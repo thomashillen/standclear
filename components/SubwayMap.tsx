@@ -2,9 +2,10 @@
 
 import dynamic from "next/dynamic";
 import { useState } from "react";
-import { LINE_GROUPS, useLines } from "@/lib/subwayData";
+import { useLines } from "@/lib/subwayData";
 import { useTrains } from "@/lib/useTrains";
 import LinePanel from "./LinePanel";
+import LinePicker from "./LinePicker";
 import {
   Dialog,
   DialogContent,
@@ -36,45 +37,19 @@ export default function SubwayMap() {
   return (
     <div className="flex flex-col h-full bg-gray-950 text-white">
       {/* ── Header ── */}
-      <header className="flex items-center gap-2 sm:gap-4 px-2 sm:px-4 py-2 sm:py-3 bg-gray-950 border-b border-gray-800 z-10 flex-shrink-0">
+      <header className="flex items-center gap-2 sm:gap-4 px-2 sm:px-4 py-2.5 sm:py-3 bg-gray-950 border-b border-gray-800 z-10 flex-shrink-0">
         <h1 className="text-base sm:text-lg font-black tracking-tight text-white sm:mr-2 flex-shrink-0">
           <span className="hidden sm:inline">SubwaySurfer</span>
-          <span className="sm:hidden text-xl" aria-label="SubwaySurfer">🚇</span>
+          <span className="sm:hidden text-3xl leading-none" aria-label="SubwaySurfer">🚇</span>
         </h1>
 
-        {/* Line pills */}
-        <div className="flex-1 overflow-x-auto -mx-1 px-1">
-          <div className="flex gap-1 items-center min-w-max">
-            {LINE_GROUPS.map((group, gi) => (
-              <div key={group.label} className="flex gap-1 items-center">
-                {group.lines.map((id) => {
-                  const line = lines?.[id];
-                  if (!line) return null;
-                  const active = selectedLine === id;
-                  return (
-                    <button
-                      key={id}
-                      onClick={() => handleLineSelect(active ? null : id)}
-                      title={`Line ${line.id}`}
-                      className={`
-                        w-9 h-9 sm:w-8 sm:h-8 rounded-full text-xs font-black transition-all flex-shrink-0 touch-manipulation
-                        ${active ? "scale-110 ring-2 ring-white ring-offset-1 ring-offset-gray-950" : "opacity-80 active:opacity-100 hover:opacity-100 hover:scale-105"}
-                      `}
-                      style={{
-                        backgroundColor: line.color,
-                        color: line.textColor,
-                      }}
-                    >
-                      {line.id}
-                    </button>
-                  );
-                })}
-                {gi < LINE_GROUPS.length - 1 && (
-                  <div className="w-px h-5 bg-gray-700 mx-1 flex-shrink-0" />
-                )}
-              </div>
-            ))}
-          </div>
+        {/* Line picker */}
+        <div className="flex-1 min-w-0">
+          <LinePicker
+            lines={lines}
+            selectedLine={selectedLine}
+            onSelect={handleLineSelect}
+          />
         </div>
 
         {/* Status badge — dot always visible, text hidden on mobile */}
@@ -112,7 +87,7 @@ export default function SubwayMap() {
                 <li>Click any line button or line on the map to focus it</li>
                 <li>Train positions interpolate between stops based on real arrival predictions</li>
                 <li>The side panel shows live N/S arrival times at every stop</li>
-                <li>Data refreshes every 15 seconds</li>
+                <li>Data refreshes every 8 seconds</li>
               </ul>
               <p className="text-gray-500 text-xs pt-2">
                 Static map: GTFS shapes from MTA. Realtime: 8 NYCT GTFS-RT feeds (no API key required).

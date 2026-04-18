@@ -6,7 +6,10 @@ import type { SubwayLine } from "./subwayData";
 
 export type { Train, Arrival };
 
-const POLL_MS = 15_000;
+// MTA GTFS-RT feeds refresh roughly every 10–15s upstream. Polling faster
+// than ~8s mostly returns identical data; slower and the on-map positions
+// jump when a stale snapshot finally refreshes.
+const POLL_MS = 8_000;
 
 let cache: { data: TrainsResponse | null; ts: number; promise: Promise<void> | null } = {
   data: null,

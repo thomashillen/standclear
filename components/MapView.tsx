@@ -56,6 +56,10 @@ export default function MapView({ selectedLine, onLineSelect }: MapViewProps) {
   const [mapLoaded, setMapLoaded] = useState(false);
   const [noToken, setNoToken] = useState(false);
   const selectedLineRef = useRef(selectedLine);
+  // Set by the map line-click handler; read + cleared by the selection
+  // effect so a click-initiated selection zooms to the nearest stop rather
+  // than to the default downtown frame.
+  const clickLngLatRef = useRef<[number, number] | null>(null);
   const data = useTrains();
   const dataRef = useRef(data);
   const lines = useLines();
@@ -83,6 +87,11 @@ export default function MapView({ selectedLine, onLineSelect }: MapViewProps) {
         zoom: 11,
         minZoom: 9,
         maxZoom: 15,
+        // Mobile Safari aggressively kills tabs under memory pressure.
+        // Trim Mapbox's defaults to stay well below that ceiling.
+        fadeDuration: 0,
+        maxTileCacheSize: 40,
+        antialias: false,
       }) as unknown as MapboxMap;
 
       mapRef.current = map;
@@ -123,18 +132,13 @@ export default function MapView({ selectedLine, onLineSelect }: MapViewProps) {
           data: { type: "FeatureCollection", features: [] },
         });
 
-        // 2× source images + pixelRatio:2 → crisp on retina at render size.
-        // Outer is 2px larger on all sides at render scale (4px at 2x).
-        const inner = makeTrainIcon(56, 24, 10);
-        const outer = makeTrainIcon(64, 32, 12);
+        // Single SDF icon, tinted per-feature by icon-color. The white
+        // border is drawn by Mapbox via icon-halo-* — one symbol layer
+        // instead of two, which halves GPU upload on mobile.
+        const icon = makeTrainIcon(56, 24, 10);
         map.addImage(
-          "train-capsule-inner",
-          { width: inner.width, height: inner.height, data: inner.data },
-          { sdf: true, pixelRatio: 2 },
-        );
-        map.addImage(
-          "train-capsule-outer",
-          { width: outer.width, height: outer.height, data: outer.data },
+          "train-capsule",
+          { width: icon.width, height: icon.height, data: icon.data },
           { sdf: true, pixelRatio: 2 },
         );
 
@@ -169,32 +173,22 @@ export default function MapView({ selectedLine, onLineSelect }: MapViewProps) {
         const capsuleRotate: MapboxExpression = ["-", ["get", "bearing"], 90];
 
         map.addLayer({
-          id: "subway-trains-outer",
+          id: "subway-trains-icon",
           type: "symbol",
           source: "subway-trains",
           layout: {
-            "icon-image": "train-capsule-outer",
+            "icon-image": "train-capsule",
             "icon-rotate": capsuleRotate,
             "icon-rotation-alignment": "map",
             "icon-pitch-alignment": "map",
             "icon-allow-overlap": true,
             "icon-ignore-placement": true,
           },
-          paint: { "icon-color": "#ffffff" },
-        });
-        map.addLayer({
-          id: "subway-trains-inner",
-          type: "symbol",
-          source: "subway-trains",
-          layout: {
-            "icon-image": "train-capsule-inner",
-            "icon-rotate": capsuleRotate,
-            "icon-rotation-alignment": "map",
-            "icon-pitch-alignment": "map",
-            "icon-allow-overlap": true,
-            "icon-ignore-placement": true,
+          paint: {
+            "icon-color": ["get", "color"],
+            "icon-halo-color": "#ffffff",
+            "icon-halo-width": 1.5,
           },
-          paint: { "icon-color": ["get", "color"] },
         });
         map.addLayer({
           id: "subway-trains-text",
@@ -218,10 +212,21 @@ export default function MapView({ selectedLine, onLineSelect }: MapViewProps) {
 
         // ── Interactions (one handler each, not one per route)
         map.on("click", "subway-lines", (e: unknown) => {
-          const ev = e as { features?: { properties?: { routeId?: string } }[] };
+          const ev = e as {
+            features?: { properties?: { routeId?: string } }[];
+            lngLat?: { lng: number; lat: number };
+          };
           const clicked = ev.features?.[0]?.properties?.routeId;
           if (!clicked) return;
-          onLineSelect(selectedLineRef.current === clicked ? null : clicked);
+          if (selectedLineRef.current === clicked) {
+            clickLngLatRef.current = null;
+            onLineSelect(null);
+            return;
+          }
+          clickLngLatRef.current = ev.lngLat
+            ? [ev.lngLat.lng, ev.lngLat.lat]
+            : null;
+          onLineSelect(clicked);
         });
         map.on("mouseenter", "subway-lines", () => {
           map.getCanvas().style.cursor = "pointer";
@@ -270,8 +275,9 @@ export default function MapView({ selectedLine, onLineSelect }: MapViewProps) {
   }, [lines]);
 
   // Push live train positions. rAF schedules; a 100ms gate caps actual work
-  // to ~10Hz — positions move sub-pixel between ticks at that rate, and this
-  // dramatically cuts CPU/battery on mobile.
+  // to ~10Hz. The halo consolidation (one symbol layer instead of two)
+  // cut per-tick GPU upload in half, which gives us headroom to redraw
+  // often enough for visibly live motion.
   useEffect(() => {
     if (!mapLoaded || !mapRef.current || !lines) return;
     const map = mapRef.current;
@@ -290,7 +296,7 @@ export default function MapView({ selectedLine, onLineSelect }: MapViewProps) {
       const d = dataRef.current;
       if (!d) return;
 
-      // Re-bucket only when the upstream data object changes (every 15s poll).
+      // Re-bucket only when the upstream data object changes (every 8s poll).
       if (d !== lastData) {
         lastData = d;
         trainsByRoute = new Map();
@@ -346,17 +352,77 @@ export default function MapView({ selectedLine, onLineSelect }: MapViewProps) {
     map.setPaintProperty("subway-lines", "line-opacity", matchSel(1, 0.1, 0.7));
     map.setPaintProperty("subway-lines", "line-width", matchSel(5, 2.5, 2.5));
     map.setPaintProperty("subway-stops", "circle-opacity", matchSel(0.85, 0.05, 0.85));
-    map.setPaintProperty("subway-trains-outer", "icon-opacity", matchSel(1, 0, 1));
-    map.setPaintProperty("subway-trains-inner", "icon-opacity", matchSel(1, 0, 1));
+    map.setPaintProperty("subway-trains-icon", "icon-opacity", matchSel(1, 0, 1));
     map.setPaintProperty("subway-trains-text", "text-opacity", matchSel(1, 0, 1));
 
     if (sel) {
       import("mapbox-gl").then((mapboxgl) => {
         const line = lines[sel];
         if (!line || line.shape.length === 0) return;
-        const bounds = new mapboxgl.default.LngLatBounds();
-        line.shape.forEach((c) => bounds.extend(c as [number, number]));
-        map.fitBounds(bounds, { padding: 80, duration: 800 });
+        // On mobile the LinePanel overlays the bottom of the map as a
+        // 45vh bottom sheet. Pad the fit so the frame lands above it.
+        const isMobile = window.matchMedia("(max-width: 639px)").matches;
+        const bottomPad = isMobile
+          ? Math.round(window.innerHeight * 0.45) + 16
+          : 40;
+
+        // If selection came from a click on the line, zoom to the nearest
+        // stop instead of the default downtown frame.
+        const clickAt = clickLngLatRef.current;
+        clickLngLatRef.current = null;
+        if (clickAt) {
+          let nearest = line.stops[0];
+          let minD2 = Infinity;
+          for (const s of line.stops) {
+            const dx = s.lng - clickAt[0];
+            const dy = s.lat - clickAt[1];
+            const d2 = dx * dx + dy * dy;
+            if (d2 < minD2) {
+              minD2 = d2;
+              nearest = s;
+            }
+          }
+          // ~0.006° ≈ 550m on lat; padding handles the bottom sheet.
+          const H = 0.006;
+          map.fitBounds(
+            new mapboxgl.default.LngLatBounds(
+              [nearest.lng - H, nearest.lat - H],
+              [nearest.lng + H, nearest.lat + H],
+            ),
+            {
+              padding: { top: 40, right: 40, bottom: bottomPad, left: 40 },
+              duration: 800,
+            },
+          );
+          return;
+        }
+
+        // Downtown-ish Manhattan frame: Battery → ~86th St, Hudson → East
+        // River. If the selected line has any stops in this window, we use
+        // this fixed rectangle (predictable framing). Otherwise (Staten
+        // Island, Rockaway shuttle) fall back to the line's full extent.
+        const DT_SW: [number, number] = [-74.020, 40.700];
+        const DT_NE: [number, number] = [-73.945, 40.790];
+        const touchesDowntown = line.stops.some(
+          (s) =>
+            s.lng >= DT_SW[0] &&
+            s.lng <= DT_NE[0] &&
+            s.lat >= DT_SW[1] &&
+            s.lat <= DT_NE[1],
+        );
+        if (touchesDowntown) {
+          map.fitBounds(new mapboxgl.default.LngLatBounds(DT_SW, DT_NE), {
+            padding: { top: 40, right: 40, bottom: bottomPad, left: 40 },
+            duration: 800,
+          });
+        } else {
+          const bounds = new mapboxgl.default.LngLatBounds();
+          line.shape.forEach((c) => bounds.extend(c as [number, number]));
+          map.fitBounds(bounds, {
+            padding: { top: 80, right: 80, bottom: bottomPad, left: 80 },
+            duration: 800,
+          });
+        }
       });
     }
   }, [selectedLine, mapLoaded, lines]);

@@ -132,7 +132,7 @@ export default function LinePanel({ lineId, onClose }: LinePanelProps) {
     <div
       className="
         flex flex-col bg-gray-950 overflow-hidden
-        absolute inset-x-0 bottom-0 max-h-[65vh] z-20 rounded-t-2xl border-t border-gray-800 shadow-2xl
+        absolute inset-x-0 bottom-0 max-h-[45vh] z-20 rounded-t-2xl border-t border-gray-800 shadow-2xl
         sm:static sm:max-h-none sm:rounded-none sm:border-t-0 sm:border-l sm:shadow-none sm:w-72 sm:flex-shrink-0 sm:z-auto
       "
     >
@@ -191,7 +191,7 @@ export default function LinePanel({ lineId, onClose }: LinePanelProps) {
 
       <div className="px-4 py-2.5 border-t border-gray-800 bg-gray-950">
         <p className="text-[11px] text-gray-500 text-center">
-          {stale ? "⚠ data may be stale" : "Live · MTA GTFS-RT · refreshes 15s"}
+          {stale ? "⚠ data may be stale" : "Live · MTA GTFS-RT · refreshes 8s"}
         </p>
       </div>
     </div>
