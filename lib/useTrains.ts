@@ -84,11 +84,26 @@ export function trainLatLng(
   if (!prev || !next) return null;
 
   if (prev.id === next.id) {
-    return {
-      lng: prev.lng,
-      lat: prev.lat,
-      bearing: train.direction === "S" ? 180 : 0,
-    };
+    // Train is dwelling at a stop — use the track's local tangent through
+    // the stop instead of a naive 0/180 (which made most capsules point
+    // vertically regardless of the actual track direction). Walk a few
+    // shape points on either side of the stop for a stable chord.
+    const shape = line.shape;
+    let bearing = 0;
+    if (shape.length >= 2) {
+      const idx = prev.shapeIdx;
+      const a = shape[Math.max(0, idx - 2)];
+      const b = shape[Math.min(shape.length - 1, idx + 2)];
+      bearing = bearingDeg(a, b);
+      // The shape tangent has no inherent direction. Flip it if it
+      // disagrees with the train's compass direction.
+      const pointsNorthish = bearing < 90 || bearing > 270;
+      if (train.direction === "N" && !pointsNorthish) bearing = (bearing + 180) % 360;
+      if (train.direction === "S" && pointsNorthish) bearing = (bearing + 180) % 360;
+    } else {
+      bearing = train.direction === "S" ? 180 : 0;
+    }
+    return { lng: prev.lng, lat: prev.lat, bearing };
   }
 
   const shape = line.shape;

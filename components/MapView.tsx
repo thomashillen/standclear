@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useLines } from "@/lib/subwayData";
-import { useTrains, trainLatLng } from "@/lib/useTrains";
+import { useTrains, trainLatLng, type Train } from "@/lib/useTrains";
 import "mapbox-gl/dist/mapbox-gl.css";
 
 interface MapViewProps {
@@ -10,9 +10,49 @@ interface MapViewProps {
   onLineSelect: (line: string | null) => void;
 }
 
+type MapboxExpression = unknown;
+type MapboxMap = {
+  getSource: (id: string) => { setData: (d: unknown) => void } | undefined;
+  setPaintProperty: (id: string, prop: string, val: MapboxExpression) => void;
+  fitBounds: (bounds: unknown, opts: unknown) => void;
+  remove: () => void;
+  getCanvas: () => HTMLCanvasElement;
+  on: (event: string, ...args: unknown[]) => void;
+  addSource: (id: string, src: unknown) => void;
+  addLayer: (layer: unknown) => void;
+  addImage: (id: string, image: unknown, opts?: unknown) => void;
+  hasImage: (id: string) => boolean;
+};
+
+// Rounded rear, pointed nose on the right. Drawn horizontal so a rotation
+// of 0 = pointing east; icon-rotate = bearing - 90 aligns the nose with the
+// direction of travel. Registered with sdf:true so Mapbox can tint via
+// `icon-color`.
+function makeTrainIcon(w: number, h: number, nosePx: number): ImageData {
+  const c = document.createElement("canvas");
+  c.width = w;
+  c.height = h;
+  const ctx = c.getContext("2d")!;
+  ctx.fillStyle = "#fff";
+  const r = h / 2;
+  const bodyW = w - nosePx;
+  ctx.beginPath();
+  ctx.moveTo(r, 0);
+  ctx.lineTo(bodyW, 0);
+  ctx.lineTo(w, h / 2);
+  ctx.lineTo(bodyW, h);
+  ctx.lineTo(r, h);
+  ctx.arcTo(0, h, 0, h - r, r);
+  ctx.lineTo(0, r);
+  ctx.arcTo(0, 0, r, 0, r);
+  ctx.closePath();
+  ctx.fill();
+  return ctx.getImageData(0, 0, w, h);
+}
+
 export default function MapView({ selectedLine, onLineSelect }: MapViewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const mapRef = useRef<unknown>(null);
+  const mapRef = useRef<MapboxMap | null>(null);
   const [mapLoaded, setMapLoaded] = useState(false);
   const [noToken, setNoToken] = useState(false);
   const selectedLineRef = useRef(selectedLine);
@@ -20,13 +60,8 @@ export default function MapView({ selectedLine, onLineSelect }: MapViewProps) {
   const dataRef = useRef(data);
   const lines = useLines();
 
-  useEffect(() => {
-    selectedLineRef.current = selectedLine;
-  }, [selectedLine]);
-
-  useEffect(() => {
-    dataRef.current = data;
-  }, [data]);
+  useEffect(() => { selectedLineRef.current = selectedLine; }, [selectedLine]);
+  useEffect(() => { dataRef.current = data; }, [data]);
 
   useEffect(() => {
     const token = process.env.NEXT_PUBLIC_MAPBOX_TOKEN;
@@ -47,148 +82,178 @@ export default function MapView({ selectedLine, onLineSelect }: MapViewProps) {
         center: [-73.9857, 40.7484],
         zoom: 11,
         minZoom: 9,
-        maxZoom: 16,
-      });
+        maxZoom: 15,
+      }) as unknown as MapboxMap;
 
       mapRef.current = map;
 
       map.on("load", () => {
         if (cancelled) return;
 
-        Object.values(lines).forEach((line) => {
-          // Real track-following shape
-          map.addSource(`line-${line.routeId}`, {
-            type: "geojson",
-            data: {
-              type: "Feature",
-              properties: {},
-              geometry: { type: "LineString", coordinates: line.shape },
+        // ── One source per layer-type, not per route. Feature properties carry
+        // routeId/color/letter so a single layer can render all 25+ lines.
+        const lineFeatures = Object.values(lines).map((line) => ({
+          type: "Feature" as const,
+          properties: { routeId: line.routeId, color: line.color },
+          geometry: { type: "LineString" as const, coordinates: line.shape },
+        }));
+        const stopFeatures = Object.values(lines).flatMap((line) =>
+          line.stops.map((stop) => ({
+            type: "Feature" as const,
+            properties: {
+              routeId: line.routeId,
+              color: line.color,
+              name: stop.name,
+              letter: line.id,
             },
-          });
-          map.addLayer({
-            id: `line-${line.routeId}`,
-            type: "line",
-            source: `line-${line.routeId}`,
-            layout: { "line-cap": "round", "line-join": "round" },
-            paint: {
-              "line-color": line.color,
-              "line-width": 2.5,
-              "line-opacity": 0.7,
-            },
-          });
+            geometry: { type: "Point" as const, coordinates: [stop.lng, stop.lat] },
+          })),
+        );
 
-          // Stations
-          map.addSource(`stops-${line.routeId}`, {
-            type: "geojson",
-            data: {
-              type: "FeatureCollection",
-              features: line.stops.map((stop) => ({
-                type: "Feature",
-                properties: { name: stop.name, routeId: line.routeId, color: line.color },
-                geometry: { type: "Point", coordinates: [stop.lng, stop.lat] },
-              })),
-            },
-          });
-          map.addLayer({
-            id: `stops-${line.routeId}`,
-            type: "circle",
-            source: `stops-${line.routeId}`,
-            paint: {
-              "circle-radius": 3.5,
-              "circle-color": "#0a0a0a",
-              "circle-stroke-width": 1.5,
-              "circle-stroke-color": line.color,
-              "circle-opacity": 0.85,
-            },
-          });
-
-          // Trains (subway-bullet style: colored circle + line letter)
-          map.addSource(`trains-${line.routeId}`, {
-            type: "geojson",
-            data: { type: "FeatureCollection", features: [] },
-          });
-          map.addLayer({
-            id: `trains-bg-${line.routeId}`,
-            type: "circle",
-            source: `trains-${line.routeId}`,
-            paint: {
-              "circle-radius": 11,
-              "circle-color": line.color,
-              "circle-stroke-width": 2,
-              "circle-stroke-color": "#ffffff",
-            },
-          });
-          // Directional arrow on the leading edge, rotated to track bearing
-          map.addLayer({
-            id: `trains-arrow-${line.routeId}`,
-            type: "symbol",
-            source: `trains-${line.routeId}`,
-            layout: {
-              "text-field": "▲",
-              "text-font": ["Open Sans Bold", "Arial Unicode MS Bold"],
-              "text-size": 12,
-              "text-rotate": ["get", "bearing"],
-              "text-rotation-alignment": "map",
-              "text-pitch-alignment": "map",
-              "text-offset": [0, -1.6],
-              "text-allow-overlap": true,
-              "text-ignore-placement": true,
-            },
-            paint: {
-              "text-color": "#ffffff",
-              "text-halo-color": line.color,
-              "text-halo-width": 1.5,
-            },
-          });
-          map.addLayer({
-            id: `trains-${line.routeId}`,
-            type: "symbol",
-            source: `trains-${line.routeId}`,
-            layout: {
-              "text-field": line.id,
-              "text-font": ["Open Sans Bold", "Arial Unicode MS Bold"],
-              "text-size": 12,
-              "text-allow-overlap": true,
-              "text-ignore-placement": true,
-            },
-            paint: {
-              "text-color": line.textColor === "black" ? "#000000" : "#ffffff",
-            },
-          });
-
-          // Click line to select
-          map.on("click", `line-${line.routeId}`, () => {
-            onLineSelect(selectedLineRef.current === line.routeId ? null : line.routeId);
-          });
-          map.on("mouseenter", `line-${line.routeId}`, () => {
-            map.getCanvas().style.cursor = "pointer";
-          });
-          map.on("mouseleave", `line-${line.routeId}`, () => {
-            map.getCanvas().style.cursor = "";
-          });
+        map.addSource("subway-lines", {
+          type: "geojson",
+          data: { type: "FeatureCollection", features: lineFeatures },
+        });
+        map.addSource("subway-stops", {
+          type: "geojson",
+          data: { type: "FeatureCollection", features: stopFeatures },
+        });
+        map.addSource("subway-trains", {
+          type: "geojson",
+          data: { type: "FeatureCollection", features: [] },
         });
 
-        // Station name popup
+        // 2× source images + pixelRatio:2 → crisp on retina at render size.
+        // Outer is 2px larger on all sides at render scale (4px at 2x).
+        const inner = makeTrainIcon(56, 24, 10);
+        const outer = makeTrainIcon(64, 32, 12);
+        map.addImage(
+          "train-capsule-inner",
+          { width: inner.width, height: inner.height, data: inner.data },
+          { sdf: true, pixelRatio: 2 },
+        );
+        map.addImage(
+          "train-capsule-outer",
+          { width: outer.width, height: outer.height, data: outer.data },
+          { sdf: true, pixelRatio: 2 },
+        );
+
+        map.addLayer({
+          id: "subway-lines",
+          type: "line",
+          source: "subway-lines",
+          layout: { "line-cap": "round", "line-join": "round" },
+          paint: {
+            "line-color": ["get", "color"],
+            "line-width": 2.5,
+            "line-opacity": 0.7,
+          },
+        });
+
+        map.addLayer({
+          id: "subway-stops",
+          type: "circle",
+          source: "subway-stops",
+          paint: {
+            "circle-radius": 3.5,
+            "circle-color": "#0a0a0a",
+            "circle-stroke-width": 1.5,
+            "circle-stroke-color": ["get", "color"],
+            "circle-opacity": 0.85,
+          },
+        });
+
+        // Capsule image is drawn with its long axis horizontal. Bearing is
+        // compass degrees (0=N, 90=E). We want the capsule long axis to
+        // align with the direction of travel, so rotate by (bearing - 90).
+        const capsuleRotate: MapboxExpression = ["-", ["get", "bearing"], 90];
+
+        map.addLayer({
+          id: "subway-trains-outer",
+          type: "symbol",
+          source: "subway-trains",
+          layout: {
+            "icon-image": "train-capsule-outer",
+            "icon-rotate": capsuleRotate,
+            "icon-rotation-alignment": "map",
+            "icon-pitch-alignment": "map",
+            "icon-allow-overlap": true,
+            "icon-ignore-placement": true,
+          },
+          paint: { "icon-color": "#ffffff" },
+        });
+        map.addLayer({
+          id: "subway-trains-inner",
+          type: "symbol",
+          source: "subway-trains",
+          layout: {
+            "icon-image": "train-capsule-inner",
+            "icon-rotate": capsuleRotate,
+            "icon-rotation-alignment": "map",
+            "icon-pitch-alignment": "map",
+            "icon-allow-overlap": true,
+            "icon-ignore-placement": true,
+          },
+          paint: { "icon-color": ["get", "color"] },
+        });
+        map.addLayer({
+          id: "subway-trains-text",
+          type: "symbol",
+          source: "subway-trains",
+          layout: {
+            "text-field": ["get", "letter"],
+            "text-font": ["Open Sans Bold", "Arial Unicode MS Bold"],
+            "text-size": 11,
+            "text-allow-overlap": true,
+            "text-ignore-placement": true,
+          },
+          paint: {
+            "text-color": [
+              "case",
+              ["==", ["get", "textColor"], "black"], "#000000",
+              "#ffffff",
+            ],
+          },
+        });
+
+        // ── Interactions (one handler each, not one per route)
+        map.on("click", "subway-lines", (e: unknown) => {
+          const ev = e as { features?: { properties?: { routeId?: string } }[] };
+          const clicked = ev.features?.[0]?.properties?.routeId;
+          if (!clicked) return;
+          onLineSelect(selectedLineRef.current === clicked ? null : clicked);
+        });
+        map.on("mouseenter", "subway-lines", () => {
+          map.getCanvas().style.cursor = "pointer";
+        });
+        map.on("mouseleave", "subway-lines", () => {
+          map.getCanvas().style.cursor = "";
+        });
+
         const popup = new mapboxgl.default.Popup({
           closeButton: false,
           closeOnClick: false,
           className: "subway-popup",
           offset: 10,
         });
-
-        Object.values(lines).forEach((line) => {
-          map.on("mouseenter", `stops-${line.routeId}`, (e) => {
-            const feat = e.features?.[0];
-            if (!feat) return;
-            const coords = (feat.geometry as GeoJSON.Point).coordinates as [number, number];
-            popup.setLngLat(coords)
-              .setHTML(
-                `<span style="color:${line.color};font-weight:700">${line.id}</span> ${feat.properties?.name}`,
-              )
-              .addTo(map);
-          });
-          map.on("mouseleave", `stops-${line.routeId}`, () => popup.remove());
+        map.on("mouseenter", "subway-stops", (e: unknown) => {
+          const ev = e as {
+            features?: {
+              geometry: GeoJSON.Point;
+              properties?: { name?: string; letter?: string; color?: string };
+            }[];
+          };
+          const feat = ev.features?.[0];
+          if (!feat) return;
+          const coords = feat.geometry.coordinates as [number, number];
+          popup
+            .setLngLat(coords)
+            .setHTML(
+              `<span style="color:${feat.properties?.color};font-weight:700">${feat.properties?.letter}</span> ${feat.properties?.name}`,
+            )
+            .addTo(map as unknown as mapboxgl.Map);
         });
+        map.on("mouseleave", "subway-stops", () => popup.remove());
 
         setMapLoaded(true);
       });
@@ -197,89 +262,103 @@ export default function MapView({ selectedLine, onLineSelect }: MapViewProps) {
     return () => {
       cancelled = true;
       if (mapRef.current) {
-        (mapRef.current as { remove: () => void }).remove();
+        mapRef.current.remove();
         mapRef.current = null;
       }
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lines]);
 
-  // Push live train positions to the map. Re-runs when new data arrives;
-  // a small rAF loop interpolates progress between polls so trains glide.
+  // Push live train positions. rAF schedules; a 100ms gate caps actual work
+  // to ~10Hz — positions move sub-pixel between ticks at that rate, and this
+  // dramatically cuts CPU/battery on mobile.
   useEffect(() => {
     if (!mapLoaded || !mapRef.current || !lines) return;
-    const map = mapRef.current as {
-      getSource: (id: string) => { setData: (d: unknown) => void } | undefined;
-    };
+    const map = mapRef.current;
 
+    const TICK_MS = 100;
     let frame = 0;
-    const tick = () => {
+    let lastTickTime = 0;
+    let lastData: typeof dataRef.current = null;
+    let trainsByRoute: Map<string, Train[]> = new Map();
+
+    const tick = (now: number) => {
+      frame = requestAnimationFrame(tick);
+      if (now - lastTickTime < TICK_MS) return;
+      lastTickTime = now;
+
       const d = dataRef.current;
-      if (d) {
-        const ageSec = (Date.now() - d.generatedAt) / 1000;
-        // smooth: assume ~2 min between stops; advance progress by elapsed/120s
-        const trainsByRoute = new Map<string, typeof d.trains>();
+      if (!d) return;
+
+      // Re-bucket only when the upstream data object changes (every 15s poll).
+      if (d !== lastData) {
+        lastData = d;
+        trainsByRoute = new Map();
         for (const t of d.trains) {
           const arr = trainsByRoute.get(t.routeId) || [];
           arr.push(t);
           trainsByRoute.set(t.routeId, arr);
         }
-
-        Object.values(lines).forEach((line) => {
-          const src = map.getSource(`trains-${line.routeId}`);
-          if (!src) return;
-          const trains = trainsByRoute.get(line.routeId) || [];
-          const features = trains.flatMap((t) => {
-            const interp = { ...t, progress: Math.min(1, t.progress + ageSec / 120) };
-            const pos = trainLatLng(line, interp);
-            if (!pos) return [];
-            return [{
-              type: "Feature" as const,
-              properties: { id: t.id, direction: t.direction, bearing: pos.bearing },
-              geometry: { type: "Point" as const, coordinates: [pos.lng, pos.lat] },
-            }];
-          });
-          src.setData({ type: "FeatureCollection", features });
-        });
       }
-      frame = requestAnimationFrame(tick);
+
+      const ageSec = (Date.now() - d.generatedAt) / 1000;
+      const features: GeoJSON.Feature[] = [];
+      for (const line of Object.values(lines)) {
+        const trains = trainsByRoute.get(line.routeId);
+        if (!trains) continue;
+        for (const t of trains) {
+          const interp = { ...t, progress: Math.min(1, t.progress + ageSec / 120) };
+          const pos = trainLatLng(line, interp);
+          if (!pos) continue;
+          features.push({
+            type: "Feature",
+            properties: {
+              id: t.id,
+              direction: t.direction,
+              bearing: pos.bearing,
+              routeId: line.routeId,
+              color: line.color,
+              letter: line.id,
+              textColor: line.textColor,
+            },
+            geometry: { type: "Point", coordinates: [pos.lng, pos.lat] },
+          });
+        }
+      }
+      const src = map.getSource("subway-trains");
+      src?.setData({ type: "FeatureCollection", features });
     };
     frame = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(frame);
   }, [mapLoaded, lines]);
 
-  // Highlight selected line
+  // Selection: dim non-selected via expressions on the consolidated layers.
   useEffect(() => {
     if (!mapLoaded || !mapRef.current || !lines) return;
-    const map = mapRef.current as {
-      setPaintProperty: (id: string, prop: string, val: unknown) => void;
-      fitBounds: (bounds: unknown, opts: unknown) => void;
-    };
+    const map = mapRef.current;
+    const sel = selectedLine;
 
-    import("mapbox-gl").then((mapboxgl) => {
-      Object.values(lines).forEach((line) => {
-        const sel = selectedLine;
-        const isThis = line.routeId === sel;
-        const dim = sel !== null && !isThis;
+    const matchSel = (whenSelected: unknown, whenDimmed: unknown, whenNone: unknown) =>
+      sel === null
+        ? whenNone
+        : ["case", ["==", ["get", "routeId"], sel], whenSelected, whenDimmed];
 
-        map.setPaintProperty(`line-${line.routeId}`, "line-opacity", dim ? 0.1 : isThis ? 1 : 0.7);
-        map.setPaintProperty(`line-${line.routeId}`, "line-width", isThis ? 5 : 2.5);
-        map.setPaintProperty(`stops-${line.routeId}`, "circle-opacity", dim ? 0.05 : 0.85);
-        map.setPaintProperty(`trains-bg-${line.routeId}`, "circle-opacity", dim ? 0 : 1);
-        map.setPaintProperty(`trains-bg-${line.routeId}`, "circle-stroke-opacity", dim ? 0 : 1);
-        map.setPaintProperty(`trains-arrow-${line.routeId}`, "text-opacity", dim ? 0 : 1);
-        map.setPaintProperty(`trains-${line.routeId}`, "text-opacity", dim ? 0 : 1);
+    map.setPaintProperty("subway-lines", "line-opacity", matchSel(1, 0.1, 0.7));
+    map.setPaintProperty("subway-lines", "line-width", matchSel(5, 2.5, 2.5));
+    map.setPaintProperty("subway-stops", "circle-opacity", matchSel(0.85, 0.05, 0.85));
+    map.setPaintProperty("subway-trains-outer", "icon-opacity", matchSel(1, 0, 1));
+    map.setPaintProperty("subway-trains-inner", "icon-opacity", matchSel(1, 0, 1));
+    map.setPaintProperty("subway-trains-text", "text-opacity", matchSel(1, 0, 1));
+
+    if (sel) {
+      import("mapbox-gl").then((mapboxgl) => {
+        const line = lines[sel];
+        if (!line || line.shape.length === 0) return;
+        const bounds = new mapboxgl.default.LngLatBounds();
+        line.shape.forEach((c) => bounds.extend(c as [number, number]));
+        map.fitBounds(bounds, { padding: 80, duration: 800 });
       });
-
-      if (selectedLine) {
-        const line = lines[selectedLine];
-        if (line && line.shape.length > 0) {
-          const bounds = new mapboxgl.default.LngLatBounds();
-          line.shape.forEach((c) => bounds.extend(c as [number, number]));
-          map.fitBounds(bounds, { padding: 80, duration: 800 });
-        }
-      }
-    });
+    }
   }, [selectedLine, mapLoaded, lines]);
 
   if (noToken) {

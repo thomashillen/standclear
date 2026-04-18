@@ -1,7 +1,8 @@
 "use client";
 
+import { memo, useMemo } from "react";
 import { useLines } from "@/lib/subwayData";
-import { useTrains, nextArrivals, trainsForLine } from "@/lib/useTrains";
+import { useTrains, type Arrival } from "@/lib/useTrains";
 
 interface LinePanelProps {
   lineId: string; // routeId (e.g. "1", "A", "GS")
@@ -16,16 +17,115 @@ function fmtEta(eta: number, now: number): string {
   return `${mins} min`;
 }
 
+interface StopRowProps {
+  stopName: string;
+  lineColor: string;
+  nEtaStr?: string;
+  sEtaStr?: string;
+  trainHere: boolean;
+  hasData: boolean;
+  showConnector: boolean;
+}
+
+const StopRow = memo(function StopRow({
+  stopName,
+  lineColor,
+  nEtaStr,
+  sEtaStr,
+  trainHere,
+  hasData,
+  showConnector,
+}: StopRowProps) {
+  return (
+    <div
+      className={`flex items-start gap-3 px-4 py-2 transition-colors ${
+        trainHere ? "bg-gray-800/60" : "hover:bg-gray-900"
+      }`}
+    >
+      <div className="flex flex-col items-center mt-1.5">
+        <div
+          className="w-3 h-3 rounded-full border-2 border-white flex-shrink-0 z-10"
+          style={{ backgroundColor: trainHere ? "#fff" : lineColor }}
+        />
+        {showConnector && (
+          <div
+            className="w-0.5 mt-0.5"
+            style={{ height: 28, backgroundColor: lineColor, opacity: 0.4 }}
+          />
+        )}
+      </div>
+
+      <div className="flex-1 min-w-0">
+        <p className="text-sm font-medium leading-tight text-gray-100 truncate">
+          {stopName}
+        </p>
+        <div className="flex gap-3 text-[11px] text-gray-400 mt-0.5">
+          {nEtaStr && (
+            <span>
+              <span className="opacity-60">N:</span>{" "}
+              <span className="text-gray-200 font-medium">{nEtaStr}</span>
+            </span>
+          )}
+          {sEtaStr && (
+            <span>
+              <span className="opacity-60">S:</span>{" "}
+              <span className="text-gray-200 font-medium">{sEtaStr}</span>
+            </span>
+          )}
+          {!nEtaStr && !sEtaStr && hasData && (
+            <span className="text-gray-600">No upcoming trains</span>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+});
+
 export default function LinePanel({ lineId, onClose }: LinePanelProps) {
   const lines = useLines();
   const line = lines?.[lineId];
   const data = useTrains();
+  const now = data?.generatedAt ?? Date.now();
+  const routeId = line?.routeId;
+
+  // One pass over arrivals/trains per poll, instead of O(stops × arrivals)
+  // filters per render. Arrivals are already sorted by eta, so the first
+  // entry per (stopId, direction) is the next arrival.
+  const arrivalsByStop = useMemo(() => {
+    const m = new Map<string, { n?: Arrival; s?: Arrival }>();
+    if (!data || !routeId) return m;
+    for (const a of data.arrivals) {
+      if (a.routeId !== routeId) continue;
+      const entry = m.get(a.stopId) ?? {};
+      if (a.direction === "N") { if (!entry.n) entry.n = a; }
+      else if (!entry.s) entry.s = a;
+      m.set(a.stopId, entry);
+    }
+    return m;
+  }, [data, routeId]);
+
+  const trainsAtStop = useMemo(() => {
+    const s = new Set<string>();
+    if (!data || !routeId) return s;
+    for (const t of data.trains) {
+      if (t.routeId !== routeId) continue;
+      if (t.progress > 0.85) s.add(t.nextStopId);
+      if (t.progress < 0.15) s.add(t.prevStopId);
+    }
+    return s;
+  }, [data, routeId]);
+
+  const trainCount = useMemo(() => {
+    if (!data || !routeId) return 0;
+    let n = 0;
+    for (const t of data.trains) if (t.routeId === routeId) n++;
+    return n;
+  }, [data, routeId]);
+
   if (!line) return null;
 
-  const trains = trainsForLine(data, line.routeId);
   const numStops = line.stops.length;
   const textClass = line.textColor === "black" ? "text-black" : "text-white";
-  const now = data?.generatedAt ?? Date.now();
   const stale = data ? Date.now() - data.generatedAt > 30_000 : false;
 
   return (
@@ -48,7 +148,7 @@ export default function LinePanel({ lineId, onClose }: LinePanelProps) {
         <div className="flex items-center gap-2">
           <span className="text-2xl font-black">{line.id}</span>
           <span className="text-sm font-medium opacity-90">
-            {trains.length} train{trains.length !== 1 ? "s" : ""}
+            {trainCount} train{trainCount !== 1 ? "s" : ""}
           </span>
         </div>
         <button
@@ -73,55 +173,18 @@ export default function LinePanel({ lineId, onClose }: LinePanelProps) {
           </div>
         )}
         {line.stops.map((stop, idx) => {
-          const nArr = nextArrivals(data, line.routeId, stop.id, "N", 1)[0];
-          const sArr = nextArrivals(data, line.routeId, stop.id, "S", 1)[0];
-          const trainHere = trains.some(
-            (t) => (t.nextStopId === stop.id && t.progress > 0.85) || (t.prevStopId === stop.id && t.progress < 0.15),
-          );
-
+          const arr = arrivalsByStop.get(stop.id);
           return (
-            <div
+            <StopRow
               key={stop.id}
-              className={`flex items-start gap-3 px-4 py-2 transition-colors ${
-                trainHere ? "bg-gray-800/60" : "hover:bg-gray-900"
-              }`}
-            >
-              <div className="flex flex-col items-center mt-1.5">
-                <div
-                  className="w-3 h-3 rounded-full border-2 border-white flex-shrink-0 z-10"
-                  style={{ backgroundColor: trainHere ? "#fff" : line.color }}
-                />
-                {idx < numStops - 1 && (
-                  <div
-                    className="w-0.5 mt-0.5"
-                    style={{ height: 28, backgroundColor: line.color, opacity: 0.4 }}
-                  />
-                )}
-              </div>
-
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium leading-tight text-gray-100 truncate">
-                  {stop.name}
-                </p>
-                <div className="flex gap-3 text-[11px] text-gray-400 mt-0.5">
-                  {nArr && (
-                    <span>
-                      <span className="opacity-60">N:</span>{" "}
-                      <span className="text-gray-200 font-medium">{fmtEta(nArr.eta, now)}</span>
-                    </span>
-                  )}
-                  {sArr && (
-                    <span>
-                      <span className="opacity-60">S:</span>{" "}
-                      <span className="text-gray-200 font-medium">{fmtEta(sArr.eta, now)}</span>
-                    </span>
-                  )}
-                  {!nArr && !sArr && data && (
-                    <span className="text-gray-600">No upcoming trains</span>
-                  )}
-                </div>
-              </div>
-            </div>
+              stopName={stop.name}
+              lineColor={line.color}
+              nEtaStr={arr?.n ? fmtEta(arr.n.eta, now) : undefined}
+              sEtaStr={arr?.s ? fmtEta(arr.s.eta, now) : undefined}
+              trainHere={trainsAtStop.has(stop.id)}
+              hasData={!!data}
+              showConnector={idx < numStops - 1}
+            />
           );
         })}
       </div>
