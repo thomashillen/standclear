@@ -1,6 +1,12 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 
+/* Tailwind v4 auto-detects content paths from the project root. Exclude the
+   raw GTFS data dump (34MB stop_times.txt etc.) so the watcher doesn't scan
+   it on every dev rebuild — major memory drain otherwise. */
+@source not "../data";
+@source not "../lib/gtfsData.json";
+
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {
