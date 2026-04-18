@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "build:gtfs": "node scripts/build-gtfs.mjs"
   },
   "dependencies": {
     "@radix-ui/react-dialog": "^1.1.1",
@@ -14,6 +15,7 @@
     "@radix-ui/react-slot": "^1.1.0",
     "class-variance-authority": "^0.7.0",
     "clsx": "^2.1.1",
+    "gtfs-realtime-bindings": "^1.1.1",
     "lucide-react": "^0.438.0",
     "mapbox-gl": "^3.6.0",
     "next": "14.2.7",
@@ -23,6 +25,7 @@
     "tailwindcss-animate": "^1.0.7"
   },
   "devDependencies": {
+    "@types/mapbox-gl": "^3.4.1",
     "@types/node": "^20",
     "@types/react": "^18",
     "@types/react-dom": "^18",

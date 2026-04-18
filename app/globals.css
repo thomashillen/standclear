@@ -86,3 +86,16 @@
     @apply bg-background text-foreground;
   }
 }
+
+/* Mapbox popup */
+.subway-popup .mapboxgl-popup-content {
+  background: #1f2937;
+  color: #f9fafb;
+  font-size: 12px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.6);
+}
+.subway-popup .mapboxgl-popup-tip {
+  border-top-color: #1f2937;
+}
