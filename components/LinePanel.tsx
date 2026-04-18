@@ -1,8 +1,10 @@
 "use client";
 
 import { memo, useEffect, useMemo, useRef, useState } from "react";
+import { AlertTriangle, Info, ChevronDown } from "lucide-react";
 import { useLines, CORRIDOR } from "@/lib/subwayData";
 import { useTrains, type Arrival } from "@/lib/useTrains";
+import { useAlerts, alertsForRoutes, type ServiceAlert } from "@/lib/useAlerts";
 
 interface LinePanelProps {
   lineId: string; // routeId (e.g. "1", "A", "GS")
@@ -108,10 +110,53 @@ const StopRow = memo(function StopRow({
   );
 });
 
+const SEVERITY_STYLE: Record<
+  ServiceAlert["severity"],
+  { bg: string; text: string; icon: typeof AlertTriangle }
+> = {
+  severe: { bg: "bg-rose-500/15 border-rose-500/30", text: "text-rose-200", icon: AlertTriangle },
+  warning: { bg: "bg-amber-500/15 border-amber-500/30", text: "text-amber-200", icon: AlertTriangle },
+  info: { bg: "bg-sky-500/10 border-sky-500/25", text: "text-sky-200", icon: Info },
+};
+
+function AlertItem({ alert }: { alert: ServiceAlert }) {
+  const [expanded, setExpanded] = useState(false);
+  const s = SEVERITY_STYLE[alert.severity];
+  const Icon = s.icon;
+  const hasBody = alert.description && alert.description !== alert.header;
+  return (
+    <div className={`border rounded-lg px-3 py-2 ${s.bg}`}>
+      <button
+        type="button"
+        onClick={() => hasBody && setExpanded((x) => !x)}
+        className="w-full flex items-start gap-2 text-left"
+      >
+        <Icon className={`w-4 h-4 mt-0.5 flex-shrink-0 ${s.text}`} />
+        <div className="flex-1 min-w-0">
+          <p className={`text-[12px] font-semibold ${s.text} leading-snug`}>
+            {alert.header || alert.effect.replace(/_/g, " ").toLowerCase()}
+          </p>
+        </div>
+        {hasBody && (
+          <ChevronDown
+            className={`w-4 h-4 flex-shrink-0 transition-transform ${s.text} ${expanded ? "rotate-180" : ""}`}
+          />
+        )}
+      </button>
+      {hasBody && expanded && (
+        <p className="mt-1.5 text-[11px] leading-snug text-gray-300 whitespace-pre-line">
+          {alert.description}
+        </p>
+      )}
+    </div>
+  );
+}
+
 export default function LinePanel({ lineId, focusStopId, onClose }: LinePanelProps) {
   const lines = useLines();
   const line = lines?.[lineId];
   const data = useTrains();
+  const alertsData = useAlerts();
   const now = data?.generatedAt ?? Date.now();
   const routeId = line?.routeId;
 
@@ -156,6 +201,11 @@ export default function LinePanel({ lineId, focusStopId, onClose }: LinePanelPro
     for (const t of data.trains) if (corridorSet.has(t.routeId)) n++;
     return n;
   }, [data, corridorSet]);
+
+  const corridorAlerts = useMemo(
+    () => (corridorSet ? alertsForRoutes(alertsData, corridorSet) : []),
+    [alertsData, corridorSet],
+  );
 
   // Scroll the tapped stop's row into view when the user opens the panel
   // via a line tap. The row is tagged with data-stop-id; a querySelector
@@ -266,6 +316,14 @@ export default function LinePanel({ lineId, focusStopId, onClose }: LinePanelPro
         <span className="opacity-40 mx-2">↕</span>
         <span className="flex-1 text-right truncate">{line.stops[numStops - 1]?.name}</span>
       </div>
+
+      {corridorAlerts.length > 0 && (
+        <div className="flex-shrink-0 px-3 py-2 space-y-1.5 border-b border-white/5 max-h-[40%] overflow-y-auto">
+          {corridorAlerts.slice(0, 6).map((a) => (
+            <AlertItem key={a.id} alert={a} />
+          ))}
+        </div>
+      )}
 
       <div ref={scrollRef} className="flex-1 overflow-y-auto py-1 overscroll-contain">
         {!data && (

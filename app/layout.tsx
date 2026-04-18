@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { Inter } from "next/font/google";
 import "./globals.css";
+import RegisterSW from "@/components/RegisterSW";
 
 const inter = Inter({ subsets: ["latin"] });
 
@@ -30,6 +31,7 @@ export default function RootLayout({
         className={`${inter.className} h-full bg-gray-950 text-white overflow-hidden overscroll-none touch-manipulation`}
       >
         {children}
+        <RegisterSW />
       </body>
     </html>
   );

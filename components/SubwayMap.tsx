@@ -2,10 +2,12 @@
 
 import dynamic from "next/dynamic";
 import { useState } from "react";
+import { MapPin } from "lucide-react";
 import { useLines } from "@/lib/subwayData";
 import { useTrains } from "@/lib/useTrains";
 import LinePanel from "./LinePanel";
 import LinePicker from "./LinePicker";
+import NearbyPanel from "./NearbyPanel";
 import {
   Dialog,
   DialogContent,
@@ -28,12 +30,25 @@ const MapView = dynamic(() => import("./MapView"), {
 export default function SubwayMap() {
   const [selectedLine, setSelectedLine] = useState<string | null>(null);
   const [focusStopId, setFocusStopId] = useState<string | undefined>();
+  const [nearbyOpen, setNearbyOpen] = useState(false);
   const data = useTrains();
   const lines = useLines();
 
   const handleLineSelect = (line: string | null, stopId?: string) => {
     setSelectedLine(line);
     setFocusStopId(stopId);
+    // Panels are mutually exclusive — tapping a station in NearbyPanel
+    // should replace it with the line view, not layer on top.
+    if (line) setNearbyOpen(false);
+  };
+
+  const handleNearbyToggle = () => {
+    const next = !nearbyOpen;
+    setNearbyOpen(next);
+    if (next) {
+      setSelectedLine(null);
+      setFocusStopId(undefined);
+    }
   };
   const totalTrains = data?.trains.length ?? 0;
   const stale = data ? Date.now() - data.generatedAt > 60_000 : false;
@@ -70,6 +85,20 @@ export default function SubwayMap() {
             {!data ? "Connecting…" : stale ? "Stale" : `Live · ${totalTrains} trains`}
           </span>
         </div>
+
+        {/* Near me */}
+        <button
+          onClick={handleNearbyToggle}
+          aria-label="Find nearby stations"
+          aria-pressed={nearbyOpen}
+          className={`flex items-center justify-center w-11 h-11 sm:w-9 sm:h-9 rounded-full transition-colors touch-manipulation flex-shrink-0 ${
+            nearbyOpen
+              ? "bg-white text-gray-950"
+              : "bg-gray-800/70 text-gray-200 hover:bg-gray-800 active:bg-gray-700 border border-gray-700/60"
+          }`}
+        >
+          <MapPin className="w-4 h-4" />
+        </button>
 
         {/* About */}
         <Dialog>
@@ -111,7 +140,7 @@ export default function SubwayMap() {
       {/* ── Map + Panel ── */}
       <div className="relative flex flex-1 min-h-0">
         <MapView selectedLine={selectedLine} onLineSelect={handleLineSelect} />
-        {selectedLine && (
+        {selectedLine && !nearbyOpen && (
           <LinePanel
             lineId={selectedLine}
             focusStopId={focusStopId}
@@ -121,6 +150,11 @@ export default function SubwayMap() {
             }}
           />
         )}
+        <NearbyPanel
+          open={nearbyOpen}
+          onClose={() => setNearbyOpen(false)}
+          onJumpToLine={(routeId, stopId) => handleLineSelect(routeId, stopId)}
+        />
       </div>
     </div>
   );
