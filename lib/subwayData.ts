@@ -75,3 +75,23 @@ export const LINE_GROUPS: { label: string; lines: string[] }[] = [
   { label: "S",   lines: ["GS", "FS", "H"] },
   { label: "SI",  lines: ["SI"] },
 ];
+
+// Shared-track corridors: picking one bullet highlights every train sharing
+// that trunk. This mirrors how NYC subway trunk colors actually map to
+// infrastructure, except for the shuttle-gray collision (L vs GS/FS/H),
+// which we break out into singletons.
+export const CORRIDOR: Record<string, string[]> = {
+  "1": ["1", "2", "3"], "2": ["1", "2", "3"], "3": ["1", "2", "3"],
+  "4": ["4", "5", "6"], "5": ["4", "5", "6"], "6": ["4", "5", "6"],
+  "7": ["7"],
+  A: ["A", "C", "E"], C: ["A", "C", "E"], E: ["A", "C", "E"],
+  B: ["B", "D", "F", "M"], D: ["B", "D", "F", "M"],
+  F: ["B", "D", "F", "M"], M: ["B", "D", "F", "M"],
+  G: ["G"],
+  J: ["J", "Z"], Z: ["J", "Z"],
+  L: ["L"],
+  N: ["N", "Q", "R", "W"], Q: ["N", "Q", "R", "W"],
+  R: ["N", "Q", "R", "W"], W: ["N", "Q", "R", "W"],
+  GS: ["GS"], FS: ["FS"], H: ["H"],
+  SI: ["SI"],
+};

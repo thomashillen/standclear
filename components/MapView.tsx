@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { useLines } from "@/lib/subwayData";
+import { useLines, CORRIDOR } from "@/lib/subwayData";
 import { useTrains, trainLatLng, type Train } from "@/lib/useTrains";
 import "mapbox-gl/dist/mapbox-gl.css";
 
@@ -344,10 +344,19 @@ export default function MapView({ selectedLine, onLineSelect }: MapViewProps) {
     const map = mapRef.current;
     const sel = selectedLine;
 
+    // Match all routes on the same shared-track corridor, not just the
+    // single routeId. Picking "1" lights up 1/2/3; picking "A" lights up
+    // A/C/E; etc.
+    const corridor = sel ? CORRIDOR[sel] ?? [sel] : null;
     const matchSel = (whenSelected: unknown, whenDimmed: unknown, whenNone: unknown) =>
-      sel === null
+      corridor === null
         ? whenNone
-        : ["case", ["==", ["get", "routeId"], sel], whenSelected, whenDimmed];
+        : [
+            "case",
+            ["in", ["get", "routeId"], ["literal", corridor]],
+            whenSelected,
+            whenDimmed,
+          ];
 
     map.setPaintProperty("subway-lines", "line-opacity", matchSel(1, 0.1, 0.7));
     map.setPaintProperty("subway-lines", "line-width", matchSel(5, 2.5, 2.5));
@@ -359,12 +368,14 @@ export default function MapView({ selectedLine, onLineSelect }: MapViewProps) {
       import("mapbox-gl").then((mapboxgl) => {
         const line = lines[sel];
         if (!line || line.shape.length === 0) return;
-        // On mobile the LinePanel overlays the bottom of the map as a
-        // 45vh bottom sheet. Pad the fit so the frame lands above it.
+        // LinePanel floats over the map — as a 45vh bottom sheet on mobile,
+        // or as a ~320px right-side card on desktop. Pad fitBounds so the
+        // frame lands in the visible area, not under the panel.
         const isMobile = window.matchMedia("(max-width: 639px)").matches;
         const bottomPad = isMobile
           ? Math.round(window.innerHeight * 0.45) + 16
           : 40;
+        const rightPad = isMobile ? 40 : 340;
 
         // If selection came from a click on the line, zoom to the nearest
         // stop instead of the default downtown frame.
@@ -390,7 +401,7 @@ export default function MapView({ selectedLine, onLineSelect }: MapViewProps) {
               [nearest.lng + H, nearest.lat + H],
             ),
             {
-              padding: { top: 40, right: 40, bottom: bottomPad, left: 40 },
+              padding: { top: 40, right: rightPad, bottom: bottomPad, left: 40 },
               duration: 800,
             },
           );
@@ -412,14 +423,14 @@ export default function MapView({ selectedLine, onLineSelect }: MapViewProps) {
         );
         if (touchesDowntown) {
           map.fitBounds(new mapboxgl.default.LngLatBounds(DT_SW, DT_NE), {
-            padding: { top: 40, right: 40, bottom: bottomPad, left: 40 },
+            padding: { top: 40, right: rightPad, bottom: bottomPad, left: 40 },
             duration: 800,
           });
         } else {
           const bounds = new mapboxgl.default.LngLatBounds();
           line.shape.forEach((c) => bounds.extend(c as [number, number]));
           map.fitBounds(bounds, {
-            padding: { top: 80, right: 80, bottom: bottomPad, left: 80 },
+            padding: { top: 80, right: rightPad, bottom: bottomPad, left: 80 },
             duration: 800,
           });
         }

@@ -1,7 +1,7 @@
 "use client";
 
 import { memo, useMemo } from "react";
-import { useLines } from "@/lib/subwayData";
+import { useLines, CORRIDOR } from "@/lib/subwayData";
 import { useTrains, type Arrival } from "@/lib/useTrains";
 
 interface LinePanelProps {
@@ -17,14 +17,33 @@ function fmtEta(eta: number, now: number): string {
   return `${mins} min`;
 }
 
+interface RouteBadge {
+  id: string;
+  color: string;
+  textColor: "white" | "black";
+}
+
 interface StopRowProps {
   stopName: string;
   lineColor: string;
   nEtaStr?: string;
   sEtaStr?: string;
+  nBadge?: RouteBadge;
+  sBadge?: RouteBadge;
   trainHere: boolean;
   hasData: boolean;
   showConnector: boolean;
+}
+
+function Bullet({ badge }: { badge: RouteBadge }) {
+  return (
+    <span
+      className="inline-flex items-center justify-center w-3.5 h-3.5 rounded-full text-[9px] font-black leading-none mr-1 align-[-1px]"
+      style={{ backgroundColor: badge.color, color: badge.textColor === "black" ? "#000" : "#fff" }}
+    >
+      {badge.id}
+    </span>
+  );
 }
 
 const StopRow = memo(function StopRow({
@@ -32,6 +51,8 @@ const StopRow = memo(function StopRow({
   lineColor,
   nEtaStr,
   sEtaStr,
+  nBadge,
+  sBadge,
   trainHere,
   hasData,
   showConnector,
@@ -39,7 +60,7 @@ const StopRow = memo(function StopRow({
   return (
     <div
       className={`flex items-start gap-3 px-4 py-2 transition-colors ${
-        trainHere ? "bg-gray-800/60" : "hover:bg-gray-900"
+        trainHere ? "bg-white/10" : "hover:bg-white/5"
       }`}
     >
       <div className="flex flex-col items-center mt-1.5">
@@ -61,15 +82,17 @@ const StopRow = memo(function StopRow({
         </p>
         <div className="flex gap-3 text-[11px] text-gray-400 mt-0.5">
           {nEtaStr && (
-            <span>
-              <span className="opacity-60">N:</span>{" "}
-              <span className="text-gray-200 font-medium">{nEtaStr}</span>
+            <span className="inline-flex items-center">
+              {nBadge && <Bullet badge={nBadge} />}
+              <span className="opacity-60">N</span>
+              <span className="text-gray-200 font-medium ml-1">{nEtaStr}</span>
             </span>
           )}
           {sEtaStr && (
-            <span>
-              <span className="opacity-60">S:</span>{" "}
-              <span className="text-gray-200 font-medium">{sEtaStr}</span>
+            <span className="inline-flex items-center">
+              {sBadge && <Bullet badge={sBadge} />}
+              <span className="opacity-60">S</span>
+              <span className="text-gray-200 font-medium ml-1">{sEtaStr}</span>
             </span>
           )}
           {!nEtaStr && !sEtaStr && hasData && (
@@ -88,39 +111,47 @@ export default function LinePanel({ lineId, onClose }: LinePanelProps) {
   const now = data?.generatedAt ?? Date.now();
   const routeId = line?.routeId;
 
+  // Map selection highlights every route on the shared trunk (e.g. 1/2/3
+  // for red). The panel should match: counting only the selected route
+  // would under-report what the user sees on the map.
+  const corridorSet = useMemo(() => {
+    if (!routeId) return null;
+    return new Set(CORRIDOR[routeId] ?? [routeId]);
+  }, [routeId]);
+
   // One pass over arrivals/trains per poll, instead of O(stops × arrivals)
   // filters per render. Arrivals are already sorted by eta, so the first
   // entry per (stopId, direction) is the next arrival.
   const arrivalsByStop = useMemo(() => {
     const m = new Map<string, { n?: Arrival; s?: Arrival }>();
-    if (!data || !routeId) return m;
+    if (!data || !corridorSet) return m;
     for (const a of data.arrivals) {
-      if (a.routeId !== routeId) continue;
+      if (!corridorSet.has(a.routeId)) continue;
       const entry = m.get(a.stopId) ?? {};
       if (a.direction === "N") { if (!entry.n) entry.n = a; }
       else if (!entry.s) entry.s = a;
       m.set(a.stopId, entry);
     }
     return m;
-  }, [data, routeId]);
+  }, [data, corridorSet]);
 
   const trainsAtStop = useMemo(() => {
     const s = new Set<string>();
-    if (!data || !routeId) return s;
+    if (!data || !corridorSet) return s;
     for (const t of data.trains) {
-      if (t.routeId !== routeId) continue;
+      if (!corridorSet.has(t.routeId)) continue;
       if (t.progress > 0.85) s.add(t.nextStopId);
       if (t.progress < 0.15) s.add(t.prevStopId);
     }
     return s;
-  }, [data, routeId]);
+  }, [data, corridorSet]);
 
   const trainCount = useMemo(() => {
-    if (!data || !routeId) return 0;
+    if (!data || !corridorSet) return 0;
     let n = 0;
-    for (const t of data.trains) if (t.routeId === routeId) n++;
+    for (const t of data.trains) if (corridorSet.has(t.routeId)) n++;
     return n;
-  }, [data, routeId]);
+  }, [data, corridorSet]);
 
   if (!line) return null;
 
@@ -131,24 +162,27 @@ export default function LinePanel({ lineId, onClose }: LinePanelProps) {
   return (
     <div
       className="
-        flex flex-col bg-gray-950 overflow-hidden
-        absolute inset-x-0 bottom-0 max-h-[45vh] z-20 rounded-t-2xl border-t border-gray-800 shadow-2xl
-        sm:static sm:max-h-none sm:rounded-none sm:border-t-0 sm:border-l sm:shadow-none sm:w-72 sm:flex-shrink-0 sm:z-auto
+        absolute z-20 overflow-hidden flex flex-col shadow-2xl
+        inset-x-0 bottom-0 max-h-[45vh] rounded-t-3xl border-t border-white/10
+        sm:inset-auto sm:right-3 sm:top-3 sm:bottom-3 sm:w-80 sm:max-h-none sm:rounded-2xl sm:border sm:border-white/10
+        bg-gray-950/80 supports-[backdrop-filter]:bg-gray-950/55
+        backdrop-blur-2xl backdrop-saturate-150
       "
     >
-      {/* Drag handle (mobile only) */}
-      <div className="sm:hidden flex justify-center pt-2 pb-1 flex-shrink-0" style={{ backgroundColor: line.color }}>
-        <div className="w-10 h-1 rounded-full bg-white/40" />
+      {/* Drag handle (mobile only) — sits on the translucent surface, no line-color strip */}
+      <div className="sm:hidden flex justify-center pt-2 pb-1 flex-shrink-0">
+        <div className="w-10 h-1 rounded-full bg-white/25" />
       </div>
 
       <div
-        className={`flex items-center justify-between px-4 py-2.5 sm:py-3 flex-shrink-0 ${textClass}`}
+        className={`flex items-center justify-between px-4 py-3 flex-shrink-0 ${textClass}`}
         style={{ backgroundColor: line.color }}
       >
-        <div className="flex items-center gap-2">
-          <span className="text-2xl font-black">{line.id}</span>
+        <div className="flex items-center gap-2.5">
+          <span className="text-2xl font-black leading-none">{line.id}</span>
           <span className="text-sm font-medium opacity-90">
             {trainCount} train{trainCount !== 1 ? "s" : ""}
+            {stale && <span className="opacity-70"> · stale</span>}
           </span>
         </div>
         <button
@@ -160,13 +194,13 @@ export default function LinePanel({ lineId, onClose }: LinePanelProps) {
         </button>
       </div>
 
-      <div className="flex text-xs font-semibold text-gray-400 bg-gray-900 border-b border-gray-800 px-4 py-2">
+      <div className="flex text-[11px] font-medium text-gray-400 px-4 py-2 border-b border-white/5">
         <span className="flex-1 truncate">{line.stops[0]?.name}</span>
         <span className="opacity-40 mx-2">↕</span>
         <span className="flex-1 text-right truncate">{line.stops[numStops - 1]?.name}</span>
       </div>
 
-      <div className="flex-1 overflow-y-auto py-1">
+      <div className="flex-1 overflow-y-auto py-1 overscroll-contain">
         {!data && (
           <div className="text-center text-xs text-gray-500 py-8 animate-pulse">
             Loading live arrivals…
@@ -174,6 +208,15 @@ export default function LinePanel({ lineId, onClose }: LinePanelProps) {
         )}
         {line.stops.map((stop, idx) => {
           const arr = arrivalsByStop.get(stop.id);
+          // Only badge when the corridor has more than one route — for a
+          // single-route line like G or L the bullet would be redundant.
+          const multi = (corridorSet?.size ?? 0) > 1;
+          const badgeFor = (rid?: string): RouteBadge | undefined => {
+            if (!multi || !rid) return undefined;
+            const l = lines?.[rid];
+            if (!l) return undefined;
+            return { id: l.id, color: l.color, textColor: l.textColor };
+          };
           return (
             <StopRow
               key={stop.id}
@@ -181,18 +224,14 @@ export default function LinePanel({ lineId, onClose }: LinePanelProps) {
               lineColor={line.color}
               nEtaStr={arr?.n ? fmtEta(arr.n.eta, now) : undefined}
               sEtaStr={arr?.s ? fmtEta(arr.s.eta, now) : undefined}
+              nBadge={badgeFor(arr?.n?.routeId)}
+              sBadge={badgeFor(arr?.s?.routeId)}
               trainHere={trainsAtStop.has(stop.id)}
               hasData={!!data}
               showConnector={idx < numStops - 1}
             />
           );
         })}
-      </div>
-
-      <div className="px-4 py-2.5 border-t border-gray-800 bg-gray-950">
-        <p className="text-[11px] text-gray-500 text-center">
-          {stale ? "⚠ data may be stale" : "Live · MTA GTFS-RT · refreshes 8s"}
-        </p>
       </div>
     </div>
   );

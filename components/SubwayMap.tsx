@@ -52,13 +52,16 @@ export default function SubwayMap() {
           />
         </div>
 
-        {/* Status badge — dot always visible, text hidden on mobile */}
+        {/* Status badge — compact on mobile (count only), full text on desktop */}
         <div className="flex items-center gap-1.5 text-xs text-gray-400 flex-shrink-0" title="MTA GTFS-Realtime feed">
           <span
             className={`w-2 h-2 rounded-full ${
               !data ? "bg-gray-500 animate-pulse" : stale ? "bg-amber-400" : "bg-green-400 animate-pulse"
             }`}
           />
+          <span className="md:hidden tabular-nums">
+            {!data ? "…" : stale ? "stale" : `${totalTrains} live`}
+          </span>
           <span className="hidden md:inline">
             {!data ? "Connecting…" : stale ? "Stale" : `Live · ${totalTrains} trains`}
           </span>
