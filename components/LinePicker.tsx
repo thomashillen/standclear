@@ -32,7 +32,7 @@ export default function LinePicker({ lines, selectedLine, onSelect }: LinePicker
     <DialogPrimitive.Root open={open} onOpenChange={setOpen}>
       <DialogPrimitive.Trigger asChild>
         <button
-          className="flex items-center gap-2 px-2.5 py-1.5 rounded-full bg-gray-800/70 hover:bg-gray-800 border border-gray-700/60 transition-colors min-w-0 max-w-[180px] sm:max-w-[260px] touch-manipulation"
+          className="flex items-center gap-2 px-3 min-h-11 sm:min-h-0 sm:py-1.5 rounded-full bg-gray-800/70 hover:bg-gray-800 active:bg-gray-700 border border-gray-700/60 transition-colors min-w-0 max-w-[180px] sm:max-w-[260px] touch-manipulation"
           aria-label="Choose a subway line"
         >
           {selected ? (
@@ -85,7 +85,7 @@ export default function LinePicker({ lines, selectedLine, onSelect }: LinePicker
             <button
               onClick={() => pick(null)}
               className={`
-                w-full mb-5 py-3 rounded-xl text-sm font-semibold transition-colors touch-manipulation
+                w-full mb-5 min-h-11 py-3 rounded-xl text-sm font-semibold transition-colors touch-manipulation
                 ${
                   !selectedLine
                     ? "bg-white text-gray-950"

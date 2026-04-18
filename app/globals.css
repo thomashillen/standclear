@@ -126,3 +126,13 @@
 .subway-popup .mapboxgl-popup-tip {
   border-top-color: #1f2937;
 }
+
+/* iOS Safari: prevent input auto-zoom-on-focus (triggers when font-size < 16px). */
+input, select, textarea {
+  font-size: 16px;
+}
+
+/* iOS Safari: momentum scrolling for overflow regions. */
+.ios-momentum {
+  -webkit-overflow-scrolling: touch;
+}

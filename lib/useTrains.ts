@@ -38,6 +38,7 @@ async function refresh() {
 
 function startPolling() {
   if (intervalId) return;
+  if (typeof document !== "undefined" && document.hidden) return;
   refresh();
   intervalId = setInterval(refresh, POLL_MS);
 }
@@ -49,11 +50,33 @@ function stopPolling() {
   }
 }
 
+// Pause polling when the tab is backgrounded. On mobile Safari this matters:
+// locking the phone or swiping away the tab otherwise keeps pulling feeds
+// every 8s, burning battery and data for data the user can't see. On resume,
+// fetch immediately so on-screen positions are fresh before the next tick.
+let visibilityBound = false;
+function bindVisibility() {
+  if (visibilityBound || typeof document === "undefined") return;
+  visibilityBound = true;
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) {
+      if (intervalId) {
+        clearInterval(intervalId);
+        intervalId = null;
+      }
+    } else if (subscribers.size > 0 && !intervalId) {
+      refresh();
+      intervalId = setInterval(refresh, POLL_MS);
+    }
+  });
+}
+
 export function useTrains(): TrainsResponse | null {
   const [data, setData] = useState<TrainsResponse | null>(cache.data);
 
   useEffect(() => {
     subscribers.add(setData);
+    bindVisibility();
     startPolling();
     if (cache.data) setData(cache.data);
     return () => {

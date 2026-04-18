@@ -27,10 +27,14 @@ const MapView = dynamic(() => import("./MapView"), {
 
 export default function SubwayMap() {
   const [selectedLine, setSelectedLine] = useState<string | null>(null);
+  const [focusStopId, setFocusStopId] = useState<string | undefined>();
   const data = useTrains();
   const lines = useLines();
 
-  const handleLineSelect = (line: string | null) => setSelectedLine(line);
+  const handleLineSelect = (line: string | null, stopId?: string) => {
+    setSelectedLine(line);
+    setFocusStopId(stopId);
+  };
   const totalTrains = data?.trains.length ?? 0;
   const stale = data ? Date.now() - data.generatedAt > 60_000 : false;
 
@@ -70,7 +74,11 @@ export default function SubwayMap() {
         {/* About */}
         <Dialog>
           <DialogTrigger asChild>
-            <Button variant="ghost" size="sm" className="text-gray-400 hover:text-white flex-shrink-0 px-2 sm:px-3">
+            <Button
+              variant="ghost"
+              size="sm"
+              className="text-gray-400 hover:text-white flex-shrink-0 px-3 min-h-11 sm:min-h-0 sm:h-8 touch-manipulation"
+            >
               About
             </Button>
           </DialogTrigger>
@@ -104,7 +112,14 @@ export default function SubwayMap() {
       <div className="relative flex flex-1 min-h-0">
         <MapView selectedLine={selectedLine} onLineSelect={handleLineSelect} />
         {selectedLine && (
-          <LinePanel lineId={selectedLine} onClose={() => setSelectedLine(null)} />
+          <LinePanel
+            lineId={selectedLine}
+            focusStopId={focusStopId}
+            onClose={() => {
+              setSelectedLine(null);
+              setFocusStopId(undefined);
+            }}
+          />
         )}
       </div>
     </div>

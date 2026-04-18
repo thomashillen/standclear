@@ -1,11 +1,12 @@
 "use client";
 
-import { memo, useMemo } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { useLines, CORRIDOR } from "@/lib/subwayData";
 import { useTrains, type Arrival } from "@/lib/useTrains";
 
 interface LinePanelProps {
   lineId: string; // routeId (e.g. "1", "A", "GS")
+  focusStopId?: string;
   onClose: () => void;
 }
 
@@ -24,6 +25,7 @@ interface RouteBadge {
 }
 
 interface StopRowProps {
+  stopId: string;
   stopName: string;
   lineColor: string;
   nEtaStr?: string;
@@ -47,6 +49,7 @@ function Bullet({ badge }: { badge: RouteBadge }) {
 }
 
 const StopRow = memo(function StopRow({
+  stopId,
   stopName,
   lineColor,
   nEtaStr,
@@ -59,6 +62,7 @@ const StopRow = memo(function StopRow({
 }: StopRowProps) {
   return (
     <div
+      data-stop-id={stopId}
       className={`flex items-start gap-3 px-4 py-2 transition-colors ${
         trainHere ? "bg-white/10" : "hover:bg-white/5"
       }`}
@@ -104,7 +108,7 @@ const StopRow = memo(function StopRow({
   );
 });
 
-export default function LinePanel({ lineId, onClose }: LinePanelProps) {
+export default function LinePanel({ lineId, focusStopId, onClose }: LinePanelProps) {
   const lines = useLines();
   const line = lines?.[lineId];
   const data = useTrains();
@@ -153,6 +157,54 @@ export default function LinePanel({ lineId, onClose }: LinePanelProps) {
     return n;
   }, [data, corridorSet]);
 
+  // Scroll the tapped stop's row into view when the user opens the panel
+  // via a line tap. The row is tagged with data-stop-id; a querySelector
+  // inside the scroll container keeps the lookup local to this panel.
+  const scrollRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!focusStopId || !scrollRef.current) return;
+    const row = scrollRef.current.querySelector<HTMLElement>(
+      `[data-stop-id="${CSS.escape(focusStopId)}"]`,
+    );
+    row?.scrollIntoView({ block: "center" });
+  }, [focusStopId, lineId]);
+
+  // Swipe-to-dismiss on mobile. Pointer events unify touch + mouse so the
+  // same gesture works for a phone drag and a desktop trackpad flick on the
+  // small bottom sheet. Desktop (sm+) is a fixed side card — dragging is
+  // disabled there.
+  const [dragY, setDragY] = useState(0);
+  const dragStartY = useRef<number | null>(null);
+  const pointerId = useRef<number | null>(null);
+
+  const isDraggable = () =>
+    typeof window !== "undefined" && window.matchMedia("(max-width: 639px)").matches;
+
+  const onDragStart = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!isDraggable()) return;
+    dragStartY.current = e.clientY;
+    pointerId.current = e.pointerId;
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+  };
+  const onDragMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (dragStartY.current === null) return;
+    const dy = e.clientY - dragStartY.current;
+    // Only track downward drag; let upward pulls snap back.
+    setDragY(Math.max(0, dy));
+  };
+  const onDragEnd = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (dragStartY.current === null) return;
+    const dy = e.clientY - dragStartY.current;
+    dragStartY.current = null;
+    pointerId.current = null;
+    // Past ~1/3 of the sheet height, treat as a dismiss gesture.
+    if (dy > 120) {
+      onClose();
+    } else {
+      setDragY(0);
+    }
+  };
+
   if (!line) return null;
 
   const numStops = line.stops.length;
@@ -167,11 +219,26 @@ export default function LinePanel({ lineId, onClose }: LinePanelProps) {
         sm:inset-auto sm:right-3 sm:top-3 sm:bottom-3 sm:w-80 sm:max-h-none sm:rounded-2xl sm:border sm:border-white/10
         bg-gray-950/80 supports-[backdrop-filter]:bg-gray-950/55
         backdrop-blur-2xl backdrop-saturate-150
+        pb-[env(safe-area-inset-bottom)]
       "
+      style={{
+        transform: dragY > 0 ? `translateY(${dragY}px)` : undefined,
+        transition: dragStartY.current === null ? "transform 200ms ease-out" : undefined,
+      }}
     >
-      {/* Drag handle (mobile only) — sits on the translucent surface, no line-color strip */}
-      <div className="sm:hidden flex justify-center pt-2 pb-1 flex-shrink-0">
-        <div className="w-10 h-1 rounded-full bg-white/25" />
+      {/* Drag handle + grab region (mobile only). The pill is 4px tall but the
+          region is padded to ~32px so fingers don't need to land on the pill
+          itself to start a dismiss swipe. */}
+      <div
+        className="sm:hidden flex items-center justify-center pt-3 pb-2 flex-shrink-0 cursor-grab active:cursor-grabbing touch-none"
+        onPointerDown={onDragStart}
+        onPointerMove={onDragMove}
+        onPointerUp={onDragEnd}
+        onPointerCancel={onDragEnd}
+        aria-label="Drag to dismiss"
+        role="button"
+      >
+        <div className="w-10 h-1.5 rounded-full bg-white/30" />
       </div>
 
       <div
@@ -187,7 +254,7 @@ export default function LinePanel({ lineId, onClose }: LinePanelProps) {
         </div>
         <button
           onClick={onClose}
-          className={`${textClass} opacity-70 hover:opacity-100 text-2xl leading-none font-bold w-9 h-9 flex items-center justify-center -mr-2 touch-manipulation`}
+          className={`${textClass} opacity-80 hover:opacity-100 active:opacity-60 text-2xl leading-none font-bold w-11 h-11 flex items-center justify-center -mr-2 touch-manipulation`}
           aria-label="Close panel"
         >
           ×
@@ -200,7 +267,7 @@ export default function LinePanel({ lineId, onClose }: LinePanelProps) {
         <span className="flex-1 text-right truncate">{line.stops[numStops - 1]?.name}</span>
       </div>
 
-      <div className="flex-1 overflow-y-auto py-1 overscroll-contain">
+      <div ref={scrollRef} className="flex-1 overflow-y-auto py-1 overscroll-contain">
         {!data && (
           <div className="text-center text-xs text-gray-500 py-8 animate-pulse">
             Loading live arrivals…
@@ -220,6 +287,7 @@ export default function LinePanel({ lineId, onClose }: LinePanelProps) {
           return (
             <StopRow
               key={stop.id}
+              stopId={stop.id}
               stopName={stop.name}
               lineColor={line.color}
               nEtaStr={arr?.n ? fmtEta(arr.n.eta, now) : undefined}
