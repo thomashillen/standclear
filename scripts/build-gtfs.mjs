@@ -7,7 +7,7 @@ import path from "node:path";
 import readline from "node:readline";
 
 const GTFS_DIR = path.resolve("data/gtfs");
-const OUTPUT = path.resolve("lib/gtfsData.json");
+const OUTPUT = path.resolve("public/gtfsData.json");
 
 // route_id -> display id shown on map (shuttles all become "S")
 const ROUTE_ALIASES = { GS: "S", FS: "S", H: "S", SI: "SI" };

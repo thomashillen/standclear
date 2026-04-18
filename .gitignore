@@ -20,7 +20,7 @@
 .DS_Store
 *.pem
 
-# Raw GTFS source — re-download from MTA, run `npm run build:gtfs` to regenerate lib/gtfsData.json
+# Raw GTFS source — re-download from MTA, run `npm run build:gtfs` to regenerate public/gtfsData.json
 /data/gtfs_subway.zip
 /data/gtfs/
 

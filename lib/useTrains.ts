@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import type { TrainsResponse, Train, Arrival } from "@/app/api/trains/route";
-import { LINES, SubwayLine } from "./subwayData";
+import type { SubwayLine } from "./subwayData";
 
 export type { Train, Arrival };
 
@@ -163,6 +163,3 @@ export function nextArrivals(
     .slice(0, limit);
 }
 
-export function lineByRouteId(routeId: string): SubwayLine | undefined {
-  return LINES[routeId];
-}

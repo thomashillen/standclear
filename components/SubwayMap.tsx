@@ -2,7 +2,7 @@
 
 import dynamic from "next/dynamic";
 import { useState } from "react";
-import { LINES, LINE_GROUPS } from "@/lib/subwayData";
+import { LINE_GROUPS, useLines } from "@/lib/subwayData";
 import { useTrains } from "@/lib/useTrains";
 import LinePanel from "./LinePanel";
 import {
@@ -27,6 +27,7 @@ const MapView = dynamic(() => import("./MapView"), {
 export default function SubwayMap() {
   const [selectedLine, setSelectedLine] = useState<string | null>(null);
   const data = useTrains();
+  const lines = useLines();
 
   const handleLineSelect = (line: string | null) => setSelectedLine(line);
   const totalTrains = data?.trains.length ?? 0;
@@ -47,7 +48,7 @@ export default function SubwayMap() {
             {LINE_GROUPS.map((group, gi) => (
               <div key={group.label} className="flex gap-1 items-center">
                 {group.lines.map((id) => {
-                  const line = LINES[id];
+                  const line = lines?.[id];
                   if (!line) return null;
                   const active = selectedLine === id;
                   return (

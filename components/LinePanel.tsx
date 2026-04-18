@@ -1,6 +1,6 @@
 "use client";
 
-import { LINES } from "@/lib/subwayData";
+import { useLines } from "@/lib/subwayData";
 import { useTrains, nextArrivals, trainsForLine } from "@/lib/useTrains";
 
 interface LinePanelProps {
@@ -17,7 +17,8 @@ function fmtEta(eta: number, now: number): string {
 }
 
 export default function LinePanel({ lineId, onClose }: LinePanelProps) {
-  const line = LINES[lineId];
+  const lines = useLines();
+  const line = lines?.[lineId];
   const data = useTrains();
   if (!line) return null;
 

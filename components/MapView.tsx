@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { LINES } from "@/lib/subwayData";
+import { useLines } from "@/lib/subwayData";
 import { useTrains, trainLatLng } from "@/lib/useTrains";
 import "mapbox-gl/dist/mapbox-gl.css";
 
@@ -18,6 +18,7 @@ export default function MapView({ selectedLine, onLineSelect }: MapViewProps) {
   const selectedLineRef = useRef(selectedLine);
   const data = useTrains();
   const dataRef = useRef(data);
+  const lines = useLines();
 
   useEffect(() => {
     selectedLineRef.current = selectedLine;
@@ -31,6 +32,7 @@ export default function MapView({ selectedLine, onLineSelect }: MapViewProps) {
     const token = process.env.NEXT_PUBLIC_MAPBOX_TOKEN;
     if (!token) { setNoToken(true); return; }
     if (!containerRef.current) return;
+    if (!lines) return;
 
     let cancelled = false;
 
@@ -53,7 +55,7 @@ export default function MapView({ selectedLine, onLineSelect }: MapViewProps) {
       map.on("load", () => {
         if (cancelled) return;
 
-        Object.values(LINES).forEach((line) => {
+        Object.values(lines).forEach((line) => {
           // Real track-following shape
           map.addSource(`line-${line.routeId}`, {
             type: "geojson",
@@ -174,7 +176,7 @@ export default function MapView({ selectedLine, onLineSelect }: MapViewProps) {
           offset: 10,
         });
 
-        Object.values(LINES).forEach((line) => {
+        Object.values(lines).forEach((line) => {
           map.on("mouseenter", `stops-${line.routeId}`, (e) => {
             const feat = e.features?.[0];
             if (!feat) return;
@@ -200,12 +202,12 @@ export default function MapView({ selectedLine, onLineSelect }: MapViewProps) {
       }
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [lines]);
 
   // Push live train positions to the map. Re-runs when new data arrives;
   // a small rAF loop interpolates progress between polls so trains glide.
   useEffect(() => {
-    if (!mapLoaded || !mapRef.current) return;
+    if (!mapLoaded || !mapRef.current || !lines) return;
     const map = mapRef.current as {
       getSource: (id: string) => { setData: (d: unknown) => void } | undefined;
     };
@@ -223,7 +225,7 @@ export default function MapView({ selectedLine, onLineSelect }: MapViewProps) {
           trainsByRoute.set(t.routeId, arr);
         }
 
-        Object.values(LINES).forEach((line) => {
+        Object.values(lines).forEach((line) => {
           const src = map.getSource(`trains-${line.routeId}`);
           if (!src) return;
           const trains = trainsByRoute.get(line.routeId) || [];
@@ -244,18 +246,18 @@ export default function MapView({ selectedLine, onLineSelect }: MapViewProps) {
     };
     frame = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(frame);
-  }, [mapLoaded]);
+  }, [mapLoaded, lines]);
 
   // Highlight selected line
   useEffect(() => {
-    if (!mapLoaded || !mapRef.current) return;
+    if (!mapLoaded || !mapRef.current || !lines) return;
     const map = mapRef.current as {
       setPaintProperty: (id: string, prop: string, val: unknown) => void;
       fitBounds: (bounds: unknown, opts: unknown) => void;
     };
 
     import("mapbox-gl").then((mapboxgl) => {
-      Object.values(LINES).forEach((line) => {
+      Object.values(lines).forEach((line) => {
         const sel = selectedLine;
         const isThis = line.routeId === sel;
         const dim = sel !== null && !isThis;
@@ -270,7 +272,7 @@ export default function MapView({ selectedLine, onLineSelect }: MapViewProps) {
       });
 
       if (selectedLine) {
-        const line = LINES[selectedLine];
+        const line = lines[selectedLine];
         if (line && line.shape.length > 0) {
           const bounds = new mapboxgl.default.LngLatBounds();
           line.shape.forEach((c) => bounds.extend(c as [number, number]));
@@ -278,7 +280,7 @@ export default function MapView({ selectedLine, onLineSelect }: MapViewProps) {
         }
       }
     });
-  }, [selectedLine, mapLoaded]);
+  }, [selectedLine, mapLoaded, lines]);
 
   if (noToken) {
     return (
