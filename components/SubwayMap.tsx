@@ -105,7 +105,7 @@ export default function SubwayMap() {
             <div className="space-y-3 text-sm text-gray-300">
               <p>
                 SubwaySurfer shows live train positions across the NYC subway,
-                pulled directly from the MTA's GTFS-Realtime feeds.
+                pulled directly from the MTA&apos;s GTFS-Realtime feeds.
               </p>
               <ul className="list-disc list-inside space-y-1 text-gray-400">
                 <li>Click any line button or line on the map to focus it</li>
