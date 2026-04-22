@@ -315,20 +315,20 @@ export default function NearbyPanel({ open, onClose, onJumpToLine }: Props) {
   return (
     <div
       className="
-        absolute z-20 overflow-hidden flex flex-col shadow-2xl
-        inset-x-0 bottom-0 max-h-[55vh] rounded-t-3xl border-t border-white/10
-        sm:inset-auto sm:right-3 sm:top-3 sm:bottom-3 sm:w-80 sm:max-h-none sm:rounded-2xl sm:border sm:border-white/10
-        bg-gray-950/80 supports-[backdrop-filter]:bg-gray-950/55
-        backdrop-blur-2xl backdrop-saturate-150
+        absolute z-20 overflow-hidden flex flex-col
+        inset-x-0 bottom-0 max-h-[60dvh] rounded-t-[28px] border-t border-white/[0.08]
+        sm:inset-auto sm:right-3 sm:top-3 sm:bottom-3 sm:w-[340px] sm:max-h-none sm:rounded-[22px] sm:border sm:border-white/[0.08]
+        ios-glass
+        shadow-[0_20px_60px_-10px_rgba(0,0,0,0.6)]
         pb-[env(safe-area-inset-bottom)]
       "
       style={{
         transform: dragY > 0 ? `translateY(${dragY}px)` : undefined,
-        transition: dragStartY.current === null ? "transform 200ms ease-out" : undefined,
+        transition: dragStartY.current === null ? "transform 340ms var(--ease-ios)" : undefined,
       }}
     >
       <div
-        className="sm:hidden flex items-center justify-center pt-3 pb-2 flex-shrink-0 cursor-grab active:cursor-grabbing touch-none"
+        className="sm:hidden flex items-center justify-center pt-2.5 pb-1.5 flex-shrink-0 cursor-grab active:cursor-grabbing touch-none"
         onPointerDown={onDragStart}
         onPointerMove={onDragMove}
         onPointerUp={onDragEnd}
@@ -336,39 +336,39 @@ export default function NearbyPanel({ open, onClose, onJumpToLine }: Props) {
         aria-label="Drag to dismiss"
         role="button"
       >
-        <div className="w-10 h-1.5 rounded-full bg-white/30" />
+        <div className="w-9 h-[5px] rounded-full bg-white/25" />
       </div>
 
-      <div className="flex items-center justify-between px-4 py-3 flex-shrink-0">
+      <div className="flex items-center justify-between px-4 py-2.5 flex-shrink-0">
         <div className="flex items-center gap-2.5 text-white">
-          <MapPin className="w-5 h-5" />
-          <span className="font-black text-base">Near me</span>
+          <MapPin className="w-[18px] h-[18px]" />
+          <span className="font-black text-[17px] tracking-tight">Near me</span>
         </div>
         <button
           onClick={onClose}
-          className="text-white opacity-80 hover:opacity-100 active:opacity-60 text-2xl leading-none font-bold w-11 h-11 flex items-center justify-center -mr-2 touch-manipulation"
+          className="press text-white opacity-85 hover:opacity-100 text-[22px] leading-none font-bold w-10 h-10 -mr-1 flex items-center justify-center rounded-full bg-white/[0.08] hover:bg-white/[0.12] touch-manipulation"
           aria-label="Close panel"
         >
           ×
         </button>
       </div>
 
-      <div className="px-3 pb-3 flex-shrink-0 border-b border-white/5">
+      <div className="px-3 pb-3 flex-shrink-0 border-b border-white/[0.06]">
         <div className="relative">
-          <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 pointer-events-none" />
+          <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
           <input
             type="search"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search stations…"
+            placeholder="Search stations"
             aria-label="Search stations"
-            className="w-full h-10 pl-9 pr-9 rounded-full bg-gray-900/70 border border-white/10 text-sm text-gray-100 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-white/20 focus:border-white/20"
+            className="w-full h-10 pl-10 pr-10 rounded-xl bg-white/[0.08] border border-white/[0.06] text-[15px] text-gray-50 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-white/25 focus:border-transparent transition-shadow"
           />
           {query && (
             <button
               onClick={() => setQuery("")}
               aria-label="Clear search"
-              className="absolute right-2 top-1/2 -translate-y-1/2 w-6 h-6 flex items-center justify-center rounded-full text-gray-500 hover:text-gray-200 hover:bg-white/10"
+              className="press absolute right-2 top-1/2 -translate-y-1/2 w-7 h-7 flex items-center justify-center rounded-full text-gray-300 bg-white/[0.08] hover:bg-white/[0.14]"
             >
               <X className="w-3.5 h-3.5" />
             </button>
@@ -376,7 +376,7 @@ export default function NearbyPanel({ open, onClose, onJumpToLine }: Props) {
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto overscroll-contain">
+      <div className="flex-1 overflow-y-auto ios-scroll">
         {/* Search view takes over whenever the user has typed a query.
             Favorites/Nearby are hidden so the results don't fight for space. */}
         {searchResults !== null ? (
