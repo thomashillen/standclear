@@ -32,7 +32,7 @@ export default function LinePicker({ lines, selectedLine, onSelect }: LinePicker
     <DialogPrimitive.Root open={open} onOpenChange={setOpen}>
       <DialogPrimitive.Trigger asChild>
         <button
-          className="flex items-center gap-2 px-3 min-h-11 sm:min-h-0 sm:py-1.5 rounded-full bg-gray-800/70 hover:bg-gray-800 active:bg-gray-700 border border-gray-700/60 transition-colors min-w-0 max-w-[180px] sm:max-w-[260px] touch-manipulation"
+          className="press flex items-center gap-2 px-3 h-10 sm:h-9 rounded-full bg-white/[0.08] hover:bg-white/[0.12] border border-white/[0.08] min-w-0 max-w-[180px] sm:max-w-[260px] touch-manipulation transition-colors"
           aria-label="Choose a subway line"
         >
           {selected ? (
@@ -43,12 +43,12 @@ export default function LinePicker({ lines, selectedLine, onSelect }: LinePicker
               >
                 {selected.id}
               </span>
-              <span className="text-sm font-semibold text-white truncate">
+              <span className="text-[14px] font-semibold text-white truncate">
                 {selected.name}
               </span>
             </>
           ) : (
-            <span className="text-sm font-semibold text-white px-1">All lines</span>
+            <span className="text-[14px] font-semibold text-white px-0.5">All lines</span>
           )}
           <ChevronDown className="w-4 h-4 text-gray-400 flex-shrink-0" />
         </button>
@@ -56,13 +56,15 @@ export default function LinePicker({ lines, selectedLine, onSelect }: LinePicker
 
       <DialogPrimitive.Portal>
         <DialogPrimitive.Overlay
-          className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=open]:fade-in-0 data-[state=closed]:fade-out-0"
+          className="fixed inset-0 z-50 bg-black/50 backdrop-blur-md data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=open]:fade-in-0 data-[state=closed]:fade-out-0"
         />
         <DialogPrimitive.Content
           className="
-            fixed z-50 bg-gray-950 text-white
-            inset-x-0 bottom-0 rounded-t-3xl border-t border-gray-800 max-h-[85vh] overflow-y-auto
-            sm:inset-auto sm:left-1/2 sm:top-1/2 sm:-translate-x-1/2 sm:-translate-y-1/2 sm:rounded-2xl sm:border sm:max-w-xl sm:w-full sm:max-h-[80vh]
+            fixed z-50 text-white ios-glass
+            inset-x-0 bottom-0 rounded-t-[28px] border-t border-white/[0.08] max-h-[85dvh] overflow-y-auto ios-scroll
+            pb-[env(safe-area-inset-bottom)]
+            sm:inset-auto sm:left-1/2 sm:top-1/2 sm:-translate-x-1/2 sm:-translate-y-1/2 sm:rounded-[22px] sm:border sm:border-white/[0.08] sm:max-w-xl sm:w-full sm:max-h-[80dvh] sm:pb-0
+            shadow-[0_20px_60px_-10px_rgba(0,0,0,0.7)]
             data-[state=open]:animate-in data-[state=closed]:animate-out
             data-[state=open]:slide-in-from-bottom data-[state=closed]:slide-out-to-bottom
             sm:data-[state=open]:slide-in-from-bottom-0 sm:data-[state=closed]:slide-out-to-bottom-0
@@ -77,19 +79,19 @@ export default function LinePicker({ lines, selectedLine, onSelect }: LinePicker
             Pick a line to focus on it, or All lines to see every train.
           </DialogPrimitive.Description>
 
-          <div className="sm:hidden flex justify-center pt-3 pb-1">
-            <div className="w-10 h-1 rounded-full bg-white/25" />
+          <div className="sm:hidden flex justify-center pt-2.5 pb-1">
+            <div className="w-9 h-[5px] rounded-full bg-white/25" />
           </div>
 
           <div className="px-5 pt-3 pb-6 sm:p-6">
             <button
               onClick={() => pick(null)}
-              className={`
-                w-full mb-5 min-h-11 py-3 rounded-xl text-sm font-semibold transition-colors touch-manipulation
+              className={`press
+                w-full mb-6 h-12 rounded-2xl text-[15px] font-semibold transition-colors touch-manipulation
                 ${
                   !selectedLine
-                    ? "bg-white text-gray-950"
-                    : "bg-gray-800 text-gray-200 hover:bg-gray-700 active:bg-gray-700"
+                    ? "bg-white text-gray-950 shadow-[0_4px_16px_rgba(255,255,255,0.18)]"
+                    : "bg-white/[0.08] text-white hover:bg-white/[0.12] border border-white/[0.06]"
                 }
               `}
             >
@@ -97,8 +99,8 @@ export default function LinePicker({ lines, selectedLine, onSelect }: LinePicker
             </button>
 
             {LINE_GROUPS.map((group) => (
-              <div key={group.label} className="mb-5 last:mb-0">
-                <div className="text-[11px] font-semibold text-gray-500 uppercase tracking-wider mb-2.5 px-1">
+              <div key={group.label} className="mb-6 last:mb-0">
+                <div className="text-[11px] font-semibold text-gray-400 uppercase tracking-[0.08em] mb-3 px-1">
                   {GROUP_LABELS[group.label] ?? group.label}
                 </div>
                 <div className="grid grid-cols-6 sm:grid-cols-8 gap-3">
@@ -111,11 +113,12 @@ export default function LinePicker({ lines, selectedLine, onSelect }: LinePicker
                         key={id}
                         onClick={() => pick(id)}
                         className={`
-                          aspect-square rounded-full text-base font-black leading-none flex items-center justify-center touch-manipulation transition-transform
+                          aspect-square rounded-full text-[17px] font-black leading-none flex items-center justify-center touch-manipulation
+                          transition-transform duration-200
                           ${
                             active
-                              ? "scale-110 ring-2 ring-inset ring-white/90"
-                              : "active:scale-95 hover:scale-105"
+                              ? "scale-[1.12] ring-[2.5px] ring-white/95 shadow-[0_4px_20px_rgba(0,0,0,0.4)]"
+                              : "active:scale-[0.92] hover:scale-105 shadow-[0_2px_8px_rgba(0,0,0,0.3)]"
                           }
                         `}
                         style={{ backgroundColor: line.color, color: line.textColor }}

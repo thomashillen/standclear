@@ -66,12 +66,14 @@ const StopRow = memo(function StopRow({
     <div
       data-stop-id={stopId}
       className={`flex items-start gap-3 px-4 py-2 transition-colors ${
-        trainHere ? "bg-white/10" : "hover:bg-white/5"
+        trainHere ? "bg-white/[0.09]" : "hover:bg-white/[0.04]"
       }`}
     >
       <div className="flex flex-col items-center mt-1.5">
         <div
-          className="w-3 h-3 rounded-full border-2 border-white flex-shrink-0 z-10"
+          className={`w-3 h-3 rounded-full border-2 border-white/90 flex-shrink-0 z-10 ${
+            trainHere ? "ring-2 ring-white/30 shadow-[0_0_12px_rgba(255,255,255,0.4)]" : ""
+          }`}
           style={{ backgroundColor: trainHere ? "#fff" : lineColor }}
         />
         {showConnector && (
@@ -83,10 +85,10 @@ const StopRow = memo(function StopRow({
       </div>
 
       <div className="flex-1 min-w-0">
-        <p className="text-sm font-medium leading-tight text-gray-100 truncate">
+        <p className="text-[14px] font-medium leading-tight text-gray-50 truncate">
           {stopName}
         </p>
-        <div className="flex gap-3 text-[11px] text-gray-400 mt-0.5">
+        <div className="flex gap-3 text-[11px] text-gray-400 mt-1">
           {nEtaStr && (
             <span className="inline-flex items-center">
               {nBadge && <Bullet badge={nBadge} />}
@@ -264,23 +266,23 @@ export default function LinePanel({ lineId, focusStopId, onClose }: LinePanelPro
   return (
     <div
       className="
-        absolute z-20 overflow-hidden flex flex-col shadow-2xl
-        inset-x-0 bottom-0 max-h-[45vh] rounded-t-3xl border-t border-white/10
-        sm:inset-auto sm:right-3 sm:top-3 sm:bottom-3 sm:w-80 sm:max-h-none sm:rounded-2xl sm:border sm:border-white/10
-        bg-gray-950/80 supports-[backdrop-filter]:bg-gray-950/55
-        backdrop-blur-2xl backdrop-saturate-150
+        absolute z-20 overflow-hidden flex flex-col
+        inset-x-0 bottom-0 max-h-[50dvh] rounded-t-[28px] border-t border-white/[0.08]
+        sm:inset-auto sm:right-3 sm:top-3 sm:bottom-3 sm:w-[340px] sm:max-h-none sm:rounded-[22px] sm:border sm:border-white/[0.08]
+        ios-glass
+        shadow-[0_20px_60px_-10px_rgba(0,0,0,0.6)]
         pb-[env(safe-area-inset-bottom)]
       "
       style={{
         transform: dragY > 0 ? `translateY(${dragY}px)` : undefined,
-        transition: dragStartY.current === null ? "transform 200ms ease-out" : undefined,
+        transition: dragStartY.current === null ? "transform 340ms var(--ease-ios)" : undefined,
       }}
     >
       {/* Drag handle + grab region (mobile only). The pill is 4px tall but the
           region is padded to ~32px so fingers don't need to land on the pill
           itself to start a dismiss swipe. */}
       <div
-        className="sm:hidden flex items-center justify-center pt-3 pb-2 flex-shrink-0 cursor-grab active:cursor-grabbing touch-none"
+        className="sm:hidden flex items-center justify-center pt-2.5 pb-1.5 flex-shrink-0 cursor-grab active:cursor-grabbing touch-none"
         onPointerDown={onDragStart}
         onPointerMove={onDragMove}
         onPointerUp={onDragEnd}
@@ -288,44 +290,46 @@ export default function LinePanel({ lineId, focusStopId, onClose }: LinePanelPro
         aria-label="Drag to dismiss"
         role="button"
       >
-        <div className="w-10 h-1.5 rounded-full bg-white/30" />
+        <div className="w-9 h-[5px] rounded-full bg-white/25" />
       </div>
 
       <div
-        className={`flex items-center justify-between px-4 py-3 flex-shrink-0 ${textClass}`}
+        className={`flex items-center justify-between px-4 py-3 flex-shrink-0 ${textClass} relative`}
         style={{ backgroundColor: line.color }}
       >
-        <div className="flex items-center gap-2.5">
-          <span className="text-2xl font-black leading-none">{line.id}</span>
-          <span className="text-sm font-medium opacity-90">
+        {/* subtle top highlight like iOS cards */}
+        <span className="pointer-events-none absolute inset-x-0 top-0 h-px bg-white/20" />
+        <div className="flex items-center gap-3">
+          <span className="text-[26px] font-black leading-none tracking-tight">{line.id}</span>
+          <span className="text-[13px] font-medium opacity-90 tabular-nums">
             {trainCount} train{trainCount !== 1 ? "s" : ""}
             {stale && <span className="opacity-70"> · stale</span>}
           </span>
         </div>
         <button
           onClick={onClose}
-          className={`${textClass} opacity-80 hover:opacity-100 active:opacity-60 text-2xl leading-none font-bold w-11 h-11 flex items-center justify-center -mr-2 touch-manipulation`}
+          className={`${textClass} press opacity-85 hover:opacity-100 text-[22px] leading-none font-bold w-10 h-10 -mr-1 flex items-center justify-center rounded-full bg-black/15 touch-manipulation`}
           aria-label="Close panel"
         >
           ×
         </button>
       </div>
 
-      <div className="flex text-[11px] font-medium text-gray-400 px-4 py-2 border-b border-white/5">
+      <div className="flex items-center text-[11px] font-medium text-gray-400 px-4 py-2 border-b border-white/[0.06]">
         <span className="flex-1 truncate">{line.stops[0]?.name}</span>
-        <span className="opacity-40 mx-2">↕</span>
+        <span className="opacity-40 mx-2 text-[10px]">↕</span>
         <span className="flex-1 text-right truncate">{line.stops[numStops - 1]?.name}</span>
       </div>
 
       {corridorAlerts.length > 0 && (
-        <div className="flex-shrink-0 px-3 py-2 space-y-1.5 border-b border-white/5 max-h-[40%] overflow-y-auto">
+        <div className="flex-shrink-0 px-3 py-2 space-y-1.5 border-b border-white/[0.06] max-h-[40%] overflow-y-auto ios-scroll">
           {corridorAlerts.slice(0, 6).map((a) => (
             <AlertItem key={a.id} alert={a} />
           ))}
         </div>
       )}
 
-      <div ref={scrollRef} className="flex-1 overflow-y-auto py-1 overscroll-contain">
+      <div ref={scrollRef} className="flex-1 overflow-y-auto py-1 ios-scroll">
         {!data && (
           <div className="text-center text-xs text-gray-500 py-8 animate-pulse">
             Loading live arrivals…

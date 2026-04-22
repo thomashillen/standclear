@@ -55,11 +55,22 @@ export default function SubwayMap() {
 
   return (
     <div className="flex flex-col h-full bg-gray-950 text-white">
-      {/* ── Header ── */}
-      <header className="flex items-center gap-2 sm:gap-4 px-2 sm:px-4 py-2.5 sm:py-3 bg-gray-950 border-b border-gray-800 z-10 flex-shrink-0">
-        <h1 className="text-base sm:text-lg font-black tracking-tight text-white sm:mr-2 flex-shrink-0">
+      {/* ── Header — iOS-style glass bar with safe-area top ── */}
+      <header
+        className="
+          relative z-10 flex-shrink-0 flex items-center gap-2 sm:gap-3
+          px-3 sm:px-4 pt-safe
+          ios-glass
+          border-b border-white/[0.06]
+        "
+        style={{
+          paddingTop: "calc(var(--safe-top) + 0.5rem)",
+          paddingBottom: "0.625rem",
+        }}
+      >
+        <h1 className="text-base sm:text-lg font-black tracking-tight text-white flex-shrink-0 select-none">
           <span className="hidden sm:inline">SubwaySurfer</span>
-          <span className="sm:hidden text-3xl leading-none" aria-label="SubwaySurfer">🚇</span>
+          <span className="sm:hidden text-[26px] leading-none" aria-label="SubwaySurfer">🚇</span>
         </h1>
 
         {/* Line picker */}
@@ -71,18 +82,26 @@ export default function SubwayMap() {
           />
         </div>
 
-        {/* Status badge — compact on mobile (count only), full text on desktop */}
-        <div className="flex items-center gap-1.5 text-xs text-gray-400 flex-shrink-0" title="MTA GTFS-Realtime feed">
-          <span
-            className={`w-2 h-2 rounded-full ${
-              !data ? "bg-gray-500 animate-pulse" : stale ? "bg-amber-400" : "bg-green-400 animate-pulse"
-            }`}
-          />
-          <span className="md:hidden tabular-nums">
-            {!data ? "…" : stale ? "stale" : `${totalTrains} live`}
+        {/* Status badge — subtle pill; count on mobile, full text on desktop */}
+        <div
+          className="flex items-center gap-1.5 text-[11px] text-gray-300/90 flex-shrink-0 px-2 h-7 rounded-full bg-white/[0.06] border border-white/[0.06]"
+          title="MTA GTFS-Realtime feed"
+        >
+          <span className="relative flex w-2 h-2">
+            <span
+              className={`absolute inset-0 rounded-full ${
+                !data ? "bg-gray-500" : stale ? "bg-amber-400" : "bg-emerald-400"
+              }`}
+            />
+            {data && !stale && (
+              <span className="absolute inset-0 rounded-full bg-emerald-400 animate-ping opacity-60" />
+            )}
           </span>
-          <span className="hidden md:inline">
-            {!data ? "Connecting…" : stale ? "Stale" : `Live · ${totalTrains} trains`}
+          <span className="md:hidden tabular-nums font-medium">
+            {!data ? "…" : stale ? "stale" : `${totalTrains}`}
+          </span>
+          <span className="hidden md:inline tabular-nums">
+            {!data ? "Connecting…" : stale ? "Stale" : `${totalTrains} live`}
           </span>
         </div>
 
@@ -91,13 +110,13 @@ export default function SubwayMap() {
           onClick={handleNearbyToggle}
           aria-label="Find nearby stations"
           aria-pressed={nearbyOpen}
-          className={`flex items-center justify-center w-11 h-11 sm:w-9 sm:h-9 rounded-full transition-colors touch-manipulation flex-shrink-0 ${
+          className={`press flex items-center justify-center w-10 h-10 sm:w-9 sm:h-9 rounded-full touch-manipulation flex-shrink-0 transition-colors ${
             nearbyOpen
-              ? "bg-white text-gray-950"
-              : "bg-gray-800/70 text-gray-200 hover:bg-gray-800 active:bg-gray-700 border border-gray-700/60"
+              ? "bg-white text-gray-950 shadow-[0_4px_16px_rgba(255,255,255,0.18)]"
+              : "bg-white/[0.08] text-gray-100 hover:bg-white/[0.12] border border-white/[0.08]"
           }`}
         >
-          <MapPin className="w-4 h-4" />
+          <MapPin className="w-[18px] h-[18px]" />
         </button>
 
         {/* About */}
@@ -106,14 +125,14 @@ export default function SubwayMap() {
             <Button
               variant="ghost"
               size="sm"
-              className="text-gray-400 hover:text-white flex-shrink-0 px-3 min-h-11 sm:min-h-0 sm:h-8 touch-manipulation"
+              className="press text-gray-300 hover:text-white hover:bg-white/[0.08] flex-shrink-0 px-3 h-10 sm:h-9 rounded-full touch-manipulation"
             >
               About
             </Button>
           </DialogTrigger>
-          <DialogContent className="bg-gray-900 border-gray-700 text-white">
+          <DialogContent className="bg-gray-900/90 backdrop-blur-xl border-white/10 text-white rounded-3xl">
             <DialogHeader>
-              <DialogTitle className="text-white text-xl font-black">SubwaySurfer</DialogTitle>
+              <DialogTitle className="text-white text-xl font-black tracking-tight">SubwaySurfer</DialogTitle>
               <DialogDescription className="text-gray-400">
                 Real-time NYC subway visualization
               </DialogDescription>

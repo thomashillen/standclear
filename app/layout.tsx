@@ -26,9 +26,10 @@ export default function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="en" className="dark h-full">
+    <html lang="en" className="dark">
       <body
-        className={`${inter.className} h-full bg-gray-950 text-white overflow-hidden overscroll-none touch-manipulation`}
+        className={`${inter.className} bg-gray-950 text-white overflow-hidden overscroll-none touch-manipulation antialiased`}
+        style={{ height: "100dvh" }}
       >
         {children}
         <RegisterSW />
