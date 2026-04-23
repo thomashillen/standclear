@@ -280,17 +280,20 @@ export default function LinePanel({ lineId, focusStopId, onClose, onStationOpen 
     onDismiss: onClose,
   });
 
-  // Scroll the tapped stop's row to sit near the bottom of the visible
-  // area when the user opens the panel via a line tap. Plain
-  // `scrollIntoView({ block: "center" })` misses at half detent — the
-  // scroll container is 88dvh tall but only ~50dvh is above the fold, so
-  // "center" of the container lands below the visible window.
+  // Scroll the tapped stop's row to sit near the top of the scroll
+  // container's visible area — this matches iOS Maps, where tapping a pin
+  // surfaces that pin's info at the top of the sheet. Anchoring to the
+  // bottom of the viewport (our previous approach) pushed the focused row
+  // off the bottom of the visible sheet when the stop was near the end of
+  // the list (e.g. Rector St on the 1 train), since scrolling can't put
+  // content below the end of the scrollable area. Result: the user saw a
+  // dozen stations above their tap and only found the tapped one by
+  // scrolling.
   //
-  // Compute the delta between where the row currently sits (in viewport
-  // coords) and where we want it (just above the bottom of the viewport,
-  // which is also the bottom of the sheet's visible area at half detent).
-  // Double rAF so the sheet's isMobile-driven translateY has committed and
-  // painted first — otherwise the row's rect is read pre-transform.
+  // Use the container's top as the anchor so we don't depend on
+  // window.innerHeight vs. dvh quirks on iOS Safari. Double rAF so the
+  // sheet's isMobile-driven translateY has committed and painted first —
+  // otherwise the row's rect is read pre-transform.
   useEffect(() => {
     if (!focusStopId) return;
     let cancelled = false;
@@ -304,9 +307,9 @@ export default function LinePanel({ lineId, focusStopId, onClose, onStationOpen 
           `[data-stop-id="${CSS.escape(focusStopId)}"]`,
         );
         if (!row) return;
-        const rowBottomInViewport = row.getBoundingClientRect().bottom;
-        const targetBottom = window.innerHeight - 16;
-        const delta = rowBottomInViewport - targetBottom;
+        const containerTop = container.getBoundingClientRect().top;
+        const rowTop = row.getBoundingClientRect().top;
+        const delta = rowTop - containerTop - 8;
         container.scrollTop = Math.max(0, container.scrollTop + delta);
       });
     });
@@ -335,11 +338,12 @@ export default function LinePanel({ lineId, focusStopId, onClose, onStationOpen 
       style={sheetStyle}
     >
       {/* Drag handle — tap to toggle half ↔ full, drag to resize or
-          dismiss. Region is padded to ~32px so fingers don't need to land
-          on the 5px pill itself. */}
+          dismiss. Hit area is h-11 (44px, the iOS minimum tap target) so a
+          finger landing anywhere near the top of the sheet catches the
+          gesture, not just the 5px pill. */}
       <button
         type="button"
-        className="sm:hidden flex items-center justify-center pt-2.5 pb-1.5 flex-shrink-0 cursor-grab active:cursor-grabbing touch-none w-full"
+        className="sm:hidden flex items-center justify-center h-11 flex-shrink-0 cursor-grab active:cursor-grabbing touch-none w-full"
         onPointerDown={handlers.onPointerDown}
         onPointerMove={handlers.onPointerMove}
         onPointerUp={handlers.onPointerUp}
