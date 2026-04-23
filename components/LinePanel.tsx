@@ -322,7 +322,11 @@ export default function LinePanel({ lineId, focusStopId, onClose }: LinePanelPro
       </div>
 
       {corridorAlerts.length > 0 && (
-        <div className="flex-shrink-0 px-3 py-2 space-y-1.5 border-b border-white/[0.06] max-h-[40%] overflow-y-auto ios-scroll">
+        // Cap the alerts strip at ~half of a dense bottom-sheet panel on
+        // mobile (and a fixed ~200px on desktop) so a day with a dozen
+        // service alerts can't evict the stop list entirely. Anything
+        // past the cap scrolls inside this region.
+        <div className="flex-shrink-0 px-3 py-2 space-y-1.5 border-b border-white/[0.06] max-h-[24dvh] sm:max-h-[200px] overflow-y-auto ios-scroll">
           {corridorAlerts.slice(0, 6).map((a) => (
             <AlertItem key={a.id} alert={a} />
           ))}

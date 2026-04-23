@@ -399,18 +399,32 @@ export default function MapView({ selectedLine, onLineSelect }: MapViewProps) {
 
   // Push live train positions. rAF schedules; a ~33ms gate caps actual work
   // to ~30Hz — enough headroom for the render loop on mobile Safari while
-  // still feeling continuously live. Each train also gets a per-frame lerp
-  // toward its target position, so 8s polls glide in instead of snapping
-  // (GTFS predictions routinely disagree with our local interpolation).
+  // still feeling continuously live.
+  //
+  // Each train carries its own observed velocity (progress fraction per
+  // second). Between polls, we advance progress at that rate so motion
+  // matches what the MTA feed is actually reporting. When a new poll
+  // arrives we refresh the velocity estimate and reset the baseline; any
+  // residual correction is lerped in so there's no visible catch-up jump.
   useEffect(() => {
     if (!mapLoaded || !mapRef.current || !lines) return;
     const map = mapRef.current;
 
     const TICK_MS = 33;
-    // Each frame, move this fraction of the remaining distance toward the
-    // current target. At 30Hz this converges ~95% in ~1s, which hides poll
-    // jumps without introducing perceivable lag on normal motion.
+    // Per-frame lerp factor for the displayed position. With accurate
+    // per-train velocity, target ≈ display each frame, so the lerp only
+    // absorbs micro-corrections at poll boundaries.
     const LERP = 0.08;
+    // Default segment traversal time in seconds, used before we've
+    // observed any motion for a train. NYC interstation average ~90s.
+    const DEFAULT_TRAVERSAL_SEC = 90;
+    // Clamp observed velocity so a single noisy poll can't project the
+    // train off the end of its segment in the next frame.
+    const MIN_TRAVERSAL_SEC = 30;   // fastest express-ish
+    const MAX_TRAVERSAL_SEC = 300;  // slowest plausible
+    const DEFAULT_VELOCITY = 1 / DEFAULT_TRAVERSAL_SEC;
+    const MIN_VELOCITY = 1 / MAX_TRAVERSAL_SEC;
+    const MAX_VELOCITY = 1 / MIN_TRAVERSAL_SEC;
 
     // Perpendicular offset in pixels, per routeId, so trains on a shared
     // trunk (4+6 at Union Sq, N+R at 42 St) stack side-by-side instead of
@@ -432,20 +446,29 @@ export default function MapView({ selectedLine, onLineSelect }: MapViewProps) {
     let lastTickTime = 0;
     let lastData: typeof dataRef.current = null;
     let trainsByRoute: Map<string, Train[]> = new Map();
-    // Remember prev/next stops alongside display pos. When a train crosses
-    // into a new segment (prev/next pair changes), lerping between the old
-    // segment's display point and the new one cuts a straight chord through
-    // whatever lies between — often the void off the track. Snap on
-    // transition; only smooth while the segment is stable.
-    const smoothed = new Map<
+    // Per-train motion state. baseProgress/baseTime is the last point we
+    // trust from the server; velocity is learned from poll-to-poll deltas.
+    // prevStopId/nextStopId pin the segment — if the train crosses a stop,
+    // we snap (lerping across segments cuts a chord through the void off
+    // the tracks).
+    const trainState = new Map<
       string,
-      { lng: number; lat: number; bearing: number; prevStopId: string; nextStopId: string }
+      {
+        baseProgress: number;
+        baseTime: number;
+        velocity: number;
+        lng: number;
+        lat: number;
+        bearing: number;
+        prevStopId: string;
+        nextStopId: string;
+      }
     >();
 
     // Lerp an angle along the shorter arc — naive linear lerp across the
     // 0/360 boundary snaps 358°→2° the long way around, flashing a spin.
     const lerpAngle = (a: number, b: number, t: number) => {
-      let d = ((b - a + 540) % 360) - 180;
+      const d = ((b - a + 540) % 360) - 180;
       return (a + d * t + 360) % 360;
     };
 
@@ -458,7 +481,8 @@ export default function MapView({ selectedLine, onLineSelect }: MapViewProps) {
       if (!d) return;
 
       // Re-bucket only when the upstream data object changes (every 8s poll).
-      if (d !== lastData) {
+      const newPoll = d !== lastData;
+      if (newPoll) {
         lastData = d;
         trainsByRoute = new Map();
         for (const t of d.trains) {
@@ -468,7 +492,7 @@ export default function MapView({ selectedLine, onLineSelect }: MapViewProps) {
         }
       }
 
-      const ageSec = (Date.now() - d.generatedAt) / 1000;
+      const nowMs = Date.now();
       const currentZoom = map.getZoom();
       const features: GeoJSON.Feature[] = [];
       const seen = new Set<string>();
@@ -476,26 +500,66 @@ export default function MapView({ selectedLine, onLineSelect }: MapViewProps) {
         const trains = trainsByRoute.get(line.routeId);
         if (!trains) continue;
         for (const t of trains) {
-          const interp = { ...t, progress: Math.min(1, t.progress + ageSec / 120) };
-          const target = trainLatLng(line, interp);
-          if (!target) continue;
-          const prev = smoothed.get(t.id);
+          let state = trainState.get(t.id);
           const segmentChanged =
-            !prev ||
-            prev.prevStopId !== t.prevStopId ||
-            prev.nextStopId !== t.nextStopId;
-          const pos = prev && !segmentChanged
-            ? {
-                lng: prev.lng + (target.lng - prev.lng) * LERP,
-                lat: prev.lat + (target.lat - prev.lat) * LERP,
-                bearing: lerpAngle(prev.bearing, target.bearing, LERP),
+            state !== undefined &&
+            (state.prevStopId !== t.prevStopId ||
+              state.nextStopId !== t.nextStopId);
+
+          if (!state || segmentChanged) {
+            // New train or crossed into a new segment — snap to the raw
+            // position and start fresh. Velocity carries over so the next
+            // segment starts with a reasonable prediction instead of the
+            // generic 90s default.
+            const pos = trainLatLng(line, t);
+            if (!pos) continue;
+            state = {
+              baseProgress: t.progress,
+              baseTime: d.generatedAt,
+              velocity: state?.velocity ?? DEFAULT_VELOCITY,
+              lng: pos.lng,
+              lat: pos.lat,
+              bearing: pos.bearing,
+              prevStopId: t.prevStopId,
+              nextStopId: t.nextStopId,
+            };
+            trainState.set(t.id, state);
+          } else if (newPoll) {
+            // Same segment, fresh poll — learn the observed velocity from
+            // the actual progress delta. Low-pass filter damps jitter
+            // from GTFS-RT snapshot-to-snapshot noise.
+            const dtSec = (d.generatedAt - state.baseTime) / 1000;
+            if (dtSec > 0.5) {
+              const observed = (t.progress - state.baseProgress) / dtSec;
+              if (observed > 0) {
+                const clamped = Math.max(
+                  MIN_VELOCITY,
+                  Math.min(MAX_VELOCITY, observed),
+                );
+                state.velocity = 0.5 * state.velocity + 0.5 * clamped;
               }
-            : target;
-          smoothed.set(t.id, {
-            ...pos,
-            prevStopId: t.prevStopId,
-            nextStopId: t.nextStopId,
-          });
+            }
+            state.baseProgress = t.progress;
+            state.baseTime = d.generatedAt;
+          }
+
+          // Predict progress as baseline + velocity × elapsed. This is what
+          // makes motion look continuous: every frame advances by a tiny
+          // fraction instead of sitting still until the next poll.
+          const elapsedSec = (nowMs - state.baseTime) / 1000;
+          const predictedProgress = Math.max(
+            0,
+            Math.min(1, state.baseProgress + state.velocity * elapsedSec),
+          );
+          const target = trainLatLng(line, { ...t, progress: predictedProgress });
+          if (!target) continue;
+
+          // Lerp display toward predicted. In steady state the per-frame
+          // delta is ~velocity × TICK_MS, so this is a small, invisible
+          // correction rather than a visible catch-up glide.
+          state.lng += (target.lng - state.lng) * LERP;
+          state.lat += (target.lat - state.lat) * LERP;
+          state.bearing = lerpAngle(state.bearing, target.bearing, LERP);
           seen.add(t.id);
 
           // Apply the per-route perpendicular nudge. Convert the pixel
@@ -504,14 +568,14 @@ export default function MapView({ selectedLine, onLineSelect }: MapViewProps) {
           // zooms. Web-Mercator meters-per-pixel formula; 111320 m per
           // degree of latitude (and per deg lng scaled by cos(lat)).
           const perpPx = PERP_OFFSET_PX[line.routeId] ?? 0;
-          let renderLng = pos.lng;
-          let renderLat = pos.lat;
+          let renderLng = state.lng;
+          let renderLat = state.lat;
           if (perpPx !== 0) {
-            const latRad = (pos.lat * Math.PI) / 180;
+            const latRad = (state.lat * Math.PI) / 180;
             const mPerPx =
               (156543.03392 * Math.cos(latRad)) / Math.pow(2, currentZoom);
             const perpM = perpPx * mPerPx;
-            const perpRad = ((pos.bearing + 90) * Math.PI) / 180;
+            const perpRad = ((state.bearing + 90) * Math.PI) / 180;
             renderLat += (perpM * Math.cos(perpRad)) / 111320;
             renderLng +=
               (perpM * Math.sin(perpRad)) / (111320 * Math.cos(latRad));
@@ -522,7 +586,7 @@ export default function MapView({ selectedLine, onLineSelect }: MapViewProps) {
             properties: {
               id: t.id,
               direction: t.direction,
-              bearing: pos.bearing,
+              bearing: state.bearing,
               routeId: line.routeId,
               color: line.color,
               letter: line.id,
@@ -532,10 +596,10 @@ export default function MapView({ selectedLine, onLineSelect }: MapViewProps) {
           });
         }
       }
-      // Drop smoothed state for trains that vanished (e.g. completed trip)
-      // so the map doesn't leak memory over long sessions.
-      if (seen.size !== smoothed.size) {
-        for (const id of smoothed.keys()) if (!seen.has(id)) smoothed.delete(id);
+      // Drop state for trains that vanished (e.g. completed trip) so the
+      // map doesn't leak memory over long sessions.
+      if (seen.size !== trainState.size) {
+        for (const id of trainState.keys()) if (!seen.has(id)) trainState.delete(id);
       }
       const src = map.getSource("subway-trains");
       src?.setData({ type: "FeatureCollection", features });
