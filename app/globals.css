@@ -222,6 +222,27 @@
 .subway-popup .mapboxgl-popup-tip {
   border-top-color: rgba(20, 20, 24, 0.92);
 }
+/* The popup content itself is a button so tapping the station name
+   opens the StationPanel. Reset default button chrome and keep it
+   looking like the text tooltip it replaces. */
+.subway-popup-btn {
+  background: transparent;
+  border: none;
+  padding: 0;
+  margin: 0;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  touch-action: manipulation;
+}
+.subway-popup-btn:hover {
+  text-decoration: underline;
+  text-decoration-color: rgba(255, 255, 255, 0.4);
+  text-underline-offset: 3px;
+}
 
 /* iOS Safari: prevent input auto-zoom-on-focus (triggers when font-size < 16px). */
 input, select, textarea {

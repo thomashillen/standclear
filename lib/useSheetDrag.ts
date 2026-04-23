@@ -105,6 +105,12 @@ export function useSheetDrag({
   const handlers = {
     onPointerDown: (e: React.PointerEvent<HTMLElement>) => {
       if (!isDraggable()) return;
+      // Drag zone is the whole header — pointerdown can land on an
+      // interactive child (close, star, route bullet). Skip drag init
+      // there so taps register normally; empty header space still
+      // initiates a drag.
+      const t = e.target as HTMLElement | null;
+      if (t && t.closest("button, a, input, [data-no-drag]")) return;
       dragStartY.current = e.clientY;
       dragMoved.current = false;
       (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);

@@ -171,7 +171,12 @@ export default function SubwayMap() {
 
       {/* ── Map + Panel ── */}
       <div className="relative flex flex-1 min-h-0">
-        <MapView selectedLine={selectedLine} onLineSelect={handleLineSelect} />
+        <MapView
+          selectedLine={selectedLine}
+          stationStopId={stationStopId}
+          onLineSelect={handleLineSelect}
+          onStationOpen={handleStationOpen}
+        />
         {selectedLine && !nearbyOpen && !stationStopId && (
           <LinePanel
             lineId={selectedLine}

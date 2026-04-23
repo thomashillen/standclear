@@ -242,17 +242,26 @@ export default function NearbyPanel({ open, onClose, onStationOpen }: Props) {
     return m;
   }, [lines]);
 
-  // Arrivals grouped by station id. Done once per poll instead of per row.
+  // Arrivals grouped by station's canonical stopId. Each station entry
+  // may span multiple physical platform stopIds (a transfer complex like
+  // Union Sq: 635 + R20 + L03), so we fan arrivals out to the complex's
+  // canonical id. Done once per poll instead of per row.
   const arrivalsByStation = useMemo(() => {
     const m = new Map<string, Arrival[]>();
     if (!data) return m;
+    // Reverse map: every member stopId → canonical stopId.
+    const memberToCanonical = new Map<string, string>();
+    for (const s of index) {
+      for (const id of s.stopIds) memberToCanonical.set(id, s.stopId);
+    }
     for (const a of data.arrivals) {
-      const arr = m.get(a.stopId) ?? [];
+      const canonical = memberToCanonical.get(a.stopId) ?? a.stopId;
+      const arr = m.get(canonical) ?? [];
       arr.push(a);
-      m.set(a.stopId, arr);
+      m.set(canonical, arr);
     }
     return m;
-  }, [data]);
+  }, [data, index]);
 
   const nearby: NearbyStation[] = useMemo(() => {
     if (geo.lng == null || geo.lat == null) return [];
@@ -301,28 +310,30 @@ export default function NearbyPanel({ open, onClose, onStationOpen }: Props) {
     >
       <button
         type="button"
-        className="sm:hidden flex items-center justify-center h-11 flex-shrink-0 cursor-grab active:cursor-grabbing touch-none w-full"
-        onPointerDown={handlers.onPointerDown}
-        onPointerMove={handlers.onPointerMove}
-        onPointerUp={handlers.onPointerUp}
-        onPointerCancel={handlers.onPointerCancel}
+        className="sm:hidden flex items-center justify-center h-5 pt-1.5 flex-shrink-0 touch-none w-full"
         onClick={onHandleTap}
         aria-label={detent === "half" ? "Expand panel" : "Collapse panel"}
       >
         <div className="w-9 h-[5px] rounded-full bg-white/25" />
       </button>
 
-      <div className="flex items-center justify-between px-4 py-2.5 flex-shrink-0">
+      <div
+        className="flex items-center justify-between px-4 py-2.5 flex-shrink-0 sm:cursor-auto cursor-grab active:cursor-grabbing touch-none"
+        onPointerDown={handlers.onPointerDown}
+        onPointerMove={handlers.onPointerMove}
+        onPointerUp={handlers.onPointerUp}
+        onPointerCancel={handlers.onPointerCancel}
+      >
         <div className="flex items-center gap-2.5 text-white">
           <MapPin className="w-[18px] h-[18px]" />
           <span className="font-black text-[17px] tracking-tight">Near me</span>
         </div>
         <button
           onClick={onClose}
-          className="press text-white opacity-85 hover:opacity-100 text-[22px] leading-none font-bold w-11 h-11 -mr-1 flex items-center justify-center rounded-full bg-white/[0.08] hover:bg-white/[0.12] touch-manipulation"
+          className="press text-white opacity-85 hover:opacity-100 w-11 h-11 -mr-1 flex items-center justify-center rounded-full bg-white/[0.08] hover:bg-white/[0.12] touch-manipulation"
           aria-label="Close panel"
         >
-          ×
+          <X className="w-[18px] h-[18px]" strokeWidth={2.5} />
         </button>
       </div>
 
