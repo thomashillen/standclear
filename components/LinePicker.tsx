@@ -32,8 +32,8 @@ export default function LinePicker({ lines, selectedLine, onSelect }: LinePicker
     <DialogPrimitive.Root open={open} onOpenChange={setOpen}>
       <DialogPrimitive.Trigger asChild>
         <button
-          className="press flex items-center gap-2 px-3 h-10 sm:h-9 rounded-full bg-white/[0.08] hover:bg-white/[0.12] border border-white/[0.08] min-w-0 max-w-[180px] sm:max-w-[260px] touch-manipulation transition-colors"
-          aria-label="Choose a subway line"
+          className="press flex items-center gap-2 px-3 h-11 sm:h-9 rounded-full bg-white/[0.08] hover:bg-white/[0.12] border border-white/[0.08] min-w-0 max-w-[260px] touch-manipulation transition-colors"
+          aria-label={selected ? `Line ${selected.id} — ${selected.name}. Tap to choose another line.` : "Choose a subway line"}
         >
           {selected ? (
             <>
@@ -43,7 +43,10 @@ export default function LinePicker({ lines, selectedLine, onSelect }: LinePicker
               >
                 {selected.id}
               </span>
-              <span className="text-[14px] font-semibold text-white truncate">
+              {/* Line name shown on sm+ where we have room. On mobile the
+                  bullet alone identifies the line unambiguously, and
+                  truncated "8 Avenue Ex…" is just noise. */}
+              <span className="hidden sm:inline text-[14px] font-semibold text-white truncate">
                 {selected.name}
               </span>
             </>
