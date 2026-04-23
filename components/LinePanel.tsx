@@ -316,7 +316,6 @@ export default function LinePanel({ lineId, focusStopId, onClose, onStationOpen 
     return () => {
       cancelled = true;
     };
-    // `detent` dep re-anchors when the user drags between half and full.
   }, [focusStopId, lineId, detent]);
 
   if (!line) return null;

@@ -151,3 +151,21 @@ export function useGeolocation(active: boolean): GeoState & { request: () => voi
   const request = useCallback(() => requestGeolocation(), []);
   return { ...state, request };
 }
+
+// Passive subscription: read the shared geo state without starting the
+// watch or triggering a permission prompt. Use this in long-lived
+// components (e.g. the background map) that want to display the user's
+// position whenever someone else has opted in via useGeolocation(true)
+// — the map doesn't prompt, but it lights up once Near Me has.
+export function useGeolocationState(): GeoState {
+  const [state, setState] = useState<GeoState>(current);
+  useEffect(() => {
+    subscribers.add(setState);
+    setState(current);
+    return () => {
+      subscribers.delete(setState);
+      if (subscribers.size === 0) stopWatch();
+    };
+  }, []);
+  return state;
+}

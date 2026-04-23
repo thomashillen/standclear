@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useLines, CORRIDOR, type Stop } from "@/lib/subwayData";
 import { useTrains, trainLatLng, type Train } from "@/lib/useTrains";
+import { useGeolocationState } from "@/lib/useGeolocation";
 import "mapbox-gl/dist/mapbox-gl.css";
 
 interface MapViewProps {
@@ -54,23 +55,26 @@ const STOP_OPACITY_BY_ZOOM: MapboxExpression = [
   12.5, 0.85,
 ];
 
-// Rounded rear, pointed nose on the right. Drawn horizontal so a rotation
-// of 0 = pointing east; icon-rotate = bearing - 90 aligns the nose with the
-// direction of travel. Registered with sdf:true so Mapbox can tint via
-// `icon-color`.
+// Clean subway-car silhouette: softly rounded rear, long sharp nose on
+// the right. Drawn horizontal so a rotation of 0 = pointing east;
+// icon-rotate = bearing - 90 aligns the nose with direction of travel.
+// No internal cutouts — overlapping cars read cleanly because the
+// silhouette's asymmetry alone signals "front," and the SDF halo rings
+// each car's outer edge as a crisp slate outline.
+// Registered with sdf:true so Mapbox can tint via `icon-color`.
 function makeTrainIcon(w: number, h: number, nosePx: number): ImageData {
   const c = document.createElement("canvas");
   c.width = w;
   c.height = h;
   const ctx = c.getContext("2d")!;
   ctx.fillStyle = "#fff";
-  const r = h / 2;
-  const bodyW = w - nosePx;
+  const bodyEnd = w - nosePx;
+  const r = 3;
   ctx.beginPath();
   ctx.moveTo(r, 0);
-  ctx.lineTo(bodyW, 0);
+  ctx.lineTo(bodyEnd, 0);
   ctx.lineTo(w, h / 2);
-  ctx.lineTo(bodyW, h);
+  ctx.lineTo(bodyEnd, h);
   ctx.lineTo(r, h);
   ctx.arcTo(0, h, 0, h - r, r);
   ctx.lineTo(0, r);
@@ -93,6 +97,7 @@ export default function MapView({ selectedLine, onLineSelect }: MapViewProps) {
   const data = useTrains();
   const dataRef = useRef(data);
   const lines = useLines();
+  const geo = useGeolocationState();
 
   useEffect(() => { selectedLineRef.current = selectedLine; }, [selectedLine]);
   useEffect(() => { dataRef.current = data; }, [data]);
@@ -144,6 +149,7 @@ export default function MapView({ selectedLine, onLineSelect }: MapViewProps) {
               color: line.color,
               name: stop.name,
               letter: line.id,
+              stopId: stop.id,
             },
             geometry: { type: "Point" as const, coordinates: [stop.lng, stop.lat] },
           })),
@@ -158,6 +164,15 @@ export default function MapView({ selectedLine, onLineSelect }: MapViewProps) {
           data: { type: "FeatureCollection", features: stopFeatures },
         });
         map.addSource("subway-trains", {
+          type: "geojson",
+          data: { type: "FeatureCollection", features: [] },
+        });
+
+        // Single-point source for the user's current location. Driven by
+        // `useGeolocationState` — populated only when Near Me (or any
+        // other opted-in consumer) has the watch running, so the map
+        // never triggers its own permission prompt.
+        map.addSource("user-location", {
           type: "geojson",
           data: { type: "FeatureCollection", features: [] },
         });
@@ -259,12 +274,13 @@ export default function MapView({ selectedLine, onLineSelect }: MapViewProps) {
           },
           paint: {
             "icon-color": ["get", "color"],
-            // Halo matches the dark map background so overlapping capsules
-            // blend into quiet dark seams instead of the jagged white
-            // streaks a white halo produced at zoom-out density.
-            "icon-halo-color": "#0a0a0a",
-            "icon-halo-width": 1,
-            "icon-halo-blur": 0.5,
+            // Slate halo rings every capsule as a visible outline. Wider
+            // than a typical halo so stacked cars at dense interchanges
+            // (Herald Sq, Times Sq) still read as separate bodies rather
+            // than a colored blob.
+            "icon-halo-color": "#cbd5e1",
+            "icon-halo-width": 2,
+            "icon-halo-blur": 0.2,
           },
         });
         map.addLayer({
@@ -297,14 +313,84 @@ export default function MapView({ selectedLine, onLineSelect }: MapViewProps) {
           },
         });
 
+        // User-location dot: soft blue halo + opaque core with a white
+        // ring. iOS-style "you are here" marker — sits above trains so
+        // the user can find themselves on a busy map.
+        map.addLayer({
+          id: "user-location-halo",
+          type: "circle",
+          source: "user-location",
+          paint: {
+            "circle-color": "#3b82f6",
+            "circle-opacity": 0.22,
+            "circle-radius": 14,
+          },
+        });
+        map.addLayer({
+          id: "user-location-dot",
+          type: "circle",
+          source: "user-location",
+          paint: {
+            "circle-color": "#3b82f6",
+            "circle-radius": 6,
+            "circle-stroke-width": 2.5,
+            "circle-stroke-color": "#ffffff",
+          },
+        });
+
         // ── Interactions (one handler each, not one per route)
+        // Clicking a train capsule jumps to the station it's at (or the
+        // closer of its two segment endpoints if mid-hop). Runs before
+        // the line handler via a guard below — otherwise a click on a
+        // train that happens to sit over its track would also trigger
+        // the generic line-tap flow.
+        map.on("click", "subway-trains-icon", (e: unknown) => {
+          const ev = e as {
+            features?: {
+              properties?: { routeId?: string };
+              geometry?: GeoJSON.Point;
+            }[];
+          };
+          const feat = ev.features?.[0];
+          const routeId = feat?.properties?.routeId;
+          const coords = feat?.geometry?.coordinates as [number, number] | undefined;
+          if (!routeId || !coords) return;
+          const targetCorridor = CORRIDOR[routeId] ?? [routeId];
+          const target = targetCorridor[0];
+          const targetLine = lines[target];
+          const focusStopId = targetLine
+            ? nearestStop(targetLine.stops, coords[0], coords[1])?.id
+            : undefined;
+          clickLngLatRef.current = coords;
+          onLineSelect(target, focusStopId);
+        });
+        map.on("mouseenter", "subway-trains-icon", () => {
+          map.getCanvas().style.cursor = "pointer";
+        });
+        map.on("mouseleave", "subway-trains-icon", () => {
+          map.getCanvas().style.cursor = "";
+        });
+
         // Bind click to the fat invisible hit layer so thin lines are still
         // easy to tap on touchscreens.
         map.on("click", "subway-lines-hit", (e: unknown) => {
           const ev = e as {
             features?: { properties?: { routeId?: string } }[];
             lngLat?: { lng: number; lat: number };
+            point?: { x: number; y: number };
           };
+          // Defer to the train/stop handlers if one of them also owns the
+          // click point — otherwise a tap on a train or station sitting
+          // on its own line triggers both flows and the second one
+          // overwrites the first's flyTo.
+          if (ev.point) {
+            const priorityHit = (map as unknown as {
+              queryRenderedFeatures: (p: unknown, o: unknown) => unknown[];
+            }).queryRenderedFeatures(ev.point, {
+              layers: ["subway-trains-icon", "subway-stops-hit"],
+            });
+            if (priorityHit.length > 0) return;
+          }
           const hitRoutes = (ev.features ?? [])
             .map((f) => f.properties?.routeId)
             .filter((r): r is string => !!r);
@@ -379,9 +465,34 @@ export default function MapView({ selectedLine, onLineSelect }: MapViewProps) {
         };
         map.on("mouseenter", "subway-stops-hit", showStopPopup);
         map.on("mouseleave", "subway-stops-hit", () => popup.remove());
-        // Touch: hover doesn't fire, so bind click too. Tapping elsewhere
-        // dismisses via closeOnClick: true.
-        map.on("click", "subway-stops-hit", showStopPopup);
+        // Tapping a station flies to it and opens the corridor's line
+        // panel focused on that stop. Hover only shows the popup.
+        map.on("click", "subway-stops-hit", (e: unknown) => {
+          showStopPopup(e);
+          const ev = e as {
+            features?: {
+              geometry: GeoJSON.Point;
+              properties?: { routeId?: string; stopId?: string };
+            }[];
+          };
+          const feat = ev.features?.[0];
+          const routeId = feat?.properties?.routeId;
+          const stopId = feat?.properties?.stopId;
+          if (!routeId) return;
+          const coords = feat?.geometry?.coordinates as [number, number] | undefined;
+          const targetCorridor = CORRIDOR[routeId] ?? [routeId];
+          const current = selectedLineRef.current;
+          // Keep the user's chosen route if it's in the same corridor as
+          // the tapped stop — otherwise jump to the corridor's canonical
+          // route. Mirrors the line-tap flow so picking a stop on a
+          // trunk doesn't silently change which line is highlighted.
+          const target =
+            current && targetCorridor.includes(current)
+              ? current
+              : targetCorridor[0];
+          if (coords) clickLngLatRef.current = coords;
+          onLineSelect(target, stopId);
+        });
 
         setMapLoaded(true);
       });
@@ -426,20 +537,32 @@ export default function MapView({ selectedLine, onLineSelect }: MapViewProps) {
     const DEFAULT_VELOCITY = 1 / DEFAULT_TRAVERSAL_SEC;
     const MAX_VELOCITY = 1 / MIN_TRAVERSAL_SEC;
 
-    // Perpendicular offset in pixels, per routeId, so trains on a shared
-    // trunk (4+6 at Union Sq, N+R at 42 St) stack side-by-side instead of
-    // collapsing into a single unreadable pixel. Centered routes (5, D, F,
-    // Q, R) get 0 so most stops still read dead-on-track; outer routes
-    // fan out symmetrically. This offset is pixel-space at the icon scale;
-    // it's converted to lng/lat per-frame so both the capsule and the
-    // letter move together.
+    // Perpendicular offset in screen-pixels at full icon scale (zoom ≥ 14).
+    // Values are multiplied by iconScaleAtZoom() each frame so the visual
+    // gap scales with icon size and stays visually consistent across zooms.
+    // The mPerPx formula uses a 256-tile constant but Mapbox GL uses 512-tile
+    // tiles, so the rendered offset is ~2× the perpPx value in screen pixels.
+    // Icon height at zoom 14 = 24px; adjacent routes need ~12px separation
+    // (half-height) to touch without overlap → perpPx ≈ 6 per lane step.
+    // 3-route corridors: ±6 from center (visual ≈ ±12px → just touching)
+    // 4-route corridors: ±4 inner pair, ±10 outer pair
     const PERP_OFFSET_PX: Record<string, number> = {
-      "1": -4, "3": 4,
-      "4": -4, "6": 4,
-      A: -4, E: 4,
-      B: -5, D: -2, F: 2, M: 5,
-      N: -5, Q: -2, R: 2, W: 5,
-      J: -3, Z: 3,
+      "1": -6, "2": 0, "3": 6,
+      "4": -6, "5": 0, "6": 6,
+      A: -6, C: 0,  E: 6,
+      B: -10, D: -4, F: 4, M: 10,
+      N: -10, Q: -4, R: 4, W: 10,
+      J: -6,  Z: 6,
+    };
+
+    // Mirrors the iconSizeByZoom Mapbox expression so perpendicular offsets
+    // scale with rendered icon size, giving consistent spacing at every zoom.
+    const iconScaleAtZoom = (z: number): number => {
+      if (z <= 10) return 0.3;
+      if (z <= 11.5) return 0.3 + ((z - 10) / 1.5) * 0.15;
+      if (z <= 13) return 0.45 + ((z - 11.5) / 1.5) * 0.35;
+      if (z <= 14) return 0.8 + (z - 13) * 0.2;
+      return 1.0;
     };
 
     let frame = 0;
@@ -564,7 +687,7 @@ export default function MapView({ selectedLine, onLineSelect }: MapViewProps) {
           // gap between stacked trains stays consistent as the user
           // zooms. Web-Mercator meters-per-pixel formula; 111320 m per
           // degree of latitude (and per deg lng scaled by cos(lat)).
-          const perpPx = PERP_OFFSET_PX[line.routeId] ?? 0;
+          const perpPx = (PERP_OFFSET_PX[line.routeId] ?? 0) * iconScaleAtZoom(currentZoom);
           let renderLng = state.lng;
           let renderLat = state.lat;
           if (perpPx !== 0) {
@@ -604,6 +727,27 @@ export default function MapView({ selectedLine, onLineSelect }: MapViewProps) {
     frame = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(frame);
   }, [mapLoaded, lines]);
+
+  // Sync user-location source with geolocation state. The dot only appears
+  // once the user has granted location permission via the Near Me panel.
+  useEffect(() => {
+    if (!mapLoaded || !mapRef.current) return;
+    const map = mapRef.current;
+    const src = map.getSource("user-location") as { setData: (d: unknown) => void } | undefined;
+    if (!src) return;
+    if (geo.status === "granted" && geo.lat != null && geo.lng != null) {
+      src.setData({
+        type: "FeatureCollection",
+        features: [{
+          type: "Feature",
+          properties: {},
+          geometry: { type: "Point", coordinates: [geo.lng, geo.lat] },
+        }],
+      });
+    } else {
+      src.setData({ type: "FeatureCollection", features: [] });
+    }
+  }, [mapLoaded, geo.status, geo.lat, geo.lng]);
 
   // Selection: dim non-selected via expressions on the consolidated layers.
   useEffect(() => {
