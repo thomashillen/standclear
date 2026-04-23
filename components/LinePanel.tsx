@@ -5,11 +5,13 @@ import { AlertTriangle, Info, ChevronDown } from "lucide-react";
 import { useLines, CORRIDOR } from "@/lib/subwayData";
 import { useTrains, type Arrival } from "@/lib/useTrains";
 import { useAlerts, alertsForRoutes, type ServiceAlert } from "@/lib/useAlerts";
+import { useSheetDrag } from "@/lib/useSheetDrag";
 
 interface LinePanelProps {
   lineId: string; // routeId (e.g. "1", "A", "GS")
   focusStopId?: string;
   onClose: () => void;
+  onStationOpen: (stopId: string) => void;
 }
 
 function fmtEta(eta: number, now: number): string {
@@ -37,6 +39,7 @@ interface StopRowProps {
   trainHere: boolean;
   hasData: boolean;
   showConnector: boolean;
+  onTap: (stopId: string) => void;
 }
 
 function Bullet({ badge }: { badge: RouteBadge }) {
@@ -61,13 +64,17 @@ const StopRow = memo(function StopRow({
   trainHere,
   hasData,
   showConnector,
+  onTap,
 }: StopRowProps) {
   return (
-    <div
+    <button
+      type="button"
       data-stop-id={stopId}
-      className={`flex items-start gap-3 px-4 py-2 transition-colors ${
-        trainHere ? "bg-white/[0.09]" : "hover:bg-white/[0.04]"
+      onClick={() => onTap(stopId)}
+      className={`w-full text-left flex items-start gap-3 px-4 py-2 transition-colors touch-manipulation ${
+        trainHere ? "bg-white/[0.09]" : "hover:bg-white/[0.04] active:bg-white/[0.06]"
       }`}
+      aria-label={`See all trains at ${stopName}`}
     >
       <div className="flex flex-col items-center mt-1.5">
         <div
@@ -85,7 +92,7 @@ const StopRow = memo(function StopRow({
       </div>
 
       <div className="flex-1 min-w-0">
-        <p className="text-[14px] font-medium leading-tight text-gray-50 truncate">
+        <p className="text-[14px] font-medium leading-tight text-gray-50 break-words">
           {stopName}
         </p>
         <div className="flex gap-3 text-[11px] text-gray-400 mt-1">
@@ -108,7 +115,7 @@ const StopRow = memo(function StopRow({
           )}
         </div>
       </div>
-    </div>
+    </button>
   );
 });
 
@@ -154,7 +161,60 @@ function AlertItem({ alert }: { alert: ServiceAlert }) {
   );
 }
 
-export default function LinePanel({ lineId, focusStopId, onClose }: LinePanelProps) {
+// Alerts are collapsed by default for every line — even one "station is exit
+// only during weekday nights" warning eats enough vertical space to push
+// live arrivals off-screen on a 50dvh bottom sheet. The summary bar shows
+// count + top severity so riders can decide whether it's worth expanding;
+// a line switch always recollapses.
+function AlertsSection({ alerts, lineId }: { alerts: ServiceAlert[]; lineId: string }) {
+  const [open, setOpen] = useState(false);
+  useEffect(() => setOpen(false), [lineId]);
+
+  // Highest-severity alert drives the summary-bar color so riders can
+  // tell at a glance whether the corridor has a suspension vs. a routine
+  // elevator-out notice.
+  const topSeverity: ServiceAlert["severity"] =
+    alerts.some((a) => a.severity === "severe")
+      ? "severe"
+      : alerts.some((a) => a.severity === "warning")
+        ? "warning"
+        : "info";
+  const s = SEVERITY_STYLE[topSeverity];
+  const Icon = s.icon;
+  const n = alerts.length;
+
+  return (
+    <div className="flex-shrink-0 border-b border-white/[0.06]">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className={`press w-full flex items-center gap-2 px-4 h-11 text-left transition-colors touch-manipulation ${s.bg}`}
+        aria-expanded={open}
+        aria-label={open ? "Hide service alerts" : "Show service alerts"}
+      >
+        <Icon className={`w-4 h-4 flex-shrink-0 ${s.text}`} />
+        <span className={`text-[12px] font-semibold ${s.text}`}>
+          {n} service alert{n !== 1 ? "s" : ""}
+        </span>
+        <span className={`text-[11px] ml-1 ${s.text} opacity-70`}>
+          {open ? "Hide" : "Show"}
+        </span>
+        <ChevronDown
+          className={`w-4 h-4 ml-auto flex-shrink-0 transition-transform ${s.text} ${open ? "rotate-180" : ""}`}
+        />
+      </button>
+      {open && (
+        <div className="px-3 pb-2 pt-1 space-y-1.5 max-h-[28dvh] sm:max-h-[220px] overflow-y-auto ios-scroll">
+          {alerts.slice(0, 8).map((a) => (
+            <AlertItem key={a.id} alert={a} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+export default function LinePanel({ lineId, focusStopId, onClose, onStationOpen }: LinePanelProps) {
   const lines = useLines();
   const line = lines?.[lineId];
   const data = useTrains();
@@ -209,53 +269,52 @@ export default function LinePanel({ lineId, focusStopId, onClose }: LinePanelPro
     [alertsData, corridorSet],
   );
 
-  // Scroll the tapped stop's row into view when the user opens the panel
-  // via a line tap. The row is tagged with data-stop-id; a querySelector
-  // inside the scroll container keeps the lookup local to this panel.
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  // Three-detent bottom sheet: half (default), full, and dismissed. The
+  // sheet DOM is always `full` tall — detent switches just animate a
+  // translateY. Tap the handle to toggle; swipe down from half to dismiss.
+  const { detent, sheetStyle, handlers, onHandleTap } = useSheetDrag({
+    halfRestingY: "calc(88dvh - 50dvh)",
+    open: true,
+    onDismiss: onClose,
+  });
+
+  // Scroll the tapped stop's row to sit near the bottom of the visible
+  // area when the user opens the panel via a line tap. Plain
+  // `scrollIntoView({ block: "center" })` misses at half detent — the
+  // scroll container is 88dvh tall but only ~50dvh is above the fold, so
+  // "center" of the container lands below the visible window.
+  //
+  // Compute the delta between where the row currently sits (in viewport
+  // coords) and where we want it (just above the bottom of the viewport,
+  // which is also the bottom of the sheet's visible area at half detent).
+  // Double rAF so the sheet's isMobile-driven translateY has committed and
+  // painted first — otherwise the row's rect is read pre-transform.
   useEffect(() => {
-    if (!focusStopId || !scrollRef.current) return;
-    const row = scrollRef.current.querySelector<HTMLElement>(
-      `[data-stop-id="${CSS.escape(focusStopId)}"]`,
-    );
-    row?.scrollIntoView({ block: "center" });
-  }, [focusStopId, lineId]);
-
-  // Swipe-to-dismiss on mobile. Pointer events unify touch + mouse so the
-  // same gesture works for a phone drag and a desktop trackpad flick on the
-  // small bottom sheet. Desktop (sm+) is a fixed side card — dragging is
-  // disabled there.
-  const [dragY, setDragY] = useState(0);
-  const dragStartY = useRef<number | null>(null);
-  const pointerId = useRef<number | null>(null);
-
-  const isDraggable = () =>
-    typeof window !== "undefined" && window.matchMedia("(max-width: 639px)").matches;
-
-  const onDragStart = (e: React.PointerEvent<HTMLDivElement>) => {
-    if (!isDraggable()) return;
-    dragStartY.current = e.clientY;
-    pointerId.current = e.pointerId;
-    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
-  };
-  const onDragMove = (e: React.PointerEvent<HTMLDivElement>) => {
-    if (dragStartY.current === null) return;
-    const dy = e.clientY - dragStartY.current;
-    // Only track downward drag; let upward pulls snap back.
-    setDragY(Math.max(0, dy));
-  };
-  const onDragEnd = (e: React.PointerEvent<HTMLDivElement>) => {
-    if (dragStartY.current === null) return;
-    const dy = e.clientY - dragStartY.current;
-    dragStartY.current = null;
-    pointerId.current = null;
-    // Past ~1/3 of the sheet height, treat as a dismiss gesture.
-    if (dy > 120) {
-      onClose();
-    } else {
-      setDragY(0);
-    }
-  };
+    if (!focusStopId) return;
+    let cancelled = false;
+    requestAnimationFrame(() => {
+      if (cancelled) return;
+      requestAnimationFrame(() => {
+        if (cancelled) return;
+        const container = scrollRef.current;
+        if (!container) return;
+        const row = container.querySelector<HTMLElement>(
+          `[data-stop-id="${CSS.escape(focusStopId)}"]`,
+        );
+        if (!row) return;
+        const rowBottomInViewport = row.getBoundingClientRect().bottom;
+        const targetBottom = window.innerHeight - 16;
+        const delta = rowBottomInViewport - targetBottom;
+        container.scrollTop = Math.max(0, container.scrollTop + delta);
+      });
+    });
+    return () => {
+      cancelled = true;
+    };
+    // `detent` dep re-anchors when the user drags between half and full.
+  }, [focusStopId, lineId, detent]);
 
   if (!line) return null;
 
@@ -267,31 +326,29 @@ export default function LinePanel({ lineId, focusStopId, onClose }: LinePanelPro
     <div
       className="
         absolute z-20 overflow-hidden flex flex-col
-        inset-x-0 bottom-0 max-h-[50dvh] rounded-t-[28px] border-t border-white/[0.08]
-        sm:inset-auto sm:right-3 sm:top-3 sm:bottom-3 sm:w-[340px] sm:max-h-none sm:rounded-[22px] sm:border sm:border-white/[0.08]
+        inset-x-0 bottom-0 h-[88dvh] rounded-t-[28px] border-t border-white/[0.08]
+        sm:inset-auto sm:right-3 sm:top-3 sm:bottom-3 sm:w-[340px] sm:h-auto sm:rounded-[22px] sm:border sm:border-white/[0.08]
         ios-glass
         shadow-[0_20px_60px_-10px_rgba(0,0,0,0.6)]
         pb-[env(safe-area-inset-bottom)]
       "
-      style={{
-        transform: dragY > 0 ? `translateY(${dragY}px)` : undefined,
-        transition: dragStartY.current === null ? "transform 340ms var(--ease-ios)" : undefined,
-      }}
+      style={sheetStyle}
     >
-      {/* Drag handle + grab region (mobile only). The pill is 4px tall but the
-          region is padded to ~32px so fingers don't need to land on the pill
-          itself to start a dismiss swipe. */}
-      <div
-        className="sm:hidden flex items-center justify-center pt-2.5 pb-1.5 flex-shrink-0 cursor-grab active:cursor-grabbing touch-none"
-        onPointerDown={onDragStart}
-        onPointerMove={onDragMove}
-        onPointerUp={onDragEnd}
-        onPointerCancel={onDragEnd}
-        aria-label="Drag to dismiss"
-        role="button"
+      {/* Drag handle — tap to toggle half ↔ full, drag to resize or
+          dismiss. Region is padded to ~32px so fingers don't need to land
+          on the 5px pill itself. */}
+      <button
+        type="button"
+        className="sm:hidden flex items-center justify-center pt-2.5 pb-1.5 flex-shrink-0 cursor-grab active:cursor-grabbing touch-none w-full"
+        onPointerDown={handlers.onPointerDown}
+        onPointerMove={handlers.onPointerMove}
+        onPointerUp={handlers.onPointerUp}
+        onPointerCancel={handlers.onPointerCancel}
+        onClick={onHandleTap}
+        aria-label={detent === "half" ? "Expand panel" : "Collapse panel"}
       >
         <div className="w-9 h-[5px] rounded-full bg-white/25" />
-      </div>
+      </button>
 
       <div
         className={`flex items-center justify-between px-4 py-3 flex-shrink-0 ${textClass} relative`}
@@ -308,7 +365,7 @@ export default function LinePanel({ lineId, focusStopId, onClose }: LinePanelPro
         </div>
         <button
           onClick={onClose}
-          className={`${textClass} press opacity-85 hover:opacity-100 text-[22px] leading-none font-bold w-10 h-10 -mr-1 flex items-center justify-center rounded-full bg-black/15 touch-manipulation`}
+          className={`${textClass} press opacity-85 hover:opacity-100 text-[22px] leading-none font-bold w-11 h-11 -mr-1 flex items-center justify-center rounded-full bg-black/15 touch-manipulation`}
           aria-label="Close panel"
         >
           ×
@@ -322,18 +379,21 @@ export default function LinePanel({ lineId, focusStopId, onClose }: LinePanelPro
       </div>
 
       {corridorAlerts.length > 0 && (
-        // Cap the alerts strip at ~half of a dense bottom-sheet panel on
-        // mobile (and a fixed ~200px on desktop) so a day with a dozen
-        // service alerts can't evict the stop list entirely. Anything
-        // past the cap scrolls inside this region.
-        <div className="flex-shrink-0 px-3 py-2 space-y-1.5 border-b border-white/[0.06] max-h-[24dvh] sm:max-h-[200px] overflow-y-auto ios-scroll">
-          {corridorAlerts.slice(0, 6).map((a) => (
-            <AlertItem key={a.id} alert={a} />
-          ))}
-        </div>
+        <AlertsSection alerts={corridorAlerts} lineId={lineId} />
       )}
 
-      <div ref={scrollRef} className="flex-1 overflow-y-auto py-1 ios-scroll">
+      <div
+        ref={scrollRef}
+        className="flex-1 overflow-y-auto py-1 ios-scroll"
+        // At half detent the sheet's bottom extends below the viewport, so
+        // the tail of the list falls into the container's below-fold zone
+        // and can't be scrolled into the visible area. Pad the content by
+        // the below-fold height (38dvh = 88dvh − 50dvh) to make every row
+        // reachable. At full detent the padding is 0.
+        style={{
+          paddingBottom: detent === "half" ? "calc(88dvh - 50dvh)" : undefined,
+        }}
+      >
         {!data && (
           <div className="text-center text-xs text-gray-500 py-8 animate-pulse">
             Loading live arrivals…
@@ -363,6 +423,7 @@ export default function LinePanel({ lineId, focusStopId, onClose }: LinePanelPro
               trainHere={trainsAtStop.has(stop.id)}
               hasData={!!data}
               showConnector={idx < numStops - 1}
+              onTap={onStationOpen}
             />
           );
         })}

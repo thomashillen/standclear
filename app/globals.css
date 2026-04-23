@@ -82,14 +82,18 @@
   --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
-/* Installed as a home-screen PWA (status-bar-translucent), iOS can briefly
+/* iOS installed as a home-screen PWA (status-bar-translucent) can briefly
    report safe-area-inset-top as 0 during orientation/viewport transitions,
    letting fixed headers slip under the Dynamic Island. Enforce a 44px
-   floor only here — Safari with its URL bar still correctly reports 0 and
-   must keep that, else a visible gap appears below the bar. */
-@media (display-mode: standalone) {
-  :root {
-    --safe-top: max(env(safe-area-inset-top, 0px), 44px);
+   floor only there — Safari with its URL bar reports 0 correctly, and
+   Android/desktop installed PWAs have a true 0 inset, so broadening the
+   rule would paint a dead-space strip above the header on those. The
+   -webkit-touch-callout feature query is iOS-only. */
+@supports (-webkit-touch-callout: none) {
+  @media (display-mode: standalone) {
+    :root {
+      --safe-top: max(env(safe-area-inset-top, 0px), 44px);
+    }
   }
 }
 
