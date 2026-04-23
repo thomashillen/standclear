@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
-import { ArrowUp, ArrowDown, Star } from "lucide-react";
+import { ArrowUp, ArrowDown, Star, X } from "lucide-react";
 import { useLines } from "@/lib/subwayData";
 import { useTrains, type Arrival } from "@/lib/useTrains";
 import { useFavorites } from "@/lib/useFavorites";
@@ -22,22 +22,72 @@ function fmtEta(eta: number, now: number): string {
   return `${mins} min`;
 }
 
+// MTA signage uses circles for local service and diamonds for express
+// variants — the "<6>", "<7>", and peak-only <F>, <Q>, etc. The realtime
+// feed surfaces these as routeIds with a trailing "X" (6X, 7X). We render
+// a diamond by rotating a square 45° and counter-rotating the label so
+// the letter stays upright. Diamond side = circle_diameter / √2 so both
+// variants share the same outer bounding box and align in a row.
 function RouteBullet({
   id,
   color,
   textColor,
   size = "md",
+  variant = "circle",
   onClick,
 }: {
   id: string;
   color: string;
   textColor: "white" | "black";
   size?: "sm" | "md";
+  variant?: "circle" | "diamond";
   onClick?: () => void;
 }) {
+  const fg = textColor === "black" ? "#000" : "#fff";
+
+  if (variant === "diamond") {
+    // Bounding box matches the circle size so bullets line up in a row.
+    // Inner rotated square is sized so its diagonal ≈ circle diameter.
+    const boxDim = size === "sm" ? "w-5 h-5 text-[9px]" : "w-7 h-7 text-[12px]";
+    const diamondSize = size === "sm" ? 14 : 20;
+    const outer = `inline-flex items-center justify-center flex-shrink-0 relative ${boxDim}`;
+    const diamondStyle: React.CSSProperties = {
+      width: diamondSize,
+      height: diamondSize,
+      backgroundColor: color,
+      transform: "rotate(45deg)",
+      borderRadius: 2,
+    };
+    const labelStyle: React.CSSProperties = { color: fg };
+    const labelClass = `relative font-black leading-none ${size === "sm" ? "text-[9px]" : "text-[12px]"}`;
+    const inner = (
+      <>
+        <span className="absolute inset-0 flex items-center justify-center">
+          <span style={diamondStyle} />
+        </span>
+        <span className={labelClass} style={labelStyle}>
+          {id}
+        </span>
+      </>
+    );
+    if (onClick) {
+      return (
+        <button
+          type="button"
+          onClick={onClick}
+          className={`${outer} press touch-manipulation hover:scale-105 active:scale-95 transition-transform`}
+          aria-label={`View ${id} express line`}
+        >
+          {inner}
+        </button>
+      );
+    }
+    return <span className={outer}>{inner}</span>;
+  }
+
   const dim = size === "sm" ? "w-5 h-5 text-[10px]" : "w-7 h-7 text-[13px]";
   const base = `inline-flex items-center justify-center rounded-full font-black leading-none flex-shrink-0 ${dim}`;
-  const style = { backgroundColor: color, color: textColor === "black" ? "#000" : "#fff" };
+  const style = { backgroundColor: color, color: fg };
   if (onClick) {
     return (
       <button
@@ -58,15 +108,27 @@ function RouteBullet({
   );
 }
 
+// Express variants in the GTFS realtime feed use a trailing "X" suffix
+// (6X = <6> Pelham Bay express, 7X = <7> Flushing express). The base
+// route's color, terminus, and line entry all apply; only the badge
+// shape changes.
+function parseExpress(routeId: string): { baseRouteId: string; isExpress: boolean } {
+  if (routeId.length > 1 && routeId.endsWith("X")) {
+    return { baseRouteId: routeId.slice(0, -1), isExpress: true };
+  }
+  return { baseRouteId: routeId, isExpress: false };
+}
+
 interface ArrivalRowProps {
   arrival: Arrival;
   now: number;
   badge: { id: string; color: string; textColor: "white" | "black" } | undefined;
+  isExpress: boolean;
   terminusName: string | undefined;
   onTapRoute: () => void;
 }
 
-function ArrivalRow({ arrival, now, badge, terminusName, onTapRoute }: ArrivalRowProps) {
+function ArrivalRow({ arrival, now, badge, isExpress, terminusName, onTapRoute }: ArrivalRowProps) {
   const etaStr = fmtEta(arrival.eta, now);
   const isImminent = arrival.eta - now / 1000 < 90;
   return (
@@ -76,6 +138,7 @@ function ArrivalRow({ arrival, now, badge, terminusName, onTapRoute }: ArrivalRo
           id={badge.id}
           color={badge.color}
           textColor={badge.textColor}
+          variant={isExpress ? "diamond" : "circle"}
           onClick={onTapRoute}
         />
       ) : (
@@ -84,6 +147,11 @@ function ArrivalRow({ arrival, now, badge, terminusName, onTapRoute }: ArrivalRo
       <div className="flex-1 min-w-0">
         <p className="text-[13px] font-medium text-gray-100 leading-tight truncate">
           {terminusName ? `to ${terminusName}` : badge?.id ?? arrival.routeId}
+          {isExpress && (
+            <span className="ml-1.5 text-[10px] font-semibold uppercase tracking-wider text-amber-300/90">
+              Express
+            </span>
+          )}
         </p>
       </div>
       <span
@@ -108,27 +176,36 @@ export default function StationPanel({ stopId, onClose, onSelectLine }: Props) {
   const { has, toggle } = useFavorites();
 
   const index = useMemo(() => (lines ? buildStationIndex(lines) : []), [lines]);
+  // A tapped stopId may be any platform in a complex (e.g. tapping the
+  // L03 dot at Union Sq should surface the merged complex whose canonical
+  // id is 635). Match against every member id, not just the canonical.
   const station = useMemo(
-    () => index.find((s) => s.stopId === stopId),
+    () => index.find((s) => s.stopIds.includes(stopId)),
     [index, stopId],
   );
 
   // Split arrivals by direction. `data.arrivals` is already sorted by eta
-  // ascending, so the per-direction slices inherit that order.
+  // ascending, so the per-direction slices inherit that order. We accept
+  // arrivals at ANY stop id belonging to this complex so transfers show
+  // up as one unified list.
+  const stationIds = useMemo(
+    () => (station ? new Set(station.stopIds) : null),
+    [station],
+  );
   const { north, south } = useMemo(() => {
     const n: Arrival[] = [];
     const s: Arrival[] = [];
-    if (!data) return { north: n, south: s };
+    if (!data || !stationIds) return { north: n, south: s };
     const nowSec = data.generatedAt / 1000;
     const CUTOFF = 45 * 60;
     for (const a of data.arrivals) {
-      if (a.stopId !== stopId) continue;
+      if (!stationIds.has(a.stopId)) continue;
       if (a.eta - nowSec > CUTOFF) continue;
       if (a.direction === "N") n.push(a);
       else s.push(a);
     }
     return { north: n, south: s };
-  }, [data, stopId]);
+  }, [data, stationIds]);
 
   // For each route serving the station, figure out which terminus matches
   // each direction by checking which end of the stop list has a higher
@@ -173,7 +250,10 @@ export default function StationPanel({ stopId, onClose, onSelectLine }: Props) {
 
   if (!station) return null;
 
-  const isFav = has(stopId);
+  // Favorites key on the canonical stopId so a complex stays "favorited"
+  // regardless of which platform the user tapped first.
+  const favId = station.stopId;
+  const isFav = has(favId);
 
   return (
     <div
@@ -189,18 +269,20 @@ export default function StationPanel({ stopId, onClose, onSelectLine }: Props) {
     >
       <button
         type="button"
-        className="sm:hidden flex items-center justify-center h-11 flex-shrink-0 cursor-grab active:cursor-grabbing touch-none w-full"
-        onPointerDown={handlers.onPointerDown}
-        onPointerMove={handlers.onPointerMove}
-        onPointerUp={handlers.onPointerUp}
-        onPointerCancel={handlers.onPointerCancel}
+        className="sm:hidden flex items-center justify-center h-5 pt-1.5 flex-shrink-0 touch-none w-full"
         onClick={onHandleTap}
         aria-label={detent === "half" ? "Expand panel" : "Collapse panel"}
       >
         <div className="w-9 h-[5px] rounded-full bg-white/25" />
       </button>
 
-      <div className="flex items-start gap-3 px-4 pt-2 pb-3 flex-shrink-0 border-b border-white/[0.06]">
+      <div
+        className="flex items-start gap-3 px-4 pt-2 pb-3 flex-shrink-0 border-b border-white/[0.06] sm:cursor-auto cursor-grab active:cursor-grabbing touch-none"
+        onPointerDown={handlers.onPointerDown}
+        onPointerMove={handlers.onPointerMove}
+        onPointerUp={handlers.onPointerUp}
+        onPointerCancel={handlers.onPointerCancel}
+      >
         <div className="flex-1 min-w-0">
           <h2 className="text-[18px] font-black tracking-tight text-white leading-tight">
             {station.name}
@@ -223,7 +305,7 @@ export default function StationPanel({ stopId, onClose, onSelectLine }: Props) {
           </div>
         </div>
         <button
-          onClick={() => toggle(stopId)}
+          onClick={() => toggle(favId)}
           className="press w-11 h-11 -mt-0.5 flex items-center justify-center rounded-full text-gray-400 hover:text-amber-300 active:text-amber-400 touch-manipulation"
           aria-label={isFav ? "Remove from favorites" : "Add to favorites"}
           aria-pressed={isFav}
@@ -232,10 +314,10 @@ export default function StationPanel({ stopId, onClose, onSelectLine }: Props) {
         </button>
         <button
           onClick={onClose}
-          className="press text-white opacity-85 hover:opacity-100 text-[22px] leading-none font-bold w-11 h-11 -mt-0.5 flex items-center justify-center rounded-full bg-white/[0.08] hover:bg-white/[0.12] touch-manipulation"
+          className="press text-white opacity-85 hover:opacity-100 w-11 h-11 -mt-0.5 flex items-center justify-center rounded-full bg-white/[0.08] hover:bg-white/[0.12] touch-manipulation"
           aria-label="Close panel"
         >
-          ×
+          <X className="w-[18px] h-[18px]" strokeWidth={2.5} />
         </button>
       </div>
 
@@ -308,16 +390,24 @@ function DirectionSection({
         </div>
       ) : (
         <div>
-          {arrivals.map((a, i) => (
-            <ArrivalRow
-              key={`${a.tripId}-${a.stopId}-${i}`}
-              arrival={a}
-              now={now}
-              badge={routeInfo.get(a.routeId)}
-              terminusName={terminusByRoute.get(a.routeId)?.[direction]}
-              onTapRoute={() => onSelectLine(a.routeId)}
-            />
-          ))}
+          {arrivals.map((a, i) => {
+            // Resolve express variants (6X, 7X) to their base line so the
+            // badge picks up the familiar color and the row can show the
+            // terminus. `isExpress` then switches the bullet to a diamond
+            // and flags the row "Express".
+            const { baseRouteId, isExpress } = parseExpress(a.routeId);
+            return (
+              <ArrivalRow
+                key={`${a.tripId}-${a.stopId}-${i}`}
+                arrival={a}
+                now={now}
+                badge={routeInfo.get(baseRouteId)}
+                isExpress={isExpress}
+                terminusName={terminusByRoute.get(baseRouteId)?.[direction]}
+                onTapRoute={() => onSelectLine(baseRouteId)}
+              />
+            );
+          })}
         </div>
       )}
     </section>

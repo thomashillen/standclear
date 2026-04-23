@@ -4,11 +4,14 @@ import { useEffect, useRef, useState } from "react";
 import { useLines, CORRIDOR, type Stop } from "@/lib/subwayData";
 import { useTrains, trainLatLng, type Train } from "@/lib/useTrains";
 import { useGeolocationState } from "@/lib/useGeolocation";
+import { buildStationIndex } from "@/lib/stopsIndex";
 import "mapbox-gl/dist/mapbox-gl.css";
 
 interface MapViewProps {
   selectedLine: string | null; // routeId
+  stationStopId: string | null;
   onLineSelect: (line: string | null, focusStopId?: string) => void;
+  onStationOpen: (stopId: string) => void;
 }
 
 function nearestStop(stops: Stop[], lng: number, lat: number): Stop | null {
@@ -39,6 +42,13 @@ type MapboxMap = {
   addImage: (id: string, image: unknown, opts?: unknown) => void;
   hasImage: (id: string) => boolean;
   getZoom: () => number;
+  flyTo: (opts: { center: [number, number]; zoom?: number; duration?: number }) => void;
+  easeTo: (opts: {
+    center: [number, number];
+    zoom?: number;
+    duration?: number;
+    padding?: { top: number; right: number; bottom: number; left: number };
+  }) => void;
 };
 
 // Zoom-responsive baselines, shared between layer setup and the selection
@@ -58,38 +68,79 @@ const STOP_OPACITY_BY_ZOOM: MapboxExpression = [
 // Clean subway-car silhouette: softly rounded rear, long sharp nose on
 // the right. Drawn horizontal so a rotation of 0 = pointing east;
 // icon-rotate = bearing - 90 aligns the nose with direction of travel.
-// No internal cutouts — overlapping cars read cleanly because the
-// silhouette's asymmetry alone signals "front," and the SDF halo rings
-// each car's outer edge as a crisp slate outline.
-// Registered with sdf:true so Mapbox can tint via `icon-color`.
-function makeTrainIcon(w: number, h: number, nosePx: number): ImageData {
+//
+// Pre-baked per route as a full RGBA bitmap (not SDF). SDF sprites are
+// single-channel and rely on Mapbox's halo shader for the white outline,
+// which gets aliased at map zooms where the sprite is downscaled heavily.
+// Baking a proper 2px stroke directly into the canvas — with lineJoin
+// "round" and a transparent-to-opaque AA boundary — gives a crisp outline
+// at every scale Mapbox renders it.
+//
+// One image per route (~30 images, <100KB total). Feature rendering then
+// picks by routeId via `["concat", "train-", ["get", "routeId"]]`, so
+// icons carry their color instead of being tinted at paint time.
+const TRAIN_ICON_W = 72;
+const TRAIN_ICON_H = 32;
+const TRAIN_NOSE_PX = 14;
+
+function makeTrainIcon(color: string): ImageData {
+  const w = TRAIN_ICON_W;
+  const h = TRAIN_ICON_H;
   const c = document.createElement("canvas");
   c.width = w;
   c.height = h;
   const ctx = c.getContext("2d")!;
-  ctx.fillStyle = "#fff";
-  const bodyEnd = w - nosePx;
-  const r = 3;
-  ctx.beginPath();
-  ctx.moveTo(r, 0);
-  ctx.lineTo(bodyEnd, 0);
-  ctx.lineTo(w, h / 2);
-  ctx.lineTo(bodyEnd, h);
-  ctx.lineTo(r, h);
-  ctx.arcTo(0, h, 0, h - r, r);
-  ctx.lineTo(0, r);
-  ctx.arcTo(0, 0, r, 0, r);
-  ctx.closePath();
+  const bodyEnd = w - TRAIN_NOSE_PX;
+  const r = 4;
+
+  // Build capsule path once, reuse for stroke (outline) + fill.
+  const path = () => {
+    ctx.beginPath();
+    ctx.moveTo(r, 0);
+    ctx.lineTo(bodyEnd, 0);
+    ctx.lineTo(w, h / 2);
+    ctx.lineTo(bodyEnd, h);
+    ctx.lineTo(r, h);
+    ctx.arcTo(0, h, 0, h - r, r);
+    ctx.lineTo(0, r);
+    ctx.arcTo(0, 0, r, 0, r);
+    ctx.closePath();
+  };
+
+  // White outline, drawn first so the fill sits on top with a clean
+  // boundary. lineWidth is doubled because half of a stroked line falls
+  // outside the path and gets clipped by the canvas edge — a 5px
+  // lineWidth gives ~2.5px of visible outline.
+  path();
+  ctx.lineWidth = 5;
+  ctx.lineJoin = "round";
+  ctx.strokeStyle = "#ffffff";
+  ctx.stroke();
+
+  // Route-color fill.
+  path();
+  ctx.fillStyle = color;
   ctx.fill();
+
+  // Soft inner highlight on top edge for a bit of depth. Low opacity so
+  // it reads as subtle shading, not a second color.
+  ctx.save();
+  ctx.clip();
+  ctx.fillStyle = "rgba(255,255,255,0.14)";
+  ctx.fillRect(0, 0, w, Math.round(h * 0.45));
+  ctx.restore();
+
   return ctx.getImageData(0, 0, w, h);
 }
 
-export default function MapView({ selectedLine, onLineSelect }: MapViewProps) {
+export default function MapView({ selectedLine, stationStopId, onLineSelect, onStationOpen }: MapViewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<MapboxMap | null>(null);
   const [mapLoaded, setMapLoaded] = useState(false);
   const [noToken, setNoToken] = useState(false);
   const selectedLineRef = useRef(selectedLine);
+  const onStationOpenRef = useRef(onStationOpen);
+  useEffect(() => { onStationOpenRef.current = onStationOpen; }, [onStationOpen]);
   // Set by the map line-click handler; read + cleared by the selection
   // effect so a click-initiated selection zooms to the nearest stop rather
   // than to the default downtown frame.
@@ -177,15 +228,32 @@ export default function MapView({ selectedLine, onLineSelect }: MapViewProps) {
           data: { type: "FeatureCollection", features: [] },
         });
 
-        // Single SDF icon, tinted per-feature by icon-color. The white
-        // border is drawn by Mapbox via icon-halo-* — one symbol layer
-        // instead of two, which halves GPU upload on mobile.
-        const icon = makeTrainIcon(56, 24, 10);
-        map.addImage(
-          "train-capsule",
-          { width: icon.width, height: icon.height, data: icon.data },
-          { sdf: true, pixelRatio: 2 },
-        );
+        // Focused-station marker: the station the StationPanel is currently
+        // showing. Rendered as a highlighted dot plus a persistent name
+        // label so the user always knows which station the panel refers to,
+        // even after panning the map. Driven by stationStopId — a 0-feature
+        // collection when no panel is open.
+        map.addSource("focused-station", {
+          type: "geojson",
+          data: { type: "FeatureCollection", features: [] },
+        });
+
+        // One pre-baked RGBA icon per route, registered as "train-<routeId>".
+        // Colors + outlines are painted into the bitmap — no SDF, no halo
+        // shader, so the outline stays crisp under Mapbox's downsampling at
+        // low zooms. Feature rendering picks the right image via a concat
+        // expression on routeId below.
+        for (const line of Object.values(lines)) {
+          const img = makeTrainIcon(line.color);
+          const imgId = `train-${line.routeId}`;
+          if (!map.hasImage(imgId)) {
+            map.addImage(
+              imgId,
+              { width: img.width, height: img.height, data: img.data },
+              { pixelRatio: 2 },
+            );
+          }
+        }
 
         map.addLayer({
           id: "subway-lines",
@@ -247,16 +315,15 @@ export default function MapView({ selectedLine, onLineSelect }: MapViewProps) {
         // align with the direction of travel, so rotate by (bearing - 90).
         const capsuleRotate: MapboxExpression = ["-", ["get", "bearing"], 90];
 
-        // Scale the capsule with zoom. At z=11 (default downtown frame) the
-        // raw 56px icon dwarfs the 2.5px tracks and piles overlap into a
-        // visual mess, so we shrink to ~0.35 there and ease up to full size
-        // on closer zooms where detail actually reads.
+        // Scale the capsule with zoom. Bitmap is 72×32 (vs the old 56×24
+        // SDF), so size multipliers are scaled down proportionally to
+        // preserve the visual footprint at every zoom.
         const iconSizeByZoom: MapboxExpression = [
           "interpolate", ["linear"], ["zoom"],
-          10, 0.3,
-          11.5, 0.45,
-          13, 0.8,
-          14, 1.0,
+          10, 0.22,
+          11.5, 0.35,
+          13, 0.6,
+          14, 0.78,
         ];
 
         map.addLayer({
@@ -264,23 +331,15 @@ export default function MapView({ selectedLine, onLineSelect }: MapViewProps) {
           type: "symbol",
           source: "subway-trains",
           layout: {
-            "icon-image": "train-capsule",
+            // Per-route baked bitmap selected by feature.routeId. Names
+            // line up with the addImage calls above.
+            "icon-image": ["concat", "train-", ["get", "routeId"]],
             "icon-rotate": capsuleRotate,
             "icon-rotation-alignment": "map",
             "icon-pitch-alignment": "map",
             "icon-size": iconSizeByZoom,
             "icon-allow-overlap": true,
             "icon-ignore-placement": true,
-          },
-          paint: {
-            "icon-color": ["get", "color"],
-            // Slate halo rings every capsule as a visible outline. Wider
-            // than a typical halo so stacked cars at dense interchanges
-            // (Herald Sq, Times Sq) still read as separate bodies rather
-            // than a colored blob.
-            "icon-halo-color": "#cbd5e1",
-            "icon-halo-width": 2,
-            "icon-halo-blur": 0.2,
           },
         });
         map.addLayer({
@@ -310,6 +369,61 @@ export default function MapView({ selectedLine, onLineSelect }: MapViewProps) {
               11.5, 0,
               12.5, 1,
             ],
+          },
+        });
+
+        // Focused-station halo + dot. The larger translucent ring draws
+        // attention to the station independent of the tiny base dot; the
+        // inner white pill with a dark rim keeps it legible on any tile
+        // color. Text label sits below so it doesn't overlap the panel
+        // on mobile.
+        map.addLayer({
+          id: "focused-station-halo",
+          type: "circle",
+          source: "focused-station",
+          paint: {
+            "circle-color": "#ffffff",
+            "circle-opacity": 0.18,
+            "circle-radius": [
+              "interpolate", ["linear"], ["zoom"],
+              11, 10,
+              14, 22,
+            ],
+          },
+        });
+        map.addLayer({
+          id: "focused-station-dot",
+          type: "circle",
+          source: "focused-station",
+          paint: {
+            "circle-color": "#ffffff",
+            "circle-radius": [
+              "interpolate", ["linear"], ["zoom"],
+              11, 4,
+              14, 7,
+            ],
+            "circle-stroke-color": "#0f172a",
+            "circle-stroke-width": 2,
+          },
+        });
+        map.addLayer({
+          id: "focused-station-label",
+          type: "symbol",
+          source: "focused-station",
+          layout: {
+            "text-field": ["get", "name"],
+            "text-font": ["Open Sans Bold", "Arial Unicode MS Bold"],
+            "text-size": 13,
+            "text-offset": [0, 1.1],
+            "text-anchor": "top",
+            "text-allow-overlap": true,
+            "text-ignore-placement": true,
+          },
+          paint: {
+            "text-color": "#ffffff",
+            "text-halo-color": "#0f172a",
+            "text-halo-width": 2.2,
+            "text-halo-blur": 0.2,
           },
         });
 
@@ -450,48 +564,63 @@ export default function MapView({ selectedLine, onLineSelect }: MapViewProps) {
           const ev = e as {
             features?: {
               geometry: GeoJSON.Point;
-              properties?: { name?: string; letter?: string; color?: string };
+              properties?: { name?: string; letter?: string; color?: string; stopId?: string };
             }[];
           };
           const feat = ev.features?.[0];
           if (!feat) return;
           const coords = feat.geometry.coordinates as [number, number];
+          const stopId = feat.properties?.stopId;
+          // Tappable popup: the station name itself is the affordance to
+          // open the StationPanel, so users who see the hover tooltip on
+          // desktop (or a touch-and-release on mobile) have an obvious
+          // path into the station view. data-stopid is read by the
+          // delegated click listener below.
           popup
             .setLngLat(coords)
             .setHTML(
-              `<span style="color:${feat.properties?.color};font-weight:700">${feat.properties?.letter}</span> ${feat.properties?.name}`,
+              `<button type="button" class="subway-popup-btn" data-stopid="${stopId ?? ""}"><span style="color:${feat.properties?.color};font-weight:700">${feat.properties?.letter}</span> ${feat.properties?.name}</button>`,
             )
             .addTo(map as unknown as mapboxgl.Map);
         };
         map.on("mouseenter", "subway-stops-hit", showStopPopup);
         map.on("mouseleave", "subway-stops-hit", () => popup.remove());
-        // Tapping a station flies to it and opens the corridor's line
-        // panel focused on that stop. Hover only shows the popup.
+        // Tapping a station opens the StationPanel (all lines serving
+        // this stop, with live arrivals), not a single-line panel. A
+        // station like Union Sq serves 4/5/6, N/Q/R/W, and L — the
+        // station view lets the user see every incoming train and pick
+        // a line from there, instead of being dropped into whichever
+        // route's dot Mapbox happened to return first.
         map.on("click", "subway-stops-hit", (e: unknown) => {
           showStopPopup(e);
           const ev = e as {
             features?: {
               geometry: GeoJSON.Point;
-              properties?: { routeId?: string; stopId?: string };
+              properties?: { stopId?: string };
             }[];
           };
           const feat = ev.features?.[0];
-          const routeId = feat?.properties?.routeId;
           const stopId = feat?.properties?.stopId;
-          if (!routeId) return;
-          const coords = feat?.geometry?.coordinates as [number, number] | undefined;
-          const targetCorridor = CORRIDOR[routeId] ?? [routeId];
-          const current = selectedLineRef.current;
-          // Keep the user's chosen route if it's in the same corridor as
-          // the tapped stop — otherwise jump to the corridor's canonical
-          // route. Mirrors the line-tap flow so picking a stop on a
-          // trunk doesn't silently change which line is highlighted.
-          const target =
-            current && targetCorridor.includes(current)
-              ? current
-              : targetCorridor[0];
-          if (coords) clickLngLatRef.current = coords;
-          onLineSelect(target, stopId);
+          if (!stopId) return;
+          // Map zoom is handled by the stationStopId effect so every
+          // entry point (map tap, Near Me row, LinePanel stop tap)
+          // animates the same way — don't duplicate that here.
+          onStationOpenRef.current(stopId);
+        });
+
+        // Delegated click handler for the popup button. The popup node
+        // is re-created on every hover/tap, so we can't bind directly —
+        // instead we listen on the map container and fire when the tap
+        // lands on the .subway-popup-btn element.
+        containerRef.current?.addEventListener("click", (ev) => {
+          const target = ev.target as HTMLElement | null;
+          const btn = target?.closest?.(".subway-popup-btn") as HTMLElement | null;
+          if (!btn) return;
+          const stopId = btn.dataset.stopid;
+          if (!stopId) return;
+          ev.stopPropagation();
+          popup.remove();
+          onStationOpenRef.current(stopId);
         });
 
         setMapLoaded(true);
@@ -537,32 +666,37 @@ export default function MapView({ selectedLine, onLineSelect }: MapViewProps) {
     const DEFAULT_VELOCITY = 1 / DEFAULT_TRAVERSAL_SEC;
     const MAX_VELOCITY = 1 / MIN_TRAVERSAL_SEC;
 
-    // Perpendicular offset in screen-pixels at full icon scale (zoom ≥ 14).
-    // Values are multiplied by iconScaleAtZoom() each frame so the visual
-    // gap scales with icon size and stays visually consistent across zooms.
-    // The mPerPx formula uses a 256-tile constant but Mapbox GL uses 512-tile
-    // tiles, so the rendered offset is ~2× the perpPx value in screen pixels.
-    // Icon height at zoom 14 = 24px; adjacent routes need ~12px separation
-    // (half-height) to touch without overlap → perpPx ≈ 6 per lane step.
-    // 3-route corridors: ±6 from center (visual ≈ ±12px → just touching)
-    // 4-route corridors: ±4 inner pair, ±10 outer pair
-    const PERP_OFFSET_PX: Record<string, number> = {
-      "1": -6, "2": 0, "3": 6,
-      "4": -6, "5": 0, "6": 6,
-      A: -6, C: 0,  E: 6,
-      B: -10, D: -4, F: 4, M: 10,
-      N: -10, Q: -4, R: 4, W: 10,
-      J: -6,  Z: 6,
-    };
+    // Directional lane rule. Every train is offset to the RIGHT of its
+    // direction of travel by `(laneIndex+1) * LANE_WIDTH` units. Because
+    // the perpendicular vector is computed from each train's bearing, a
+    // northbound train's "right" is east (line's right side on the map)
+    // and a southbound train's "right" is west — so N trains end up east
+    // of the line, S trains end up west, with no special-casing of
+    // direction. Lane index comes from the route's position within its
+    // trunk (CORRIDOR), so the 1/2/3 trio (and BDFM, NQRW, etc.) each
+    // get their own sub-lane and never visually collide with same-
+    // direction siblings on the same trunk.
+    //
+    // LANE_WIDTH=8 puts adjacent same-direction lanes ≈12.5 px apart at
+    // zoom 14 — matching the rendered icon half-height (32px × 0.78 / 2)
+    // so neighbours just-touch without overlap at any zoom. Opposite-
+    // direction lanes are on opposite sides of the line, so they only
+    // approach each other near the line centerline where bearings
+    // change — cleanly separated everywhere else.
+    const LANE_WIDTH = 8;
+    const LANE_INDEX: Record<string, number> = {};
+    for (const routeId of Object.keys(CORRIDOR)) {
+      LANE_INDEX[routeId] = CORRIDOR[routeId].indexOf(routeId);
+    }
 
     // Mirrors the iconSizeByZoom Mapbox expression so perpendicular offsets
     // scale with rendered icon size, giving consistent spacing at every zoom.
     const iconScaleAtZoom = (z: number): number => {
-      if (z <= 10) return 0.3;
-      if (z <= 11.5) return 0.3 + ((z - 10) / 1.5) * 0.15;
-      if (z <= 13) return 0.45 + ((z - 11.5) / 1.5) * 0.35;
-      if (z <= 14) return 0.8 + (z - 13) * 0.2;
-      return 1.0;
+      if (z <= 10) return 0.22;
+      if (z <= 11.5) return 0.22 + ((z - 10) / 1.5) * 0.13;
+      if (z <= 13) return 0.35 + ((z - 11.5) / 1.5) * 0.25;
+      if (z <= 14) return 0.6 + (z - 13) * 0.18;
+      return 0.78;
     };
 
     let frame = 0;
@@ -687,7 +821,8 @@ export default function MapView({ selectedLine, onLineSelect }: MapViewProps) {
           // gap between stacked trains stays consistent as the user
           // zooms. Web-Mercator meters-per-pixel formula; 111320 m per
           // degree of latitude (and per deg lng scaled by cos(lat)).
-          const perpPx = (PERP_OFFSET_PX[line.routeId] ?? 0) * iconScaleAtZoom(currentZoom);
+          const laneIndex = LANE_INDEX[line.routeId] ?? 0;
+          const perpPx = (laneIndex + 1) * LANE_WIDTH * iconScaleAtZoom(currentZoom);
           let renderLng = state.lng;
           let renderLat = state.lat;
           if (perpPx !== 0) {
@@ -866,6 +1001,50 @@ export default function MapView({ selectedLine, onLineSelect }: MapViewProps) {
       });
     }
   }, [selectedLine, mapLoaded, lines]);
+
+  // Fly to the station when a StationPanel opens — regardless of entry
+  // point (map tap, Near Me panel row, LinePanel stop tap). The map click
+  // handler can zoom directly because it has the coords in hand, but taps
+  // from a panel only know a stopId, so we look coords up from the merged
+  // station index and animate here. Pad for the 55dvh bottom sheet on
+  // mobile and the ~340px right-side card on desktop. Also populates the
+  // focused-station source so a highlighted pin + name stay on the map
+  // as long as the panel is open.
+  useEffect(() => {
+    if (!mapLoaded || !mapRef.current || !lines) return;
+    const map = mapRef.current;
+    const src = map.getSource("focused-station") as
+      | { setData: (d: unknown) => void }
+      | undefined;
+    if (!stationStopId) {
+      src?.setData({ type: "FeatureCollection", features: [] });
+      return;
+    }
+    const index = buildStationIndex(lines);
+    const station = index.find((s) => s.stopIds.includes(stationStopId));
+    if (!station) return;
+    src?.setData({
+      type: "FeatureCollection",
+      features: [
+        {
+          type: "Feature",
+          properties: { name: station.name },
+          geometry: { type: "Point", coordinates: [station.lng, station.lat] },
+        },
+      ],
+    });
+    const isMobile = window.matchMedia("(max-width: 639px)").matches;
+    const bottomPad = isMobile
+      ? Math.round(window.innerHeight * 0.55) + 16
+      : 40;
+    const rightPad = isMobile ? 40 : 360;
+    map.easeTo({
+      center: [station.lng, station.lat],
+      zoom: Math.max(map.getZoom(), 14),
+      padding: { top: 40, right: rightPad, bottom: bottomPad, left: 40 },
+      duration: 700,
+    });
+  }, [stationStopId, mapLoaded, lines]);
 
   if (noToken) {
     return (

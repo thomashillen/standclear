@@ -1,7 +1,7 @@
 "use client";
 
 import { memo, useEffect, useMemo, useRef, useState } from "react";
-import { AlertTriangle, Info, ChevronDown } from "lucide-react";
+import { AlertTriangle, Info, ChevronDown, X } from "lucide-react";
 import { useLines, CORRIDOR } from "@/lib/subwayData";
 import { useTrains, type Arrival } from "@/lib/useTrains";
 import { useAlerts, alertsForRoutes, type ServiceAlert } from "@/lib/useAlerts";
@@ -342,11 +342,7 @@ export default function LinePanel({ lineId, focusStopId, onClose, onStationOpen 
           gesture, not just the 5px pill. */}
       <button
         type="button"
-        className="sm:hidden flex items-center justify-center h-11 flex-shrink-0 cursor-grab active:cursor-grabbing touch-none w-full"
-        onPointerDown={handlers.onPointerDown}
-        onPointerMove={handlers.onPointerMove}
-        onPointerUp={handlers.onPointerUp}
-        onPointerCancel={handlers.onPointerCancel}
+        className="sm:hidden flex items-center justify-center h-5 pt-1.5 flex-shrink-0 touch-none w-full"
         onClick={onHandleTap}
         aria-label={detent === "half" ? "Expand panel" : "Collapse panel"}
       >
@@ -354,8 +350,12 @@ export default function LinePanel({ lineId, focusStopId, onClose, onStationOpen 
       </button>
 
       <div
-        className={`flex items-center justify-between px-4 py-3 flex-shrink-0 ${textClass} relative`}
+        className={`flex items-center justify-between px-4 py-3 flex-shrink-0 ${textClass} relative sm:cursor-auto cursor-grab active:cursor-grabbing touch-none`}
         style={{ backgroundColor: line.color }}
+        onPointerDown={handlers.onPointerDown}
+        onPointerMove={handlers.onPointerMove}
+        onPointerUp={handlers.onPointerUp}
+        onPointerCancel={handlers.onPointerCancel}
       >
         {/* subtle top highlight like iOS cards */}
         <span className="pointer-events-none absolute inset-x-0 top-0 h-px bg-white/20" />
@@ -368,10 +368,10 @@ export default function LinePanel({ lineId, focusStopId, onClose, onStationOpen 
         </div>
         <button
           onClick={onClose}
-          className={`${textClass} press opacity-85 hover:opacity-100 text-[22px] leading-none font-bold w-11 h-11 -mr-1 flex items-center justify-center rounded-full bg-black/15 touch-manipulation`}
+          className={`${textClass} press opacity-85 hover:opacity-100 w-11 h-11 -mr-1 flex items-center justify-center rounded-full bg-black/15 touch-manipulation`}
           aria-label="Close panel"
         >
-          ×
+          <X className="w-[18px] h-[18px]" strokeWidth={2.5} />
         </button>
       </div>
 

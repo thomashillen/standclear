@@ -8,7 +8,13 @@ export interface RouteBadge {
 }
 
 export interface StationEntry {
-  stopId: string; // parent station id (N/S suffixes stripped upstream)
+  stopId: string; // canonical (first) stop id — used by favorites, keys
+  // All stop ids that belong to this station complex. Union Square serves
+  // 4/5/6 (id 635), N/Q/R/W (id R20), and L (id L03) via three separate
+  // MTA stop records that share a name and sit within the same block —
+  // merged into one entry here so the station panel surfaces every line
+  // at the complex instead of whichever dot you happened to tap.
+  stopIds: string[];
   name: string;
   lat: number;
   lng: number;
@@ -36,14 +42,33 @@ export function haversineMeters(
   return 2 * R * Math.asin(Math.sqrt(h));
 }
 
-// Collapse per-line stop lists into one entry per physical station. The same
-// stop appears in multiple SubwayLine entries (e.g. Union Sq shows up on
-// 4/5/6, N/Q/R/W, L) — we merge so the panel shows one row with every route
-// serving it. Coordinates come from the first occurrence, which is fine:
-// GTFS coordinates for the same parent_station agree across lines in the
-// MTA feed.
+// Collapse per-line stop lists into one entry per physical station. Two
+// layers of merging:
+//
+// 1) Same stop id across lines. The same stop appears in multiple SubwayLine
+//    entries (e.g. the "6" and "4" entries both list stop id 635), and we
+//    want a single entry with both route badges.
+//
+// 2) Station complexes. The MTA feed assigns different stop ids to different
+//    physical platforms inside the same transfer complex: Union Square is
+//    635 (4/5/6), R20 (N/Q/R/W), and L03 (L). All three share the name
+//    "14 St-Union Sq" and sit within ~100m. The GTFS `transfers.txt` file
+//    identifies these groupings officially, but we don't build from GTFS
+//    at runtime, so we use a name+proximity heuristic: stops with identical
+//    name within COMPLEX_RADIUS_M of an existing entry merge into it.
+//    Catches every documented complex in the MTA system without pulling in
+//    hundreds of false positives (two unrelated "23 St" stops on different
+//    trunks are ~500m apart, well outside the radius).
+//
+// Complex entries carry every member's stopId in `stopIds` so the station
+// panel can surface arrivals from any of them. The canonical `stopId` is
+// the first member encountered — used as a stable favorites/React key.
+const COMPLEX_RADIUS_M = 250;
+
 export function buildStationIndex(lines: Lines): StationEntry[] {
-  const map = new Map<string, StationEntry>();
+  // First pass: one entry per unique stopId, carrying the union of its
+  // routes. This is the existing "same stop across multiple lines" merge.
+  const byStopId = new Map<string, StationEntry>();
   for (const line of Object.values(lines)) {
     const badge: RouteBadge = {
       id: line.id,
@@ -52,14 +77,15 @@ export function buildStationIndex(lines: Lines): StationEntry[] {
       textColor: line.textColor,
     };
     for (const stop of line.stops) {
-      const existing = map.get(stop.id);
+      const existing = byStopId.get(stop.id);
       if (existing) {
         if (!existing.routes.some((r) => r.routeId === line.routeId)) {
           existing.routes.push(badge);
         }
       } else {
-        map.set(stop.id, {
+        byStopId.set(stop.id, {
           stopId: stop.id,
+          stopIds: [stop.id],
           name: stop.name,
           lat: stop.lat,
           lng: stop.lng,
@@ -68,7 +94,36 @@ export function buildStationIndex(lines: Lines): StationEntry[] {
       }
     }
   }
-  return [...map.values()];
+
+  // Second pass: merge complexes. Walk every stop-id entry in a stable
+  // order; for each, look for an already-accepted entry with the same name
+  // whose coordinates are within COMPLEX_RADIUS_M — if one exists, fold the
+  // new entry into it. Otherwise, start a new complex entry.
+  const byNameBucket = new Map<string, StationEntry[]>();
+  const complexes: StationEntry[] = [];
+  for (const entry of byStopId.values()) {
+    const bucket = byNameBucket.get(entry.name) ?? [];
+    const match = bucket.find(
+      (e) => haversineMeters(e, entry) <= COMPLEX_RADIUS_M,
+    );
+    if (match) {
+      // Fold: extend stopIds, union routes (preserving first-seen order
+      // so bullet ordering stays stable across polls).
+      for (const id of entry.stopIds) {
+        if (!match.stopIds.includes(id)) match.stopIds.push(id);
+      }
+      for (const r of entry.routes) {
+        if (!match.routes.some((x) => x.routeId === r.routeId)) {
+          match.routes.push(r);
+        }
+      }
+    } else {
+      bucket.push(entry);
+      byNameBucket.set(entry.name, bucket);
+      complexes.push(entry);
+    }
+  }
+  return complexes;
 }
 
 // Simple multi-term substring search over station names. The MTA station
