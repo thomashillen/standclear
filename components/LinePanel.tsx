@@ -154,6 +154,62 @@ function AlertItem({ alert }: { alert: ServiceAlert }) {
   );
 }
 
+// Alerts live-action: a single-row summary bar by default so three service
+// alerts don't evict the arrivals list on a 50dvh bottom sheet. Tap to
+// expand an inline, scrollable list; line switches collapse it again.
+// Single-alert lines skip the toggle and render the item inline so the
+// most common case stays zero-click.
+function AlertsSection({ alerts, lineId }: { alerts: ServiceAlert[]; lineId: string }) {
+  const [open, setOpen] = useState(false);
+  useEffect(() => setOpen(false), [lineId]);
+
+  if (alerts.length === 1) {
+    return (
+      <div className="flex-shrink-0 px-3 py-2 border-b border-white/[0.06]">
+        <AlertItem alert={alerts[0]} />
+      </div>
+    );
+  }
+
+  // Highest-severity alert drives the summary-bar color so riders can
+  // tell at a glance whether the corridor has a suspension vs. a routine
+  // elevator-out notice.
+  const topSeverity: ServiceAlert["severity"] =
+    alerts.some((a) => a.severity === "severe")
+      ? "severe"
+      : alerts.some((a) => a.severity === "warning")
+        ? "warning"
+        : "info";
+  const s = SEVERITY_STYLE[topSeverity];
+  const Icon = s.icon;
+
+  return (
+    <div className="flex-shrink-0 border-b border-white/[0.06]">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className={`w-full flex items-center gap-2 px-4 py-2.5 text-left transition-colors ${s.bg}`}
+        aria-expanded={open}
+      >
+        <Icon className={`w-4 h-4 flex-shrink-0 ${s.text}`} />
+        <span className={`text-[12px] font-semibold ${s.text}`}>
+          {alerts.length} service alerts
+        </span>
+        <ChevronDown
+          className={`w-4 h-4 ml-auto flex-shrink-0 transition-transform ${s.text} ${open ? "rotate-180" : ""}`}
+        />
+      </button>
+      {open && (
+        <div className="px-3 pb-2 pt-1 space-y-1.5 max-h-[28dvh] sm:max-h-[220px] overflow-y-auto ios-scroll">
+          {alerts.slice(0, 8).map((a) => (
+            <AlertItem key={a.id} alert={a} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function LinePanel({ lineId, focusStopId, onClose }: LinePanelProps) {
   const lines = useLines();
   const line = lines?.[lineId];
@@ -322,15 +378,7 @@ export default function LinePanel({ lineId, focusStopId, onClose }: LinePanelPro
       </div>
 
       {corridorAlerts.length > 0 && (
-        // Cap the alerts strip at ~half of a dense bottom-sheet panel on
-        // mobile (and a fixed ~200px on desktop) so a day with a dozen
-        // service alerts can't evict the stop list entirely. Anything
-        // past the cap scrolls inside this region.
-        <div className="flex-shrink-0 px-3 py-2 space-y-1.5 border-b border-white/[0.06] max-h-[24dvh] sm:max-h-[200px] overflow-y-auto ios-scroll">
-          {corridorAlerts.slice(0, 6).map((a) => (
-            <AlertItem key={a.id} alert={a} />
-          ))}
-        </div>
+        <AlertsSection alerts={corridorAlerts} lineId={lineId} />
       )}
 
       <div ref={scrollRef} className="flex-1 overflow-y-auto py-1 ios-scroll">

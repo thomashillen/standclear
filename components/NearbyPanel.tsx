@@ -405,7 +405,22 @@ export default function NearbyPanel({ open, onClose, onJumpToLine }: Props) {
           )
         ) : (
           <>
-        {geo.status === "idle" || geo.status === "prompting" ? (
+        {geo.status === "idle" ? (
+          <div className="px-6 py-10 text-center">
+            <Navigation className="w-10 h-10 mx-auto mb-3 text-gray-400" />
+            <p className="text-sm text-gray-300 font-medium mb-1">Find stations near you</p>
+            <p className="text-[11px] text-gray-500 mb-4 max-w-[240px] mx-auto">
+              We&apos;ll surface the closest stops and which trains you can still catch.
+            </p>
+            <button
+              onClick={geo.request}
+              className="press inline-flex items-center gap-2 px-4 h-10 rounded-full bg-white text-gray-950 text-[13px] font-semibold shadow-[0_4px_16px_rgba(255,255,255,0.18)]"
+            >
+              <Navigation className="w-4 h-4" />
+              Enable location
+            </button>
+          </div>
+        ) : geo.status === "prompting" && geo.lng == null ? (
           <div className="px-6 py-10 text-center">
             <Navigation className="w-10 h-10 mx-auto mb-3 text-gray-500 animate-pulse" />
             <p className="text-sm text-gray-400">Finding your location…</p>
@@ -427,10 +442,16 @@ export default function NearbyPanel({ open, onClose, onJumpToLine }: Props) {
           </div>
         ) : geo.status === "error" ? (
           <div className="px-6 py-10 text-center">
-            <p className="text-sm text-gray-300">Couldn&apos;t get your location.</p>
+            <p className="text-sm text-gray-300 mb-1">Couldn&apos;t get your location.</p>
             {geo.error && (
-              <p className="text-[11px] text-gray-600 mt-1">{geo.error}</p>
+              <p className="text-[11px] text-gray-600 mb-4">{geo.error}</p>
             )}
+            <button
+              onClick={geo.request}
+              className="press inline-flex items-center gap-2 px-4 h-9 rounded-full bg-white/[0.08] border border-white/[0.08] text-[12px] font-semibold text-gray-100"
+            >
+              Try again
+            </button>
           </div>
         ) : null}
 

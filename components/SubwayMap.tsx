@@ -30,7 +30,10 @@ const MapView = dynamic(() => import("./MapView"), {
 export default function SubwayMap() {
   const [selectedLine, setSelectedLine] = useState<string | null>(null);
   const [focusStopId, setFocusStopId] = useState<string | undefined>();
-  const [nearbyOpen, setNearbyOpen] = useState(false);
+  // Open on first load so nearby stations surface before any interaction.
+  // Mounting the panel also subscribes to geolocation, which on iOS Safari
+  // gives the permission prompt a cold-start path. Users can dismiss.
+  const [nearbyOpen, setNearbyOpen] = useState(true);
   const data = useTrains();
   const lines = useLines();
 

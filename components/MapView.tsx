@@ -418,12 +418,12 @@ export default function MapView({ selectedLine, onLineSelect }: MapViewProps) {
     // Default segment traversal time in seconds, used before we've
     // observed any motion for a train. NYC interstation average ~90s.
     const DEFAULT_TRAVERSAL_SEC = 90;
-    // Clamp observed velocity so a single noisy poll can't project the
-    // train off the end of its segment in the next frame.
-    const MIN_TRAVERSAL_SEC = 30;   // fastest express-ish
-    const MAX_TRAVERSAL_SEC = 300;  // slowest plausible
+    // Upper clamp on observed velocity so a single noisy poll (e.g. a
+    // GTFS-RT snapshot that jumped the train forward) can't project it
+    // off the end of the segment on the next frame. 30s corresponds to
+    // the fastest plausible express hop.
+    const MIN_TRAVERSAL_SEC = 30;
     const DEFAULT_VELOCITY = 1 / DEFAULT_TRAVERSAL_SEC;
-    const MIN_VELOCITY = 1 / MAX_TRAVERSAL_SEC;
     const MAX_VELOCITY = 1 / MIN_TRAVERSAL_SEC;
 
     // Perpendicular offset in pixels, per routeId, so trains on a shared
@@ -526,18 +526,15 @@ export default function MapView({ selectedLine, onLineSelect }: MapViewProps) {
             trainState.set(t.id, state);
           } else if (newPoll) {
             // Same segment, fresh poll — learn the observed velocity from
-            // the actual progress delta. Low-pass filter damps jitter
-            // from GTFS-RT snapshot-to-snapshot noise.
+            // the actual progress delta. Zero or negative deltas (train
+            // holding at a signal, ETA recalculation walking progress
+            // back) decay velocity toward 0 via the LP filter, so we
+            // stop predicting forward motion the MTA feed isn't seeing.
             const dtSec = (d.generatedAt - state.baseTime) / 1000;
             if (dtSec > 0.5) {
               const observed = (t.progress - state.baseProgress) / dtSec;
-              if (observed > 0) {
-                const clamped = Math.max(
-                  MIN_VELOCITY,
-                  Math.min(MAX_VELOCITY, observed),
-                );
-                state.velocity = 0.5 * state.velocity + 0.5 * clamped;
-              }
+              const clamped = Math.max(0, Math.min(MAX_VELOCITY, observed));
+              state.velocity = 0.5 * state.velocity + 0.5 * clamped;
             }
             state.baseProgress = t.progress;
             state.baseTime = d.generatedAt;
