@@ -301,7 +301,7 @@ export default function NearbyPanel({ open, onClose, onStationOpen }: Props) {
     >
       <button
         type="button"
-        className="sm:hidden flex items-center justify-center pt-2.5 pb-1.5 flex-shrink-0 cursor-grab active:cursor-grabbing touch-none w-full"
+        className="sm:hidden flex items-center justify-center h-11 flex-shrink-0 cursor-grab active:cursor-grabbing touch-none w-full"
         onPointerDown={handlers.onPointerDown}
         onPointerMove={handlers.onPointerMove}
         onPointerUp={handlers.onPointerUp}
