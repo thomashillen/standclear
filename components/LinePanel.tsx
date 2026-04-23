@@ -280,40 +280,39 @@ export default function LinePanel({ lineId, focusStopId, onClose, onStationOpen 
     onDismiss: onClose,
   });
 
-  // Scroll the tapped stop's row to sit near the bottom of the visible
-  // area when the user opens the panel via a line tap. Plain
-  // `scrollIntoView({ block: "center" })` misses at half detent — the
-  // scroll container is 88dvh tall but only ~50dvh is above the fold, so
-  // "center" of the container lands below the visible window.
-  //
-  // Compute the delta between where the row currently sits (in viewport
-  // coords) and where we want it (just above the bottom of the viewport,
-  // which is also the bottom of the sheet's visible area at half detent).
-  // Double rAF so the sheet's isMobile-driven translateY has committed and
-  // painted first — otherwise the row's rect is read pre-transform.
+  // Scroll the focused stop into the visible portion of the sheet.
+  // getBoundingClientRect() is wrong here: the sheet has a 380ms CSS
+  // transition, and rAF fires ~16ms in, so the row's viewport position is
+  // read while the sheet is still animating and the delta is way too small.
+  // Instead, use offsetTop (layout-relative, unaffected by CSS transforms)
+  // and compute the target scrollTop from static half-detent geometry:
+  //   visibleH = 50dvh − headerH  (how much of the list is above the fold)
+  //   scrollTop = rowBottom_in_container − visibleH + 16px buffer
   useEffect(() => {
     if (!focusStopId) return;
     let cancelled = false;
     requestAnimationFrame(() => {
       if (cancelled) return;
-      requestAnimationFrame(() => {
-        if (cancelled) return;
-        const container = scrollRef.current;
-        if (!container) return;
-        const row = container.querySelector<HTMLElement>(
-          `[data-stop-id="${CSS.escape(focusStopId)}"]`,
-        );
-        if (!row) return;
-        const rowBottomInViewport = row.getBoundingClientRect().bottom;
-        const targetBottom = window.innerHeight - 16;
-        const delta = rowBottomInViewport - targetBottom;
-        container.scrollTop = Math.max(0, container.scrollTop + delta);
-      });
+      const container = scrollRef.current;
+      if (!container) return;
+      const row = container.querySelector<HTMLElement>(
+        `[data-stop-id="${CSS.escape(focusStopId)}"]`,
+      );
+      if (!row) return;
+      // offsetTop within the sheet tells us how much fixed chrome sits
+      // above the scrollable list (handle + header + terminal bar + alerts).
+      const headerH = container.offsetTop;
+      const visibleH =
+        detent === "half"
+          ? window.innerHeight * 0.5 - headerH
+          : container.clientHeight;
+      const targetScrollTop =
+        row.offsetTop + row.offsetHeight - visibleH + 16;
+      container.scrollTop = Math.max(0, targetScrollTop);
     });
     return () => {
       cancelled = true;
     };
-    // `detent` dep re-anchors when the user drags between half and full.
   }, [focusStopId, lineId, detent]);
 
   if (!line) return null;
