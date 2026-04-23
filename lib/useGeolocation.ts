@@ -54,9 +54,13 @@ function applyPosition(pos: GeolocationPosition) {
 
 function applyError(err: GeolocationPositionError, fromWatch: boolean) {
   const denied = err.code === err.PERMISSION_DENIED;
-  // A timeout from the fast low-accuracy fix shouldn't demote an already-
-  // granted watch — only propagate the error if we haven't locked in a fix.
-  if (!denied && current.status === "granted" && !fromWatch) return;
+  // Only the watch and explicit denials should drive status. The fast
+  // low-accuracy fix is a best-effort kickstart — its timeouts and
+  // POSITION_UNAVAILABLE errors aren't meaningful while the high-accuracy
+  // watch is still running, and surfacing them flipped the UI to "error"
+  // (with a Try Again button) even for users who had granted permission
+  // and were seconds away from a real fix.
+  if (!denied && !fromWatch) return;
   publish({ status: denied ? "denied" : "error", error: err.message });
   if (denied && watchId !== null && typeof navigator !== "undefined") {
     navigator.geolocation.clearWatch(watchId);
