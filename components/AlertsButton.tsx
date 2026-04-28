@@ -149,6 +149,126 @@ function AlertItem({ alert, routeInfo }: AlertItemProps) {
   );
 }
 
+// ─── AlertsDialog ────────────────────────────────────────────────────
+// Controlled dialog version — pass `open` and `onOpenChange` so the
+// dialog can be opened from anywhere (the legacy floating button OR
+// the new More menu row). Same styling and content as the original
+// AlertsButton dialog; only the trigger plumbing changed.
+export function AlertsDialog({
+  open,
+  onOpenChange,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}) {
+  const data = useAlerts();
+  const lines = useLines();
+
+  const routeInfo = useMemo(() => {
+    const m = new Map<string, { id: string; color: string; textColor: "white" | "black" }>();
+    if (!lines) return m;
+    for (const line of Object.values(lines)) {
+      m.set(line.routeId, {
+        id: line.id,
+        color: line.color,
+        textColor: line.textColor,
+      });
+    }
+    return m;
+  }, [lines]);
+
+  const grouped = useMemo(() => {
+    const out: Record<ServiceAlert["severity"], ServiceAlert[]> = {
+      severe: [],
+      warning: [],
+      info: [],
+    };
+    if (!data) return out;
+    for (const a of data.alerts) out[a.severity].push(a);
+    return out;
+  }, [data]);
+
+  const totalCount = data?.alerts.length ?? 0;
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="bg-gray-900/95 backdrop-blur-xl border-white/10 text-white rounded-t-[28px] sm:rounded-3xl max-h-[85dvh] sm:max-h-[80dvh] overflow-hidden flex flex-col pb-[env(safe-area-inset-bottom)] sm:pb-6">
+        <DialogHeader>
+          <DialogTitle className="text-white text-xl font-black tracking-tight">
+            Service alerts
+          </DialogTitle>
+          <DialogDescription className="text-gray-400">
+            {!data
+              ? "Loading…"
+              : totalCount === 0
+                ? "All clear across the system right now."
+                : `${totalCount} active across ${
+                    new Set(data.alerts.flatMap((a) => a.routeIds)).size
+                  } line${
+                    new Set(data.alerts.flatMap((a) => a.routeIds)).size === 1 ? "" : "s"
+                  }.`}
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="flex-1 overflow-y-auto ios-scroll -mx-2 px-2">
+          {totalCount === 0 ? (
+            <div className="flex flex-col items-center justify-center py-10 text-center">
+              <CheckCircle2 className="w-10 h-10 text-emerald-400/80 mb-3" />
+              <p className="text-sm text-gray-200 font-medium">
+                No service issues right now
+              </p>
+              <p className="text-[11px] text-gray-500 mt-1 max-w-[260px]">
+                When the MTA reports delays, reroutes, or suspensions,
+                they&apos;ll show up here.
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-4 pb-2">
+              {(["severe", "warning", "info"] as const).map((sev) => {
+                const items = grouped[sev];
+                if (items.length === 0) return null;
+                const s = SEVERITY_STYLE[sev];
+                return (
+                  <section key={sev} className="space-y-1.5">
+                    <div className="flex items-center gap-2 px-1">
+                      <span
+                        className={`inline-block w-1.5 h-1.5 rounded-full ${
+                          sev === "severe"
+                            ? "bg-rose-400"
+                            : sev === "warning"
+                              ? "bg-amber-400"
+                              : "bg-sky-400"
+                        }`}
+                      />
+                      <h3 className={`text-[11px] font-semibold uppercase tracking-wider ${s.text}`}>
+                        {s.label}
+                      </h3>
+                      <span className="text-[11px] text-gray-500 ml-auto tabular-nums">
+                        {items.length}
+                      </span>
+                    </div>
+                    <div className="space-y-2">
+                      {items.map((alert) => (
+                        <AlertItem key={alert.id} alert={alert} routeInfo={routeInfo} />
+                      ))}
+                    </div>
+                  </section>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        {data && totalCount > 0 && (
+          <p className="text-[10px] text-gray-600 text-center pt-1">
+            Tap any alert for details. Source: MTA GTFS-RT alerts feed.
+          </p>
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 export default function AlertsButton() {
   const data = useAlerts();
   const lines = useLines();
@@ -236,7 +356,7 @@ export default function AlertsButton() {
           )}
         </button>
       </DialogTrigger>
-      <DialogContent className="bg-gray-900/95 backdrop-blur-xl border-white/10 text-white rounded-3xl max-h-[80dvh] overflow-hidden flex flex-col">
+      <DialogContent className="bg-gray-900/95 backdrop-blur-xl border-white/10 text-white rounded-t-[28px] sm:rounded-3xl max-h-[85dvh] sm:max-h-[80dvh] overflow-hidden flex flex-col pb-[env(safe-area-inset-bottom)] sm:pb-6">
         <DialogHeader>
           <DialogTitle className="text-white text-xl font-black tracking-tight">
             Service alerts

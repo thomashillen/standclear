@@ -45,6 +45,16 @@ export interface SelectedTrip {
   /** Canonical complex stopId of the transfer point, or undefined for
    *  a direct trip. Resolved into a station by the parent. */
   transferStation?: { stopId: string; name: string; lng: number; lat: number };
+  /** Optional walk-leg endpoint at the start of the trip — the rider's
+   *  actual origin (current location or saved address). When set,
+   *  MapView draws a dashed walking line from this coord to the first
+   *  leg's boarding station. Undefined when the rider is starting at
+   *  a station-pinned origin (no walk needed). */
+  walkFrom?: { lng: number; lat: number; name?: string };
+  /** Same idea for the destination side — walks from the last leg's
+   *  alighting station to this coord (a saved address or geocoded
+   *  destination). Undefined for station-only destinations. */
+  walkTo?: { lng: number; lat: number; name?: string };
 }
 
 function nearestStop(stops: Stop[], lng: number, lat: number): Stop | null {
@@ -177,25 +187,39 @@ function makeTrainIcon(color: string): ImageData {
     ctx.closePath();
   };
 
-  // 1) Headlight beam — drawn FIRST, behind everything, so the body's
-  //    drop shadow occludes the beam's origin and it reads as light
-  //    streaming out from under the headlights. Tapered cone for that
-  //    "spotlight" cone effect.
-  const beamEndX = W - 2;
-  const beamGrad = ctx.createLinearGradient(bodyRight, 0, beamEndX, 0);
-  beamGrad.addColorStop(0, "rgba(255, 240, 200, 0.55)");
-  beamGrad.addColorStop(0.5, "rgba(255, 240, 200, 0.20)");
-  beamGrad.addColorStop(1, "rgba(255, 240, 200, 0)");
-  ctx.fillStyle = beamGrad;
-  const beamStartW = 14;
-  const beamEndW = 4;
-  ctx.beginPath();
-  ctx.moveTo(bodyRight, bodyMidY - beamStartW / 2);
-  ctx.lineTo(beamEndX, bodyMidY - beamEndW / 2);
-  ctx.lineTo(beamEndX, bodyMidY + beamEndW / 2);
-  ctx.lineTo(bodyRight, bodyMidY + beamStartW / 2);
-  ctx.closePath();
-  ctx.fill();
+  // 1) Headlight cones — drawn FIRST, behind everything, so the body's
+  //    drop shadow occludes the cone origins and they read as light
+  //    streaming out from beneath the bulbs. Two distinct cones (one
+  //    per headlight) rather than a single wide beam, so the rider
+  //    can clearly see where each bulb is pointing. Each cone starts
+  //    narrow at the headlight, widens slightly outward (cones diverge
+  //    a touch as they project), and fades from semi-transparent at
+  //    the source to fully transparent at the tip.
+  const coneStartX = bodyRight;
+  const coneTipX = W - 1;
+  // Headlight Y positions match the bulbs drawn later in step 7.
+  const coneTopY = bodyY + 6;
+  const coneBotY = bodyY + BODY_H - 6;
+  const drawCone = (centerY: number, divergeY: number) => {
+    const grad = ctx.createLinearGradient(coneStartX, 0, coneTipX, 0);
+    grad.addColorStop(0, "rgba(255, 245, 200, 0.60)");
+    grad.addColorStop(0.55, "rgba(255, 245, 200, 0.20)");
+    grad.addColorStop(1, "rgba(255, 245, 200, 0)");
+    ctx.fillStyle = grad;
+    const startHalfW = 1.5;
+    const tipHalfW = 4;
+    ctx.beginPath();
+    ctx.moveTo(coneStartX, centerY - startHalfW);
+    ctx.lineTo(coneTipX, centerY + divergeY - tipHalfW);
+    ctx.lineTo(coneTipX, centerY + divergeY + tipHalfW);
+    ctx.lineTo(coneStartX, centerY + startHalfW);
+    ctx.closePath();
+    ctx.fill();
+  };
+  // Top cone diverges slightly upward, bottom cone slightly downward —
+  // the two beams visually splay outward like real train headlights.
+  drawCone(coneTopY, -1.5);
+  drawCone(coneBotY, 1.5);
 
   // 2) Drop shadow — soft dark blur under the body for the "polygon
   //    floating slightly above the map" Apple Maps look.
@@ -308,6 +332,7 @@ export default function MapView({ selectedLine, stationStopId, onLineSelect, onS
   const lines = useLines();
   const geo = useGeolocationState();
 
+
   useEffect(() => { selectedLineRef.current = selectedLine; }, [selectedLine]);
   useEffect(() => { dataRef.current = data; }, [data]);
 
@@ -411,6 +436,14 @@ export default function MapView({ selectedLine, stationStopId, onLineSelect, onS
           type: "geojson",
           data: { type: "FeatureCollection", features: [] },
         });
+        // Walk legs: dashed lines connecting the rider's actual origin
+        // to the boarding station, and the alighting station to the
+        // destination address. Empty FC when the trip's endpoints are
+        // already stations (no walk to draw).
+        map.addSource("subway-trip-walks", {
+          type: "geojson",
+          data: { type: "FeatureCollection", features: [] },
+        });
 
         // One pre-baked RGBA icon per route, registered as "train-<routeId>".
         // Colors + outlines are painted into the bitmap — no SDF, no halo
@@ -485,6 +518,47 @@ export default function MapView({ selectedLine, stationStopId, onLineSelect, onS
         });
 
         // ── Trip overlay (selected trip plan from SearchSheet) ──
+        // Walking legs render UNDER the subway segment so where they
+        // meet at a station the subway color reads cleanly on top.
+        // Apple Maps style: short white dashes ("dotted line" feel)
+        // with a soft halo for legibility on dark tiles. The dashes
+        // shrink slightly at low zoom so they don't smear into a
+        // solid line when viewing the whole city.
+        map.addLayer({
+          id: "subway-trip-walks-halo",
+          type: "line",
+          source: "subway-trip-walks",
+          layout: { "line-cap": "round", "line-join": "round" },
+          paint: {
+            "line-color": "#000000",
+            "line-opacity": 0.45,
+            "line-width": [
+              "interpolate", ["linear"], ["zoom"],
+              10, 4,
+              14, 8,
+            ],
+            "line-blur": 1.5,
+          },
+        });
+        map.addLayer({
+          id: "subway-trip-walks",
+          type: "line",
+          source: "subway-trip-walks",
+          layout: { "line-cap": "round", "line-join": "round" },
+          paint: {
+            "line-color": "#ffffff",
+            "line-opacity": 0.95,
+            "line-width": [
+              "interpolate", ["linear"], ["zoom"],
+              10, 2,
+              14, 4,
+            ],
+            // Mapbox scales the dasharray by line-width, so these
+            // values give roughly square dot-gap pairs at every zoom.
+            "line-dasharray": [0.1, 1.6],
+          },
+        });
+
         // Bright thick polyline per leg in the leg's route color, with
         // a soft white halo underneath so the segment pops on the
         // dimmed line network. Placed above subway-stops so the
@@ -655,51 +729,10 @@ export default function MapView({ selectedLine, stationStopId, onLineSelect, onS
           },
         });
 
-        // Cluster count badge — when the bucket collapse fires (≥4
-        // trains in one position, terminus layover queue), this layer
-        // renders "×N" next to the representative train icon so the
-        // rider still knows there's a queue without seeing 8+ stacked
-        // markers. Filtered to features with cluster=true so non-
-        // clustered trains never get the badge.
-        map.addLayer({
-          id: "subway-trains-cluster-count",
-          type: "symbol",
-          source: "subway-trains",
-          filter: ["==", ["get", "cluster"], true],
-          layout: {
-            "text-field": [
-              "concat",
-              "×",
-              ["to-string", ["get", "count"]],
-            ],
-            "text-font": ["DIN Pro Bold", "Open Sans Bold", "Arial Unicode MS Bold"],
-            "text-size": [
-              "interpolate", ["linear"], ["zoom"],
-              11, 9,
-              13, 11,
-              14, 13,
-            ],
-            // Sit to the right of the icon (the icon's leading-edge
-            // direction is rotated by bearing, but text stays
-            // viewport-aligned, so the badge floats next to the icon
-            // in screen-space rather than rotating with it).
-            "text-offset": [1.7, 0],
-            "text-anchor": "left",
-            "text-allow-overlap": true,
-            "text-ignore-placement": true,
-          },
-          paint: {
-            "text-color": "#fbbf24",
-            "text-halo-color": "#0a0a0a",
-            "text-halo-width": 2.2,
-            "text-halo-blur": 0.3,
-            "text-opacity": [
-              "interpolate", ["linear"], ["zoom"],
-              10.5, 0,
-              11.5, 1,
-            ],
-          },
-        });
+        // (No cluster ×N badge — replaced by a simpler dedup-by-route-
+        // direction pass during feature generation. Multiple same-route
+        // same-direction trains in one bucket collapse to a single
+        // representative icon, so a "queue" indicator is unnecessary.)
 
         // Focused-station halo + dot. The larger translucent ring draws
         // attention to the station independent of the tiny base dot; the
@@ -1180,7 +1213,8 @@ export default function MapView({ selectedLine, stationStopId, onLineSelect, onS
       // Stable ordering inside each bucket so trains don't shuffle
       // between renders — sort by routeId, then trainId. Otherwise an
       // 8-second feed re-poll could swap two trains' stack positions
-      // and produce a visible jump.
+      // and produce a visible jump. Sort first so the dedup pass
+      // below picks a deterministic representative per group.
       for (const arr of buckets.values()) {
         if (arr.length > 1) {
           arr.sort((a, b) => {
@@ -1190,43 +1224,35 @@ export default function MapView({ selectedLine, stationStopId, onLineSelect, onS
         }
       }
 
+      // Within each bucket, dedupe trains that share BOTH route AND
+      // direction. Riders don't care that there are 4 N-bound J
+      // trains stacked at Broad St (terminus layover queue) or 3
+      // N-bound 4 trains queued behind a delay — visually it's "the
+      // J is here, northbound." Keeping the first occurrence per
+      // (routeId, direction) is far simpler than the previous
+      // cluster + ×N badge logic, and naturally handles both cases.
+      // Cross-direction siblings (N-bound + S-bound 4) and cross-
+      // route siblings (4 + 5 sharing track at Lex) survive the
+      // dedup so the perpendicular fan-out below still splits them.
+      for (const [key, arr] of buckets) {
+        if (arr.length <= 1) continue;
+        const seen = new Set<string>();
+        const deduped: Computed[] = [];
+        for (const c of arr) {
+          const groupKey = `${c.line.routeId}-${c.direction}`;
+          if (seen.has(groupKey)) continue;
+          seen.add(groupKey);
+          deduped.push(c);
+        }
+        buckets.set(key, deduped);
+      }
+
       // Cache zoom-dependent meters/pixel scaling once per tick.
       const zoomScale = iconScaleAtZoom(currentZoom);
 
       const features: GeoJSON.Feature[] = [];
-      // Above this many trains in a single bucket, the spread of
-      // perpendicular markers becomes visual noise — that's the
-      // terminus-layover queue case (J at Broad St, F at Jamaica,
-      // etc.). Collapse those into a single representative car icon
-      // with a count badge "×N" rendered next to it. Below the
-      // threshold (1–3 trains) we keep the existing fan-out so a
-      // 2/3 at a station still splits east/west cleanly.
-      const CLUSTER_THRESHOLD = 4;
       for (const arr of buckets.values()) {
         const n = arr.length;
-
-        if (n >= CLUSTER_THRESHOLD) {
-          // Cluster representative — first by stable sort. We pick
-          // its bearing as the rendered orientation; at terminus
-          // queues every train shares the same bearing anyway.
-          const c = arr[0];
-          features.push({
-            type: "Feature",
-            properties: {
-              id: `cluster-${c.line.routeId}-${c.direction}-${c.trainId}`,
-              direction: c.direction,
-              bearing: c.bearing,
-              routeId: c.line.routeId,
-              color: c.line.color,
-              letter: c.line.id,
-              textColor: c.line.textColor,
-              cluster: true,
-              count: n,
-            },
-            geometry: { type: "Point", coordinates: [c.lng, c.lat] },
-          });
-          continue;
-        }
 
         // Track per-direction indices so each direction's sub-group fans
         // out independently. The bucket's iteration order is already
@@ -1250,14 +1276,20 @@ export default function MapView({ selectedLine, stationStopId, onLineSelect, onS
             // So a 2-train bucket with one N and one S splits cleanly
             // to opposite sides without any direction-specific casing.
             //
-            // Offsets within each direction sub-group are 0.5, 1.5,
-            // 2.5… (always positive, fanning further out from the
-            // line). Same-direction siblings stack on the same side
-            // rather than centering around the line — that keeps the
-            // "uptown east, downtown west" rule intact regardless of
-            // how many siblings the bucket has.
+            // Spacing is asymmetric between groups:
+            //   • The FIRST train in each direction sits at 0.5 lanes
+            //     off-center, so a single N + single S split cleanly
+            //     across the line.
+            //   • SAME-direction siblings are tightened to 0.55 of a
+            //     lane apart (vs. the 1.0 used for the cross-direction
+            //     gap). Trains on the same track aren't separated by
+            //     a track gap in real life — they're inches apart at
+            //     a platform — so collapsing them visually closer
+            //     reads better than fanning them out as if they were
+            //     on opposite sides.
             const idxInDir = dirCounts[c.direction]++;
-            const stackOffset = idxInDir + 0.5;
+            const SAME_SIDE_STEP = 0.55;
+            const stackOffset = 0.5 + idxInDir * SAME_SIDE_STEP;
             const perpPx = stackOffset * STACK_SPACING_PX * zoomScale;
             const latRad = (c.lat * Math.PI) / 180;
             const mPerPx =
@@ -1606,11 +1638,15 @@ export default function MapView({ selectedLine, stationStopId, onLineSelect, onS
     const stationSrc = map.getSource("subway-trip-stations") as
       | { setData: (d: unknown) => void }
       | undefined;
-    if (!legSrc || !stationSrc) return;
+    const walkSrc = map.getSource("subway-trip-walks") as
+      | { setData: (d: unknown) => void }
+      | undefined;
+    if (!legSrc || !stationSrc || !walkSrc) return;
 
     if (!selectedTrip || selectedTrip.legs.length === 0) {
       legSrc.setData({ type: "FeatureCollection", features: [] });
       stationSrc.setData({ type: "FeatureCollection", features: [] });
+      walkSrc.setData({ type: "FeatureCollection", features: [] });
       return;
     }
 
@@ -1650,7 +1686,76 @@ export default function MapView({ selectedLine, stationStopId, onLineSelect, onS
       properties: { name: end.name, kind: "alight", tint: "#38bdf8" },
       geometry: { type: "Point", coordinates: [end.lng, end.lat] },
     });
+    // Walk endpoints — rider's actual origin (current location pin or
+    // saved address) and destination address. Same source as the
+    // station markers so they all share zoom-responsive sizing and
+    // labels. White tint differentiates them from station roles
+    // (which use route-coded colors); the labels carry the address
+    // text so the rider sees "550 Madison Ave" at the destination
+    // dot, not just the station name.
+    if (selectedTrip.walkFrom) {
+      stationFeatures.push({
+        type: "Feature",
+        properties: {
+          name: selectedTrip.walkFrom.name ?? "You",
+          kind: "origin",
+          tint: "#ffffff",
+        },
+        geometry: {
+          type: "Point",
+          coordinates: [selectedTrip.walkFrom.lng, selectedTrip.walkFrom.lat],
+        },
+      });
+    }
+    if (selectedTrip.walkTo) {
+      stationFeatures.push({
+        type: "Feature",
+        properties: {
+          name: selectedTrip.walkTo.name ?? "Destination",
+          kind: "destination",
+          tint: "#ffffff",
+        },
+        geometry: {
+          type: "Point",
+          coordinates: [selectedTrip.walkTo.lng, selectedTrip.walkTo.lat],
+        },
+      });
+    }
     stationSrc.setData({ type: "FeatureCollection", features: stationFeatures });
+
+    // Walk legs — straight dashed line from the rider's actual origin
+    // to the boarding station, and from the alighting station to the
+    // destination address. We don't fetch actual pedestrian routing
+    // (would need a separate API call); the straight line is the
+    // standard transit-app convention for "you walk this part."
+    const walkFeatures: GeoJSON.Feature[] = [];
+    if (selectedTrip.walkFrom) {
+      walkFeatures.push({
+        type: "Feature",
+        properties: { kind: "from" },
+        geometry: {
+          type: "LineString",
+          coordinates: [
+            [selectedTrip.walkFrom.lng, selectedTrip.walkFrom.lat],
+            [start.lng, start.lat],
+          ],
+        },
+      });
+    }
+    if (selectedTrip.walkTo) {
+      walkFeatures.push({
+        type: "Feature",
+        properties: { kind: "to" },
+        geometry: {
+          type: "LineString",
+          coordinates: [
+            [end.lng, end.lat],
+            [selectedTrip.walkTo.lng, selectedTrip.walkTo.lat],
+          ],
+        },
+      });
+    }
+    walkSrc.setData({ type: "FeatureCollection", features: walkFeatures });
 
     // Fit camera to the bounding box of all leg coords. Padding
     // accounts for the SearchSheet (still open) on the bottom (mobile)
@@ -1659,13 +1764,23 @@ export default function MapView({ selectedLine, stationStopId, onLineSelect, onS
       minLat = Infinity,
       maxLng = -Infinity,
       maxLat = -Infinity;
+    const expand = (lng: number, lat: number) => {
+      if (lng < minLng) minLng = lng;
+      if (lng > maxLng) maxLng = lng;
+      if (lat < minLat) minLat = lat;
+      if (lat > maxLat) maxLat = lat;
+    };
     for (const leg of selectedTrip.legs) {
-      for (const [lng, lat] of leg.coordinates) {
-        if (lng < minLng) minLng = lng;
-        if (lng > maxLng) maxLng = lng;
-        if (lat < minLat) minLat = lat;
-        if (lat > maxLat) maxLat = lat;
-      }
+      for (const [lng, lat] of leg.coordinates) expand(lng, lat);
+    }
+    // Walking endpoints participate in the bounds too — otherwise the
+    // dashed walks disappear off-screen at the start/end of the
+    // animation when they extend past the subway segment.
+    if (selectedTrip.walkFrom) {
+      expand(selectedTrip.walkFrom.lng, selectedTrip.walkFrom.lat);
+    }
+    if (selectedTrip.walkTo) {
+      expand(selectedTrip.walkTo.lng, selectedTrip.walkTo.lat);
     }
     if (
       Number.isFinite(minLng) &&
@@ -1674,8 +1789,15 @@ export default function MapView({ selectedLine, stationStopId, onLineSelect, onS
       Number.isFinite(maxLat)
     ) {
       const isMobile = window.matchMedia("(max-width: 639px)").matches;
+      // Half-detent sheet covers the bottom ~60% of the viewport
+      // (sheet is 88dvh tall, translated down 28dvh, so its top edge
+      // sits at 40% from the top). Bottom padding has to exceed that
+      // coverage or the route's southern edge ends up clipped under
+      // the panel. 65% leaves a small visible buffer above the sheet
+      // edge so the rider sees the full route, not just the parts
+      // not covered by chrome.
       const bottomPad = isMobile
-        ? Math.round(window.innerHeight * 0.55) + 24
+        ? Math.round(window.innerHeight * 0.65) + 24
         : 60;
       const rightPad = isMobile ? 40 : 360;
       map.fitBounds(

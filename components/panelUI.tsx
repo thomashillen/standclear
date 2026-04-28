@@ -5,7 +5,7 @@ import { ArrowUp, ArrowDown, Star, X, Home, Briefcase, ArrowRight, Compass, Foot
 import type { Arrival } from "@/lib/useTrains";
 import { catchVerdict, walkMinutes, type CatchVerdict, type StationEntry } from "@/lib/stopsIndex";
 import type { CommuteAnchor } from "@/lib/useFavorites";
-import type { TripPlan } from "@/lib/commuteRouting";
+import { estimateTripTimeSec, type TripPlan } from "@/lib/commuteRouting";
 
 // ─── Shared types ───────────────────────────────────────────────────
 
@@ -425,13 +425,41 @@ export function TripPlanRow({
       .slice(0, 3);
   }, [arrivals, leg1, now]);
 
+  // Total trip time in minutes — walk + wait (live next-train ETA
+  // when known) + travel + transfer + walk. Wraps the row's already
+  // filtered arrivals into a single-entry map keyed on leg-1's
+  // boarding complex so estimateTripTimeSec can find the live wait.
+  const totalMin = useMemo(() => {
+    if (!leg1) return 0;
+    const m = new Map<string, Arrival[]>();
+    m.set(leg1.boardComplexId, arrivals);
+    const sec = estimateTripTimeSec(plan, {
+      arrivalsByStation: m,
+      nowSec: now / 1000,
+      walkFromMeters,
+      walkToMeters,
+    });
+    return Math.max(1, Math.round(sec / 60));
+  }, [plan, leg1, arrivals, now, walkFromMeters, walkToMeters]);
+
   // Outer element switches between div (purely informational) and
   // button (when onSelect is provided). The latter gives keyboard /
   // screen-reader semantics for "tap to show this trip on the map"
   // without losing the rich nested layout.
   const Container: React.ElementType = onSelect ? "button" : "div";
+  // iOS-26 selected state: vibrant ring + ambient glow tinted to the
+  // leg-1 route color, matching the trip overlay's color on the map.
+  // Inline style (instead of Tailwind classes) so the color flows
+  // directly from the route data — no per-route class explosion.
+  const accentColor = leg1Info?.color ?? "#ffffff";
+  const selectedStyle: React.CSSProperties | undefined = isSelected
+    ? {
+        boxShadow: `inset 0 0 0 2px ${accentColor}, 0 10px 32px -8px ${accentColor}66, 0 1px 0 rgba(255,255,255,0.10) inset`,
+        backgroundColor: `${accentColor}22`,
+      }
+    : undefined;
   const ringCls = isSelected
-    ? "ring-2 ring-white/40 bg-white/[0.08]"
+    ? ""
     : isPrimary
       ? "ring-1 bg-white/[0.05] ring-white/[0.10]"
       : "ring-1 bg-white/[0.02] ring-white/[0.06]";
@@ -447,7 +475,8 @@ export function TripPlanRow({
       type={onSelect ? "button" : undefined}
       onClick={onSelect}
       aria-pressed={onSelect ? !!isSelected : undefined}
-      className={`rounded-2xl px-3.5 pt-3 pb-3 ${ringCls} ${interactiveCls} transition-colors`}
+      style={selectedStyle}
+      className={`rounded-2xl px-3.5 pt-3 pb-3 ${ringCls} ${interactiveCls} transition-all duration-200`}
     >
       {walkFromMin > 0 && (
         <div className="flex items-center gap-1.5 text-[11px] text-gray-400 mb-2">
@@ -487,11 +516,29 @@ export function TripPlanRow({
             )}
           </>
         )}
-        <span className="text-[11px] text-gray-400 ml-1.5 truncate">
+        <span className="text-[11px] text-gray-400 ml-1.5 truncate min-w-0">
           {plan.totalStops} stop{plan.totalStops === 1 ? "" : "s"}
           {transferStation
-            ? ` · transfer at ${transferStation.name}`
+            ? ` · ${transferStation.name}`
             : " · direct"}
+        </span>
+        {/* Total time pill — vibrant, tabular numerals, route-color
+            tinted on the selected plan and quiet otherwise. Pinned
+            to the right of the ribbon so the rider's eye lands on
+            "how long" first. */}
+        <span
+          className="ml-auto flex-shrink-0 inline-flex items-center px-2 h-5 rounded-full text-[11px] font-bold tabular-nums"
+          style={
+            isSelected
+              ? {
+                  backgroundColor: `${accentColor}33`,
+                  color: "#ffffff",
+                  boxShadow: `inset 0 0 0 1px ${accentColor}80`,
+                }
+              : { backgroundColor: "rgba(255,255,255,0.08)", color: "#f3f4f6" }
+          }
+        >
+          {totalMin} min
         </span>
       </div>
 

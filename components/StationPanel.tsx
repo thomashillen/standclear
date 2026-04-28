@@ -1,9 +1,9 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowUp, ArrowDown, Star, X, Home, Briefcase } from "lucide-react";
 import { useLines } from "@/lib/subwayData";
-import { useTrains, type Arrival } from "@/lib/useTrains";
+import { useTrains, type Arrival, type Train } from "@/lib/useTrains";
 import { useFavorites, useCommute } from "@/lib/useFavorites";
 import { useNow } from "@/lib/useNow";
 import { buildStationIndex } from "@/lib/stopsIndex";
@@ -196,6 +196,81 @@ export default function StationPanel({ stopId, onClose, onSelectLine }: Props) {
     () => (station ? new Set(station.stopIds) : null),
     [station],
   );
+
+  // Stabilize "Now" trains across feed polls. The MTA feed
+  // occasionally oscillates a train's currentStatus between
+  // STOPPED_AT and IN_TRANSIT_TO across consecutive 8-second polls
+  // (route-specific + base feeds disagree, or the field is briefly
+  // absent and falls back to the IN_TRANSIT_TO default). Without
+  // smoothing, a train that's actually sitting on the platform
+  // flickers in and out of the "Now" group on every other poll.
+  //
+  // Strategy: remember the last time we saw each tripId STOPPED_AT,
+  // keyed by parent stopId. Treat a train as "Now" if it's currently
+  // STOPPED_AT here OR was STOPPED_AT here within the last GRACE_MS.
+  // When the feed shows the train at a different stopId, the entry
+  // is implicitly stale (the new stopId won't match the old one) and
+  // gets cleaned up.
+  const STOPPED_AT_GRACE_MS = 25_000;
+  const stoppedAtMemoRef = useRef<
+    Map<string, { stopId: string; lastSeenMs: number; train: Train }>
+  >(new Map());
+
+  // Update the memo on every fresh data tick. Deliberately a side
+  // effect rather than derived state — we want the memo to outlive
+  // the current data snapshot so a brief absence from data.trains
+  // doesn't drop the entry.
+  useEffect(() => {
+    if (!data) return;
+    const memo = stoppedAtMemoRef.current;
+    const nowMs = Date.now();
+    // Record currently STOPPED_AT trains. Existing entries get their
+    // timestamp refreshed; new ones get added.
+    for (const t of data.trains) {
+      if (t.status !== "STOPPED_AT") continue;
+      memo.set(t.id, {
+        stopId: t.prevStopId,
+        lastSeenMs: nowMs,
+        train: t,
+      });
+    }
+    // GC: drop entries that are clearly stale.
+    //
+    //   1. Time expiry — past the grace window, no recent confirmation.
+    //
+    //   2. Train CONFIRMED at a different stop — but only when that
+    //      confirmation comes from another STOPPED_AT report. We do
+    //      NOT trust a status-change-to-IN_TRANSIT_TO as evidence
+    //      the train moved: the API's prevStopId field is computed
+    //      differently for IT vs. STOPPED_AT (one uses the feed's
+    //      stop_time_updates index, the other defaults to the
+    //      vehicle's current stopId), so a mere status flip can
+    //      flip prevStopId even when the train hasn't moved. Using
+    //      that as a deletion signal is exactly the bug that caused
+    //      the original flicker, where a STOPPED_AT → IT
+    //      oscillation immediately blew away the memo entry.
+    //
+    //      A FRESH STOPPED_AT at a different parent stopId is a
+    //      strong signal — the train is now physically at another
+    //      platform. Only that drops the entry early.
+    const liveByTrip = new Map<string, Train>();
+    for (const t of data.trains) liveByTrip.set(t.id, t);
+    for (const [tripId, entry] of memo) {
+      if (nowMs - entry.lastSeenMs > STOPPED_AT_GRACE_MS) {
+        memo.delete(tripId);
+        continue;
+      }
+      const live = liveByTrip.get(tripId);
+      if (
+        live &&
+        live.status === "STOPPED_AT" &&
+        live.prevStopId !== entry.stopId
+      ) {
+        memo.delete(tripId);
+      }
+    }
+  }, [data]);
+
   const { north, south } = useMemo(() => {
     const n: Arrival[] = [];
     const s: Arrival[] = [];
@@ -203,23 +278,22 @@ export default function StationPanel({ stopId, onClose, onSelectLine }: Props) {
     const nowSec = data.generatedAt / 1000;
     const CUTOFF = 45 * 60;
 
-    // Synthesize "Now" arrivals from trains currently STOPPED_AT a
-    // platform in this complex. The MTA feed does NOT include the
-    // current stop in the trip's future stop_time_updates (that
-    // arrival has already happened from the server's perspective),
-    // so without this synthesis a train clearly sitting at the
-    // station never shows up in the list — the rider can see the
-    // train on the map but the panel reports the next train as the
-    // closest one. Each synthetic entry carries eta = nowSec so it
-    // sorts to the top and renders as "Now".
-    //
-    // Dedup: if the API somehow does include a near-zero arrival for
-    // the same trip+stop, the synthetic entry takes precedence and
-    // we skip the API copy. Compound key on tripId+stopId.
+    // Synthesize "Now" arrivals from trains currently OR RECENTLY
+    // STOPPED_AT a platform in this complex. The MTA feed does NOT
+    // include the current stop in the trip's future
+    // stop_time_updates (that arrival has already happened from the
+    // server's perspective), so without this synthesis a train
+    // clearly sitting at the station never shows up in the list.
+    // The recency window (STOPPED_AT_GRACE_MS) absorbs feed status
+    // oscillation that would otherwise flicker the row.
     const seen = new Set<string>();
+    const nowMs = Date.now();
+    const memo = stoppedAtMemoRef.current;
+    const considered = new Set<string>();
     for (const t of data.trains) {
       if (t.status !== "STOPPED_AT") continue;
       if (!stationIds.has(t.prevStopId)) continue;
+      considered.add(t.id);
       const arr: Arrival = {
         routeId: t.routeId,
         stopId: t.prevStopId,
@@ -228,6 +302,25 @@ export default function StationPanel({ stopId, onClose, onSelectLine }: Props) {
         tripId: t.id,
       };
       seen.add(`${t.id}|${t.prevStopId}`);
+      if (arr.direction === "N") n.push(arr);
+      else s.push(arr);
+    }
+    // Recently-STOPPED_AT (within grace window) — anything in the memo
+    // whose stopId belongs to this complex and that we didn't already
+    // include from the current snapshot.
+    for (const [tripId, entry] of memo) {
+      if (considered.has(tripId)) continue;
+      if (!stationIds.has(entry.stopId)) continue;
+      if (nowMs - entry.lastSeenMs > STOPPED_AT_GRACE_MS) continue;
+      const t = entry.train;
+      const arr: Arrival = {
+        routeId: t.routeId,
+        stopId: entry.stopId,
+        direction: t.direction,
+        eta: nowSec,
+        tripId,
+      };
+      seen.add(`${tripId}|${entry.stopId}`);
       if (arr.direction === "N") n.push(arr);
       else s.push(arr);
     }

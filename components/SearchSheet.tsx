@@ -1,18 +1,33 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Search, X, Compass, ArrowLeftRight, MapPin } from "lucide-react";
+import {
+  Search,
+  X,
+  Compass,
+  ArrowLeftRight,
+  ArrowLeft,
+  MapPin,
+  Home,
+  Briefcase,
+} from "lucide-react";
 import { useLines } from "@/lib/subwayData";
 import { useTrains, type Arrival } from "@/lib/useTrains";
 import { useFavorites, useCommute, type CommuteEndpoint } from "@/lib/useFavorites";
 import { useGeolocationState } from "@/lib/useGeolocation";
 import { useNow } from "@/lib/useNow";
+import { useRecentSearches } from "@/lib/useRecentSearches";
 import { useSheetDrag } from "@/lib/useSheetDrag";
-import { planTrips, type TripPlan } from "@/lib/commuteRouting";
+import {
+  planTrips,
+  rankPlansByTime,
+  type TripPlan,
+} from "@/lib/commuteRouting";
 import {
   buildStationIndex,
   haversineMeters,
   nearestStations,
+  nearestStationsWithin,
   searchStations,
   type StationEntry,
 } from "@/lib/stopsIndex";
@@ -33,12 +48,48 @@ interface Props {
   onClose: () => void;
   onStationOpen: (stopId: string) => void;
   /** Tap on a trip plan in directions mode. The parent renders the
-   *  trip's legs and station markers on the map. Pass null to clear. */
-  onTripSelect?: (plan: TripPlan | null, fromStopId: string) => void;
+   *  trip's legs, station markers, and walking segments on the map.
+   *  Pass null to clear. */
+  onTripSelect?: (
+    selection:
+      | {
+          plan: TripPlan;
+          walkFrom?: { lng: number; lat: number; name?: string };
+          walkTo?: { lng: number; lat: number; name?: string };
+        }
+      | null,
+  ) => void;
   /** Identifier (string) of the currently-selected plan so the row can
    *  show a selected-state highlight. The parent generates this from
    *  the plan it renders on the map. */
   selectedTripKey?: string | null;
+  /** Mode the sheet should land in when it opens. Defaults to
+   *  "search". The "See all routes" CTA in NearbyPanel sets this to
+   *  "directions" so the rider arrives directly at trip planning
+   *  with home/work pre-filled (the in-component effect handles
+   *  the auto-fill on first directions render). */
+  initialMode?: "search" | "directions";
+  /** When set, the sheet operates in focused anchor-pick mode: a
+   *  prominent banner makes the goal explicit ("Tap a result to set
+   *  as Home"), tapping ANY row immediately pins it as the named
+   *  anchor and closes the sheet — instead of opening the station
+   *  panel or starting a directions flow. Used by MoreSheet's
+   *  Set Home / Set Work rows. Cleared when the sheet closes. */
+  anchorPickMode?: "home" | "work" | null;
+  /** Called after a successful anchor pick so the parent can close
+   *  the sheet (and optionally clear the pick mode). */
+  onAnchorPicked?: () => void;
+  /** Force-fill the directions From/To when the sheet opens. Used
+   *  by NearbyPanel's "See all routes" button so the rider always
+   *  lands on a fresh "current location → chosen destination" trip
+   *  rather than whatever they previously searched. Each endpoint
+   *  is either a station (by stopId) or a geocoded place (lng/lat
+   *  + name). When this prop changes the sheet re-applies — so
+   *  successive "See all routes" taps reset cleanly. */
+  presetTrip?: {
+    from: { kind: "station"; stopId: string } | { kind: "address"; lng: number; lat: number; name: string };
+    to: { kind: "station"; stopId: string } | { kind: "address"; lng: number; lat: number; name: string };
+  } | null;
 }
 
 // ─── SearchSheet ─────────────────────────────────────────────────────
@@ -79,24 +130,91 @@ type TripEndpoint = StationEntry & {
   address?: Place;
 };
 
+// ─── Set-as-Home/Work toggle button ─────────────────────────────────
+// Compact icon button that pins a station or address as the rider's
+// Home or Work anchor. Active state matches the StationPanel chip
+// vocabulary (emerald for Home, sky for Work) so a rider sees the
+// same visual whether they pin from the station detail or the
+// directions picker. Stops propagation so tapping the button doesn't
+// also fire the picker row's pick-and-fill handler.
+function AnchorIconButton({
+  anchor,
+  active,
+  onClick,
+}: {
+  anchor: "home" | "work";
+  active: boolean;
+  onClick: () => void;
+}) {
+  const Icon = anchor === "home" ? Home : Briefcase;
+  const activeClass =
+    anchor === "home"
+      ? "bg-emerald-300/20 text-emerald-200 ring-1 ring-emerald-300/40"
+      : "bg-sky-300/20 text-sky-200 ring-1 ring-sky-300/40";
+  const inactiveClass =
+    "text-gray-500 hover:text-gray-100 hover:bg-white/[0.06]";
+  return (
+    <button
+      type="button"
+      onClick={(e) => {
+        e.stopPropagation();
+        onClick();
+      }}
+      aria-pressed={active}
+      aria-label={
+        active ? `Unset as ${anchor}` : `Set as ${anchor}`
+      }
+      className={`press w-7 h-7 flex items-center justify-center rounded-full touch-manipulation ${
+        active ? activeClass : inactiveClass
+      }`}
+    >
+      <Icon className="w-3.5 h-3.5" />
+    </button>
+  );
+}
+
 export default function SearchSheet({
   open,
   onClose,
   onStationOpen,
   onTripSelect,
   selectedTripKey,
+  initialMode = "search",
+  anchorPickMode = null,
+  onAnchorPicked,
+  presetTrip = null,
 }: Props) {
   const lines = useLines();
   const data = useTrains();
   const { has, toggle } = useFavorites();
-  const { home, work, anchorOf } = useCommute();
+  const {
+    recents,
+    addStation: addRecentStation,
+    addPlace: addRecentPlace,
+    clear: clearRecents,
+  } = useRecentSearches();
+  const {
+    home,
+    work,
+    anchorOf,
+    assignAnchor,
+    assignAnchorAddress,
+    setAnchor,
+  } = useCommute();
 
-  // Mode: which pane is showing. Defaults to search; flips back to
-  // search on close so re-opening lands in the more general surface.
-  const [mode, setMode] = useState<"search" | "directions">("search");
+  // Mode: which pane is showing. Defaults from `initialMode` so the
+  // rider lands wherever the entry point dropped them (Search for the
+  // header search button, Directions for the Going-to-Work "See all
+  // routes" CTA). Flips back to `initialMode` on close so re-opening
+  // is consistent with how it was opened.
+  const [mode, setMode] = useState<"search" | "directions">(initialMode);
 
-  // Search-mode state.
+  // Search-mode state. Stations come from the in-memory index; places
+  // come from a debounced Mapbox geocoder so a rider can type an
+  // address into the same search bar and see both kinds of results
+  // mixed — Apple Maps' single-search pattern.
   const [query, setQuery] = useState("");
+  const [searchPlaceResults, setSearchPlaceResults] = useState<Place[]>([]);
 
   // Directions-mode state. Endpoint type is a station-with-optional-
   // address-metadata so the field can show an address label while
@@ -161,14 +279,33 @@ export default function SearchSheet({
     return m;
   }, [data, index]);
 
-  // Reset state when sheet closes so re-opening lands clean.
+  // Reset state when sheet closes so re-opening lands clean. Mode
+  // resets to whatever the entry point requested (initialMode), not a
+  // hardcoded "search" — so opening via "See all routes" repeatedly
+  // keeps landing in directions. Also clear From/To so a stale prior
+  // trip doesn't show up the next time the rider opens directions.
   useEffect(() => {
     if (!open) {
-      setMode("search");
+      setMode(initialMode);
       setQuery("");
       setPlannerQuery("");
+      setSearchPlaceResults([]);
+      setTripFrom(null);
+      setTripTo(null);
+      setActiveField("from");
     }
-  }, [open]);
+  }, [open, initialMode]);
+
+  // When the sheet is already mounted and the parent flips
+  // initialMode (rider tapped "See all routes" while sheet was
+  // briefly closed and re-opened), sync the mode without waiting
+  // for a close cycle.
+  useEffect(() => {
+    if (open) setMode(initialMode);
+    // Intentionally only depend on initialMode — we don't want this
+    // to fire every time the rider toggles modes manually.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialMode]);
 
   // Resolve a CommuteEndpoint into a TripEndpoint for the planner fields.
   // Station endpoints map directly; address endpoints resolve to the nearest
@@ -199,8 +336,11 @@ export default function SearchSheet({
   // with Work if those anchors are set. Saves the rider the typing
   // for the most common "what's a non-direct version of my commute"
   // case. Doesn't override values the rider has already chosen.
+  // Skipped entirely when a presetTrip is supplied — the parent
+  // explicitly controls From/To in that path (see "See all routes").
   useEffect(() => {
     if (mode !== "directions") return;
+    if (presetTrip) return;
     if (tripFrom || tripTo) return;
     const h = endpointToTrip(home);
     const w = endpointToTrip(work);
@@ -211,7 +351,41 @@ export default function SearchSheet({
     // null when both pre-filled — plans render straight away rather
     // than popping the keyboard.
     setActiveField(!h ? "from" : !w ? "to" : null);
-  }, [mode, home, work, endpointToTrip, tripFrom, tripTo]);
+  }, [mode, home, work, endpointToTrip, tripFrom, tripTo, presetTrip]);
+
+  // Apply presetTrip on open / preset-change. Runs whenever the
+  // preset reference changes, which the parent toggles per "See all
+  // routes" tap, so successive taps land cleanly with current
+  // location and the right destination.
+  useEffect(() => {
+    if (!open || !presetTrip) return;
+    const resolveEndpoint = (
+      ep: NonNullable<typeof presetTrip>["from"],
+    ): TripEndpoint | null => {
+      if (ep.kind === "station") {
+        return stationsByComplexId.get(ep.stopId) ?? null;
+      }
+      const nearest = nearestStations(index, ep.lng, ep.lat, 1)[0];
+      if (!nearest) return null;
+      return {
+        ...nearest,
+        displayName: ep.name,
+        address: {
+          id: `preset:${ep.name}`,
+          name: ep.name,
+          context: "",
+          lng: ep.lng,
+          lat: ep.lat,
+        },
+      };
+    };
+    const f = resolveEndpoint(presetTrip.from);
+    const t = resolveEndpoint(presetTrip.to);
+    if (f) setTripFrom(f);
+    if (t) setTripTo(t);
+    setActiveField(null);
+    setMode("directions");
+  }, [open, presetTrip, stationsByComplexId, index]);
 
   // ── Search-mode results.
   const searchResults = useMemo<(StationEntry & { meters?: number })[] | null>(
@@ -224,13 +398,70 @@ export default function SearchSheet({
     [mode, query, index],
   );
 
-  // ── Directions-mode plans.
+  // ── Directions-mode plans, time-ranked.
+  // When an endpoint is an address we expand candidates to every
+  // station within ~700m so the planner doesn't lock onto a single
+  // nearest station and miss alternates. Classic example: an address
+  // at 60th & Lex is closest to both 5Av/59 (N/R/W) and Lex/59
+  // (4/5/6); locking onto one buries direct routes via the other.
+  // The expansion + path-aware dedup in planTrips together produce a
+  // diverse plan list. Per-plan walks are computed via address
+  // anchors so each plan's timing reflects its actual board/alight
+  // station, not the original anchor's station.
+  const NEAR_RADIUS_M = 700;
   const tripPlans = useMemo(() => {
     if (mode !== "directions" || !tripFrom || !tripTo || !lines) return [];
-    return planTrips(lines, index, tripFrom.stopIds, tripTo.stopIds, {
-      maxResults: 4,
+    const fromStopIds = tripFrom.address
+      ? Array.from(
+          new Set(
+            nearestStationsWithin(
+              index,
+              tripFrom.address.lng,
+              tripFrom.address.lat,
+              NEAR_RADIUS_M,
+            ).flatMap((s) => s.stopIds),
+          ),
+        )
+      : tripFrom.stopIds;
+    const toStopIds = tripTo.address
+      ? Array.from(
+          new Set(
+            nearestStationsWithin(
+              index,
+              tripTo.address.lng,
+              tripTo.address.lat,
+              NEAR_RADIUS_M,
+            ).flatMap((s) => s.stopIds),
+          ),
+        )
+      : tripTo.stopIds;
+    const raw = planTrips(lines, index, fromStopIds, toStopIds, {
+      maxResults: 12,
     });
-  }, [mode, tripFrom, tripTo, lines, index]);
+    return rankPlansByTime(raw, {
+      arrivalsByStation,
+      nowSec: now / 1000,
+      walkFromAnchor: tripFrom.address
+        ? { lng: tripFrom.address.lng, lat: tripFrom.address.lat }
+        : undefined,
+      walkToAnchor: tripTo.address
+        ? { lng: tripTo.address.lng, lat: tripTo.address.lat }
+        : undefined,
+      stationsByComplexId,
+      // Fallback constants for non-address endpoints.
+      walkFromMeters: 0,
+      walkToMeters: 0,
+    }).slice(0, 6);
+  }, [
+    mode,
+    tripFrom,
+    tripTo,
+    lines,
+    index,
+    arrivalsByStation,
+    now,
+    stationsByComplexId,
+  ]);
 
   // ── Picker results (when a directions field needs filling).
   const plannerSearchResults = useMemo<StationEntry[] | null>(() => {
@@ -261,11 +492,35 @@ export default function SearchSheet({
     debouncedGeocoder(
       q,
       geo.lat != null && geo.lng != null
-        ? { proximity: { lng: geo.lng, lat: geo.lat }, limit: 5 }
-        : { limit: 5 },
+        ? { proximity: { lng: geo.lng, lat: geo.lat }, limit: 10 }
+        : { limit: 10 },
       setPlannerPlaceResults,
     );
   }, [mode, plannerQuery, debouncedGeocoder, geo.lat, geo.lng]);
+
+  // Same idea for Search mode: as the rider types into the top-level
+  // search bar, fire the debounced geocoder so addresses, neighborhoods,
+  // and POIs surface alongside station hits. One shared geocoder
+  // instance — the debounce window means consecutive keystrokes
+  // collapse into a single API call.
+  useEffect(() => {
+    if (mode !== "search") {
+      setSearchPlaceResults([]);
+      return;
+    }
+    const q = query.trim();
+    if (q.length < 2) {
+      setSearchPlaceResults([]);
+      return;
+    }
+    debouncedGeocoder(
+      q,
+      geo.lat != null && geo.lng != null
+        ? { proximity: { lng: geo.lng, lat: geo.lat }, limit: 10 }
+        : { limit: 10 },
+      setSearchPlaceResults,
+    );
+  }, [mode, query, debouncedGeocoder, geo.lat, geo.lng]);
 
   // Resolve each place to the nearest station so the trip planner
   // (which routes between StationEntries) has a real subway endpoint
@@ -285,9 +540,109 @@ export default function SearchSheet({
     [plannerPlaceResults, index],
   );
 
+  // Same derivation for Search mode places: each Mapbox hit pinned to
+  // its nearest station so a "directions to here" tap can route the
+  // rider through the subway from a real platform endpoint.
+  const searchPlaceRows = useMemo(
+    () =>
+      searchPlaceResults
+        .map((place) => ({
+          place,
+          nearest: nearestStations(index, place.lng, place.lat, 1)[0] ?? null,
+        }))
+        .filter(
+          (r): r is { place: Place; nearest: StationEntry & { meters: number } } =>
+            r.nearest !== null,
+        ),
+    [searchPlaceResults, index],
+  );
+
+  // Unified "directions to here from current location" handoff used
+  // by every result row in Search mode. The compass on a station, the
+  // tap on a place — both end here. Origin defaults to the rider's
+  // nearest station tagged as "Current location"; if geo isn't
+  // available the From field stays empty and gets focus so the rider
+  // can fill it manually. Picks are recorded in recent searches so
+  // they surface in the empty state next time.
+  const startDirectionsTo = (destination: TripEndpoint) => {
+    if (destination.address) {
+      addRecentPlace({
+        id: destination.address.id,
+        name: destination.address.name,
+        context: destination.address.context,
+        lng: destination.address.lng,
+        lat: destination.address.lat,
+      });
+    } else {
+      addRecentStation(destination.stopId, destination.name);
+    }
+    setMode("directions");
+    setQuery("");
+    setPlannerQuery("");
+    setSearchPlaceResults([]);
+    let nextFrom: TripEndpoint | null = null;
+    if (geo.lat != null && geo.lng != null) {
+      const nearestFrom = nearestStations(index, geo.lng, geo.lat, 1)[0];
+      if (nearestFrom) {
+        nextFrom = {
+          ...nearestFrom,
+          displayName: "Current location",
+          address: {
+            id: "current-location",
+            name: "Current location",
+            context: "",
+            lng: geo.lng,
+            lat: geo.lat,
+          },
+        };
+      }
+    }
+    setTripFrom(nextFrom);
+    setTripTo(destination);
+    setActiveField(nextFrom ? null : "from");
+  };
+
   const swapTrip = () => {
     setTripFrom(tripTo);
     setTripTo(tripFrom);
+  };
+
+  // ── Anchor toggles for picker rows ─────────────────────────────
+  // Each picker row carries a Home and a Work icon button. Tapping
+  // assigns/clears the rider's commute anchor. Stations route through
+  // assignAnchor (preserves the favorites-add side effect for stops);
+  // addresses go through assignAnchorAddress.
+  const isStationAnchored = (
+    stopId: string,
+    anchor: "home" | "work",
+  ): boolean => {
+    const ep = anchor === "home" ? home : work;
+    return ep?.kind === "station" && ep.stopId === stopId;
+  };
+  const isAddressAnchored = (
+    place: Place,
+    anchor: "home" | "work",
+  ): boolean => {
+    const ep = anchor === "home" ? home : work;
+    return (
+      ep?.kind === "address" &&
+      ep.name === place.name &&
+      ep.lng === place.lng &&
+      ep.lat === place.lat
+    );
+  };
+  const toggleStationAnchor = (stopId: string, anchor: "home" | "work") => {
+    if (isStationAnchored(stopId, anchor)) setAnchor(anchor, null);
+    else assignAnchor(anchor, stopId);
+  };
+  const toggleAddressAnchor = (place: Place, anchor: "home" | "work") => {
+    if (isAddressAnchored(place, anchor)) setAnchor(anchor, null);
+    else
+      assignAnchorAddress(anchor, {
+        name: place.name,
+        lng: place.lng,
+        lat: place.lat,
+      });
   };
 
   const pickPlannerStation = (s: StationEntry) => {
@@ -327,11 +682,22 @@ export default function SearchSheet({
   };
 
   // Shared sheet drag with half/full detents + dismiss threshold.
-  const { detent, sheetStyle, handlers, onHandleTap } = useSheetDrag({
+  const { detent, sheetStyle, handlers, onHandleTap, setDetent } = useSheetDrag({
     halfRestingY: "calc(88dvh - 60dvh)",
     open,
     onDismiss: onClose,
   });
+
+  // When opening directly into directions mode (via "See all routes"
+  // from NearbyPanel), default to the full detent so the rider sees
+  // every plan without having to drag the sheet up. The hook's own
+  // close-effect resets to "half" so this only fires on (re)open
+  // while initialMode says directions.
+  useEffect(() => {
+    if (open && initialMode === "directions") {
+      setDetent("full");
+    }
+  }, [open, initialMode, setDetent]);
 
   if (!open) return null;
 
@@ -371,53 +737,50 @@ export default function SearchSheet({
           }}
           aria-label={detent === "half" ? "Expand panel" : "Collapse panel"}
         />
-        <div className="flex items-center gap-2 text-white">
-          <Search className="w-[17px] h-[17px]" />
-          <span className="font-black text-[16px] tracking-tight">
+        <div className="flex items-center gap-2 text-white min-w-0">
+          {mode === "directions" && (
+            // Back-to-search arrow. The segmented control is gone
+            // (Search and Directions aren't peer tabs anymore — Search
+            // is the entry surface; Directions is what you get when
+            // you tap the compass on a result), so the rider needs
+            // an explicit back affordance to return to the search
+            // list without dismissing the whole sheet.
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                setMode("search");
+                setPlannerQuery("");
+                setPlannerPlaceResults([]);
+                // Going back to search is the rider stepping out of
+                // the directions context — drop any active trip
+                // overlay so they don't see a stale route on the
+                // map. Same intent as tapping the X (which already
+                // clears via onClose).
+                onTripSelect?.(null);
+              }}
+              aria-label="Back to search"
+              className="press w-8 h-8 -ml-1 flex items-center justify-center rounded-full bg-white/[0.08] hover:bg-white/[0.14] touch-manipulation flex-shrink-0"
+            >
+              <ArrowLeft className="w-[16px] h-[16px]" strokeWidth={2.5} />
+            </button>
+          )}
+          {mode === "search" ? (
+            <Search className="w-[17px] h-[17px]" />
+          ) : (
+            <Compass className="w-[17px] h-[17px]" />
+          )}
+          <span className="font-black text-[16px] tracking-tight truncate">
             {mode === "search" ? "Search" : "Directions"}
           </span>
         </div>
         <button
           onClick={onClose}
-          className="press text-white opacity-85 hover:opacity-100 w-9 h-9 -mr-1 flex items-center justify-center rounded-full bg-white/[0.08] hover:bg-white/[0.12] touch-manipulation"
+          className="press text-white opacity-85 hover:opacity-100 w-9 h-9 -mr-1 flex items-center justify-center rounded-full bg-white/[0.08] hover:bg-white/[0.12] touch-manipulation flex-shrink-0"
           aria-label="Close panel"
         >
           <X className="w-[16px] h-[16px]" strokeWidth={2.5} />
         </button>
-      </div>
-
-      {/* Segmented control — Apple's two-button toggle pattern. The
-          active segment gets a brighter inner pill; the inactive one
-          stays in the gray-on-glass background. */}
-      <div className="px-3 pb-2 flex-shrink-0">
-        <div className="p-1 rounded-xl bg-white/[0.06] flex">
-          <button
-            type="button"
-            onClick={() => setMode("search")}
-            className={`flex-1 h-8 rounded-lg text-[13px] font-semibold touch-manipulation transition-colors ${
-              mode === "search"
-                ? "bg-white/[0.16] text-white shadow-[0_1px_2px_rgba(0,0,0,0.2)]"
-                : "text-gray-400 hover:text-gray-200"
-            }`}
-            aria-pressed={mode === "search"}
-          >
-            <Search className="inline w-3.5 h-3.5 mr-1 -mt-0.5" />
-            Search
-          </button>
-          <button
-            type="button"
-            onClick={() => setMode("directions")}
-            className={`flex-1 h-8 rounded-lg text-[13px] font-semibold touch-manipulation transition-colors ${
-              mode === "directions"
-                ? "bg-white/[0.16] text-white shadow-[0_1px_2px_rgba(0,0,0,0.2)]"
-                : "text-gray-400 hover:text-gray-200"
-            }`}
-            aria-pressed={mode === "directions"}
-          >
-            <Compass className="inline w-3.5 h-3.5 mr-1 -mt-0.5" />
-            Directions
-          </button>
-        </div>
       </div>
 
       {/* ── Mode-specific input row ───────────────────────────────── */}
@@ -429,8 +792,8 @@ export default function SearchSheet({
               type="search"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search stations"
-              aria-label="Search stations"
+              placeholder="Search stations, places, addresses"
+              aria-label="Search NYC"
               className="w-full h-11 pl-10 pr-10 rounded-xl bg-white/[0.08] border border-white/[0.06] text-[15px] text-gray-50 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-white/25 focus:border-transparent transition-shadow"
               autoFocus
             />
@@ -467,7 +830,7 @@ export default function SearchSheet({
                 active={activeField === "from"}
                 query={activeField === "from" ? plannerQuery : ""}
                 onQueryChange={setPlannerQuery}
-                placeholder="Search start station or address"
+                placeholder="Search start"
                 accent="emerald"
                 onTap={() => {
                   setActiveField("from");
@@ -477,6 +840,10 @@ export default function SearchSheet({
                   setTripFrom(null);
                   setActiveField("from");
                   setPlannerQuery("");
+                  // The selected route is invalid the moment an
+                  // endpoint changes — drop the overlay so the
+                  // rider isn't seeing a stale path on the map.
+                  onTripSelect?.(null);
                 }}
               />
               <PlannerField
@@ -489,7 +856,7 @@ export default function SearchSheet({
                 active={activeField === "to"}
                 query={activeField === "to" ? plannerQuery : ""}
                 onQueryChange={setPlannerQuery}
-                placeholder="Search destination or address"
+                placeholder="Search destination"
                 accent="sky"
                 onTap={() => {
                   setActiveField("to");
@@ -499,6 +866,7 @@ export default function SearchSheet({
                   setTripTo(null);
                   setActiveField("to");
                   setPlannerQuery("");
+                  onTripSelect?.(null);
                 }}
               />
             </div>
@@ -515,81 +883,329 @@ export default function SearchSheet({
         </div>
       )}
 
+      {/* Anchor-pick mode banner. Renders above the scroll content so
+          the rider can never miss the goal: "tap any result and that's
+          your Home / Work." Tinted to match the anchor's accent (emerald
+          for Home, sky for Work) and dismissible by closing the sheet. */}
+      {anchorPickMode && (
+        <div
+          className={`mx-3 mb-2 mt-1 px-3 py-2 rounded-xl text-[12px] flex items-center gap-2 ${
+            anchorPickMode === "home"
+              ? "bg-emerald-500/15 text-emerald-100 ring-1 ring-emerald-500/30"
+              : "bg-sky-500/15 text-sky-100 ring-1 ring-sky-500/30"
+          }`}
+        >
+          {anchorPickMode === "home" ? (
+            <Home className="w-3.5 h-3.5 flex-shrink-0" />
+          ) : (
+            <Briefcase className="w-3.5 h-3.5 flex-shrink-0" />
+          )}
+          <span className="font-semibold">
+            Tap any result to set as{" "}
+            {anchorPickMode === "home" ? "Home" : "Work"}.
+          </span>
+        </div>
+      )}
+
       {/* ── Mode-specific scroll content ──────────────────────────── */}
-      <div className="flex-1 overflow-y-auto ios-scroll">
+      <div
+        className="flex-1 overflow-y-auto ios-scroll"
+        // At half detent the sheet's bottom 28dvh is below viewport.
+        // Pad enough to keep the last item reachable by scrolling
+        // without dragging the sheet up. See NearbyPanel for the full
+        // rationale.
+        style={{
+          paddingBottom: "calc(28dvh + 1rem + env(safe-area-inset-bottom))",
+        }}
+      >
         {mode === "search" ? (
-          searchResults === null ? (
-            <div className="px-6 py-10 text-center text-[12px] text-gray-500">
-              Type at least two letters to search NYC subway stations.
+          searchResults === null && searchPlaceRows.length === 0 ? (
+            // Empty + idle state. When the rider has both Home and
+            // Work anchored we surface a quick-action card to plan
+            // that commute right now — covers the most common
+            // "Directions from scratch" entry point now that the
+            // segmented control is gone.
+            <div className="px-3 py-3 space-y-3">
+              {(() => {
+                const h = endpointToTrip(home);
+                const w = endpointToTrip(work);
+                if (!h || !w) return null;
+                return (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMode("directions");
+                      setQuery("");
+                      setSearchPlaceResults([]);
+                      setTripFrom(h);
+                      setTripTo(w);
+                      setActiveField(null);
+                    }}
+                    className="press w-full flex items-center gap-3 p-3 rounded-2xl bg-white/[0.05] hover:bg-white/[0.08] border border-white/[0.08] touch-manipulation text-left"
+                  >
+                    <span className="flex items-center justify-center w-9 h-9 rounded-full bg-emerald-300/15 text-emerald-200 ring-1 ring-emerald-300/30">
+                      <Compass className="w-4 h-4" />
+                    </span>
+                    <span className="flex-1 min-w-0">
+                      <span className="block text-[11px] uppercase tracking-wider font-semibold text-gray-400">
+                        Quick commute
+                      </span>
+                      <span className="block text-[14px] font-semibold text-gray-100 truncate">
+                        Home → Work
+                      </span>
+                      <span className="block text-[11px] text-gray-500 truncate">
+                        {(home?.kind === "address" ? home.name : h.name)}{" "}
+                        →{" "}
+                        {(work?.kind === "address" ? work.name : w.name)}
+                      </span>
+                    </span>
+                  </button>
+                );
+              })()}
+              <p className="px-3 pt-1 text-center text-[12px] text-gray-500">
+                Search for a station, address, restaurant, or anywhere
+                in NYC.
+              </p>
+
+              {/* Recent searches — last 10 places the rider tapped
+                  on. Each row replays the same "directions to here"
+                  flow tapping in the search results would. Section
+                  hidden entirely when empty so the empty state stays
+                  clean for first-time users. */}
+              {recents.length > 0 && (
+                <div className="pt-2">
+                  <div className="flex items-center justify-between px-2 pb-1.5">
+                    <h3 className="text-[10px] font-semibold uppercase tracking-wider text-gray-500">
+                      Recent
+                    </h3>
+                    <button
+                      type="button"
+                      onClick={clearRecents}
+                      className="press text-[11px] text-gray-500 hover:text-gray-300 touch-manipulation"
+                    >
+                      Clear
+                    </button>
+                  </div>
+                  <div className="space-y-1">
+                    {recents.map((r) => {
+                      if (r.kind === "station") {
+                        const s = stationsByComplexId.get(r.stopId);
+                        return (
+                          <button
+                            key={`recent-station-${r.stopId}`}
+                            type="button"
+                            onClick={() => {
+                              if (s) startDirectionsTo(s as TripEndpoint);
+                              else onStationOpen(r.stopId);
+                            }}
+                            className="press w-full flex items-center gap-3 px-3 py-2.5 rounded-xl bg-white/[0.04] hover:bg-white/[0.08] text-left touch-manipulation"
+                          >
+                            <span className="w-8 h-8 rounded-full bg-white/[0.08] border border-white/[0.10] flex items-center justify-center flex-shrink-0">
+                              <Search className="w-3.5 h-3.5 text-gray-300" />
+                            </span>
+                            <span className="flex-1 min-w-0">
+                              <span className="block text-[13px] font-semibold text-gray-100 truncate">
+                                {r.name}
+                              </span>
+                              <span className="block text-[11px] text-gray-500 truncate">
+                                Subway station
+                              </span>
+                            </span>
+                            <Compass className="w-4 h-4 text-gray-500 flex-shrink-0" />
+                          </button>
+                        );
+                      }
+                      // Place recent — resolve to the nearest station
+                      // for routing.
+                      return (
+                        <button
+                          key={`recent-place-${r.id}`}
+                          type="button"
+                          onClick={() => {
+                            const nearest = nearestStations(
+                              index,
+                              r.lng,
+                              r.lat,
+                              1,
+                            )[0];
+                            if (!nearest) return;
+                            startDirectionsTo({
+                              ...nearest,
+                              displayName: r.name,
+                              address: {
+                                id: r.id,
+                                name: r.name,
+                                context: r.context,
+                                lng: r.lng,
+                                lat: r.lat,
+                              },
+                            });
+                          }}
+                          className="press w-full flex items-center gap-3 px-3 py-2.5 rounded-xl bg-white/[0.04] hover:bg-white/[0.08] text-left touch-manipulation"
+                        >
+                          <span className="w-8 h-8 rounded-full bg-white/[0.08] border border-white/[0.10] flex items-center justify-center flex-shrink-0">
+                            <MapPin className="w-3.5 h-3.5 text-gray-300" />
+                          </span>
+                          <span className="flex-1 min-w-0">
+                            <span className="block text-[13px] font-semibold text-gray-100 truncate">
+                              {r.name}
+                            </span>
+                            {r.context && (
+                              <span className="block text-[11px] text-gray-500 truncate">
+                                {r.context}
+                              </span>
+                            )}
+                          </span>
+                          <Compass className="w-4 h-4 text-gray-500 flex-shrink-0" />
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
             </div>
-          ) : searchResults.length === 0 ? (
+          ) : (searchResults?.length ?? 0) === 0 &&
+            searchPlaceRows.length === 0 ? (
             <div className="px-6 py-10 text-center text-sm text-gray-500">
-              No stations match &ldquo;{query}&rdquo;
+              No stations or places match &ldquo;{query}&rdquo;
             </div>
           ) : (
             <div>
-              <div className="px-4 pt-3 pb-1.5 text-[10px] font-semibold text-gray-500 uppercase tracking-wider">
-                Matches
-              </div>
-              {searchResults.map((s) => (
-                <StationRow
-                  key={`search-${s.stopId}`}
-                  station={s}
-                  arrivals={arrivalsByStation.get(s.stopId) ?? []}
-                  routeColors={routeColors}
-                  now={now}
-                  isFavorite={has(s.stopId)}
-                  onFavoriteToggle={() => toggle(s.stopId)}
-                  onTap={() => onStationOpen(s.stopId)}
-                  anchor={anchorOf(s.stopId)}
-                  // Tapping the compass icon jumps to directions
-                  // with this station as the *destination* and the
-                  // rider's current location resolved to its nearest
-                  // station as the *origin*. The intent is "get me
-                  // there from here," not "plan a trip from this
-                  // station." If geo isn't available, the From field
-                  // stays empty and is auto-focused for the rider to
-                  // fill manually.
-                  onDirectionsFrom={() => {
-                    setMode("directions");
-                    setQuery("");
-                    setPlannerQuery("");
-                    let nextFrom: TripEndpoint | null = null;
-                    if (geo.lat != null && geo.lng != null) {
-                      const nearest = nearestStations(
-                        index,
-                        geo.lng,
-                        geo.lat,
-                        1,
-                      )[0];
-                      if (nearest) {
-                        nextFrom = {
-                          ...nearest,
-                          displayName: "Current location",
-                          address: {
-                            id: "current-location",
-                            name: "Current location",
-                            context: "",
-                            lng: geo.lng,
-                            lat: geo.lat,
-                          },
-                        };
+              {searchResults && searchResults.length > 0 && (
+                <>
+                  <div className="px-4 pt-3 pb-1.5 text-[10px] font-semibold text-gray-500 uppercase tracking-wider">
+                    Stations
+                  </div>
+                  {searchResults.slice(0, 8).map((s) => (
+                    <StationRow
+                      key={`search-${s.stopId}`}
+                      station={s}
+                      arrivals={arrivalsByStation.get(s.stopId) ?? []}
+                      routeColors={routeColors}
+                      now={now}
+                      isFavorite={has(s.stopId)}
+                      onFavoriteToggle={() => toggle(s.stopId)}
+                      onTap={() => {
+                        // Anchor-pick mode short-circuits the default
+                        // station-open behavior — tapping a result
+                        // pins it as the chosen anchor and closes
+                        // the sheet.
+                        if (anchorPickMode) {
+                          assignAnchor(anchorPickMode, s.stopId);
+                          onAnchorPicked?.();
+                          return;
+                        }
+                        onStationOpen(s.stopId);
+                      }}
+                      anchor={anchorOf(s.stopId)}
+                      // Tap = compass = "directions to here from
+                      // current location". Single unified handler so
+                      // both stations and places hit the same flow.
+                      // Suppressed in anchor-pick mode — the row is
+                      // a one-tap pin, no secondary actions.
+                      onDirectionsFrom={
+                        anchorPickMode
+                          ? undefined
+                          : () => startDirectionsTo(s as TripEndpoint)
                       }
-                    }
-                    setTripFrom(nextFrom);
-                    setTripTo(s as TripEndpoint);
-                    // null = both endpoints filled, plans render
-                    // immediately. "from" = need user to fill From.
-                    setActiveField(nextFrom ? null : "from");
-                  }}
-                />
-              ))}
+                    />
+                  ))}
+                </>
+              )}
+              {searchPlaceRows.length > 0 && (
+                <>
+                  <div className="px-4 pt-3 pb-1.5 text-[10px] font-semibold text-gray-500 uppercase tracking-wider">
+                    Places
+                  </div>
+                  {searchPlaceRows.map(({ place, nearest }) => {
+                    const destination: TripEndpoint = {
+                      ...nearest,
+                      displayName: place.name,
+                      address: place,
+                    };
+                    return (
+                      <div
+                        key={`search-place-${place.id}`}
+                        className="flex items-start gap-2 px-4 py-3 border-b border-white/5 hover:bg-white/[0.04]"
+                      >
+                        <button
+                          type="button"
+                          onClick={() => {
+                            // Anchor-pick mode: pin this address and
+                            // close. No directions side-trip.
+                            if (anchorPickMode) {
+                              assignAnchorAddress(anchorPickMode, {
+                                name: place.name,
+                                lng: place.lng,
+                                lat: place.lat,
+                              });
+                              onAnchorPicked?.();
+                              return;
+                            }
+                            startDirectionsTo(destination);
+                          }}
+                          className="press flex-1 min-w-0 text-left flex items-start gap-3 touch-manipulation"
+                        >
+                          <span className="w-7 h-7 rounded-full bg-white/[0.08] border border-white/[0.10] flex items-center justify-center flex-shrink-0 mt-0.5">
+                            <MapPin className="w-3.5 h-3.5 text-gray-300" />
+                          </span>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-semibold text-gray-100 leading-tight truncate">
+                              {place.name}
+                            </p>
+                            {place.context && (
+                              <p className="text-[11px] text-gray-500 leading-tight truncate">
+                                {place.context}
+                              </p>
+                            )}
+                            <p className="text-[11px] text-gray-400 mt-1 truncate">
+                              Nearest: {nearest.name}
+                              {nearest.meters !== undefined &&
+                                ` · ${
+                                  nearest.meters < 1000
+                                    ? `${Math.round(nearest.meters)} m`
+                                    : `${(nearest.meters / 1000).toFixed(1)} km`
+                                } walk`}
+                            </p>
+                          </div>
+                        </button>
+                        <div className="flex items-center gap-0.5 flex-shrink-0 pt-0.5">
+                          <AnchorIconButton
+                            anchor="home"
+                            active={isAddressAnchored(place, "home")}
+                            onClick={() => toggleAddressAnchor(place, "home")}
+                          />
+                          <AnchorIconButton
+                            anchor="work"
+                            active={isAddressAnchored(place, "work")}
+                            onClick={() => toggleAddressAnchor(place, "work")}
+                          />
+                          {/* Directions compass — a place row's main
+                              CTA. Mirrors the StationRow compass so the
+                              affordance is consistent across kinds. */}
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              startDirectionsTo(destination);
+                            }}
+                            aria-label={`Directions to ${place.name}`}
+                            className="press w-7 h-7 flex items-center justify-center rounded-full text-gray-400 hover:text-sky-300 active:text-sky-400 touch-manipulation"
+                          >
+                            <Compass className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </>
+              )}
             </div>
           )
         ) : plannerPicking ? (
           plannerSearchResults === null ? (
             <div className="px-6 py-10 text-center text-[12px] text-gray-500">
-              Type a station name or address to fill the{" "}
+              Type a station, address, or place to fill the{" "}
               <span className="text-gray-300 font-semibold">
                 {activeField === "from" ? "start" : "destination"}
               </span>
@@ -610,13 +1226,15 @@ export default function SearchSheet({
                     Stations
                   </div>
                   {plannerSearchResults.map((s) => (
-                    <button
+                    <div
                       key={`pick-station-${s.stopId}`}
-                      type="button"
-                      onClick={() => pickPlannerStation(s)}
-                      className="press w-full text-left flex items-start gap-3 px-4 py-3 border-b border-white/5 hover:bg-white/[0.04] touch-manipulation"
+                      className="flex items-start gap-2 px-4 py-3 border-b border-white/5 hover:bg-white/[0.04]"
                     >
-                      <div className="flex-1 min-w-0">
+                      <button
+                        type="button"
+                        onClick={() => pickPlannerStation(s)}
+                        className="press flex-1 min-w-0 text-left touch-manipulation"
+                      >
                         <div className="flex items-center gap-1 flex-wrap mb-1.5">
                           {s.routes.slice(0, 6).map((r) => {
                             const info = routeColors.get(r.routeId);
@@ -634,8 +1252,20 @@ export default function SearchSheet({
                         <p className="text-sm font-semibold text-gray-100 leading-tight">
                           {s.name}
                         </p>
+                      </button>
+                      <div className="flex items-center gap-0.5 flex-shrink-0 pt-0.5">
+                        <AnchorIconButton
+                          anchor="home"
+                          active={isStationAnchored(s.stopId, "home")}
+                          onClick={() => toggleStationAnchor(s.stopId, "home")}
+                        />
+                        <AnchorIconButton
+                          anchor="work"
+                          active={isStationAnchored(s.stopId, "work")}
+                          onClick={() => toggleStationAnchor(s.stopId, "work")}
+                        />
                       </div>
-                    </button>
+                    </div>
                   ))}
                 </>
               )}
@@ -650,35 +1280,51 @@ export default function SearchSheet({
                     Places
                   </div>
                   {placeRows.map(({ place, nearest }) => (
-                    <button
+                    <div
                       key={`pick-place-${place.id}`}
-                      type="button"
-                      onClick={() => pickPlannerPlace(place, nearest)}
-                      className="press w-full text-left flex items-start gap-3 px-4 py-3 border-b border-white/5 hover:bg-white/[0.04] touch-manipulation"
+                      className="flex items-start gap-2 px-4 py-3 border-b border-white/5 hover:bg-white/[0.04]"
                     >
-                      <span className="w-7 h-7 rounded-full bg-white/[0.08] border border-white/[0.10] flex items-center justify-center flex-shrink-0 mt-0.5">
-                        <MapPin className="w-3.5 h-3.5 text-gray-300" />
-                      </span>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-semibold text-gray-100 leading-tight truncate">
-                          {place.name}
-                        </p>
-                        {place.context && (
-                          <p className="text-[11px] text-gray-500 leading-tight truncate">
-                            {place.context}
+                      <button
+                        type="button"
+                        onClick={() => pickPlannerPlace(place, nearest)}
+                        className="press flex-1 min-w-0 text-left flex items-start gap-3 touch-manipulation"
+                      >
+                        <span className="w-7 h-7 rounded-full bg-white/[0.08] border border-white/[0.10] flex items-center justify-center flex-shrink-0 mt-0.5">
+                          <MapPin className="w-3.5 h-3.5 text-gray-300" />
+                        </span>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-semibold text-gray-100 leading-tight truncate">
+                            {place.name}
                           </p>
-                        )}
-                        <p className="text-[11px] text-gray-400 mt-1 truncate">
-                          Nearest: {nearest.name}
-                          {nearest.meters !== undefined &&
-                            ` · ${
-                              nearest.meters < 1000
-                                ? `${Math.round(nearest.meters)} m`
-                                : `${(nearest.meters / 1000).toFixed(1)} km`
-                            } walk`}
-                        </p>
+                          {place.context && (
+                            <p className="text-[11px] text-gray-500 leading-tight truncate">
+                              {place.context}
+                            </p>
+                          )}
+                          <p className="text-[11px] text-gray-400 mt-1 truncate">
+                            Nearest: {nearest.name}
+                            {nearest.meters !== undefined &&
+                              ` · ${
+                                nearest.meters < 1000
+                                  ? `${Math.round(nearest.meters)} m`
+                                  : `${(nearest.meters / 1000).toFixed(1)} km`
+                              } walk`}
+                          </p>
+                        </div>
+                      </button>
+                      <div className="flex items-center gap-0.5 flex-shrink-0 pt-0.5">
+                        <AnchorIconButton
+                          anchor="home"
+                          active={isAddressAnchored(place, "home")}
+                          onClick={() => toggleAddressAnchor(place, "home")}
+                        />
+                        <AnchorIconButton
+                          anchor="work"
+                          active={isAddressAnchored(place, "work")}
+                          onClick={() => toggleAddressAnchor(place, "work")}
+                        />
                       </div>
-                    </button>
+                    </div>
                   ))}
                 </>
               )}
@@ -697,57 +1343,100 @@ export default function SearchSheet({
               </p>
             </div>
           ) : (
-            (() => {
-              // Walk legs: same for every plan (all plans share the
-              // same boarding/alighting complex with the From/To
-              // endpoint), so compute once outside the map.
-              const walkFromMeters = tripFrom.address
-                ? haversineMeters(
-                    { lat: tripFrom.address.lat, lng: tripFrom.address.lng },
-                    { lat: tripFrom.lat, lng: tripFrom.lng },
-                  )
-                : undefined;
-              const walkToMeters = tripTo.address
-                ? haversineMeters(
-                    { lat: tripTo.address.lat, lng: tripTo.address.lng },
-                    { lat: tripTo.lat, lng: tripTo.lng },
-                  )
-                : undefined;
-              return (
-                <div className="space-y-2 px-3 pt-3 pb-2">
-                  {tripPlans.map((plan, i) => {
-                    const k = tripKey(plan);
-                    const isSelected = selectedTripKey === k;
-                    return (
-                      <TripPlanRow
-                        key={`plan-${k}`}
-                        plan={plan}
-                        origin={tripFrom}
-                        routeColors={routeColors}
-                        stationsByComplexId={stationsByComplexId}
-                        arrivals={arrivalsByStation.get(tripFrom.stopId) ?? []}
-                        now={now}
-                        isPrimary={i === 0}
-                        isSelected={isSelected}
-                        onSelect={
-                          onTripSelect
-                            ? () =>
-                                onTripSelect(
-                                  isSelected ? null : plan,
-                                  tripFrom.stopId,
-                                )
-                            : undefined
-                        }
-                        walkFromMeters={walkFromMeters}
-                        walkFromName={tripFrom.address?.name}
-                        walkToMeters={walkToMeters}
-                        walkToName={tripTo.address?.name}
-                      />
-                    );
-                  })}
-                </div>
-              );
-            })()
+            <div className="space-y-2 px-3 pt-3 pb-8">
+              {tripPlans.map((plan, i) => {
+                const k = tripKey(plan);
+                const isSelected = selectedTripKey === k;
+                // Per-plan walk: address → plan's actual board /
+                // alight station, not the original tripFrom/tripTo
+                // anchor. Two plans that board at different
+                // complexes (e.g. one at Wall St 4/5, one at
+                // Rector St 1) get different walk numbers.
+                const board = stationsByComplexId.get(
+                  plan.legs[0].boardComplexId,
+                );
+                const alight = stationsByComplexId.get(
+                  plan.legs[plan.legs.length - 1].alightComplexId,
+                );
+                const walkFromMeters =
+                  tripFrom.address && board
+                    ? haversineMeters(
+                        {
+                          lat: tripFrom.address.lat,
+                          lng: tripFrom.address.lng,
+                        },
+                        { lat: board.lat, lng: board.lng },
+                      )
+                    : undefined;
+                const walkToMeters =
+                  tripTo.address && alight
+                    ? haversineMeters(
+                        { lat: tripTo.address.lat, lng: tripTo.address.lng },
+                        { lat: alight.lat, lng: alight.lng },
+                      )
+                    : undefined;
+                return (
+                  <TripPlanRow
+                    key={`plan-${k}`}
+                    plan={plan}
+                    origin={tripFrom}
+                    routeColors={routeColors}
+                    stationsByComplexId={stationsByComplexId}
+                    arrivals={
+                      arrivalsByStation.get(plan.legs[0].boardComplexId) ?? []
+                    }
+                    now={now}
+                    isPrimary={i === 0}
+                    isSelected={isSelected}
+                    onSelect={
+                      onTripSelect
+                        ? () => {
+                            if (isSelected) {
+                              onTripSelect(null);
+                              return;
+                            }
+                            // Walk endpoints from the rider's actual
+                            // address coords (when present). The map
+                            // uses these to draw dashed pedestrian
+                            // segments connecting the rider to the
+                            // boarding/alighting stations. Station
+                            // pins skip walks (the rider IS at the
+                            // platform).
+                            onTripSelect({
+                              plan,
+                              walkFrom: tripFrom.address
+                                ? {
+                                    lng: tripFrom.address.lng,
+                                    lat: tripFrom.address.lat,
+                                    name: tripFrom.address.name,
+                                  }
+                                : undefined,
+                              walkTo: tripTo.address
+                                ? {
+                                    lng: tripTo.address.lng,
+                                    lat: tripTo.address.lat,
+                                    name: tripTo.address.name,
+                                  }
+                                : undefined,
+                            });
+                            // Apple-Maps pattern: collapse the sheet
+                            // to half so the trip overlay is visible
+                            // on the map. Tapping the same plan
+                            // again clears; leave the sheet alone in
+                            // that case so the rider can keep
+                            // browsing.
+                            setDetent("half");
+                          }
+                        : undefined
+                    }
+                    walkFromMeters={walkFromMeters}
+                    walkFromName={tripFrom.address?.name}
+                    walkToMeters={walkToMeters}
+                    walkToName={tripTo.address?.name}
+                  />
+                );
+              })}
+            </div>
           )
         ) : (
           <div className="px-6 py-10 text-center text-[12px] text-gray-500">

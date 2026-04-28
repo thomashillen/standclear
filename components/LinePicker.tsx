@@ -32,13 +32,19 @@ export default function LinePicker({ lines, selectedLine, onSelect }: LinePicker
     <DialogPrimitive.Root open={open} onOpenChange={setOpen}>
       <DialogPrimitive.Trigger asChild>
         <button
-          className="press flex items-center gap-2 px-3 h-11 sm:h-9 rounded-full bg-white/[0.08] hover:bg-white/[0.12] border border-white/[0.08] min-w-0 max-w-[260px] touch-manipulation transition-colors"
+          // Sized to match the live-count pill (h-9 / 36px) so the
+          // header reads as a row of consistent-height controls. The
+          // round 44px buttons (search / near-me / more) sit slightly
+          // taller, which is fine — they're visually a different
+          // shape so a small height delta reads as intentional rather
+          // than misaligned.
+          className="press flex items-center gap-1.5 px-2.5 h-9 rounded-full bg-white/[0.08] hover:bg-white/[0.12] border border-white/[0.08] min-w-0 max-w-[260px] touch-manipulation transition-colors"
           aria-label={selected ? `Line ${selected.id} — ${selected.name}. Tap to choose another line.` : "Choose a subway line"}
         >
           {selected ? (
             <>
               <span
-                className="nyc-bullet w-6 h-6 rounded-full flex items-center justify-center text-[14px] leading-none flex-shrink-0"
+                className="nyc-bullet w-5 h-5 rounded-full flex items-center justify-center text-[12px] leading-none flex-shrink-0"
                 style={{ backgroundColor: selected.color, color: selected.textColor }}
               >
                 {selected.id}
@@ -46,14 +52,14 @@ export default function LinePicker({ lines, selectedLine, onSelect }: LinePicker
               {/* Line name shown on sm+ where we have room. On mobile the
                   bullet alone identifies the line unambiguously, and
                   truncated "8 Avenue Ex…" is just noise. */}
-              <span className="hidden sm:inline text-[14px] font-semibold text-white truncate">
+              <span className="hidden sm:inline text-[13px] font-semibold text-white truncate">
                 {selected.name}
               </span>
             </>
           ) : (
-            <span className="text-[14px] font-semibold text-white px-0.5">All lines</span>
+            <span className="text-[13px] font-semibold text-white px-0.5">All lines</span>
           )}
-          <ChevronDown className="w-4 h-4 text-gray-400 flex-shrink-0" />
+          <ChevronDown className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />
         </button>
       </DialogPrimitive.Trigger>
 

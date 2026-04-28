@@ -130,11 +130,16 @@
 
 /* Liquid Glass — translucent surface with vendor-prefixed backdrop filter.
    Tailwind v4 emits the standard `backdrop-filter` but not the WebKit
-   prefix older iOS Safari still needs, so we apply both here. */
+   prefix older iOS Safari still needs, so we apply both here. iOS-26
+   tuning: slightly higher saturate + blur than vanilla iOS Safari for
+   the "vibrant frosted" look the redesigned system materials use,
+   plus a thin 1px white inner highlight along the top edge so the
+   glass reads as a slightly raised surface, not a flat tint. */
 @utility ios-glass {
-  background-color: rgba(10, 10, 12, 0.62);
-  -webkit-backdrop-filter: saturate(160%) blur(28px);
-  backdrop-filter: saturate(160%) blur(28px);
+  background-color: rgba(10, 10, 12, 0.6);
+  -webkit-backdrop-filter: saturate(180%) blur(32px);
+  backdrop-filter: saturate(180%) blur(32px);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
 }
 
 /* Authentic NYC subway bullet typography. The MTA standard (Vignelli,
@@ -263,6 +268,24 @@
 /* iOS Safari: prevent input auto-zoom-on-focus (triggers when font-size < 16px). */
 input, select, textarea {
   font-size: 16px;
+}
+
+/* `<input type="search">` ships with a native blue clear-X in WebKit
+   and a similar pseudo-element in some Chromium builds. We render
+   our own styled X button matched to the rest of the app, so the
+   browser's stock control would just sit next to ours as a duplicate
+   affordance. Suppress it across vendors. */
+input[type="search"]::-webkit-search-cancel-button,
+input[type="search"]::-webkit-search-decoration,
+input[type="search"]::-webkit-search-results-button,
+input[type="search"]::-webkit-search-results-decoration {
+  -webkit-appearance: none;
+  appearance: none;
+  display: none;
+}
+input[type="search"] {
+  -webkit-appearance: none;
+  appearance: none;
 }
 
 /* iOS Safari: momentum scrolling for overflow regions. Kept for backwards

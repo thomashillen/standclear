@@ -21,21 +21,24 @@ import {
 } from "@/lib/useFavorites";
 import { useNow } from "@/lib/useNow";
 import { useSheetDrag } from "@/lib/useSheetDrag";
-import { planTrips, type TripPlan } from "@/lib/commuteRouting";
+import {
+  planTrips,
+  rankPlansByTime,
+  type TripPlan,
+} from "@/lib/commuteRouting";
 import {
   buildStationIndex,
   catchVerdict,
   haversineMeters,
   nearestStations,
+  nearestStationsWithin,
   type CatchVerdict,
   type NearbyStation,
   type StationEntry,
 } from "@/lib/stopsIndex";
 import {
-  fmtEta,
-  RouteBullet,
   StationRow,
-  VERDICT_STYLES,
+  TripPlanRow,
   type RouteColorMap,
 } from "./panelUI";
 
@@ -43,6 +46,35 @@ interface Props {
   open: boolean;
   onClose: () => void;
   onStationOpen: (stopId: string) => void;
+  /** Tap handler for a trip plan (in the Going-to-Work card). The
+   *  parent renders the trip's legs and station markers on the map.
+   *  Pass null to clear. Symmetric with SearchSheet's prop of the
+   *  same name. */
+  onTripSelect?: (
+    selection:
+      | {
+          plan: TripPlan;
+          walkFrom?: { lng: number; lat: number; name?: string };
+          walkTo?: { lng: number; lat: number; name?: string };
+        }
+      | null,
+  ) => void;
+  /** Stable identifier of the currently-rendered trip so the row
+   *  can show a selected highlight. */
+  selectedTripKey?: string | null;
+  /** Tapping "See all routes" on the Going-to-Work card opens the
+   *  SearchSheet pre-filled with current location → destination
+   *  anchor in directions mode. The parent owns SearchSheet state so
+   *  this callback is the bridge; the preset shape mirrors the
+   *  CommuteEndpoint discriminated union. */
+  onSeeAllRoutes?: (preset: {
+    from:
+      | { kind: "station"; stopId: string }
+      | { kind: "address"; lng: number; lat: number; name: string };
+    to:
+      | { kind: "station"; stopId: string }
+      | { kind: "address"; lng: number; lat: number; name: string };
+  }) => void;
 }
 
 /**
@@ -108,20 +140,14 @@ interface GoingToCardProps {
   destination: ResolvedEndpoint;
   /** Which anchor is the destination — drives the title and icon. */
   destAnchor: CommuteAnchor;
-  /** Arrivals at the origin's nearest-station complex. Each plan's
-   *  TripPlanRow filters this further by leg-1 route + direction. */
-  arrivals: Arrival[];
+  /** Per-complex arrivals map. Each plan's TripPlanRow looks up the
+   *  arrivals at ITS specific board complex (which can differ from
+   *  another plan's when we expand candidate stations around an
+   *  address) and then filters by leg-1 route + direction. */
+  arrivalsByStation: Map<string, Arrival[]>;
   /** Top trip plans from origin to destination, in display order
-   *  (later this'll be re-ranked by estimated total time, but
-   *  planTrips' default ranking suffices today). */
+   *  (re-ranked by estimated total time). */
   plans: TripPlan[];
-  /** Walk distance in meters from current location to the boarding
-   *  station — same value applies to every plan since they all
-   *  board at the same complex (origin's nearest station). */
-  walkFromMeters: number;
-  /** Walk distance in meters from the alighting station to the
-   *  destination address. Zero when destination is a station pin. */
-  walkToMeters: number;
   routeColors: RouteColorMap;
   /** complex stopId → station entry, for resolving each plan's
    *  transfer station name. */
@@ -129,65 +155,74 @@ interface GoingToCardProps {
   now: number;
   onSwap: () => void;
   onTapOrigin: () => void;
+  /** Tap handler for a plan row — sets the selected trip on the map. */
+  onTripSelect?: (
+    selection:
+      | {
+          plan: TripPlan;
+          walkFrom?: { lng: number; lat: number; name?: string };
+          walkTo?: { lng: number; lat: number; name?: string };
+        }
+      | null,
+  ) => void;
+  /** Stable identifier of the currently-selected trip so this card's
+   *  rows can show the matching plan as selected. */
+  selectedTripKey?: string | null;
+}
+
+// Stable tripKey recipe — must match SubwayMap's so a tap from
+// either NearbyPanel or SearchSheet selects the same plan. Mirrors
+// the dedup key in lib/commuteRouting.ts.
+function tripKey(plan: TripPlan): string {
+  return (
+    plan.legs.map((l) => `${l.routeId}-${l.direction}`).join("|") +
+    (plan.transferComplexId ? `:${plan.transferComplexId}` : "")
+  );
 }
 
 function GoingToCard({
   origin,
   destination,
   destAnchor,
-  arrivals,
+  arrivalsByStation,
   plans,
-  walkFromMeters,
-  walkToMeters,
   routeColors,
   stationsByComplexId,
   now,
   onSwap,
   onTapOrigin,
-}: GoingToCardProps) {
-  // Use the best plan (first in ranking) for the card display.
-  const plan = plans?.[0] ?? null;
-
-  // The next departures the rider needs are at the ORIGIN on the
-  // FIRST leg's route + direction. The second leg's arrivals (at the
-  // transfer station) only matter once the rider gets there, and we
-  // don't yet model time-shifted predictions — so the card surfaces
-  // leg 1 only. Live verdict (run/walk/chill) still applies because
-  // walkFromMeters is the rider's distance to the boarding station.
-  const upcoming = useMemo(() => {
-    if (!plan || plan.legs.length === 0) return [];
-    const leg1 = plan.legs[0];
-    const cutoff = now / 1000 - 5;
-    return arrivals
-      .filter(
-        (a) =>
-          a.routeId === leg1.routeId &&
-          a.direction === leg1.direction &&
-          a.eta >= cutoff,
-      )
-      .slice(0, 4);
-  }, [arrivals, plan, now]);
-
+  onTripSelect,
+  onSeeAllRoutes,
+  selectedTripKey,
+}: GoingToCardProps & {
+  onSeeAllRoutes?: (preset: {
+    from:
+      | { kind: "station"; stopId: string }
+      | { kind: "address"; lng: number; lat: number; name: string };
+    to:
+      | { kind: "station"; stopId: string }
+      | { kind: "address"; lng: number; lat: number; name: string };
+  }) => void;
+}) {
   const title = destAnchor === "work" ? "Going to Work" : "Going Home";
-
   const tint =
     destAnchor === "work"
       ? "from-sky-500/15 via-sky-500/[0.06] to-transparent ring-sky-400/20"
       : "from-emerald-500/15 via-emerald-500/[0.06] to-transparent ring-emerald-400/20";
 
-  const leg1 = plan?.legs[0];
-  const leg2 = plan?.legs[1];
-  const leg1Info = leg1 ? routeColors.get(leg1.routeId) : null;
-  const leg2Info = leg2 ? routeColors.get(leg2.routeId) : null;
-  const transferStation = plan?.transferComplexId
-    ? stationsByComplexId.get(plan.transferComplexId)
-    : null;
-
   return (
     <div
-      className={`mx-3 mt-3 mb-1 rounded-2xl bg-gradient-to-br ${tint} ring-1 px-3.5 pt-3 pb-3.5 backdrop-blur-sm`}
+      // iOS-26 ambient material: gradient tint + ring + thin top
+      // highlight (inset shadow) for the "raised glass" feel, plus a
+      // soft outer drop shadow so the card sits above the panel's
+      // base material.
+      style={{
+        boxShadow:
+          "inset 0 1px 0 rgba(255,255,255,0.10), 0 8px 24px -12px rgba(0,0,0,0.4)",
+      }}
+      className={`mx-3 mt-3 mb-1 rounded-2xl bg-gradient-to-br ${tint} ring-1 px-3 pt-3 pb-3 backdrop-blur-sm`}
     >
-      <div className="flex items-center gap-2 mb-2">
+      <div className="flex items-center gap-2 mb-2 px-0.5">
         <span
           className={`inline-flex items-center justify-center w-6 h-6 rounded-full ${
             destAnchor === "work"
@@ -207,103 +242,155 @@ function GoingToCard({
         <button
           type="button"
           onClick={onSwap}
-          aria-label="Swap direction"
+          aria-label="Swap destination"
           className="press ml-auto w-8 h-8 -mr-1 flex items-center justify-center rounded-full bg-white/[0.06] hover:bg-white/[0.12] text-gray-200 touch-manipulation"
         >
           <ArrowLeftRight className="w-3.5 h-3.5" />
         </button>
       </div>
 
+      {/* From → To micro-line. Origin is "Current location" tappable
+          to open the boarding station; destination is informational
+          but shows the saved displayName (address or station name). */}
       <button
         type="button"
         onClick={onTapOrigin}
-        className="press w-full text-left flex items-center gap-1.5 text-[12px] text-gray-300 mb-2 touch-manipulation"
+        className="press w-full text-left flex items-center gap-1.5 text-[12px] text-gray-300 mb-2 px-0.5 touch-manipulation"
       >
-        <span className="font-semibold text-gray-100 truncate">{origin.displayName}</span>
+        <span className="font-semibold text-gray-100 truncate">
+          {origin.displayName}
+        </span>
         <ArrowRight className="w-3 h-3 flex-shrink-0 text-gray-500" />
         <span className="text-gray-400 truncate">{destination.displayName}</span>
       </button>
 
-      {!plan ? (
-        <p className="text-[12px] text-gray-400 leading-snug">
-          No subway route found. Open one of these stations to plan a trip
-          manually.
+      {plans.length === 0 ? (
+        <p className="text-[12px] text-gray-400 leading-snug px-0.5">
+          No subway route found between these endpoints.
         </p>
       ) : (
-        <>
-          <div className="flex items-center gap-1.5 mb-2">
-            {leg1Info && leg1 && (
-              <RouteBullet
-                id={leg1Info.displayId}
-                color={leg1Info.color}
-                textColor={leg1Info.textColor}
+        <div className="space-y-2">
+          {/* "See all routes" CTA — opens SearchSheet in directions
+              mode with home/work pre-filled. The home/work auto-fill
+              already happens inside SearchSheet's directions effect,
+              so we only need to flip the panel into directions mode
+              and the rest follows. Pinned at the bottom of the
+              card; visible only when more plans exist. */}
+          {plans.map((plan, i) => {
+            const k = tripKey(plan);
+            const isSelected = selectedTripKey === k;
+            // Per-plan walks. Each plan boards/alights at a complex
+            // that may differ from another plan's (we expand the
+            // candidate set when origin or destination is an
+            // address), so the walk is plan-specific. Same shape as
+            // SearchSheet's TripPlanRow rendering.
+            const board = stationsByComplexId.get(plan.legs[0].boardComplexId);
+            const alight = stationsByComplexId.get(
+              plan.legs[plan.legs.length - 1].alightComplexId,
+            );
+            const walkFromMeters = board
+              ? haversineMeters(
+                  { lat: origin.address.lat, lng: origin.address.lng },
+                  { lat: board.lat, lng: board.lng },
+                )
+              : undefined;
+            const walkToMeters =
+              destination.address && alight
+                ? haversineMeters(
+                    {
+                      lat: destination.address.lat,
+                      lng: destination.address.lng,
+                    },
+                    { lat: alight.lat, lng: alight.lng },
+                  )
+                : undefined;
+            return (
+              <TripPlanRow
+                key={`going-${k}-${i}`}
+                plan={plan}
+                origin={origin}
+                routeColors={routeColors}
+                stationsByComplexId={stationsByComplexId}
+                // Per-plan boarding-station arrivals so the live
+                // first-leg ETA matches the plan's actual platform.
+                arrivals={
+                  arrivalsByStation.get(plan.legs[0].boardComplexId) ?? []
+                }
+                now={now}
+                isPrimary={i === 0}
+                isSelected={isSelected}
+                onSelect={
+                  onTripSelect
+                    ? () => {
+                        if (isSelected) {
+                          onTripSelect(null);
+                          return;
+                        }
+                        onTripSelect({
+                          plan,
+                          // Origin walk = current location → board
+                          // station. Destination walk = alight
+                          // station → saved address (when present).
+                          walkFrom: {
+                            lng: origin.address.lng,
+                            lat: origin.address.lat,
+                            name: origin.address.name,
+                          },
+                          walkTo: destination.address
+                            ? {
+                                lng: destination.address.lng,
+                                lat: destination.address.lat,
+                                name: destination.address.name,
+                              }
+                            : undefined,
+                        });
+                      }
+                    : undefined
+                }
+                walkFromMeters={walkFromMeters}
+                walkFromName={origin.address.name}
+                walkToMeters={
+                  walkToMeters && walkToMeters > 0 ? walkToMeters : undefined
+                }
+                walkToName={destination.address?.name}
               />
-            )}
-            {leg2 && (
-              <>
-                <ArrowRight className="w-3 h-3 text-gray-500 flex-shrink-0" />
-                {leg2Info && (
-                  <RouteBullet
-                    id={leg2Info.displayId}
-                    color={leg2Info.color}
-                    textColor={leg2Info.textColor}
-                  />
-                )}
-              </>
-            )}
-            <span className="text-[11px] text-gray-400 ml-1.5 truncate">
-              {plan.totalStops} stop{plan.totalStops === 1 ? "" : "s"}
-              {transferStation
-                ? ` · transfer at ${transferStation.name}`
-                : " · direct"}
-            </span>
-          </div>
-
-          {upcoming.length === 0 ? (
-            <p className="text-[12px] text-gray-500 leading-snug">
-              No upcoming {leg1Info?.displayId ?? leg1?.routeId} trains in
-              that direction right now.
-            </p>
-          ) : (
-            <div className="flex flex-wrap gap-x-3 gap-y-1.5">
-              {upcoming.map((a, i) => {
-                const info = routeColors.get(a.routeId);
-                if (!info) return null;
-                const verdict: CatchVerdict | null =
-                  walkFromMeters !== undefined
-                    ? catchVerdict(walkFromMeters, a.eta, now / 1000)
-                    : null;
-                const style = verdict
-                  ? VERDICT_STYLES[verdict]
-                  : VERDICT_STYLES.chill;
-                return (
-                  <span
-                    key={`${a.tripId}-${i}`}
-                    className="inline-flex items-center gap-1"
-                  >
-                    <RouteBullet
-                      id={info.displayId}
-                      color={info.color}
-                      textColor={info.textColor}
-                    />
-                    <span
-                      className={`text-[13px] font-semibold tabular-nums ${style.etaCls}`}
-                    >
-                      {fmtEta(a.eta, now)}
-                    </span>
-                    {style.label && (
-                      <span
-                        className={`ml-0.5 px-1.5 py-[1px] rounded-full text-[9px] leading-none uppercase tracking-wider ${style.pill}`}
-                      >
-                        {style.label}
-                      </span>
-                    )}
-                  </span>
-                );
-              })}
-            </div>
+            );
+          })}
+          {onSeeAllRoutes && (
+            <button
+              type="button"
+              onClick={() => {
+                // Pass the rider's actual current trip so the
+                // SearchSheet lands with current location → chosen
+                // destination — instead of inheriting whatever was
+                // last searched.
+                onSeeAllRoutes({
+                  from: {
+                    kind: "address",
+                    lng: origin.address.lng,
+                    lat: origin.address.lat,
+                    name: origin.displayName,
+                  },
+                  to: destination.address
+                    ? {
+                        kind: "address",
+                        lng: destination.address.lng,
+                        lat: destination.address.lat,
+                        name: destination.address.name,
+                      }
+                    : {
+                        kind: "station",
+                        stopId: destination.station.stopId,
+                      },
+                });
+              }}
+              className="press w-full mt-1 flex items-center justify-center gap-1 px-3 h-9 rounded-xl bg-white/[0.04] hover:bg-white/[0.08] text-[12px] font-semibold text-gray-200 touch-manipulation"
+            >
+              See all routes
+              <ArrowRight className="w-3 h-3" />
+            </button>
           )}
-        </>
+        </div>
       )}
     </div>
   );
@@ -315,7 +402,14 @@ function GoingToCard({
 // Search and trip planning live in SearchSheet so they have their own
 // dedicated surface (Apple Maps pattern).
 
-export default function NearbyPanel({ open, onClose, onStationOpen }: Props) {
+export default function NearbyPanel({
+  open,
+  onClose,
+  onStationOpen,
+  onTripSelect,
+  selectedTripKey,
+  onSeeAllRoutes,
+}: Props) {
   const geo = useGeolocation(open);
   const lines = useLines();
   const data = useTrains();
@@ -443,34 +537,62 @@ export default function NearbyPanel({ open, onClose, onStationOpen }: Props) {
       },
     };
 
-    const plans = planTrips(
-      lines,
-      index,
-      fromNearest.stopIds,
-      dest.station.stopIds,
-      { maxResults: 3 },
+    // Expand origin candidates: every station within ~700m of the
+    // rider's current location, not just the absolute nearest. This
+    // is the same fix as the address-search side — if the rider is
+    // standing between Wall St (4/5) and Rector St (1) we want both
+    // as boarding candidates so the planner can find the direct
+    // 4/5 to Lexington/59 St rather than only the 1-train route.
+    const NEAR_RADIUS_M = 700;
+    const fromStopIds = Array.from(
+      new Set(
+        nearestStationsWithin(index, geo.lng, geo.lat, NEAR_RADIUS_M).flatMap(
+          (s) => s.stopIds,
+        ),
+      ),
     );
-
-    // Walk legs: from current location to boarding station, and
-    // from alighting station to the destination's address (when the
-    // destination is an address pin rather than a station).
-    const walkFromMeters = haversineMeters(
-      { lat: geo.lat, lng: geo.lng },
-      { lat: fromNearest.lat, lng: fromNearest.lng },
-    );
-    const walkToMeters = dest.address
-      ? haversineMeters(
-          { lat: dest.address.lat, lng: dest.address.lng },
-          { lat: dest.station.lat, lng: dest.station.lng },
+    // Same for the destination when it's an address (the saved Home
+    // or Work pin). When it's a station we keep the station's own
+    // stopIds so the rider's chosen platform wins.
+    const toStopIds = dest.address
+      ? Array.from(
+          new Set(
+            nearestStationsWithin(
+              index,
+              dest.address.lng,
+              dest.address.lat,
+              NEAR_RADIUS_M,
+            ).flatMap((s) => s.stopIds),
+          ),
         )
-      : 0;
+      : dest.station.stopIds;
+
+    const rawPlans = planTrips(lines, index, fromStopIds, toStopIds, {
+      maxResults: 12,
+    });
+
+    // Re-rank by estimated total time. Per-plan walks come from the
+    // address anchors + stationsByComplexId so each plan's timing
+    // reflects ITS actual board/alight station. Trim to top 6 so the
+    // rider sees a healthy spread of options without overwhelm.
+    const ranked = rankPlansByTime(rawPlans, {
+      arrivalsByStation,
+      nowSec: now / 1000,
+      walkFromAnchor: { lng: geo.lng, lat: geo.lat },
+      walkToAnchor: dest.address
+        ? { lng: dest.address.lng, lat: dest.address.lat }
+        : undefined,
+      stationsByComplexId,
+    });
+    // Apple Maps Today widget pattern — surface ONE recommendation on
+    // the home surface. Riders who want options tap "See all routes"
+    // and land in the directions sheet with home/work pre-filled.
+    const plans = ranked.slice(0, 1);
 
     return {
       origin,
       destination: dest,
       plans,
-      walkFromMeters,
-      walkToMeters,
     };
   }, [
     home,
@@ -481,28 +603,28 @@ export default function NearbyPanel({ open, onClose, onStationOpen }: Props) {
     destAnchor,
     geo.lat,
     geo.lng,
+    arrivalsByStation,
+    now,
   ]);
 
-  // Anchors get their own section, so strip them out of the other
-  // lists to avoid the same station rendering twice. For station
-  // anchors that's the stopId directly; for address anchors it's
-  // the resolved nearest station's stopId so the underlying station
-  // doesn't double-render either.
+  // Station-pinned anchors only — for those it's correct to dedupe
+  // them out of Nearest Stations so the same station doesn't appear
+  // twice on screen (the anchor still surfaces via the Going-to-Work
+  // card or the Home/Work badge on a remaining list, depending on
+  // context). Address-pinned anchors don't get filtered: an address
+  // has many equally-valid nearby stations, and hiding "the closest"
+  // one from Nearest Stations would just remove a useful row for an
+  // arbitrary reason.
   const anchorIds = useMemo(() => {
     const s = new Set<string>();
     const add = (ep: CommuteEndpoint | null) => {
       if (!ep) return;
-      if (ep.kind === "station") {
-        s.add(ep.stopId);
-      } else {
-        const nearest = nearestStations(index, ep.lng, ep.lat, 1)[0];
-        if (nearest) s.add(nearest.stopId);
-      }
+      if (ep.kind === "station") s.add(ep.stopId);
     };
     add(home);
     add(work);
     return s;
-  }, [home, work, index]);
+  }, [home, work]);
 
   const nearby = useMemo(
     () => nearbyAll.filter((s) => !anchorIds.has(s.stopId)),
@@ -521,36 +643,8 @@ export default function NearbyPanel({ open, onClose, onStationOpen }: Props) {
     return out;
   }, [favorites, stationsByComplexId, nearby, anchorIds]);
 
-  const commuteRows = useMemo<
-    { anchor: CommuteAnchor; station: StationEntry & { meters?: number } }[]
-  >(() => {
-    if (!home && !work) return [];
-    const have = geo.lng != null && geo.lat != null;
-    const rows: {
-      anchor: CommuteAnchor;
-      station: StationEntry & { meters?: number };
-    }[] = [];
-    const pairs: [CommuteAnchor, CommuteEndpoint | null][] = [
-      ["home", home],
-      ["work", work],
-    ];
-    for (const [anchor, ep] of pairs) {
-      const r = resolveCommuteEndpoint(ep, stationsByComplexId, index);
-      if (!r) continue;
-      const s = r.station;
-      const meters = have
-        ? haversineMeters(
-            { lat: geo.lat!, lng: geo.lng! },
-            { lat: s.lat, lng: s.lng },
-          )
-        : undefined;
-      rows.push({ anchor, station: { ...s, meters } });
-    }
-    return rows;
-  }, [home, work, stationsByComplexId, index, geo.lat, geo.lng]);
-
   // Shared sheet drag with half/full detents + dismiss threshold.
-  const { detent, sheetStyle, handlers, onHandleTap } = useSheetDrag({
+  const { detent, sheetStyle, handlers, onHandleTap, setDetent } = useSheetDrag({
     halfRestingY: "calc(88dvh - 60dvh)",
     open,
     onDismiss: onClose,
@@ -602,7 +696,20 @@ export default function NearbyPanel({ open, onClose, onStationOpen }: Props) {
         </button>
       </div>
 
-      <div className="flex-1 overflow-y-auto ios-scroll">
+      <div
+        className="flex-1 overflow-y-auto ios-scroll"
+        // At half detent the sheet hangs ~28dvh below the visible
+        // viewport, so the last items in the scroll content end up
+        // physically below where the rider can see. Adding 28dvh of
+        // bottom padding pushes the scrollable bottom past the
+        // overlap — the rider can scroll to the end without dragging
+        // the sheet up. Harmless at full detent (just adds dead space
+        // at the bottom of the list, which already has visual breathing
+        // room from the safe-area inset).
+        style={{
+          paddingBottom: "calc(28dvh + 1rem + env(safe-area-inset-bottom))",
+        }}
+      >
         {/* Hero card: when both Home and Work are set, show next
             departures in the rider's likely commute direction. */}
         {goingTo && home && work && (
@@ -610,11 +717,10 @@ export default function NearbyPanel({ open, onClose, onStationOpen }: Props) {
             origin={goingTo.origin}
             destination={goingTo.destination}
             destAnchor={destAnchor}
-            arrivals={arrivalsByStation.get(goingTo.origin.stopId) ?? []}
+            arrivalsByStation={arrivalsByStation}
             plans={goingTo.plans}
-            walkFromMeters={goingTo.walkFromMeters}
-            walkToMeters={goingTo.walkToMeters}
             routeColors={routeColors}
+            onSeeAllRoutes={onSeeAllRoutes}
             stationsByComplexId={stationsByComplexId}
             now={now}
             onSwap={() => {
@@ -622,28 +728,22 @@ export default function NearbyPanel({ open, onClose, onStationOpen }: Props) {
               destAnchorAutoPicked.current = true;
             }}
             onTapOrigin={() => onStationOpen(goingTo.origin.stopId)}
+            onTripSelect={
+              onTripSelect
+                ? (plan) => {
+                    onTripSelect(plan);
+                    // Apple-Maps pattern: tapping a route plan
+                    // collapses the sheet to its half-detent so the
+                    // map's trip overlay is visible. Tapping the
+                    // same plan again clears (plan === null) — keep
+                    // the sheet at whatever detent it's at; the
+                    // rider can drag if they want more room.
+                    if (plan) setDetent("half");
+                  }
+                : undefined
+            }
+            selectedTripKey={selectedTripKey}
           />
-        )}
-
-        {commuteRows.length > 0 && (
-          <div>
-            <div className="px-4 pt-3 pb-1.5 text-[10px] font-semibold text-gray-500 uppercase tracking-wider">
-              Commute
-            </div>
-            {commuteRows.map(({ anchor, station }) => (
-              <StationRow
-                key={`commute-${anchor}`}
-                station={station}
-                arrivals={arrivalsByStation.get(station.stopId) ?? []}
-                routeColors={routeColors}
-                now={now}
-                isFavorite={has(station.stopId)}
-                onFavoriteToggle={() => toggle(station.stopId)}
-                onTap={() => onStationOpen(station.stopId)}
-                anchor={anchor}
-              />
-            ))}
-          </div>
         )}
 
         {/* First-run hint: shown only when neither anchor is set, the
@@ -710,7 +810,7 @@ export default function NearbyPanel({ open, onClose, onStationOpen }: Props) {
         {/* Empty geo states (no location yet, denied, etc.). Kept at
             the bottom so the rest of the panel still renders if any
             useful content exists above. */}
-        {nearby.length === 0 && commuteRows.length === 0 && favStations.length === 0 && (
+        {nearby.length === 0 && favStations.length === 0 && !goingTo && (
           geo.status === "idle" ? (
             <div className="px-6 py-10 text-center">
               <Navigation className="w-10 h-10 mx-auto mb-3 text-gray-400" />

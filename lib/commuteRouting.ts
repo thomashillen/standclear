@@ -1,5 +1,6 @@
 import type { Lines, SubwayLine } from "./subwayData";
-import type { StationEntry } from "./stopsIndex";
+import { haversineMeters, type StationEntry } from "./stopsIndex";
+import type { Arrival } from "./useTrains";
 
 export interface DirectRoute {
   routeId: string;
@@ -152,6 +153,169 @@ export function directRoutesBetween(
  *     so an "express" plan that skips local stops shows fewer total
  *     stops than its local sibling, which is the rider-correct ranking.
  */
+// Per-leg time model. These are tuned for NYC subway service:
+// average headway off-peak is ~6–10 minutes (so half a headway is a
+// reasonable wait estimate without live data), per-stop time on
+// local lines averages ~90 seconds, and a typical in-system transfer
+// takes 2–3 minutes (walk + wait). We override the wait term with
+// the actual live next-train ETA whenever it's available.
+const FALLBACK_WAIT_S = 4 * 60;
+const TRAVEL_PER_STOP_S = 90;
+const TRANSFER_S = 3 * 60;
+// Walk-time helper assumes WALK_MPS = 1.4 m/s × GRID_FACTOR = 1.3
+// (kept as constants here so this module doesn't take a circular
+// import on stopsIndex).
+const WALK_S_PER_M = 1.3 / 1.4;
+
+export interface RankPlanOptions {
+  /** Live arrivals at the boarding station, used to substitute the
+   *  fallback first-leg wait with the actual next-train ETA. */
+  arrivalsByStation?: Map<string, Arrival[]> | null;
+  /** Wall-clock now in seconds (Date.now() / 1000). Required when
+   *  arrivalsByStation is provided so the wait calculation is
+   *  meaningful. */
+  nowSec?: number;
+  /** Walk distance in meters from the rider's actual origin (an
+   *  address) to the boarding station. Adds to the leg-1 wait so
+   *  trip totals reflect "leave home now to catch this."
+   *  Used as a constant fallback when walkFromAnchor isn't
+   *  provided. */
+  walkFromMeters?: number;
+  /** Walk distance in meters from the alighting station to the
+   *  rider's actual destination (an address). Constant fallback. */
+  walkToMeters?: number;
+  /** Geocoded origin (address) coordinates. When provided alongside
+   *  `stationsByComplexId`, the walk distance is computed PER PLAN
+   *  using the plan's actual board station — so two plans that
+   *  board at different complexes get walks specific to their
+   *  boarding station rather than one shared "anchor walk." */
+  walkFromAnchor?: { lng: number; lat: number };
+  /** Geocoded destination (address) coordinates. Same per-plan
+   *  walk computation as walkFromAnchor but for the alight side. */
+  walkToAnchor?: { lng: number; lat: number };
+  /** Map of complex stopId → StationEntry, needed to look up the
+   *  lng/lat of a plan's board/alight complex when computing
+   *  per-plan walks. */
+  stationsByComplexId?: Map<string, StationEntry>;
+}
+
+/**
+ * Estimate the total time for a trip plan in seconds. Components:
+ *
+ *   walk from origin
+ * + first-leg wait (live ETA when available, else FALLBACK_WAIT_S)
+ * + first-leg travel (stops × TRAVEL_PER_STOP_S)
+ * + (optional) transfer (TRANSFER_S) + second-leg wait + travel
+ * + walk to destination
+ *
+ * Does NOT model weekend/late-night frequency dropoff or service
+ * changes; the live wait term is the strongest correction we can
+ * apply with the data we have today.
+ */
+export function estimateTripTimeSec(
+  plan: TripPlan,
+  options: RankPlanOptions = {},
+): number {
+  const {
+    arrivalsByStation,
+    nowSec,
+    walkFromMeters: walkFromConst = 0,
+    walkToMeters: walkToConst = 0,
+    walkFromAnchor,
+    walkToAnchor,
+    stationsByComplexId,
+  } = options;
+
+  // Resolve per-plan walks when anchors are provided. The plan's actual
+  // board/alight complex tells us which station to measure to — so two
+  // plans that board at different complexes (e.g. one at Wall St on the
+  // 4/5, another at Rector St on the 1) get walks specific to their
+  // boarding station rather than the same constant.
+  const firstLeg = plan.legs[0];
+  const lastLeg = plan.legs[plan.legs.length - 1];
+  let walkFromMeters = walkFromConst;
+  if (walkFromAnchor && stationsByComplexId && firstLeg) {
+    const board = stationsByComplexId.get(firstLeg.boardComplexId);
+    if (board) {
+      walkFromMeters = haversineMeters(
+        { lat: walkFromAnchor.lat, lng: walkFromAnchor.lng },
+        { lat: board.lat, lng: board.lng },
+      );
+    }
+  }
+  let walkToMeters = walkToConst;
+  if (walkToAnchor && stationsByComplexId && lastLeg) {
+    const alight = stationsByComplexId.get(lastLeg.alightComplexId);
+    if (alight) {
+      walkToMeters = haversineMeters(
+        { lat: walkToAnchor.lat, lng: walkToAnchor.lng },
+        { lat: alight.lat, lng: alight.lng },
+      );
+    }
+  }
+
+  let total = walkFromMeters * WALK_S_PER_M;
+
+  for (let i = 0; i < plan.legs.length; i++) {
+    const leg = plan.legs[i];
+    // Wait time for THIS leg's first train.
+    let waitSec = FALLBACK_WAIT_S;
+    if (
+      i === 0 &&
+      arrivalsByStation &&
+      typeof nowSec === "number"
+    ) {
+      // Look up the soonest upcoming arrival at the boarding complex
+      // matching this leg's route + direction. The arrivals lookup
+      // is keyed on canonical complex stopId; the leg already
+      // carries that.
+      const arrivals = arrivalsByStation.get(leg.boardComplexId);
+      if (arrivals) {
+        let earliest = Infinity;
+        for (const a of arrivals) {
+          if (a.routeId !== leg.routeId) continue;
+          if (a.direction !== leg.direction) continue;
+          if (a.eta < nowSec - 5) continue; // already left
+          if (a.eta < earliest) earliest = a.eta;
+        }
+        if (Number.isFinite(earliest)) {
+          waitSec = Math.max(0, earliest - nowSec);
+        }
+      }
+    } else if (i > 0) {
+      // Transfer wait — we don't have live data for the rider's
+      // arrival time at the transfer station, so use a constant.
+      // The TRANSFER_S walk is added separately below.
+      waitSec = FALLBACK_WAIT_S;
+    }
+    total += waitSec;
+    if (i > 0) total += TRANSFER_S;
+    total += leg.stopCount * TRAVEL_PER_STOP_S;
+  }
+
+  total += walkToMeters * WALK_S_PER_M;
+  return total;
+}
+
+/**
+ * Re-rank a planTrips() result by estimated total time. Returns a
+ * new array; doesn't mutate. Useful when the rider has live arrivals
+ * and walk distances — a route with a longer subway segment can be
+ * faster overall if its next train arrives sooner.
+ */
+export function rankPlansByTime(
+  plans: TripPlan[],
+  options: RankPlanOptions = {},
+): TripPlan[] {
+  return plans
+    .map((plan) => ({
+      plan,
+      seconds: estimateTripTimeSec(plan, options),
+    }))
+    .sort((a, b) => a.seconds - b.seconds)
+    .map((p) => p.plan);
+}
+
 /**
  * Walk `line.shape` from the boarding stop's shape index to the
  * alighting stop's, returning the [lng, lat] coordinates of the leg.
@@ -360,19 +524,60 @@ export function planTrips(
     return a.totalStops - b.totalStops;
   });
 
-  // Dedupe. Two plans with the same routeId+direction sequence and the
-  // same transfer complex are equivalent for the rider. We dedupe AFTER
-  // sorting so the cheaper of any duplicate pair survives.
+  // Dedupe in two passes:
+  //
+  //   1. Exact dedup by (routeId-direction|...) — kills truly identical
+  //      plans (same line on same path).
+  //
+  //   2. Path dedup by (boardComplex→alightComplex|...) — collapses
+  //      co-running routes that share a physical track segment. The
+  //      classic NYC case: between Times Sq and 5Av/59 St the N, R,
+  //      and W all run the same Broadway BMT tunnel and stop at the
+  //      same intermediate stations. From the rider's perspective
+  //      that's ONE option ("take any Broadway-line train"), not
+  //      three. We dedupe AFTER sorting so the surviving plan in
+  //      each path-group is the lowest-stop one. Riders see the
+  //      route bullet of whichever variant won; live arrivals on
+  //      that complex still surface trains from any of the
+  //      co-running routes since they all stop there.
   const seen = new Set<string>();
+  const seenPath = new Set<string>();
   const deduped: TripPlan[] = [];
   for (const plan of results) {
-    const key =
+    const exactKey =
       plan.legs.map((l) => `${l.routeId}-${l.direction}`).join("|") +
       (plan.transferComplexId ? `:${plan.transferComplexId}` : "");
-    if (seen.has(key)) continue;
-    seen.add(key);
+    if (seen.has(exactKey)) continue;
+    seen.add(exactKey);
+
+    const pathKey = plan.legs
+      .map((l) => `${l.boardComplexId}>${l.alightComplexId}-${l.direction}`)
+      .join("|");
+    if (seenPath.has(pathKey)) continue;
+    seenPath.add(pathKey);
+
     deduped.push(plan);
   }
 
-  return deduped.slice(0, maxResults);
+  // Strip redundant trunk transfers. If the 4 reaches the destination
+  // directly AND the 5 reaches the destination directly, then a 4→5
+  // (or 5→4) transfer plan is noise — the rider would just take
+  // whichever train arrives first and stay on it. Same for N/R/W on
+  // the BMT Broadway line, A/C on 8th Ave, etc. Generalized check:
+  // any transfer plan whose first OR second leg's route also appears
+  // in the direct-plan set is dropped. Riders who actually need a
+  // cross-trunk transfer (e.g., 4 → L) keep their plan because
+  // neither route alone reaches the destination.
+  const directRoutes = new Set<string>();
+  for (const plan of deduped) {
+    if (plan.legs.length === 1) directRoutes.add(plan.legs[0].routeId);
+  }
+  const trimmed = deduped.filter((plan) => {
+    if (plan.legs.length === 1) return true;
+    if (directRoutes.has(plan.legs[0].routeId)) return false;
+    if (directRoutes.has(plan.legs[1].routeId)) return false;
+    return true;
+  });
+
+  return trimmed.slice(0, maxResults);
 }

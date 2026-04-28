@@ -54,15 +54,20 @@ export async function geocodePlaces(
     `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(trimmed)}.json`,
   );
   url.searchParams.set("access_token", token);
-  url.searchParams.set("limit", String(options.limit ?? 5));
+  // Bumped from 5 → 10 so business / POI results surface alongside
+  // address matches. Mapbox can return a mix per query; with only 5
+  // slots and addresses ranking high for ambiguous queries, named
+  // places like restaurants, shops, and landmarks were getting
+  // squeezed out. 10 gives the ranker enough room to include both.
+  url.searchParams.set("limit", String(options.limit ?? 10));
   url.searchParams.set("bbox", NYC_BBOX);
-  // The "address" + "poi" types cover street addresses and named
-  // places. We exclude "country", "region", "postcode" because those
-  // are too coarse for a rider trying to plan a trip. "neighborhood"
-  // and "locality" are useful for trips like "to Williamsburg".
+  // POI listed first to nudge Mapbox's relevance ranker toward
+  // returning businesses + landmarks alongside addresses. Order
+  // doesn't strictly affect ranking but the documented hint helps
+  // for ambiguous queries like "starbucks" vs "550 madison".
   url.searchParams.set(
     "types",
-    "address,poi,neighborhood,locality,place",
+    "poi,address,neighborhood,locality,place",
   );
   if (options.proximity) {
     url.searchParams.set(
@@ -71,6 +76,10 @@ export async function geocodePlaces(
     );
   }
   url.searchParams.set("autocomplete", "true");
+  // English-language POI names — without this Mapbox occasionally
+  // returns translated names for international chains (e.g. Cyrillic
+  // for a Russian-named cafe), which is jarring in a NYC transit app.
+  url.searchParams.set("language", "en");
 
   const res = await fetch(url.toString(), { signal: options.signal });
   if (!res.ok) {
@@ -92,19 +101,24 @@ export async function geocodePlaces(
   if (!data.features) return [];
 
   return data.features.map((f) => {
-    // place_name is the comma-joined full string ("123 Main St,
-    // Brooklyn, NY 11211, USA"). Strip the country tail if present
-    // for a cleaner subtitle, since every result is in NYC anyway.
+    // For address features Mapbox stores the house number in `address`
+    // and the street name in `text`. The full street address ("550
+    // Madison Avenue") only appears in `place_name`. Using `text`
+    // alone drops the number — wrong for a transit picker where the
+    // exact building matters. Take the first comma-separated part of
+    // `place_name`, which is "550 Madison Avenue" for addresses,
+    // "Empire State Building" for POIs, "Williamsburg" for
+    // neighborhoods. Cleanest single source for the display title.
     const fullName = f.place_name ?? f.text;
     const parts = fullName.split(",").map((s) => s.trim()).filter(Boolean);
-    // Drop the first part (it's f.text, used as the title) and the
-    // last part if it's a country code/name.
+    const title = parts[0] ?? f.text;
+    // Drop the country tail if present — every result is in NYC.
     const ctx = parts
       .slice(1)
       .filter((p) => p !== "United States" && p !== "USA");
     return {
       id: f.id,
-      name: f.text,
+      name: title,
       context: ctx.join(", "),
       lng: f.center[0],
       lat: f.center[1],

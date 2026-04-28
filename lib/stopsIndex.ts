@@ -220,6 +220,40 @@ export function nearestStations(
   return withDist.slice(0, limit);
 }
 
+/**
+ * Return all stations within `maxMeters` of the given point, plus the
+ * absolute nearest as a guaranteed fallback so the caller never gets an
+ * empty list. Capped to `limit` results so the routing engine doesn't
+ * explode when the rider is in a station-dense area like Midtown.
+ *
+ * Used by the trip planner: when the rider's origin or destination is a
+ * geocoded address, we want to consider EVERY nearby station as a
+ * boarding/alighting candidate. The single-nearest approach (used by
+ * earlier versions) misses cases like 5 Av/59 St (N/R/W) vs Lexington
+ * Av/59 St (4/5/6) — different complexes, same address, very different
+ * trip implications. ~700m ≈ 9 min walk, the threshold most riders
+ * tolerate before it becomes a bus or cab decision.
+ */
+export function nearestStationsWithin(
+  index: StationEntry[],
+  lng: number,
+  lat: number,
+  maxMeters: number,
+  limit = 8,
+): NearbyStation[] {
+  const withDist: NearbyStation[] = index.map((s) => ({
+    ...s,
+    meters: haversineMeters({ lat, lng }, { lat: s.lat, lng: s.lng }),
+  }));
+  withDist.sort((a, b) => a.meters - b.meters);
+  const within = withDist.filter((s) => s.meters <= maxMeters);
+  // Always include the nearest station even if it's outside the radius
+  // — better to walk an extra block than show "no routes" because the
+  // address is in a station-thin neighborhood.
+  if (within.length === 0 && withDist.length > 0) return [withDist[0]];
+  return within.slice(0, limit);
+}
+
 // Catchable-train verdict — the hero feature. Given how far away the user is
 // and when a train is due, decide whether they can walk, need to run, or
 // have already missed it.
