@@ -42,32 +42,53 @@ export function haversineMeters(
   return 2 * R * Math.asin(Math.sqrt(h));
 }
 
-// Collapse per-line stop lists into one entry per physical station. Two
-// layers of merging:
+// Authoritative list of multi-line transfer complexes. Each inner array is
+// the parent_stop_ids that share a single physical complex (in-system
+// transfer between platforms, no fare needed). Merging happens ONLY for
+// stop_ids listed here — anything else stays as its own station.
 //
-// 1) Same stop id across lines. The same stop appears in multiple SubwayLine
-//    entries (e.g. the "6" and "4" entries both list stop id 635), and we
-//    want a single entry with both route badges.
+// Why an explicit list and not name+proximity heuristics:
 //
-// 2) Station complexes. The MTA feed assigns different stop ids to different
-//    physical platforms inside the same transfer complex: Union Square is
-//    635 (4/5/6), R20 (N/Q/R/W), and L03 (L). All three share the name
-//    "14 St-Union Sq" and sit within ~100m. The GTFS `transfers.txt` file
-//    identifies these groupings officially, but we don't build from GTFS
-//    at runtime, so we use a name+proximity heuristic: stops with identical
-//    name within COMPLEX_RADIUS_M of an existing entry merge into it.
-//    Catches every documented complex in the MTA system without pulling in
-//    hundreds of false positives (two unrelated "23 St" stops on different
-//    trunks are ~500m apart, well outside the radius).
+//   The previous heuristic merged any same-name stops within 250m. That
+//   caught real complexes like Union Sq, Times Sq, and W 4 St, but also
+//   produced false positives. A real example: Rector St on the 1 train
+//   (139, at Greenwich St) and Rector St on the R/W (R26, at Trinity Pl)
+//   sit ~49m apart and share a name, yet have NO underground connection
+//   — they're separate stations across the street from each other.
+//   Same trap with Wall St (2/3) vs Wall St (4/5) at 247m, and others.
 //
-// Complex entries carry every member's stopId in `stopIds` so the station
-// panel can surface arrivals from any of them. The canonical `stopId` is
-// the first member encountered — used as a stable favorites/React key.
-const COMPLEX_RADIUS_M = 250;
+//   Distance alone can't separate "platforms inside one complex" from
+//   "two stations across the street" — they overlap. Using an allowlist
+//   curated from MTA's station_complex data eliminates the false
+//   positives. Stations missing from the list are merely not merged
+//   (riders see them as distinct entries); the only cost of an
+//   incomplete list is that a connected complex shows as multiple rows
+//   instead of one. That's recoverable, vs. the prior bug where two
+//   unrelated stations were impossible to tell apart.
+//
+//   Future work: parse transfers.txt during the GTFS build step and emit
+//   the complex map into gtfsData.json so this table is data-driven.
+const KNOWN_COMPLEXES: string[][] = [
+  ["635", "L03", "R20"],          // 14 St-Union Sq (4/5/6 + L + N/Q/R/W)
+  ["127", "725", "R16", "902"],   // Times Sq-42 St (1/2/3 + 7 + N/Q/R/W + S shuttle)
+  ["631", "723", "901"],          // Grand Central-42 St (4/5/6 + 7 + S shuttle)
+  ["D17", "R17"],                 // 34 St-Herald Sq (B/D/F/M + N/Q/R/W)
+  ["125", "A24"],                 // 59 St-Columbus Circle (1 + A/B/C/D)
+  ["A32", "D20"],                 // W 4 St-Wash Sq (A/C/E + B/D/F/M)
+  ["235", "D24", "R31"],          // Atlantic Av-Barclays Ctr (2/3/4/5 + B/Q + D/N/R/W)
+  ["A51", "J27", "L22"],          // Broadway Junction (A/C + J/Z + L)
+  ["719", "G22"],                 // Court Sq (7 + E/M/G)
+  ["232", "423"],                 // Borough Hall (R + 4/5)
+  ["A41", "R29"],                 // Jay St-MetroTech (A/C/F + R)
+  ["229", "418", "A38", "M22"],   // Fulton St (2/3 + 4/5 + A/C + J/Z) — NOT G36 in Brooklyn
+  ["F15", "M18"],                 // Delancey St-Essex St (F + J/M/Z)
+];
 
 export function buildStationIndex(lines: Lines): StationEntry[] {
   // First pass: one entry per unique stopId, carrying the union of its
-  // routes. This is the existing "same stop across multiple lines" merge.
+  // routes. The same stop appears in multiple SubwayLine entries (e.g.
+  // the "6" and "4" entries both list stop id 635), and we want a single
+  // entry with both route badges attached.
   const byStopId = new Map<string, StationEntry>();
   for (const line of Object.values(lines)) {
     const badge: RouteBadge = {
@@ -95,31 +116,53 @@ export function buildStationIndex(lines: Lines): StationEntry[] {
     }
   }
 
-  // Second pass: merge complexes. Walk every stop-id entry in a stable
-  // order; for each, look for an already-accepted entry with the same name
-  // whose coordinates are within COMPLEX_RADIUS_M — if one exists, fold the
-  // new entry into it. Otherwise, start a new complex entry.
-  const byNameBucket = new Map<string, StationEntry[]>();
+  // Second pass: merge across stop_ids only when an authoritative complex
+  // group declares them connected. Coordinates of the merged entry use the
+  // centroid of present members so distance-from-user calcs are balanced
+  // (Times Sq's centroid sits between the 1/2/3 and N/Q/R/W platforms,
+  // not skewed to whichever stop_id was listed first).
+  const merged = new Set<string>();
   const complexes: StationEntry[] = [];
-  for (const entry of byStopId.values()) {
-    const bucket = byNameBucket.get(entry.name) ?? [];
-    const match = bucket.find(
-      (e) => haversineMeters(e, entry) <= COMPLEX_RADIUS_M,
-    );
-    if (match) {
-      // Fold: extend stopIds, union routes (preserving first-seen order
-      // so bullet ordering stays stable across polls).
-      for (const id of entry.stopIds) {
-        if (!match.stopIds.includes(id)) match.stopIds.push(id);
+
+  for (const group of KNOWN_COMPLEXES) {
+    const members = group
+      .map((id) => byStopId.get(id))
+      .filter((e): e is StationEntry => Boolean(e));
+    if (members.length === 0) continue;
+    if (members.length === 1) {
+      // A complex with only one member present in the data isn't really
+      // a merged complex — fall through and let it be added as a plain
+      // station below (avoids a redundant entry).
+      continue;
+    }
+    const canonical = members[0];
+    const lat = members.reduce((s, m) => s + m.lat, 0) / members.length;
+    const lng = members.reduce((s, m) => s + m.lng, 0) / members.length;
+    const entry: StationEntry = {
+      stopId: canonical.stopId,
+      stopIds: [],
+      name: canonical.name,
+      lat,
+      lng,
+      routes: [],
+    };
+    for (const m of members) {
+      for (const id of m.stopIds) {
+        if (!entry.stopIds.includes(id)) entry.stopIds.push(id);
+        merged.add(id);
       }
-      for (const r of entry.routes) {
-        if (!match.routes.some((x) => x.routeId === r.routeId)) {
-          match.routes.push(r);
+      for (const r of m.routes) {
+        if (!entry.routes.some((x) => x.routeId === r.routeId)) {
+          entry.routes.push(r);
         }
       }
-    } else {
-      bucket.push(entry);
-      byNameBucket.set(entry.name, bucket);
+    }
+    complexes.push(entry);
+  }
+
+  // Anything not absorbed into a known complex stays as its own station.
+  for (const entry of byStopId.values()) {
+    if (entry.stopIds.every((id) => !merged.has(id))) {
       complexes.push(entry);
     }
   }
@@ -179,13 +222,16 @@ export function nearestStations(
 //
 // Model (deliberately simple, tuned for NYC):
 //   walk_seconds = dist_m * 1.3 / 1.4 + 20s entry overhead
-//   run_seconds  = dist_m * 1.3 / 2.5 + 20s entry overhead
+//   run_seconds  = dist_m * 1.3 / 3.5 + 20s entry overhead
 //
 //   1.3× grid-detour factor — haversine is as-the-crow-flies; NYC blocks
 //     make the actual walk ~20–40% longer. 1.3 is a conservative middle.
 //   1.4 m/s  — normative NYC walking pace (~3.1 mph).
-//   2.5 m/s  — a brisk jog, not a sprint. Someone in business shoes can
-//     sustain this for a few blocks.
+//   3.5 m/s  — a real run, not a jog. The previous 2.5 m/s was a brisk
+//     jog and made the verdict too pessimistic: a 100m / 60s arrival
+//     came back as "miss" when most adults can sprint that comfortably.
+//     3.5 m/s ≈ 7.8 mph — short-distance "running for the train" pace,
+//     achievable for a fit adult over 100–300m without elite training.
 //   20s entry overhead — stairs, turnstile, descend to platform. The MTA
 //     countdown clocks trigger "arriving" at the station, not at the
 //     platform edge, so some buffer is mandatory or every "Run" lies.
@@ -198,7 +244,7 @@ export function nearestStations(
 export type CatchVerdict = "miss" | "run" | "walk" | "chill";
 
 const WALK_MPS = 1.4;
-const RUN_MPS = 2.5;
+const RUN_MPS = 3.5;
 const GRID_FACTOR = 1.3;
 const ENTRY_OVERHEAD_S = 20;
 const CHILL_BUFFER_S = 120;

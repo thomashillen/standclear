@@ -1,12 +1,14 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { MapPin, Star, Navigation, ArrowUp, ArrowDown, Search, X } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { MapPin, Star, Navigation, ArrowUp, ArrowDown, Search, X, Home, Briefcase, ArrowLeftRight, ArrowRight } from "lucide-react";
 import { useLines } from "@/lib/subwayData";
 import { useTrains, type Arrival } from "@/lib/useTrains";
 import { useGeolocation } from "@/lib/useGeolocation";
-import { useFavorites } from "@/lib/useFavorites";
+import { useFavorites, useCommute, type CommuteAnchor } from "@/lib/useFavorites";
+import { useNow } from "@/lib/useNow";
 import { useSheetDrag } from "@/lib/useSheetDrag";
+import { directRoutesBetween } from "@/lib/commuteRouting";
 import {
   buildStationIndex,
   catchVerdict,
@@ -24,12 +26,14 @@ interface Props {
   onStationOpen: (stopId: string) => void;
 }
 
+// Format ETA for the compact list rows. The final minute counts down
+// second by second so the user can see urgency build; minutes-only
+// above that to keep the row from getting noisy at distance.
 function fmtEta(eta: number, now: number): string {
-  const secs = eta - now / 1000;
-  if (secs < 30) return "Now";
-  const mins = Math.round(secs / 60);
-  if (mins < 1) return "<1m";
-  return `${mins}m`;
+  const secs = Math.round(eta - now / 1000);
+  if (secs <= 5) return "Now";
+  if (secs < 60) return `${secs}s`;
+  return `${Math.round(secs / 60)}m`;
 }
 
 function fmtDistance(meters: number): string {
@@ -48,11 +52,160 @@ function RouteBullet({
 }) {
   return (
     <span
-      className="inline-flex items-center justify-center w-5 h-5 rounded-full text-[10px] font-black leading-none flex-shrink-0"
+      className="nyc-bullet inline-flex items-center justify-center w-5 h-5 rounded-full text-[12px] leading-none flex-shrink-0"
       style={{ backgroundColor: color, color: textColor === "black" ? "#000" : "#fff" }}
     >
       {id}
     </span>
+  );
+}
+
+// ─── Going to Work / Going Home — the daily-commute hero card ─────
+// Surfaces only when both Home and Work are set. Picks a direction
+// (origin → destination) based on which anchor the user is closer to,
+// and shows the next few catchable trains at the origin headed toward
+// the destination. A swap button flips the direction so a rider mid-day
+// can preview the return without changing their commute setup.
+
+interface GoingToCardProps {
+  origin: StationEntry & { meters?: number };
+  destination: StationEntry;
+  /** Which anchor the origin represents — drives the title and badge. */
+  originAnchor: CommuteAnchor;
+  arrivals: Arrival[];
+  routes: { routeId: string; direction: "N" | "S" }[];
+  routeColors: Map<string, { color: string; textColor: "white" | "black"; displayId: string }>;
+  now: number;
+  onSwap: () => void;
+  onTapOrigin: () => void;
+}
+
+function GoingToCard({
+  origin,
+  destination,
+  originAnchor,
+  arrivals,
+  routes,
+  routeColors,
+  now,
+  onSwap,
+  onTapOrigin,
+}: GoingToCardProps) {
+  // Filter to arrivals on the relevant route+direction at the origin's
+  // member stop_ids, drop any already departed (5s grace), and trim to
+  // the soonest few. The `arrivals` prop is already scoped to the origin
+  // station; we just narrow further by route+direction here.
+  const routeKey = useMemo(() => {
+    const m = new Map<string, "N" | "S">();
+    for (const r of routes) m.set(r.routeId, r.direction);
+    return m;
+  }, [routes]);
+
+  const upcoming = useMemo(() => {
+    const cutoff = now / 1000 - 5;
+    return arrivals
+      .filter((a) => {
+        const d = routeKey.get(a.routeId);
+        return d != null && d === a.direction && a.eta >= cutoff;
+      })
+      .slice(0, 4);
+  }, [arrivals, routeKey, now]);
+
+  const destAnchor: CommuteAnchor = originAnchor === "home" ? "work" : "home";
+  const title = destAnchor === "work" ? "Going to Work" : "Going Home";
+
+  // Container styles: gradient backdrop tinted by destination anchor
+  // (sky for Work, emerald for Home) so the card visually maps to the
+  // header chip color rider already learned in StationPanel.
+  const tint =
+    destAnchor === "work"
+      ? "from-sky-500/15 via-sky-500/[0.06] to-transparent ring-sky-400/20"
+      : "from-emerald-500/15 via-emerald-500/[0.06] to-transparent ring-emerald-400/20";
+
+  return (
+    <div
+      className={`mx-3 mt-3 mb-1 rounded-2xl bg-gradient-to-br ${tint} ring-1 px-3.5 pt-3 pb-3.5 backdrop-blur-sm`}
+    >
+      <div className="flex items-center gap-2 mb-2">
+        <span
+          className={`inline-flex items-center justify-center w-6 h-6 rounded-full ${
+            destAnchor === "work" ? "bg-sky-300/20 text-sky-200" : "bg-emerald-300/20 text-emerald-200"
+          }`}
+        >
+          {destAnchor === "work" ? <Briefcase className="w-3.5 h-3.5" /> : <Home className="w-3.5 h-3.5" />}
+        </span>
+        <h3 className="text-[14px] font-black tracking-tight text-white">{title}</h3>
+        <button
+          type="button"
+          onClick={onSwap}
+          aria-label="Swap direction"
+          className="press ml-auto w-8 h-8 -mr-1 flex items-center justify-center rounded-full bg-white/[0.06] hover:bg-white/[0.12] text-gray-200 touch-manipulation"
+        >
+          <ArrowLeftRight className="w-3.5 h-3.5" />
+        </button>
+      </div>
+
+      {/* From → To micro-line. Origin is tappable to open its full
+          station detail; destination is informational. */}
+      <button
+        type="button"
+        onClick={onTapOrigin}
+        className="press w-full text-left flex items-center gap-1.5 text-[12px] text-gray-300 mb-2.5 touch-manipulation"
+      >
+        <span className="font-semibold text-gray-100 truncate">{origin.name}</span>
+        <ArrowRight className="w-3 h-3 flex-shrink-0 text-gray-500" />
+        <span className="text-gray-400 truncate">{destination.name}</span>
+      </button>
+
+      {routes.length === 0 ? (
+        <p className="text-[12px] text-gray-400 leading-snug">
+          No direct route between these stations. Open one of them to plan a
+          transfer.
+        </p>
+      ) : upcoming.length === 0 ? (
+        <p className="text-[12px] text-gray-500 leading-snug">
+          No upcoming{" "}
+          {routes.map((r) => routeColors.get(r.routeId)?.displayId ?? r.routeId).join("/")}{" "}
+          trains in that direction right now.
+        </p>
+      ) : (
+        <div className="flex flex-wrap gap-x-3 gap-y-1.5">
+          {upcoming.map((a, i) => {
+            const info = routeColors.get(a.routeId);
+            if (!info) return null;
+            const verdict: CatchVerdict | null =
+              origin.meters !== undefined
+                ? catchVerdict(origin.meters, a.eta, now / 1000)
+                : null;
+            const style = verdict ? VERDICT_STYLES[verdict] : VERDICT_STYLES.chill;
+            return (
+              <span
+                key={`${a.tripId}-${i}`}
+                className="inline-flex items-center gap-1"
+              >
+                <RouteBullet
+                  id={info.displayId}
+                  color={info.color}
+                  textColor={info.textColor}
+                />
+                <span
+                  className={`text-[13px] font-semibold tabular-nums ${style.etaCls}`}
+                >
+                  {fmtEta(a.eta, now)}
+                </span>
+                {style.label && (
+                  <span
+                    className={`ml-0.5 px-1.5 py-[1px] rounded-full text-[9px] leading-none uppercase tracking-wider ${style.pill}`}
+                  >
+                    {style.label}
+                  </span>
+                )}
+              </span>
+            );
+          })}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -64,6 +217,29 @@ interface StationRowProps {
   isFavorite: boolean;
   onFavoriteToggle: () => void;
   onTap: () => void;
+  /** When set, renders a small Home/Work badge in front of the route
+   *  bullets. Pure visual annotation — doesn't change tap behavior. */
+  anchor?: CommuteAnchor | null;
+}
+
+// Small inline pill flagging a station as Home or Work. Sits next to the
+// route bullets so the user clocks "this is my home stop" before reading
+// the name.
+function AnchorBadge({ anchor }: { anchor: CommuteAnchor }) {
+  if (anchor === "home") {
+    return (
+      <span className="inline-flex items-center gap-1 px-1.5 h-5 rounded-full text-[10px] font-bold bg-emerald-300/15 text-emerald-200 ring-1 ring-emerald-300/30">
+        <Home className="w-3 h-3" />
+        Home
+      </span>
+    );
+  }
+  return (
+    <span className="inline-flex items-center gap-1 px-1.5 h-5 rounded-full text-[10px] font-bold bg-sky-300/15 text-sky-200 ring-1 ring-sky-300/30">
+      <Briefcase className="w-3 h-3" />
+      Work
+    </span>
+  );
 }
 
 // Styling per verdict. "chill" and unknown (no distance) leave the eta alone
@@ -95,16 +271,24 @@ function StationRow({
   isFavorite,
   onFavoriteToggle,
   onTap,
+  anchor,
 }: StationRowProps) {
-  // Show up to 3 soonest upcoming arrivals. The API already sorts by eta
-  // ascending; we filter per-station in the parent and slice here.
-  const topArrivals = arrivals.slice(0, 3);
+  // Drop arrivals whose eta has already passed (with a 5s grace so a
+  // train STOPPED_AT the platform still shows for a beat). Without this
+  // filter, departed trains linger up to 8s — until the next /api/trains
+  // poll drops them — and render as "Now miss", which is misleading.
+  // Filtering here (not in the parent's memo) means the live `now` tick
+  // drives drop-out instantly, not on the feed cadence.
+  const topArrivals = arrivals
+    .filter((a) => a.eta - now / 1000 > -5)
+    .slice(0, 3);
 
   return (
     <div className="border-b border-white/5 last:border-b-0">
       <div className="flex items-start gap-3 px-4 py-3">
         <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 mb-1.5">
+          <div className="flex items-center gap-2 mb-1.5 flex-wrap">
+            {anchor && <AnchorBadge anchor={anchor} />}
             <div className="flex items-center gap-1 flex-shrink-0">
               {station.routes.slice(0, 6).map((r) => {
                 const info = routeColors.get(r.routeId);
@@ -200,6 +384,7 @@ export default function NearbyPanel({ open, onClose, onStationOpen }: Props) {
   const lines = useLines();
   const data = useTrains();
   const { favorites, toggle, has } = useFavorites();
+  const { home, work, anchorOf } = useCommute();
   const [query, setQuery] = useState("");
 
   const index = useMemo(() => (lines ? buildStationIndex(lines) : []), [lines]);
@@ -263,28 +448,122 @@ export default function NearbyPanel({ open, onClose, onStationOpen }: Props) {
     return m;
   }, [data, index]);
 
-  const nearby: NearbyStation[] = useMemo(() => {
+  const nearbyAll: NearbyStation[] = useMemo(() => {
     if (geo.lng == null || geo.lat == null) return [];
     return nearestStations(index, geo.lng, geo.lat, 6);
   }, [geo.lng, geo.lat, index]);
 
+  // Resolve the commute anchors into renderable rows. Annotate with
+  // distance when location is available so the catchable-train verdict
+  // applies to your home/work stops too — that's exactly when the
+  // verdict matters most ("can I still make the 7:43?").
+  const commuteRows = useMemo<
+    { anchor: CommuteAnchor; station: StationEntry & { meters?: number } }[]
+  >(() => {
+    if (!home && !work) return [];
+    const byId = new Map(index.map((s) => [s.stopId, s]));
+    const have = geo.lng != null && geo.lat != null;
+    const rows: { anchor: CommuteAnchor; station: StationEntry & { meters?: number } }[] = [];
+    const pairs: [CommuteAnchor, string | null][] = [
+      ["home", home],
+      ["work", work],
+    ];
+    for (const [anchor, id] of pairs) {
+      if (!id) continue;
+      const s = byId.get(id);
+      if (!s) continue;
+      const meters = have
+        ? haversineMeters({ lat: geo.lat!, lng: geo.lng! }, { lat: s.lat, lng: s.lng })
+        : undefined;
+      rows.push({ anchor, station: { ...s, meters } });
+    }
+    return rows;
+  }, [home, work, index, geo.lat, geo.lng]);
+
+  // ─── Going to Work / Going Home ────────────────────────────────────
+  // Origin defaults to whichever anchor the user is closer to once
+  // geolocation lands (e.g. you're at home in the morning → "Going to
+  // Work" pre-selected). The default is computed once and then sticks
+  // — manual swaps win, and we don't want a fresh location reading to
+  // override the rider's expressed intent.
+  const [originAnchor, setOriginAnchor] = useState<CommuteAnchor>("home");
+  const originAutoPicked = useRef(false);
+  useEffect(() => {
+    if (originAutoPicked.current) return;
+    if (!home || !work) return;
+    if (geo.lat == null || geo.lng == null) return;
+    const byId = new Map(index.map((s) => [s.stopId, s]));
+    const h = byId.get(home);
+    const w = byId.get(work);
+    if (!h || !w) return;
+    const dh = haversineMeters({ lat: geo.lat, lng: geo.lng }, { lat: h.lat, lng: h.lng });
+    const dw = haversineMeters({ lat: geo.lat, lng: geo.lng }, { lat: w.lat, lng: w.lng });
+    setOriginAnchor(dw < dh ? "work" : "home");
+    originAutoPicked.current = true;
+  }, [home, work, geo.lat, geo.lng, index]);
+
+  // Resolve origin/destination StationEntries + the direct routes between
+  // them. Origin carries a meters distance when geo is known so the
+  // GoingToCard can color arrivals with the catch verdict.
+  const goingTo = useMemo(() => {
+    if (!home || !work || !lines) return null;
+    const byId = new Map(index.map((s) => [s.stopId, s]));
+    const h = byId.get(home);
+    const w = byId.get(work);
+    if (!h || !w) return null;
+    const origin = originAnchor === "home" ? h : w;
+    const destination = originAnchor === "home" ? w : h;
+    const meters =
+      geo.lat != null && geo.lng != null
+        ? haversineMeters(
+            { lat: geo.lat, lng: geo.lng },
+            { lat: origin.lat, lng: origin.lng },
+          )
+        : undefined;
+    const routes = directRoutesBetween(lines, origin.stopIds, destination.stopIds);
+    return {
+      origin: { ...origin, meters } as StationEntry & { meters?: number },
+      destination: destination as StationEntry,
+      routes,
+    };
+  }, [home, work, lines, index, originAnchor, geo.lat, geo.lng]);
+
+  // Anchors get their own section, so strip them out of the other lists
+  // to avoid the same station rendering twice.
+  const anchorIds = useMemo(() => {
+    const s = new Set<string>();
+    if (home) s.add(home);
+    if (work) s.add(work);
+    return s;
+  }, [home, work]);
+
+  const nearby = useMemo(
+    () => nearbyAll.filter((s) => !anchorIds.has(s.stopId)),
+    [nearbyAll, anchorIds],
+  );
+
   const favStations: StationEntry[] = useMemo(() => {
     if (favorites.size === 0) return [];
-    // Skip favorites that already appear in the nearby list — otherwise
-    // your closest-favorite shows up twice, and only the nearby copy gets
-    // a catchable-train verdict. Single source of truth per station.
+    // Skip favorites that already appear in the commute or nearby lists
+    // — otherwise the same station shows up two or three times. Commute
+    // wins, then nearby (which carries the catch verdict), so favorites
+    // is the residual "saved-but-not-already-shown" bucket.
     const nearbyIds = new Set(nearby.map((s) => s.stopId));
     const byId = new Map(index.map((s) => [s.stopId, s]));
     const out: StationEntry[] = [];
     for (const id of favorites) {
-      if (nearbyIds.has(id)) continue;
+      if (nearbyIds.has(id) || anchorIds.has(id)) continue;
       const s = byId.get(id);
       if (s) out.push(s);
     }
     return out;
-  }, [favorites, index, nearby]);
+  }, [favorites, index, nearby, anchorIds]);
 
-  const now = data?.generatedAt ?? Date.now();
+  // Wall-clock "now" ticking every second so countdowns + catch verdicts
+  // update live, not on the 8s feed-poll cadence. Pause the timer when
+  // the panel is closed — the unmount path also handles it, but this
+  // prevents a brief tick storm during dismiss animations.
+  const now = useNow(open);
 
   // Shared sheet drag with half/full detents + dismiss threshold. Matches
   // LinePanel so the gesture feels consistent across both mobile sheets.
@@ -308,36 +587,42 @@ export default function NearbyPanel({ open, onClose, onStationOpen }: Props) {
       "
       style={sheetStyle}
     >
-      <button
-        type="button"
-        className="sm:hidden flex items-center justify-center h-5 pt-1.5 flex-shrink-0 touch-none w-full"
-        onClick={onHandleTap}
-        aria-label={detent === "half" ? "Expand panel" : "Collapse panel"}
-      >
-        <div className="w-9 h-[5px] rounded-full bg-white/25" />
-      </button>
-
+      {/* Combined handle + title row. The grab handle sits absolutely
+          at the top of the row so it doesn't claim its own line of
+          vertical real estate, and the entire row (including the
+          area around the handle) is draggable. The handle button is
+          still tap-to-toggle-detent on mobile; stopPropagation keeps
+          a tap from bleeding into the parent's pointerdown drag. */}
       <div
-        className="flex items-center justify-between px-4 py-2.5 flex-shrink-0 sm:cursor-auto cursor-grab active:cursor-grabbing touch-none"
+        className="relative flex items-center justify-between px-4 pt-3.5 pb-1.5 flex-shrink-0 sm:cursor-auto cursor-grab active:cursor-grabbing touch-none sm:pt-2"
         onPointerDown={handlers.onPointerDown}
         onPointerMove={handlers.onPointerMove}
         onPointerUp={handlers.onPointerUp}
         onPointerCancel={handlers.onPointerCancel}
       >
-        <div className="flex items-center gap-2.5 text-white">
-          <MapPin className="w-[18px] h-[18px]" />
-          <span className="font-black text-[17px] tracking-tight">Near me</span>
+        <button
+          type="button"
+          className="sm:hidden absolute top-1.5 left-1/2 -translate-x-1/2 w-9 h-[5px] rounded-full bg-white/30 hover:bg-white/50 touch-manipulation"
+          onClick={(e) => {
+            e.stopPropagation();
+            onHandleTap();
+          }}
+          aria-label={detent === "half" ? "Expand panel" : "Collapse panel"}
+        />
+        <div className="flex items-center gap-2 text-white">
+          <MapPin className="w-[17px] h-[17px]" />
+          <span className="font-black text-[16px] tracking-tight">Near me</span>
         </div>
         <button
           onClick={onClose}
-          className="press text-white opacity-85 hover:opacity-100 w-11 h-11 -mr-1 flex items-center justify-center rounded-full bg-white/[0.08] hover:bg-white/[0.12] touch-manipulation"
+          className="press text-white opacity-85 hover:opacity-100 w-9 h-9 -mr-1 flex items-center justify-center rounded-full bg-white/[0.08] hover:bg-white/[0.12] touch-manipulation"
           aria-label="Close panel"
         >
-          <X className="w-[18px] h-[18px]" strokeWidth={2.5} />
+          <X className="w-[16px] h-[16px]" strokeWidth={2.5} />
         </button>
       </div>
 
-      <div className="px-3 pb-3 flex-shrink-0 border-b border-white/[0.06]">
+      <div className="px-3 pb-2.5 flex-shrink-0 border-b border-white/[0.06]">
         <div className="relative">
           <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
           <input
@@ -383,6 +668,7 @@ export default function NearbyPanel({ open, onClose, onStationOpen }: Props) {
                   isFavorite={has(s.stopId)}
                   onFavoriteToggle={() => toggle(s.stopId)}
                   onTap={() => onStationOpen(s.stopId)}
+                  anchor={anchorOf(s.stopId)}
                 />
               ))}
             </div>
@@ -439,6 +725,67 @@ export default function NearbyPanel({ open, onClose, onStationOpen }: Props) {
           </div>
         ) : null}
 
+        {/* Hero card: when both Home and Work are set, show next departures
+            in the rider's likely commute direction. Sits above the
+            individual Home/Work station cards which serve as drill-in. */}
+        {goingTo && home && work && (
+          <GoingToCard
+            origin={goingTo.origin}
+            destination={goingTo.destination}
+            originAnchor={originAnchor}
+            arrivals={arrivalsByStation.get(goingTo.origin.stopId) ?? []}
+            routes={goingTo.routes}
+            routeColors={routeColors}
+            now={now}
+            onSwap={() => {
+              setOriginAnchor((a) => (a === "home" ? "work" : "home"));
+              originAutoPicked.current = true;
+            }}
+            onTapOrigin={() => onStationOpen(goingTo.origin.stopId)}
+          />
+        )}
+
+        {commuteRows.length > 0 && (
+          <div>
+            <div className="px-4 pt-3 pb-1.5 text-[10px] font-semibold text-gray-500 uppercase tracking-wider">
+              Commute
+            </div>
+            {commuteRows.map(({ anchor, station }) => (
+              <StationRow
+                key={`commute-${anchor}`}
+                station={station}
+                arrivals={arrivalsByStation.get(station.stopId) ?? []}
+                routeColors={routeColors}
+                now={now}
+                isFavorite={has(station.stopId)}
+                onFavoriteToggle={() => toggle(station.stopId)}
+                onTap={() => onStationOpen(station.stopId)}
+                anchor={anchor}
+              />
+            ))}
+          </div>
+        )}
+
+        {/* First-run hint: shown only when neither anchor is set, the
+            user has location enabled (so they can see nearby stations
+            to anchor), and no other empty state is visible above. */}
+        {!home && !work && geo.lng != null && (
+          <div className="mx-4 mt-3 mb-1 rounded-2xl border border-white/[0.06] bg-white/[0.04] px-3.5 py-2.5">
+            <p className="text-[12px] text-gray-300 leading-snug">
+              <span className="font-semibold text-gray-100">Pin your commute.</span>{" "}
+              Tap any station and choose{" "}
+              <span className="inline-flex items-center gap-1 px-1.5 py-px rounded-full bg-emerald-300/15 text-emerald-200 text-[10px] font-bold align-baseline">
+                <Home className="w-2.5 h-2.5" /> Home
+              </span>{" "}
+              or{" "}
+              <span className="inline-flex items-center gap-1 px-1.5 py-px rounded-full bg-sky-300/15 text-sky-200 text-[10px] font-bold align-baseline">
+                <Briefcase className="w-2.5 h-2.5" /> Work
+              </span>{" "}
+              to keep it one tap away.
+            </p>
+          </div>
+        )}
+
         {favStations.length > 0 && (
           <div>
             <div className="px-4 pt-3 pb-1.5 text-[10px] font-semibold text-gray-500 uppercase tracking-wider">
@@ -454,6 +801,7 @@ export default function NearbyPanel({ open, onClose, onStationOpen }: Props) {
                 isFavorite={true}
                 onFavoriteToggle={() => toggle(s.stopId)}
                 onTap={() => onStationOpen(s.stopId)}
+                anchor={anchorOf(s.stopId)}
               />
             ))}
           </div>
@@ -474,6 +822,7 @@ export default function NearbyPanel({ open, onClose, onStationOpen }: Props) {
                 isFavorite={has(s.stopId)}
                 onFavoriteToggle={() => toggle(s.stopId)}
                 onTap={() => onStationOpen(s.stopId)}
+                anchor={anchorOf(s.stopId)}
               />
             ))}
           </div>

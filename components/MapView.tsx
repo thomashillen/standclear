@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { useLines, CORRIDOR, type Stop } from "@/lib/subwayData";
+import { useLines, CORRIDOR, type Stop, type SubwayLine } from "@/lib/subwayData";
 import { useTrains, trainLatLng, type Train } from "@/lib/useTrains";
 import { useGeolocationState } from "@/lib/useGeolocation";
 import { buildStationIndex } from "@/lib/stopsIndex";
@@ -12,6 +12,17 @@ interface MapViewProps {
   stationStopId: string | null;
   onLineSelect: (line: string | null, focusStopId?: string) => void;
   onStationOpen: (stopId: string) => void;
+  /** Increments each time the user taps Near-me. The map reacts by
+   *  flying to the user's current location; if geolocation hasn't
+   *  arrived yet, the fly stays pending and triggers as soon as a
+   *  position is available. */
+  flyToUserSignal?: number;
+  /** Whether any covering panel (NearbyPanel, LinePanel, StationPanel)
+   *  is currently rendered. When true, fly-to-user applies camera
+   *  padding so the user's location lands in the *visible* portion of
+   *  the map rather than the geometric viewport center (which is
+   *  hidden behind the panel on mobile). */
+  panelOpen?: boolean;
 }
 
 function nearestStop(stops: Stop[], lng: number, lat: number): Stop | null {
@@ -42,7 +53,12 @@ type MapboxMap = {
   addImage: (id: string, image: unknown, opts?: unknown) => void;
   hasImage: (id: string) => boolean;
   getZoom: () => number;
-  flyTo: (opts: { center: [number, number]; zoom?: number; duration?: number }) => void;
+  flyTo: (opts: {
+    center: [number, number];
+    zoom?: number;
+    duration?: number;
+    padding?: { top?: number; right?: number; bottom?: number; left?: number };
+  }) => void;
   easeTo: (opts: {
     center: [number, number];
     zoom?: number;
@@ -72,68 +88,188 @@ const STOP_OPACITY_BY_ZOOM: MapboxExpression = [
 // Pre-baked per route as a full RGBA bitmap (not SDF). SDF sprites are
 // single-channel and rely on Mapbox's halo shader for the white outline,
 // which gets aliased at map zooms where the sprite is downscaled heavily.
-// Baking a proper 2px stroke directly into the canvas — with lineJoin
-// "round" and a transparent-to-opaque AA boundary — gives a crisp outline
-// at every scale Mapbox renders it.
+// Train marker — top-down skeumorphic subway car, rendered in the style
+// of Apple Maps' simplified 3D polygon vehicles.
 //
-// One image per route (~30 images, <100KB total). Feature rendering then
-// picks by routeId via `["concat", "train-", ["get", "routeId"]]`, so
-// icons carry their color instead of being tinted at paint time.
-const TRAIN_ICON_W = 72;
-const TRAIN_ICON_H = 32;
-const TRAIN_NOSE_PX = 14;
+// Anatomy of the icon:
+//   • Body: rounded rectangle in the route color, with corner radius
+//     matching a real R211/R142 subway car silhouette (gentle round,
+//     not pill-shaped). Inset from the canvas edges to leave room for
+//     drop shadow and headlight beam.
+//   • 3D shading: a vertical gradient (lighter top edge, darker bottom
+//     edge) plus a thin specular gleam along the top, so the body
+//     reads as a slightly raised polygon viewed from above with light
+//     coming from "north" — the same trick Apple Maps uses on its
+//     building polygons.
+//   • Front (right end after rotation): two warm-white headlight bulbs
+//     with soft halos at the front corners, plus a small dark
+//     windshield rectangle between them — the operator's cab.
+//   • Headlight beam: a tapered warm-white cone fading forward into
+//     the map, simulating the headlights' projection.
+//   • Rear (left end): two small dark marker squares — subtle visual
+//     cue that this end is the back, without competing with the
+//     headlights' brightness.
+//   • Outer ring: a thin subtle white stroke for separation from
+//     similarly-colored map tiles.
+//
+// The route letter / number is rendered on top by a separate Mapbox
+// text symbol layer (see subway-trains-text), so it can stay
+// viewport-aligned (always upright) while the body rotates with the
+// map.
+//
+// One image per route — Mapbox picks the right one per feature via
+// `["concat", "train-", ["get", "routeId"]]`.
+const TRAIN_ICON_W = 92;
+const TRAIN_ICON_H = 40;
+const BODY_W = 70;
+const BODY_H = 30;
 
 function makeTrainIcon(color: string): ImageData {
-  const w = TRAIN_ICON_W;
-  const h = TRAIN_ICON_H;
+  const W = TRAIN_ICON_W;
+  const H = TRAIN_ICON_H;
   const c = document.createElement("canvas");
-  c.width = w;
-  c.height = h;
+  c.width = W;
+  c.height = H;
   const ctx = c.getContext("2d")!;
-  const bodyEnd = w - TRAIN_NOSE_PX;
-  const r = 4;
 
-  // Build capsule path once, reuse for stroke (outline) + fill.
-  const path = () => {
+  // Body geometry — centered on canvas so Mapbox's default
+  // icon-anchor (bitmap center) lands the train's lat/lng on the
+  // body's geometric center. Travel direction extends rightward.
+  const bodyX = (W - BODY_W) / 2;
+  const bodyY = (H - BODY_H) / 2;
+  const bodyR = 6;
+  const bodyRight = bodyX + BODY_W;
+  const bodyMidY = bodyY + BODY_H / 2;
+
+  const bodyPath = () => {
     ctx.beginPath();
-    ctx.moveTo(r, 0);
-    ctx.lineTo(bodyEnd, 0);
-    ctx.lineTo(w, h / 2);
-    ctx.lineTo(bodyEnd, h);
-    ctx.lineTo(r, h);
-    ctx.arcTo(0, h, 0, h - r, r);
-    ctx.lineTo(0, r);
-    ctx.arcTo(0, 0, r, 0, r);
+    ctx.moveTo(bodyX + bodyR, bodyY);
+    ctx.lineTo(bodyRight - bodyR, bodyY);
+    ctx.arcTo(bodyRight, bodyY, bodyRight, bodyY + bodyR, bodyR);
+    ctx.lineTo(bodyRight, bodyY + BODY_H - bodyR);
+    ctx.arcTo(bodyRight, bodyY + BODY_H, bodyRight - bodyR, bodyY + BODY_H, bodyR);
+    ctx.lineTo(bodyX + bodyR, bodyY + BODY_H);
+    ctx.arcTo(bodyX, bodyY + BODY_H, bodyX, bodyY + BODY_H - bodyR, bodyR);
+    ctx.lineTo(bodyX, bodyY + bodyR);
+    ctx.arcTo(bodyX, bodyY, bodyX + bodyR, bodyY, bodyR);
     ctx.closePath();
   };
 
-  // White outline, drawn first so the fill sits on top with a clean
-  // boundary. lineWidth is doubled because half of a stroked line falls
-  // outside the path and gets clipped by the canvas edge — a 5px
-  // lineWidth gives ~2.5px of visible outline.
-  path();
-  ctx.lineWidth = 5;
-  ctx.lineJoin = "round";
-  ctx.strokeStyle = "#ffffff";
-  ctx.stroke();
+  // 1) Headlight beam — drawn FIRST, behind everything, so the body's
+  //    drop shadow occludes the beam's origin and it reads as light
+  //    streaming out from under the headlights. Tapered cone for that
+  //    "spotlight" cone effect.
+  const beamEndX = W - 2;
+  const beamGrad = ctx.createLinearGradient(bodyRight, 0, beamEndX, 0);
+  beamGrad.addColorStop(0, "rgba(255, 240, 200, 0.55)");
+  beamGrad.addColorStop(0.5, "rgba(255, 240, 200, 0.20)");
+  beamGrad.addColorStop(1, "rgba(255, 240, 200, 0)");
+  ctx.fillStyle = beamGrad;
+  const beamStartW = 14;
+  const beamEndW = 4;
+  ctx.beginPath();
+  ctx.moveTo(bodyRight, bodyMidY - beamStartW / 2);
+  ctx.lineTo(beamEndX, bodyMidY - beamEndW / 2);
+  ctx.lineTo(beamEndX, bodyMidY + beamEndW / 2);
+  ctx.lineTo(bodyRight, bodyMidY + beamStartW / 2);
+  ctx.closePath();
+  ctx.fill();
 
-  // Route-color fill.
-  path();
+  // 2) Drop shadow — soft dark blur under the body for the "polygon
+  //    floating slightly above the map" Apple Maps look.
+  ctx.save();
+  ctx.shadowColor = "rgba(0, 0, 0, 0.55)";
+  ctx.shadowBlur = 5;
+  ctx.shadowOffsetY = 2;
+  bodyPath();
+  ctx.fillStyle = color;
+  ctx.fill();
+  ctx.restore();
+
+  // 3) Solid body fill — covers the shadowed silhouette with the route
+  //    color in full saturation.
+  bodyPath();
   ctx.fillStyle = color;
   ctx.fill();
 
-  // Soft inner highlight on top edge for a bit of depth. Low opacity so
-  // it reads as subtle shading, not a second color.
+  // 4) 3D shading — vertical gradient simulates light from "above" so
+  //    the top edge brightens and the bottom edge falls into shadow.
+  //    Same trick Apple Maps uses on building polygons.
   ctx.save();
+  bodyPath();
   ctx.clip();
-  ctx.fillStyle = "rgba(255,255,255,0.14)";
-  ctx.fillRect(0, 0, w, Math.round(h * 0.45));
+  const shading = ctx.createLinearGradient(0, bodyY, 0, bodyY + BODY_H);
+  shading.addColorStop(0, "rgba(255, 255, 255, 0.30)");
+  shading.addColorStop(0.5, "rgba(255, 255, 255, 0)");
+  shading.addColorStop(1, "rgba(0, 0, 0, 0.30)");
+  ctx.fillStyle = shading;
+  ctx.fillRect(0, 0, W, H);
+
+  // 5) Top-edge specular highlight — thin elongated near-white ellipse
+  //    just inside the top edge, length-matched to the body. Reads as
+  //    sun glinting off the roof of the car.
+  ctx.fillStyle = "rgba(255, 255, 255, 0.45)";
+  ctx.beginPath();
+  ctx.ellipse(bodyX + BODY_W / 2, bodyY + 2, BODY_W / 2 - 8, 1, 0, 0, Math.PI * 2);
+  ctx.fill();
   ctx.restore();
 
-  return ctx.getImageData(0, 0, w, h);
+  // 6) Subtle outer outline — thin and not bright, for separation from
+  //    map tiles of similar color without looking like a sign sticker.
+  bodyPath();
+  ctx.strokeStyle = "rgba(255, 255, 255, 0.65)";
+  ctx.lineWidth = 1;
+  ctx.stroke();
+
+  // 7) Headlights — two warm-white bulbs at the front corners. A
+  //    larger, lower-alpha halo behind each bulb gives them that
+  //    "glowing" feel and ties them visually to the beam.
+  const headlightX = bodyRight - 5;
+  const headlightTopY = bodyY + 6;
+  const headlightBotY = bodyY + BODY_H - 6;
+  ctx.fillStyle = "rgba(255, 240, 200, 0.40)";
+  ctx.beginPath();
+  ctx.arc(headlightX, headlightTopY, 2.8, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(headlightX, headlightBotY, 2.8, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = "rgba(255, 245, 220, 0.98)";
+  ctx.beginPath();
+  ctx.arc(headlightX, headlightTopY, 1.6, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(headlightX, headlightBotY, 1.6, 0, Math.PI * 2);
+  ctx.fill();
+
+  // 8) Windshield — small dark rounded rectangle between the
+  //    headlights, slightly inset from the front edge so it reads as
+  //    the driver's cab interior visible through the front window.
+  const wsX = bodyRight - 9;
+  const wsY = bodyY + 11;
+  const wsW = 6;
+  const wsH = 8;
+  ctx.fillStyle = "rgba(0, 0, 0, 0.32)";
+  if (typeof ctx.roundRect === "function") {
+    ctx.beginPath();
+    ctx.roundRect(wsX, wsY, wsW, wsH, 1.5);
+    ctx.fill();
+  } else {
+    ctx.fillRect(wsX, wsY, wsW, wsH);
+  }
+
+  // 9) Rear marker squares — small dark unlit indicators at the back
+  //    corners. Quiet visual cue that this end is the rear so the
+  //    train's direction stays unambiguous even at low zooms where the
+  //    headlights and beam may be hard to see.
+  ctx.fillStyle = "rgba(0, 0, 0, 0.40)";
+  ctx.fillRect(bodyX + 4, bodyY + 6, 2, 2);
+  ctx.fillRect(bodyX + 4, bodyY + BODY_H - 8, 2, 2);
+
+  return ctx.getImageData(0, 0, W, H);
 }
 
-export default function MapView({ selectedLine, stationStopId, onLineSelect, onStationOpen }: MapViewProps) {
+export default function MapView({ selectedLine, stationStopId, onLineSelect, onStationOpen, flyToUserSignal, panelOpen }: MapViewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<MapboxMap | null>(null);
   const [mapLoaded, setMapLoaded] = useState(false);
@@ -310,20 +446,29 @@ export default function MapView({ selectedLine, stationStopId, onLineSelect, onS
           },
         });
 
-        // Capsule image is drawn with its long axis horizontal. Bearing is
-        // compass degrees (0=N, 90=E). We want the capsule long axis to
-        // align with the direction of travel, so rotate by (bearing - 90).
+        // The car body's long axis is horizontal in the bitmap and the
+        // headlights/beam emit at the +x end. Bearing is compass degrees
+        // (0=N, 90=E), so rotating by (bearing − 90) aligns the long
+        // axis with the direction of travel and points the headlights
+        // forward.
         const capsuleRotate: MapboxExpression = ["-", ["get", "bearing"], 90];
 
-        // Scale the capsule with zoom. Bitmap is 72×32 (vs the old 56×24
-        // SDF), so size multipliers are scaled down proportionally to
-        // preserve the visual footprint at every zoom.
+        // Scale with zoom. Canvas is 92×40 at 2× pixel ratio → 46×20
+        // base display, of which the body is 70/92 ≈ 76% wide.
+        // Multipliers below give a target visible BODY size of:
+        //   z=10   ~10×4 px   — abstract dot, headlight bulbs visible
+        //   z=12   ~18×8 px   — body shape recognizable, beam visible
+        //   z=13   ~26×11 px  — windshield + headlights + letter all read
+        //   z=14   ~36×16 px  — full skeumorphic detail, comfortable
+        //                       letter inside the body
+        // Slightly larger than the prior pill so the windshield and
+        // rear markers don't disappear into pixel noise.
         const iconSizeByZoom: MapboxExpression = [
           "interpolate", ["linear"], ["zoom"],
-          10, 0.22,
-          11.5, 0.35,
-          13, 0.6,
-          14, 0.78,
+          10, 0.29,
+          11.5, 0.50,
+          13, 0.74,
+          14, 1.03,
         ];
 
         map.addLayer({
@@ -348,12 +493,20 @@ export default function MapView({ selectedLine, stationStopId, onLineSelect, onS
           source: "subway-trains",
           layout: {
             "text-field": ["get", "letter"],
-            "text-font": ["Open Sans Bold", "Arial Unicode MS Bold"],
+            // DIN Pro Bold first (chunky, NYC subway feel) — falls back
+            // to Open Sans Bold if the dark-v11 style doesn't include
+            // DIN glyphs. Either way the letter renders with weight.
+            "text-font": ["DIN Pro Bold", "Open Sans Bold", "Arial Unicode MS Bold"],
+            // Sized to fill ~80% of the body's vertical height at each
+            // zoom — at z=14 the body is ~16 px tall and the letter is
+            // 13 px, leaving comfortable padding without looking lost.
             "text-size": [
               "interpolate", ["linear"], ["zoom"],
-              12, 8,
-              14, 11,
+              12, 7,
+              13, 10,
+              14, 13,
             ],
+            "text-letter-spacing": -0.02,
             "text-allow-overlap": true,
             "text-ignore-placement": true,
           },
@@ -666,37 +819,30 @@ export default function MapView({ selectedLine, stationStopId, onLineSelect, onS
     const DEFAULT_VELOCITY = 1 / DEFAULT_TRAVERSAL_SEC;
     const MAX_VELOCITY = 1 / MIN_TRAVERSAL_SEC;
 
-    // Directional lane rule. Every train is offset to the RIGHT of its
-    // direction of travel by `(laneIndex+1) * LANE_WIDTH` units. Because
-    // the perpendicular vector is computed from each train's bearing, a
-    // northbound train's "right" is east (line's right side on the map)
-    // and a southbound train's "right" is west — so N trains end up east
-    // of the line, S trains end up west, with no special-casing of
-    // direction. Lane index comes from the route's position within its
-    // trunk (CORRIDOR), so the 1/2/3 trio (and BDFM, NQRW, etc.) each
-    // get their own sub-lane and never visually collide with same-
-    // direction siblings on the same trunk.
+    // Position-based stacking. Trains sit ON their line by default — no
+    // perpendicular offset for a single train at a position. When two or
+    // more trains land within STACK_BUCKET_DEG of each other (which
+    // happens when a 4 / 5 / 6 are all stopped at Union Sq, or when
+    // express overtakes local at a shared platform), we fan them out
+    // perpendicular to travel direction so each is individually visible.
     //
-    // LANE_WIDTH=8 puts adjacent same-direction lanes ≈12.5 px apart at
-    // zoom 14 — matching the rendered icon half-height (32px × 0.78 / 2)
-    // so neighbours just-touch without overlap at any zoom. Opposite-
-    // direction lanes are on opposite sides of the line, so they only
-    // approach each other near the line centerline where bearings
-    // change — cleanly separated everywhere else.
-    const LANE_WIDTH = 8;
-    const LANE_INDEX: Record<string, number> = {};
-    for (const routeId of Object.keys(CORRIDOR)) {
-      LANE_INDEX[routeId] = CORRIDOR[routeId].indexOf(routeId);
-    }
+    // The previous LANE_INDEX scheme always offset every train by its
+    // route's position within its CORRIDOR group, which produced a
+    // visible gap between e.g. an E train and its blue line even when
+    // no other lines were nearby. Position-based stacking only spends
+    // visual space when there's actually a collision to resolve.
+    const STACK_BUCKET_DEG = 0.0002; // ≈ 22 m at NYC latitude
+    const STACK_SPACING_PX = 14;
 
-    // Mirrors the iconSizeByZoom Mapbox expression so perpendicular offsets
-    // scale with rendered icon size, giving consistent spacing at every zoom.
+    // Mirrors the iconSizeByZoom Mapbox expression so perpendicular
+    // stack offsets scale with rendered icon size — keeps the visual
+    // gap between stacked trains consistent at every zoom.
     const iconScaleAtZoom = (z: number): number => {
-      if (z <= 10) return 0.22;
-      if (z <= 11.5) return 0.22 + ((z - 10) / 1.5) * 0.13;
-      if (z <= 13) return 0.35 + ((z - 11.5) / 1.5) * 0.25;
-      if (z <= 14) return 0.6 + (z - 13) * 0.18;
-      return 0.78;
+      if (z <= 10) return 0.29;
+      if (z <= 11.5) return 0.29 + ((z - 10) / 1.5) * 0.21;
+      if (z <= 13) return 0.50 + ((z - 11.5) / 1.5) * 0.24;
+      if (z <= 14) return 0.74 + (z - 13) * 0.29;
+      return 1.03;
     };
 
     let frame = 0;
@@ -751,7 +897,20 @@ export default function MapView({ selectedLine, stationStopId, onLineSelect, onS
 
       const nowMs = Date.now();
       const currentZoom = map.getZoom();
-      const features: GeoJSON.Feature[] = [];
+      // Two-pass build: first compute every train's base position on the
+      // line (no perpendicular offset), then bucket-group by position and
+      // apply stacking offsets only where there's a collision. Single
+      // trains end up exactly on the line; stacks fan out perpendicular.
+      type Computed = {
+        trainId: string;
+        line: SubwayLine;
+        train: Train;
+        lng: number;
+        lat: number;
+        bearing: number;
+        direction: "N" | "S";
+      };
+      const computed: Computed[] = [];
       const seen = new Set<string>();
       for (const line of Object.values(lines)) {
         const trains = trainsByRoute.get(line.routeId);
@@ -816,21 +975,87 @@ export default function MapView({ selectedLine, stationStopId, onLineSelect, onS
           state.bearing = lerpAngle(state.bearing, target.bearing, LERP);
           seen.add(t.id);
 
-          // Apply the per-route perpendicular nudge. Convert the pixel
-          // offset to lng/lat based on the current zoom so the visual
-          // gap between stacked trains stays consistent as the user
-          // zooms. Web-Mercator meters-per-pixel formula; 111320 m per
-          // degree of latitude (and per deg lng scaled by cos(lat)).
-          const laneIndex = LANE_INDEX[line.routeId] ?? 0;
-          const perpPx = (laneIndex + 1) * LANE_WIDTH * iconScaleAtZoom(currentZoom);
-          let renderLng = state.lng;
-          let renderLat = state.lat;
-          if (perpPx !== 0) {
-            const latRad = (state.lat * Math.PI) / 180;
+          computed.push({
+            trainId: t.id,
+            line,
+            train: t,
+            lng: state.lng,
+            lat: state.lat,
+            bearing: state.bearing,
+            direction: t.direction,
+          });
+        }
+      }
+
+      // Bucket trains by rounded lat/lng. Anything within ~22m of each
+      // other lands in the same bucket. Same-direction trains at the
+      // same stop (4/5/6 at Union Sq), express-overtaking-local pairs
+      // at shared platforms, opposite-direction trains at the same
+      // station — all caught here. Solo trains stay alone in their
+      // bucket and don't get any offset.
+      const buckets = new Map<string, Computed[]>();
+      for (const c of computed) {
+        const key = `${Math.round(c.lng / STACK_BUCKET_DEG)},${Math.round(c.lat / STACK_BUCKET_DEG)}`;
+        const arr = buckets.get(key);
+        if (arr) arr.push(c);
+        else buckets.set(key, [c]);
+      }
+
+      // Stable ordering inside each bucket so trains don't shuffle
+      // between renders — sort by routeId, then trainId. Otherwise an
+      // 8-second feed re-poll could swap two trains' stack positions
+      // and produce a visible jump.
+      for (const arr of buckets.values()) {
+        if (arr.length > 1) {
+          arr.sort((a, b) => {
+            const r = a.line.routeId.localeCompare(b.line.routeId);
+            return r !== 0 ? r : a.trainId.localeCompare(b.trainId);
+          });
+        }
+      }
+
+      // Cache zoom-dependent meters/pixel scaling once per tick.
+      const zoomScale = iconScaleAtZoom(currentZoom);
+
+      const features: GeoJSON.Feature[] = [];
+      for (const arr of buckets.values()) {
+        const n = arr.length;
+        // Track per-direction indices so each direction's sub-group fans
+        // out independently. The bucket's iteration order is already
+        // stabilized by the routeId+trainId sort above, so the indices
+        // assigned here are consistent across renders.
+        const dirCounts: Record<"N" | "S", number> = { N: 0, S: 0 };
+
+        for (let i = 0; i < n; i++) {
+          const c = arr[i];
+          let renderLng = c.lng;
+          let renderLat = c.lat;
+
+          if (n > 1) {
+            // Each train shifts perpendicular to its OWN bearing on the
+            // RIGHT side of travel direction. By NYC convention (and
+            // because trains drive on the right), uptown trains are on
+            // the east track and downtown on the west — and "right of
+            // travel" naturally encodes that:
+            //   • Northbound train: right = east (right of map)
+            //   • Southbound train: right = west (left of map)
+            // So a 2-train bucket with one N and one S splits cleanly
+            // to opposite sides without any direction-specific casing.
+            //
+            // Offsets within each direction sub-group are 0.5, 1.5,
+            // 2.5… (always positive, fanning further out from the
+            // line). Same-direction siblings stack on the same side
+            // rather than centering around the line — that keeps the
+            // "uptown east, downtown west" rule intact regardless of
+            // how many siblings the bucket has.
+            const idxInDir = dirCounts[c.direction]++;
+            const stackOffset = idxInDir + 0.5;
+            const perpPx = stackOffset * STACK_SPACING_PX * zoomScale;
+            const latRad = (c.lat * Math.PI) / 180;
             const mPerPx =
               (156543.03392 * Math.cos(latRad)) / Math.pow(2, currentZoom);
             const perpM = perpPx * mPerPx;
-            const perpRad = ((state.bearing + 90) * Math.PI) / 180;
+            const perpRad = ((c.bearing + 90) * Math.PI) / 180;
             renderLat += (perpM * Math.cos(perpRad)) / 111320;
             renderLng +=
               (perpM * Math.sin(perpRad)) / (111320 * Math.cos(latRad));
@@ -839,18 +1064,19 @@ export default function MapView({ selectedLine, stationStopId, onLineSelect, onS
           features.push({
             type: "Feature",
             properties: {
-              id: t.id,
-              direction: t.direction,
-              bearing: state.bearing,
-              routeId: line.routeId,
-              color: line.color,
-              letter: line.id,
-              textColor: line.textColor,
+              id: c.trainId,
+              direction: c.direction,
+              bearing: c.bearing,
+              routeId: c.line.routeId,
+              color: c.line.color,
+              letter: c.line.id,
+              textColor: c.line.textColor,
             },
             geometry: { type: "Point", coordinates: [renderLng, renderLat] },
           });
         }
       }
+
       // Drop state for trains that vanished (e.g. completed trip) so the
       // map doesn't leak memory over long sessions.
       if (seen.size !== trainState.size) {
@@ -883,6 +1109,64 @@ export default function MapView({ selectedLine, stationStopId, onLineSelect, onS
       src.setData({ type: "FeatureCollection", features: [] });
     }
   }, [mapLoaded, geo.status, geo.lat, geo.lng]);
+
+  // Fly-to-user, driven by the parent's flyToUserSignal counter. Each
+  // increment of the prop becomes a "pending fly" that consumes the
+  // first geolocation reading available — so a tap on Near-me works
+  // whether geo is already known (instant fly) or still being granted
+  // (fly fires the moment the position lands). State, not a ref, so
+  // both signal-change and geo-arrival can trigger consumption.
+  const lastFlySignalRef = useRef(0);
+  const [pendingFly, setPendingFly] = useState(false);
+
+  // Latest panelOpen value mirrored in a ref so the fly effect can
+  // read it without adding it to its dep array (which would re-run
+  // the effect on panel toggles). The fly should respect whatever
+  // the panel state IS at the moment the camera moves.
+  const panelOpenRef = useRef(!!panelOpen);
+  useEffect(() => {
+    panelOpenRef.current = !!panelOpen;
+  }, [panelOpen]);
+
+  useEffect(() => {
+    const sig = flyToUserSignal ?? 0;
+    if (sig === 0 || sig === lastFlySignalRef.current) return;
+    lastFlySignalRef.current = sig;
+    setPendingFly(true);
+  }, [flyToUserSignal]);
+  useEffect(() => {
+    if (!pendingFly) return;
+    if (!mapLoaded || !mapRef.current) return;
+    if (geo.lat == null || geo.lng == null) return;
+    const map = mapRef.current;
+    const currentZoom = map.getZoom();
+
+    // When a panel covers part of the viewport, declare that area as
+    // padding so Mapbox aims the center at the visible map region
+    // rather than the geometric viewport center (which is hidden
+    // behind the panel on mobile). Mobile = bottom sheet, desktop =
+    // right rail. Without this, the user's blue dot lands behind
+    // the panel and the rider thinks "nothing happened".
+    const vw = typeof window !== "undefined" ? window.innerWidth : 0;
+    const vh = typeof window !== "undefined" ? window.innerHeight : 0;
+    const isSmallScreen = vw < 640;
+    const padding = panelOpenRef.current
+      ? isSmallScreen
+        ? { bottom: Math.round(vh * 0.55) }
+        : { right: 360 }
+      : undefined;
+
+    map.flyTo({
+      center: [geo.lng, geo.lat],
+      // Don't zoom out if user is already in close — only zoom IN when
+      // they're farther out than ~13. Avoids a jarring jump from a
+      // close inspection back to neighborhood scale.
+      zoom: currentZoom < 13 ? 14 : currentZoom,
+      duration: 1100,
+      padding,
+    });
+    setPendingFly(false);
+  }, [pendingFly, mapLoaded, geo.lat, geo.lng]);
 
   // Selection: dim non-selected via expressions on the consolidated layers.
   useEffect(() => {

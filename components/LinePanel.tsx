@@ -45,7 +45,7 @@ interface StopRowProps {
 function Bullet({ badge }: { badge: RouteBadge }) {
   return (
     <span
-      className="inline-flex items-center justify-center w-3.5 h-3.5 rounded-full text-[9px] font-black leading-none mr-1 align-[-1px]"
+      className="nyc-bullet inline-flex items-center justify-center w-3.5 h-3.5 rounded-full text-[9px] leading-none mr-1 align-[-1px]"
       style={{ backgroundColor: badge.color, color: badge.textColor === "black" ? "#000" : "#fff" }}
     >
       {badge.id}

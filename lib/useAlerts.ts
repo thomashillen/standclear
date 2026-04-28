@@ -9,10 +9,39 @@ export type { ServiceAlert };
 // don't hammer the MTA feed for data that rarely moves.
 const POLL_MS = 60_000;
 
+// Persist the last successful response to localStorage so the alerts
+// bell shows the right tone immediately on cold boot, instead of
+// flashing "All clear" before the first network call lands.
+const STORAGE_KEY = "subwaysurfer:alerts:v1";
+
 let cache: { data: AlertsResponse | null; promise: Promise<void> | null } = {
   data: null,
   promise: null,
 };
+
+function hydrateFromStorage() {
+  if (cache.data) return;
+  if (typeof window === "undefined") return;
+  try {
+    const raw = window.localStorage.getItem(STORAGE_KEY);
+    if (!raw) return;
+    const parsed = JSON.parse(raw) as { data?: AlertsResponse };
+    if (parsed?.data && Array.isArray(parsed.data.alerts)) {
+      cache = { data: parsed.data, promise: null };
+    }
+  } catch {
+    // ignore
+  }
+}
+
+function persistToStorage(data: AlertsResponse) {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ data }));
+  } catch {
+    // ignore
+  }
+}
 const subscribers = new Set<(d: AlertsResponse) => void>();
 let intervalId: ReturnType<typeof setInterval> | null = null;
 
@@ -24,6 +53,7 @@ async function refresh() {
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = (await res.json()) as AlertsResponse;
       cache = { data, promise: null };
+      persistToStorage(data);
       subscribers.forEach((cb) => cb(data));
     } catch (err) {
       console.warn("Failed to fetch /api/alerts", err);
@@ -65,13 +95,17 @@ function bindVisibility() {
 }
 
 export function useAlerts(): AlertsResponse | null {
+  // Same SSR-safety pattern as useTrains: initial render must match
+  // the server (null) to avoid hydration mismatch. Hydration from
+  // localStorage happens in the effect below, post-render.
   const [data, setData] = useState<AlertsResponse | null>(cache.data);
 
   useEffect(() => {
+    hydrateFromStorage();
+    if (cache.data) setData(cache.data);
     subscribers.add(setData);
     bindVisibility();
     startPolling();
-    if (cache.data) setData(cache.data);
     return () => {
       subscribers.delete(setData);
       stopPolling();

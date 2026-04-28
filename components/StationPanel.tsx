@@ -1,10 +1,11 @@
 "use client";
 
 import { useMemo } from "react";
-import { ArrowUp, ArrowDown, Star, X } from "lucide-react";
+import { ArrowUp, ArrowDown, Star, X, Home, Briefcase } from "lucide-react";
 import { useLines } from "@/lib/subwayData";
 import { useTrains, type Arrival } from "@/lib/useTrains";
-import { useFavorites } from "@/lib/useFavorites";
+import { useFavorites, useCommute } from "@/lib/useFavorites";
+import { useNow } from "@/lib/useNow";
 import { buildStationIndex } from "@/lib/stopsIndex";
 import { useSheetDrag } from "@/lib/useSheetDrag";
 
@@ -14,12 +15,14 @@ interface Props {
   onSelectLine: (routeId: string) => void;
 }
 
+// Live countdown for the station detail rows. Seconds in the final
+// minute (urgency window), rounded minutes above that. The string
+// re-renders every tick of the parent's now-clock.
 function fmtEta(eta: number, now: number): string {
-  const secs = eta - now / 1000;
-  if (secs < 30) return "Now";
-  const mins = Math.round(secs / 60);
-  if (mins < 1) return "<1 min";
-  return `${mins} min`;
+  const secs = Math.round(eta - now / 1000);
+  if (secs <= 5) return "Now";
+  if (secs < 60) return `${secs} sec`;
+  return `${Math.round(secs / 60)} min`;
 }
 
 // MTA signage uses circles for local service and diamonds for express
@@ -48,9 +51,9 @@ function RouteBullet({
   if (variant === "diamond") {
     // Bounding box matches the circle size so bullets line up in a row.
     // Inner rotated square is sized so its diagonal ≈ circle diameter.
-    const boxDim = size === "sm" ? "w-5 h-5 text-[9px]" : "w-7 h-7 text-[12px]";
+    const boxDim = size === "sm" ? "w-5 h-5 text-[11px]" : "w-7 h-7 text-[14px]";
     const diamondSize = size === "sm" ? 14 : 20;
-    const outer = `inline-flex items-center justify-center flex-shrink-0 relative ${boxDim}`;
+    const outer = `nyc-bullet inline-flex items-center justify-center flex-shrink-0 relative ${boxDim}`;
     const diamondStyle: React.CSSProperties = {
       width: diamondSize,
       height: diamondSize,
@@ -59,7 +62,7 @@ function RouteBullet({
       borderRadius: 2,
     };
     const labelStyle: React.CSSProperties = { color: fg };
-    const labelClass = `relative font-black leading-none ${size === "sm" ? "text-[9px]" : "text-[12px]"}`;
+    const labelClass = `relative leading-none ${size === "sm" ? "text-[11px]" : "text-[14px]"}`;
     const inner = (
       <>
         <span className="absolute inset-0 flex items-center justify-center">
@@ -85,8 +88,8 @@ function RouteBullet({
     return <span className={outer}>{inner}</span>;
   }
 
-  const dim = size === "sm" ? "w-5 h-5 text-[10px]" : "w-7 h-7 text-[13px]";
-  const base = `inline-flex items-center justify-center rounded-full font-black leading-none flex-shrink-0 ${dim}`;
+  const dim = size === "sm" ? "w-5 h-5 text-[12px]" : "w-7 h-7 text-[16px]";
+  const base = `nyc-bullet inline-flex items-center justify-center rounded-full leading-none flex-shrink-0 ${dim}`;
   const style = { backgroundColor: color, color: fg };
   if (onClick) {
     return (
@@ -174,6 +177,7 @@ export default function StationPanel({ stopId, onClose, onSelectLine }: Props) {
   const lines = useLines();
   const data = useTrains();
   const { has, toggle } = useFavorites();
+  const commute = useCommute();
 
   const index = useMemo(() => (lines ? buildStationIndex(lines) : []), [lines]);
   // A tapped stopId may be any platform in a complex (e.g. tapping the
@@ -198,12 +202,50 @@ export default function StationPanel({ stopId, onClose, onSelectLine }: Props) {
     if (!data || !stationIds) return { north: n, south: s };
     const nowSec = data.generatedAt / 1000;
     const CUTOFF = 45 * 60;
+
+    // Synthesize "Now" arrivals from trains currently STOPPED_AT a
+    // platform in this complex. The MTA feed does NOT include the
+    // current stop in the trip's future stop_time_updates (that
+    // arrival has already happened from the server's perspective),
+    // so without this synthesis a train clearly sitting at the
+    // station never shows up in the list — the rider can see the
+    // train on the map but the panel reports the next train as the
+    // closest one. Each synthetic entry carries eta = nowSec so it
+    // sorts to the top and renders as "Now".
+    //
+    // Dedup: if the API somehow does include a near-zero arrival for
+    // the same trip+stop, the synthetic entry takes precedence and
+    // we skip the API copy. Compound key on tripId+stopId.
+    const seen = new Set<string>();
+    for (const t of data.trains) {
+      if (t.status !== "STOPPED_AT") continue;
+      if (!stationIds.has(t.prevStopId)) continue;
+      const arr: Arrival = {
+        routeId: t.routeId,
+        stopId: t.prevStopId,
+        direction: t.direction,
+        eta: nowSec,
+        tripId: t.id,
+      };
+      seen.add(`${t.id}|${t.prevStopId}`);
+      if (arr.direction === "N") n.push(arr);
+      else s.push(arr);
+    }
+
     for (const a of data.arrivals) {
       if (!stationIds.has(a.stopId)) continue;
       if (a.eta - nowSec > CUTOFF) continue;
+      if (seen.has(`${a.tripId}|${a.stopId}`)) continue;
       if (a.direction === "N") n.push(a);
       else s.push(a);
     }
+
+    // Re-sort each list — synthetic Nows are pushed before the rest
+    // but the API list's natural order is by eta, not interleaved
+    // with the synthetics. A single sort restores eta-ascending.
+    n.sort((x, y) => x.eta - y.eta);
+    s.sort((x, y) => x.eta - y.eta);
+
     return { north: n, south: s };
   }, [data, stationIds]);
 
@@ -240,7 +282,10 @@ export default function StationPanel({ stopId, onClose, onSelectLine }: Props) {
     return m;
   }, [lines]);
 
-  const now = data?.generatedAt ?? Date.now();
+  // Live wall-clock so the countdown ticks every second. The component
+  // only mounts when a station is open, so the tick is bounded by the
+  // sheet's lifetime — no extra gating needed.
+  const now = useNow(true);
 
   const { detent, sheetStyle, handlers, onHandleTap } = useSheetDrag({
     halfRestingY: "calc(88dvh - 55dvh)",
@@ -277,48 +322,95 @@ export default function StationPanel({ stopId, onClose, onSelectLine }: Props) {
       </button>
 
       <div
-        className="flex items-start gap-3 px-4 pt-2 pb-3 flex-shrink-0 border-b border-white/[0.06] sm:cursor-auto cursor-grab active:cursor-grabbing touch-none"
+        className="flex flex-col gap-3 px-4 pt-2 pb-3 flex-shrink-0 border-b border-white/[0.06] sm:cursor-auto cursor-grab active:cursor-grabbing touch-none"
         onPointerDown={handlers.onPointerDown}
         onPointerMove={handlers.onPointerMove}
         onPointerUp={handlers.onPointerUp}
         onPointerCancel={handlers.onPointerCancel}
       >
-        <div className="flex-1 min-w-0">
-          <h2 className="text-[18px] font-black tracking-tight text-white leading-tight">
-            {station.name}
-          </h2>
-          <div className="flex items-center gap-1.5 mt-2 flex-wrap">
-            {station.routes.map((r) => {
-              const info = routeInfo.get(r.routeId);
-              if (!info) return null;
-              return (
-                <RouteBullet
-                  key={r.routeId}
-                  id={info.id}
-                  color={info.color}
-                  textColor={info.textColor}
-                  size="sm"
-                  onClick={() => onSelectLine(r.routeId)}
-                />
-              );
-            })}
+        <div className="flex items-start gap-3">
+          <div className="flex-1 min-w-0">
+            <h2 className="text-[18px] font-black tracking-tight text-white leading-tight">
+              {station.name}
+            </h2>
+            <div className="flex items-center gap-1.5 mt-2 flex-wrap">
+              {station.routes.map((r) => {
+                const info = routeInfo.get(r.routeId);
+                if (!info) return null;
+                return (
+                  <RouteBullet
+                    key={r.routeId}
+                    id={info.id}
+                    color={info.color}
+                    textColor={info.textColor}
+                    size="sm"
+                    onClick={() => onSelectLine(r.routeId)}
+                  />
+                );
+              })}
+            </div>
           </div>
+          <button
+            onClick={onClose}
+            className="press text-white opacity-85 hover:opacity-100 w-11 h-11 -mt-0.5 flex items-center justify-center rounded-full bg-white/[0.08] hover:bg-white/[0.12] touch-manipulation flex-shrink-0"
+            aria-label="Close panel"
+          >
+            <X className="w-[18px] h-[18px]" strokeWidth={2.5} />
+          </button>
         </div>
-        <button
-          onClick={() => toggle(favId)}
-          className="press w-11 h-11 -mt-0.5 flex items-center justify-center rounded-full text-gray-400 hover:text-amber-300 active:text-amber-400 touch-manipulation"
-          aria-label={isFav ? "Remove from favorites" : "Add to favorites"}
-          aria-pressed={isFav}
-        >
-          <Star className={`w-5 h-5 ${isFav ? "fill-amber-300 text-amber-300" : ""}`} />
-        </button>
-        <button
-          onClick={onClose}
-          className="press text-white opacity-85 hover:opacity-100 w-11 h-11 -mt-0.5 flex items-center justify-center rounded-full bg-white/[0.08] hover:bg-white/[0.12] touch-manipulation"
-          aria-label="Close panel"
-        >
-          <X className="w-[18px] h-[18px]" strokeWidth={2.5} />
-        </button>
+
+        {/* Save / Home / Work — three toggleable anchor chips. Tapping
+            an active chip clears that anchor; tapping an inactive one
+            sets it (Home and Work are mutually exclusive). */}
+        <div className="flex items-center gap-2 flex-wrap">
+          <AnchorChip
+            label="Save"
+            icon={<Star className={`w-[15px] h-[15px] ${isFav ? "fill-amber-300 text-amber-300" : ""}`} />}
+            active={isFav}
+            activeRing="ring-amber-300/40"
+            activeBg="bg-amber-300/15 text-amber-100"
+            onClick={() => toggle(favId)}
+            aria-label={isFav ? "Remove from favorites" : "Add to favorites"}
+          />
+          <AnchorChip
+            label="Home"
+            icon={
+              <Home
+                className={`w-[15px] h-[15px] ${
+                  commute.isHome(favId) ? "fill-emerald-300 text-emerald-300" : ""
+                }`}
+              />
+            }
+            active={commute.isHome(favId)}
+            activeRing="ring-emerald-300/40"
+            activeBg="bg-emerald-300/15 text-emerald-100"
+            onClick={() =>
+              commute.isHome(favId)
+                ? commute.setAnchor("home", null)
+                : commute.assignAnchor("home", favId)
+            }
+            aria-label={commute.isHome(favId) ? "Unset as Home" : "Set as Home"}
+          />
+          <AnchorChip
+            label="Work"
+            icon={
+              <Briefcase
+                className={`w-[15px] h-[15px] ${
+                  commute.isWork(favId) ? "fill-sky-300 text-sky-300" : ""
+                }`}
+              />
+            }
+            active={commute.isWork(favId)}
+            activeRing="ring-sky-300/40"
+            activeBg="bg-sky-300/15 text-sky-100"
+            onClick={() =>
+              commute.isWork(favId)
+                ? commute.setAnchor("work", null)
+                : commute.assignAnchor("work", favId)
+            }
+            aria-label={commute.isWork(favId) ? "Unset as Work" : "Set as Work"}
+          />
+        </div>
       </div>
 
       <div className="flex-1 overflow-y-auto ios-scroll">
@@ -354,6 +446,45 @@ export default function StationPanel({ stopId, onClose, onSelectLine }: Props) {
   );
 }
 
+// Pill-shaped toggle used in the StationPanel action row. Inactive state
+// is a quiet white-on-glass chip; active state lights up with a tinted
+// background + ring matching the anchor's color (amber/emerald/sky).
+// Keeps tap target ≥ 36px so it stays comfortable on mobile.
+function AnchorChip({
+  label,
+  icon,
+  active,
+  activeRing,
+  activeBg,
+  onClick,
+  "aria-label": ariaLabel,
+}: {
+  label: string;
+  icon: React.ReactNode;
+  active: boolean;
+  activeRing: string;
+  activeBg: string;
+  onClick: () => void;
+  "aria-label": string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      aria-label={ariaLabel}
+      className={`press inline-flex items-center gap-1.5 h-9 px-3 rounded-full text-[12px] font-semibold touch-manipulation transition-colors ${
+        active
+          ? `${activeBg} ring-1 ${activeRing}`
+          : "bg-white/[0.06] text-gray-200 hover:bg-white/[0.10] border border-white/[0.06]"
+      }`}
+    >
+      {icon}
+      <span>{label}</span>
+    </button>
+  );
+}
+
 function DirectionSection({
   label,
   icon,
@@ -373,6 +504,11 @@ function DirectionSection({
   direction: "N" | "S";
   onSelectLine: (routeId: string) => void;
 }) {
+  // Drop arrivals whose eta has already passed (5s grace for trains
+  // pulling in). Re-runs each tick of `now` so departed trains drop
+  // out the moment they leave, not when the feed next polls.
+  const visible = arrivals.filter((a) => a.eta - now / 1000 > -5);
+
   return (
     <section>
       <div className="flex items-center gap-2 px-4 pt-3 pb-2 text-gray-400">
@@ -381,16 +517,16 @@ function DirectionSection({
           {label}
         </span>
         <span className="text-[11px] text-gray-600 ml-auto tabular-nums">
-          {arrivals.length > 0 ? `${arrivals.length} upcoming` : "—"}
+          {visible.length > 0 ? `${visible.length} upcoming` : "—"}
         </span>
       </div>
-      {arrivals.length === 0 ? (
+      {visible.length === 0 ? (
         <div className="px-4 pb-3 text-[12px] text-gray-600">
           No upcoming trains in the next 45 min.
         </div>
       ) : (
         <div>
-          {arrivals.map((a, i) => {
+          {visible.map((a, i) => {
             // Resolve express variants (6X, 7X) to their base line so the
             // badge picks up the familiar color and the row can show the
             // terminus. `isExpress` then switches the bullet to a diamond

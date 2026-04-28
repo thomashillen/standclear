@@ -137,6 +137,22 @@
   backdrop-filter: saturate(160%) blur(28px);
 }
 
+/* Authentic NYC subway bullet typography. The MTA standard (Vignelli,
+   1989-onward) uses Helvetica Bold for the route designation, set tight
+   so the letter or numeral fills ~60–65% of the bullet diameter. We
+   apply the font + spacing here and let each bullet pick its own size
+   class; the result reads as a proper subway bullet rather than a
+   generic colored circle.
+   No gradients, no inset highlights — flat fill, flat letter. The map
+   markers are the place for skeumorphic detail; the bullets stay clean
+   and sign-like. */
+@utility nyc-bullet {
+  font-family: "Helvetica Neue", "Helvetica", "Arial", sans-serif;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  font-feature-settings: "tnum" 1;
+}
+
 /* Safe-area padding helpers */
 @utility pt-safe {
   padding-top: var(--safe-top);

@@ -162,8 +162,41 @@ export async function GET() {
       console.warn("Feed fetch failed:", r.reason);
     }
   }
+
+  // Two-pass dedup. MTA's feeds occasionally echo the same physical
+  // train across multiple endpoints — sometimes with the same tripId,
+  // sometimes with a different one (the base nyct/gtfs feed and the
+  // route-specific gtfs-ace / gtfs-bdfm / etc. occasionally name the
+  // same trip differently after route reassignments). Without dedup
+  // the map renders phantom stacks of "4 E trains" or "3 R trains" at
+  // the same physical location.
+  //
+  // Pass 1: tripId — collapses obvious cross-feed dups where MTA was
+  // consistent.
+  // Pass 2: compound key (routeId, direction, prevStopId, nextStopId,
+  // status). Two real physical trains physically can't share all five
+  // — signaling enforces a minimum spacing of one block, so any pair
+  // matching this key is the same train under different tripIds.
+  // Last write wins in both passes; route-specific feeds listed after
+  // the base feed in FEEDS naturally take precedence.
+  const byId = new Map<string, Train>();
+  for (const t of trains) byId.set(t.id, t);
+
+  const seenSegmentKey = new Set<string>();
+  const dedupedTrains: Train[] = [];
+  for (const t of byId.values()) {
+    const segmentKey = `${t.routeId}|${t.direction}|${t.prevStopId}|${t.nextStopId}|${t.status}`;
+    if (seenSegmentKey.has(segmentKey)) continue;
+    seenSegmentKey.add(segmentKey);
+    dedupedTrains.push(t);
+  }
+
   arrivals.sort((a, b) => a.eta - b.eta);
-  const body: TrainsResponse = { generatedAt: Date.now(), trains, arrivals };
+  const body: TrainsResponse = {
+    generatedAt: Date.now(),
+    trains: dedupedTrains,
+    arrivals,
+  };
   return NextResponse.json(body, {
     headers: { "Cache-Control": "no-store, max-age=0" },
   });

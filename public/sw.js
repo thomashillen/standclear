@@ -16,7 +16,7 @@
 // Bump CACHE_VERSION when the SW logic changes meaningfully — older caches
 // are purged on activate.
 
-const CACHE_VERSION = "v1";
+const CACHE_VERSION = "v2";
 const STATIC_CACHE = `subwaysurfer-static-${CACHE_VERSION}`;
 const DATA_CACHE = `subwaysurfer-data-${CACHE_VERSION}`;
 const HTML_CACHE = `subwaysurfer-html-${CACHE_VERSION}`;
@@ -64,6 +64,15 @@ function isStaticAsset(url) {
 
 function isDataRequest(url) {
   return url.pathname === "/api/trains" || url.pathname === "/api/alerts";
+}
+
+// The static GTFS payload is ~430KB and only changes with a redeploy.
+// Stale-while-revalidate gives instant cold-boot rendering (the app shell
+// can build the station index immediately from cached data) while pulling
+// fresh data in the background. Without this entry the JSON falls through
+// the matcher chain and is fetched every cold launch — fatal underground.
+function isStaticGtfs(url) {
+  return url.pathname === "/gtfsData.json";
 }
 
 async function staleWhileRevalidate(request, cacheName) {
@@ -121,6 +130,11 @@ self.addEventListener("fetch", (event) => {
 
   if (isDataRequest(url)) {
     event.respondWith(staleWhileRevalidate(request, DATA_CACHE));
+    return;
+  }
+
+  if (isStaticGtfs(url)) {
+    event.respondWith(staleWhileRevalidate(request, STATIC_CACHE));
     return;
   }
 

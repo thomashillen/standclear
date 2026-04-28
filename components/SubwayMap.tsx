@@ -5,19 +5,11 @@ import { useState } from "react";
 import { MapPin } from "lucide-react";
 import { useLines } from "@/lib/subwayData";
 import { useTrains } from "@/lib/useTrains";
+import AlertsButton from "./AlertsButton";
 import LinePanel from "./LinePanel";
 import LinePicker from "./LinePicker";
 import NearbyPanel from "./NearbyPanel";
 import StationPanel from "./StationPanel";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog";
-import { Button } from "@/components/ui/button";
 
 const MapView = dynamic(() => import("./MapView"), {
   ssr: false,
@@ -36,6 +28,11 @@ export default function SubwayMap() {
   // Mounting the panel also subscribes to geolocation, which on iOS Safari
   // gives the permission prompt a cold-start path. Users can dismiss.
   const [nearbyOpen, setNearbyOpen] = useState(true);
+  // Fly-to-user signal — increments each time the user taps Near-me so
+  // MapView can fly the camera to their location (waiting for geo if it
+  // isn't available yet). Counter, not a boolean, so successive taps
+  // each register as fresh requests rather than no-ops.
+  const [flyToUserSignal, setFlyToUserSignal] = useState(0);
   const data = useTrains();
   const lines = useLines();
 
@@ -64,118 +61,38 @@ export default function SubwayMap() {
       setSelectedLine(null);
       setFocusStopId(undefined);
       setStationStopId(null);
+      // Always fly on tap, even if the panel was already open — the
+      // user is asking to be re-centered. Counter increments either
+      // way (open or re-open), but we only signal on "open" since
+      // closing the panel doesn't imply a camera move.
     }
+    // Bump the signal both for open AND re-tap-while-open. Tapping
+    // Near-me when the panel is already open is "find me again",
+    // which should re-center the camera.
+    setFlyToUserSignal((s) => s + 1);
   };
+
   const totalTrains = data?.trains.length ?? 0;
   const stale = data ? Date.now() - data.generatedAt > 60_000 : false;
 
   return (
-    <div className="flex flex-col h-full bg-gray-950 text-white">
-      {/* ── Header — iOS-style glass bar with safe-area top ── */}
-      <header
-        className="
-          relative z-10 flex-shrink-0 flex items-center gap-2 sm:gap-3
-          px-3 sm:px-4 pt-safe
-          ios-glass
-          border-b border-white/[0.06]
-        "
-        style={{
-          paddingTop: "calc(max(var(--safe-top), 0.5rem) + 0.5rem)",
-          paddingBottom: "0.625rem",
-        }}
-      >
-        <h1 className="text-base sm:text-lg font-black tracking-tight text-white flex-shrink-0 select-none">
-          <span className="hidden sm:inline">SubwaySurfer</span>
-          <span className="sm:hidden text-[26px] leading-none" aria-label="SubwaySurfer">🚇</span>
-        </h1>
-
-        {/* Line picker */}
-        <div className="flex-1 min-w-0">
-          <LinePicker
-            lines={lines}
-            selectedLine={selectedLine}
-            onSelect={handleLineSelect}
-          />
-        </div>
-
-        {/* Status badge — subtle pill; count on mobile, full text on desktop */}
-        <div
-          className="flex items-center gap-1.5 text-[11px] text-gray-300/90 flex-shrink-0 px-2 h-7 rounded-full bg-white/[0.06] border border-white/[0.06]"
-          title="MTA GTFS-Realtime feed"
-        >
-          <span className="relative flex w-2 h-2">
-            <span
-              className={`absolute inset-0 rounded-full ${
-                !data ? "bg-gray-500" : stale ? "bg-amber-400" : "bg-emerald-400"
-              }`}
-            />
-            {data && !stale && (
-              <span className="absolute inset-0 rounded-full bg-emerald-400 animate-ping opacity-60" />
-            )}
-          </span>
-          <span className="tabular-nums font-medium">
-            {!data ? "Connecting…" : stale ? "Stale" : `${totalTrains} live`}
-          </span>
-        </div>
-
-        {/* Near me */}
-        <button
-          onClick={handleNearbyToggle}
-          aria-label="Find nearby stations"
-          aria-pressed={nearbyOpen}
-          className={`press flex items-center justify-center w-11 h-11 sm:w-9 sm:h-9 rounded-full touch-manipulation flex-shrink-0 transition-colors ${
-            nearbyOpen
-              ? "bg-white text-gray-950 shadow-[0_4px_16px_rgba(255,255,255,0.18)]"
-              : "bg-white/[0.08] text-gray-100 hover:bg-white/[0.12] border border-white/[0.08]"
-          }`}
-        >
-          <MapPin className="w-[18px] h-[18px]" />
-        </button>
-
-        {/* About */}
-        <Dialog>
-          <DialogTrigger asChild>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="press text-gray-300 hover:text-white hover:bg-white/[0.08] flex-shrink-0 px-3 h-11 sm:h-9 rounded-full touch-manipulation"
-            >
-              About
-            </Button>
-          </DialogTrigger>
-          <DialogContent className="bg-gray-900/90 backdrop-blur-xl border-white/10 text-white rounded-3xl">
-            <DialogHeader>
-              <DialogTitle className="text-white text-xl font-black tracking-tight">SubwaySurfer</DialogTitle>
-              <DialogDescription className="text-gray-400">
-                Real-time NYC subway visualization
-              </DialogDescription>
-            </DialogHeader>
-            <div className="space-y-3 text-sm text-gray-300">
-              <p>
-                SubwaySurfer shows live train positions across the NYC subway,
-                pulled directly from the MTA&apos;s GTFS-Realtime feeds.
-              </p>
-              <ul className="list-disc list-inside space-y-1 text-gray-400">
-                <li>Click any line button or line on the map to focus it</li>
-                <li>Train positions interpolate between stops based on real arrival predictions</li>
-                <li>The side panel shows live N/S arrival times at every stop</li>
-                <li>Data refreshes every 8 seconds</li>
-              </ul>
-              <p className="text-gray-500 text-xs pt-2">
-                Static map: GTFS shapes from MTA. Realtime: 8 NYCT GTFS-RT feeds (no API key required).
-              </p>
-            </div>
-          </DialogContent>
-        </Dialog>
-      </header>
-
-      {/* ── Map + Panel ── */}
+    <div className="relative flex flex-col h-full bg-gray-950 text-white">
+      {/* ── Map fills the full viewport ── */}
       <div className="relative flex flex-1 min-h-0">
         <MapView
           selectedLine={selectedLine}
           stationStopId={stationStopId}
           onLineSelect={handleLineSelect}
           onStationOpen={handleStationOpen}
+          flyToUserSignal={flyToUserSignal}
+          // Camera padding for fly-to-user when a panel is covering
+          // part of the screen, so the user's location lands in the
+          // visible map area rather than behind the panel.
+          panelOpen={
+            (nearbyOpen && !stationStopId) ||
+            !!stationStopId ||
+            (!!selectedLine && !nearbyOpen && !stationStopId)
+          }
         />
         {selectedLine && !nearbyOpen && !stationStopId && (
           <LinePanel
@@ -200,6 +117,105 @@ export default function SubwayMap() {
           onClose={() => setNearbyOpen(false)}
           onStationOpen={handleStationOpen}
         />
+      </div>
+
+      {/* ── Floating Liquid Glass control row, overlaid on the map ──
+          The container itself is pointer-events-none so users can pan
+          the map between buttons; each interactive child opts back in
+          with pointer-events-auto. iOS-26-style frosted-glass tiles
+          float independently rather than sharing a header bar — same
+          spatial grouping as Apple Maps' top-row controls. */}
+      <div
+        className="absolute inset-x-0 top-0 z-30 flex items-center gap-2 px-3 pointer-events-none"
+        style={{
+          paddingTop: "calc(max(var(--safe-top), 0.5rem) + 0.5rem)",
+        }}
+      >
+        {/* Logo — small floating tile, hidden on mobile to give the
+            line picker more room. Identity cue only, not navigation. */}
+        <div
+          className="pointer-events-auto hidden sm:flex items-center justify-center w-11 h-11 rounded-full ios-glass border border-white/[0.10] shadow-[0_6px_20px_rgba(0,0,0,0.45)] text-[22px] flex-shrink-0 select-none"
+          aria-label="SubwaySurfer"
+        >
+          🚇
+        </div>
+
+        {/* Line picker — primary nav. Already styles itself as a glass
+            pill internally; the wrapping div just owns layout flex and
+            pointer-events. */}
+        <div className="flex-1 min-w-0 pointer-events-auto">
+          <LinePicker
+            lines={lines}
+            selectedLine={selectedLine}
+            onSelect={handleLineSelect}
+          />
+        </div>
+
+        {/* Live-status indicator — compact circle with a glowing dot.
+            No count text per design feedback; the dot alone signals
+            "feed is alive" with its pulse. Slightly smaller than the
+            buttons (w-9 vs w-11) so it visually reads as a status
+            light rather than another tap target. The aria-label and
+            title carry the actual numbers for accessibility/hover. */}
+        <div
+          className="pointer-events-auto flex items-center justify-center w-9 h-9 flex-shrink-0 rounded-full ios-glass border border-white/[0.10] shadow-[0_6px_20px_rgba(0,0,0,0.45)]"
+          role="status"
+          aria-live="polite"
+          aria-label={
+            !data
+              ? "Connecting to live feed"
+              : stale
+                ? "Live feed is stale"
+                : `${totalTrains} trains live`
+          }
+          title={
+            !data
+              ? "Connecting…"
+              : stale
+                ? "Stale — last refresh more than a minute ago"
+                : `${totalTrains} trains live`
+          }
+        >
+          <span className="relative flex w-2.5 h-2.5">
+            <span
+              className={`absolute inset-0 rounded-full ${
+                !data ? "bg-gray-500" : stale ? "bg-amber-400" : "bg-emerald-400"
+              } shadow-[0_0_8px_currentColor]`}
+              style={{
+                color: !data
+                  ? "rgba(107,114,128,0.5)"
+                  : stale
+                    ? "rgba(251,191,36,0.6)"
+                    : "rgba(52,211,153,0.7)",
+              }}
+            />
+            {data && !stale && (
+              <span className="absolute inset-0 rounded-full bg-emerald-400 animate-ping opacity-60" />
+            )}
+          </span>
+        </div>
+
+        {/* Service alerts — bell with severity-tinted background and a
+            count badge. Already self-styling; sits as its own floating
+            tile in the row. */}
+        <AlertsButton />
+
+        {/* Near-me — taps fly the map to the rider's location AND open
+            the Near Me panel. When already centered + panel open, a
+            re-tap re-centers (the signal counter increments either
+            way). Active state mirrors the panel's open state. */}
+        <button
+          onClick={handleNearbyToggle}
+          aria-label="Find nearby stations"
+          aria-pressed={nearbyOpen}
+          className={`pointer-events-auto press flex items-center justify-center w-11 h-11 rounded-full touch-manipulation flex-shrink-0 transition-colors border shadow-[0_6px_20px_rgba(0,0,0,0.45)] ${
+            nearbyOpen
+              ? "bg-white text-gray-950 border-white/30 shadow-[0_6px_20px_rgba(255,255,255,0.20)]"
+              : "ios-glass text-gray-100 border-white/[0.10]"
+          }`}
+        >
+          <MapPin className="w-[18px] h-[18px]" />
+        </button>
       </div>
     </div>
   );

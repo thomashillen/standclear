@@ -38,7 +38,7 @@ export default function LinePicker({ lines, selectedLine, onSelect }: LinePicker
           {selected ? (
             <>
               <span
-                className="w-6 h-6 rounded-full flex items-center justify-center text-[11px] font-black leading-none flex-shrink-0"
+                className="nyc-bullet w-6 h-6 rounded-full flex items-center justify-center text-[14px] leading-none flex-shrink-0"
                 style={{ backgroundColor: selected.color, color: selected.textColor }}
               >
                 {selected.id}
@@ -116,12 +116,13 @@ export default function LinePicker({ lines, selectedLine, onSelect }: LinePicker
                         key={id}
                         onClick={() => pick(id)}
                         className={`
-                          aspect-square rounded-full text-[17px] font-black leading-none flex items-center justify-center touch-manipulation
+                          nyc-bullet aspect-square rounded-full text-[26px] leading-none flex items-center justify-center touch-manipulation
                           transition-transform duration-200
+                          shadow-[0_2px_8px_rgba(0,0,0,0.3)]
                           ${
                             active
-                              ? "scale-[1.12] ring-[2.5px] ring-white/95 shadow-[0_4px_20px_rgba(0,0,0,0.4)]"
-                              : "active:scale-[0.92] hover:scale-105 shadow-[0_2px_8px_rgba(0,0,0,0.3)]"
+                              ? "scale-[1.12] ring-[2.5px] ring-white/95"
+                              : "active:scale-[0.92] hover:scale-105"
                           }
                         `}
                         style={{ backgroundColor: line.color, color: line.textColor }}

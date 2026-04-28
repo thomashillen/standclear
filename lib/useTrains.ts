@@ -11,6 +11,11 @@ export type { Train, Arrival };
 // jump when a stale snapshot finally refreshes.
 const POLL_MS = 8_000;
 
+// Persist the last successful response to localStorage so a cold boot
+// surfaces the last-known state immediately instead of a "Connecting…"
+// pulse. The poll loop replaces it with fresh data on first success.
+const STORAGE_KEY = "subwaysurfer:trains:v1";
+
 let cache: { data: TrainsResponse | null; ts: number; promise: Promise<void> | null } = {
   data: null,
   ts: 0,
@@ -19,14 +24,64 @@ let cache: { data: TrainsResponse | null; ts: number; promise: Promise<void> | n
 const subscribers = new Set<(d: TrainsResponse) => void>();
 let intervalId: ReturnType<typeof setInterval> | null = null;
 
+function hydrateFromStorage() {
+  if (cache.data) return;
+  if (typeof window === "undefined") return;
+  try {
+    const raw = window.localStorage.getItem(STORAGE_KEY);
+    if (!raw) return;
+    const parsed = JSON.parse(raw) as { data?: TrainsResponse; ts?: number };
+    if (parsed?.data && typeof parsed.data.generatedAt === "number") {
+      // Run the cached payload through dedup too — earlier sessions
+      // before the API gained dedup may have stored duplicate trains.
+      const data = dedupeResponse(parsed.data);
+      cache = { data, ts: parsed.ts ?? data.generatedAt, promise: null };
+    }
+  } catch {
+    // Corrupted storage just falls back to network. Don't throw.
+  }
+}
+
+function persistToStorage(data: TrainsResponse) {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ data, ts: Date.now() }));
+  } catch {
+    // Quota / private mode — best-effort only.
+  }
+}
+
+// Backstop dedup applied to every API response. The API already dedupes,
+// but in dev mode (where Next.js sometimes serves a stale module) or
+// when an old service-worker cached response is replayed, we want the
+// client to also enforce the rule. Compound key: two physical trains
+// can't share routeId+direction+segment+status because signaling
+// enforces minimum spacing of one block.
+function dedupeResponse(data: TrainsResponse): TrainsResponse {
+  const byId = new Map<string, Train>();
+  for (const t of data.trains) byId.set(t.id, t);
+
+  const seenSegment = new Set<string>();
+  const trains: Train[] = [];
+  for (const t of byId.values()) {
+    const segKey = `${t.routeId}|${t.direction}|${t.prevStopId}|${t.nextStopId}|${t.status}`;
+    if (seenSegment.has(segKey)) continue;
+    seenSegment.add(segKey);
+    trains.push(t);
+  }
+  return { ...data, trains };
+}
+
 async function refresh() {
   if (cache.promise) return cache.promise;
   cache.promise = (async () => {
     try {
       const res = await fetch("/api/trains", { cache: "no-store" });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = (await res.json()) as TrainsResponse;
+      const raw = (await res.json()) as TrainsResponse;
+      const data = dedupeResponse(raw);
       cache = { data, ts: Date.now(), promise: null };
+      persistToStorage(data);
       subscribers.forEach((cb) => cb(data));
     } catch (err) {
       console.error("Failed to fetch /api/trains", err);
@@ -72,13 +127,22 @@ function bindVisibility() {
 }
 
 export function useTrains(): TrainsResponse | null {
+  // Initial render must match the server (always null on first SSR
+  // pass) to avoid hydration mismatch — so we DON'T hydrate from
+  // localStorage in the lazy initializer. That ran on the client only
+  // and immediately produced a non-null value on the first client
+  // render, which never matches the server's null. Hydrating inside
+  // useEffect happens after the mismatch-checking render and updates
+  // state via the normal React path. Cold boot still feels instant
+  // because the effect runs in the same microtask as initial mount.
   const [data, setData] = useState<TrainsResponse | null>(cache.data);
 
   useEffect(() => {
+    hydrateFromStorage();
+    if (cache.data) setData(cache.data);
     subscribers.add(setData);
     bindVisibility();
     startPolling();
-    if (cache.data) setData(cache.data);
     return () => {
       subscribers.delete(setData);
       stopPolling();
