@@ -42,6 +42,72 @@ interface StopRowProps {
   onTap: (stopId: string) => void;
 }
 
+// ─── Inline subway-car glyph for "train at this stop" ───────────────
+// Vertical orientation matches the line-panel layout — stops stack
+// down the column with a vertical connector line between them, so a
+// horizontal car at each stop reads tiny. A vertical car (long axis
+// along the line) is twice as tall, much more recognizable, and
+// visually says "this train is parked along this line." Headlights
+// at the top represent the leading edge; the body color is the route
+// color so the train reads as the same vehicle that appears on the
+// map's top-down subway car icon.
+function TrainGlyph({ color }: { color: string }) {
+  return (
+    <svg
+      viewBox="0 0 12 22"
+      width="14"
+      height="26"
+      role="img"
+      aria-label="Train at this stop"
+      className="flex-shrink-0 z-10 drop-shadow-[0_0_6px_rgba(255,255,255,0.4)]"
+    >
+      {/* Body — rounded rect with the long axis vertical */}
+      <rect
+        x="1.5"
+        y="0.7"
+        width="9"
+        height="20.6"
+        rx="2.5"
+        ry="2.5"
+        fill={color}
+        stroke="rgba(255,255,255,0.92)"
+        strokeWidth="0.8"
+      />
+      {/* Left-edge gradient highlight (same "light from above"
+          shading the map markers use; rotated to match vertical
+          orientation) */}
+      <rect
+        x="2"
+        y="1.4"
+        width="2.4"
+        height="19"
+        rx="1.2"
+        ry="1.2"
+        fill="rgba(255,255,255,0.16)"
+      />
+      {/* Two headlights at the top (leading edge) */}
+      <circle cx="3.6" cy="2.6" r="0.85" fill="rgba(255,245,220,0.96)" />
+      <circle cx="8.4" cy="2.6" r="0.85" fill="rgba(255,245,220,0.96)" />
+      {/* Small dark windshield between the headlights — the cab
+          interior visible through the front window */}
+      <rect
+        x="4.7"
+        y="3.6"
+        width="2.6"
+        height="2.2"
+        rx="0.5"
+        ry="0.5"
+        fill="rgba(0,0,0,0.32)"
+      />
+      {/* Two small marker squares at the rear (bottom) so the car
+          reads as having a definite front and back even when the
+          rider tilts the screen */}
+      <rect x="3.6" y="18.8" width="1.2" height="1.2" fill="rgba(0,0,0,0.4)" />
+      <rect x="7.2" y="18.8" width="1.2" height="1.2" fill="rgba(0,0,0,0.4)" />
+    </svg>
+  );
+}
+
 function Bullet({ badge }: { badge: RouteBadge }) {
   return (
     <span
@@ -77,12 +143,14 @@ const StopRow = memo(function StopRow({
       aria-label={`See all trains at ${stopName}`}
     >
       <div className="flex flex-col items-center mt-1.5">
-        <div
-          className={`w-3 h-3 rounded-full border-2 border-white/90 flex-shrink-0 z-10 ${
-            trainHere ? "ring-2 ring-white/30 shadow-[0_0_12px_rgba(255,255,255,0.4)]" : ""
-          }`}
-          style={{ backgroundColor: trainHere ? "#fff" : lineColor }}
-        />
+        {trainHere ? (
+          <TrainGlyph color={lineColor} />
+        ) : (
+          <div
+            className="w-3 h-3 rounded-full border-2 border-white/90 flex-shrink-0 z-10"
+            style={{ backgroundColor: lineColor }}
+          />
+        )}
         {showConnector && (
           <div
             className="w-0.5 mt-0.5"

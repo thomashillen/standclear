@@ -23,6 +23,28 @@ interface MapViewProps {
    *  the map rather than the geometric viewport center (which is
    *  hidden behind the panel on mobile). */
   panelOpen?: boolean;
+  /** A trip plan from SearchSheet. When set, the map renders thick
+   *  highlighted polylines for each leg + Board / Transfer / Alight
+   *  markers, and flies the camera to fit the trip bounds. Null when
+   *  nothing is selected (the trip layers render an empty FC). */
+  selectedTrip?: SelectedTrip | null;
+}
+
+/** Lightweight DTO between SubwayMap (which holds the user's chosen
+ *  TripPlan) and MapView (which only needs the per-leg geometry +
+ *  station coordinates to render the overlay). The shape lets MapView
+ *  stay decoupled from `commuteRouting.ts` types. */
+export interface SelectedTrip {
+  legs: {
+    routeId: string;
+    color: string;
+    coordinates: [number, number][];
+    boardStation: { stopId: string; name: string; lng: number; lat: number };
+    alightStation: { stopId: string; name: string; lng: number; lat: number };
+  }[];
+  /** Canonical complex stopId of the transfer point, or undefined for
+   *  a direct trip. Resolved into a station by the parent. */
+  transferStation?: { stopId: string; name: string; lng: number; lat: number };
 }
 
 function nearestStop(stops: Stop[], lng: number, lat: number): Stop | null {
@@ -269,7 +291,7 @@ function makeTrainIcon(color: string): ImageData {
   return ctx.getImageData(0, 0, W, H);
 }
 
-export default function MapView({ selectedLine, stationStopId, onLineSelect, onStationOpen, flyToUserSignal, panelOpen }: MapViewProps) {
+export default function MapView({ selectedLine, stationStopId, onLineSelect, onStationOpen, flyToUserSignal, panelOpen, selectedTrip }: MapViewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<MapboxMap | null>(null);
   const [mapLoaded, setMapLoaded] = useState(false);
@@ -374,6 +396,22 @@ export default function MapView({ selectedLine, stationStopId, onLineSelect, onS
           data: { type: "FeatureCollection", features: [] },
         });
 
+        // Trip overlay — renders the legs of a selected TripPlan as
+        // bright thick polylines on top of the dimmed line network,
+        // plus distinctive Board / Transfer / Alight station markers.
+        // Driven by `selectedTrip` from the parent; an empty feature
+        // collection when no trip is selected. Two separate sources
+        // keep line geometry and station markers cleanly separated so
+        // their layers can use different paint expressions.
+        map.addSource("subway-trip-legs", {
+          type: "geojson",
+          data: { type: "FeatureCollection", features: [] },
+        });
+        map.addSource("subway-trip-stations", {
+          type: "geojson",
+          data: { type: "FeatureCollection", features: [] },
+        });
+
         // One pre-baked RGBA icon per route, registered as "train-<routeId>".
         // Colors + outlines are painted into the bitmap — no SDF, no halo
         // shader, so the outline stays crisp under Mapbox's downsampling at
@@ -443,6 +481,98 @@ export default function MapView({ selectedLine, stationStopId, onLineSelect, onS
             "circle-radius": 14,
             "circle-color": "#000",
             "circle-opacity": 0,
+          },
+        });
+
+        // ── Trip overlay (selected trip plan from SearchSheet) ──
+        // Bright thick polyline per leg in the leg's route color, with
+        // a soft white halo underneath so the segment pops on the
+        // dimmed line network. Placed above subway-stops so the
+        // selected segment overdraws station dots on its path.
+        map.addLayer({
+          id: "subway-trip-legs-halo",
+          type: "line",
+          source: "subway-trip-legs",
+          layout: { "line-cap": "round", "line-join": "round" },
+          paint: {
+            "line-color": "#ffffff",
+            "line-opacity": 0.55,
+            "line-width": [
+              "interpolate", ["linear"], ["zoom"],
+              10, 6,
+              14, 14,
+            ],
+            "line-blur": 1.5,
+          },
+        });
+        map.addLayer({
+          id: "subway-trip-legs",
+          type: "line",
+          source: "subway-trip-legs",
+          layout: { "line-cap": "round", "line-join": "round" },
+          paint: {
+            "line-color": ["get", "color"],
+            "line-opacity": 1,
+            "line-width": [
+              "interpolate", ["linear"], ["zoom"],
+              10, 3.5,
+              14, 8,
+            ],
+          },
+        });
+
+        // Trip stations: distinctive circle markers at boarding,
+        // transfer, and alighting points. Color encodes role so a
+        // glance reads the journey: emerald = start, amber = transfer,
+        // sky = destination. White stroke + soft halo lift them off
+        // any tile color.
+        map.addLayer({
+          id: "subway-trip-stations-halo",
+          type: "circle",
+          source: "subway-trip-stations",
+          paint: {
+            "circle-color": ["get", "tint"],
+            "circle-opacity": 0.32,
+            "circle-radius": [
+              "interpolate", ["linear"], ["zoom"],
+              10, 8,
+              14, 18,
+            ],
+          },
+        });
+        map.addLayer({
+          id: "subway-trip-stations-dot",
+          type: "circle",
+          source: "subway-trip-stations",
+          paint: {
+            "circle-color": ["get", "tint"],
+            "circle-radius": [
+              "interpolate", ["linear"], ["zoom"],
+              10, 4,
+              14, 8,
+            ],
+            "circle-stroke-color": "#ffffff",
+            "circle-stroke-width": 2.2,
+          },
+        });
+        map.addLayer({
+          id: "subway-trip-stations-label",
+          type: "symbol",
+          source: "subway-trip-stations",
+          layout: {
+            "text-field": ["get", "name"],
+            "text-font": ["DIN Pro Bold", "Open Sans Bold", "Arial Unicode MS Bold"],
+            "text-size": 12,
+            "text-offset": [0, 1.2],
+            "text-anchor": "top",
+            "text-allow-overlap": true,
+            "text-ignore-placement": true,
+          },
+          paint: {
+            "text-color": "#ffffff",
+            "text-halo-color": "#0a0a0a",
+            "text-halo-width": 2.2,
+            "text-halo-blur": 0.2,
           },
         });
 
@@ -521,6 +651,52 @@ export default function MapView({ selectedLine, stationStopId, onLineSelect, onS
               "interpolate", ["linear"], ["zoom"],
               11.5, 0,
               12.5, 1,
+            ],
+          },
+        });
+
+        // Cluster count badge — when the bucket collapse fires (≥4
+        // trains in one position, terminus layover queue), this layer
+        // renders "×N" next to the representative train icon so the
+        // rider still knows there's a queue without seeing 8+ stacked
+        // markers. Filtered to features with cluster=true so non-
+        // clustered trains never get the badge.
+        map.addLayer({
+          id: "subway-trains-cluster-count",
+          type: "symbol",
+          source: "subway-trains",
+          filter: ["==", ["get", "cluster"], true],
+          layout: {
+            "text-field": [
+              "concat",
+              "×",
+              ["to-string", ["get", "count"]],
+            ],
+            "text-font": ["DIN Pro Bold", "Open Sans Bold", "Arial Unicode MS Bold"],
+            "text-size": [
+              "interpolate", ["linear"], ["zoom"],
+              11, 9,
+              13, 11,
+              14, 13,
+            ],
+            // Sit to the right of the icon (the icon's leading-edge
+            // direction is rotated by bearing, but text stays
+            // viewport-aligned, so the badge floats next to the icon
+            // in screen-space rather than rotating with it).
+            "text-offset": [1.7, 0],
+            "text-anchor": "left",
+            "text-allow-overlap": true,
+            "text-ignore-placement": true,
+          },
+          paint: {
+            "text-color": "#fbbf24",
+            "text-halo-color": "#0a0a0a",
+            "text-halo-width": 2.2,
+            "text-halo-blur": 0.3,
+            "text-opacity": [
+              "interpolate", ["linear"], ["zoom"],
+              10.5, 0,
+              11.5, 1,
             ],
           },
         });
@@ -1018,8 +1194,40 @@ export default function MapView({ selectedLine, stationStopId, onLineSelect, onS
       const zoomScale = iconScaleAtZoom(currentZoom);
 
       const features: GeoJSON.Feature[] = [];
+      // Above this many trains in a single bucket, the spread of
+      // perpendicular markers becomes visual noise — that's the
+      // terminus-layover queue case (J at Broad St, F at Jamaica,
+      // etc.). Collapse those into a single representative car icon
+      // with a count badge "×N" rendered next to it. Below the
+      // threshold (1–3 trains) we keep the existing fan-out so a
+      // 2/3 at a station still splits east/west cleanly.
+      const CLUSTER_THRESHOLD = 4;
       for (const arr of buckets.values()) {
         const n = arr.length;
+
+        if (n >= CLUSTER_THRESHOLD) {
+          // Cluster representative — first by stable sort. We pick
+          // its bearing as the rendered orientation; at terminus
+          // queues every train shares the same bearing anyway.
+          const c = arr[0];
+          features.push({
+            type: "Feature",
+            properties: {
+              id: `cluster-${c.line.routeId}-${c.direction}-${c.trainId}`,
+              direction: c.direction,
+              bearing: c.bearing,
+              routeId: c.line.routeId,
+              color: c.line.color,
+              letter: c.line.id,
+              textColor: c.line.textColor,
+              cluster: true,
+              count: n,
+            },
+            geometry: { type: "Point", coordinates: [c.lng, c.lat] },
+          });
+          continue;
+        }
+
         // Track per-direction indices so each direction's sub-group fans
         // out independently. The bucket's iteration order is already
         // stabilized by the routeId+trainId sort above, so the indices
@@ -1168,6 +1376,43 @@ export default function MapView({ selectedLine, stationStopId, onLineSelect, onS
     setPendingFly(false);
   }, [pendingFly, mapLoaded, geo.lat, geo.lng]);
 
+  // One-shot initial auto-fly. When the map first loads and the
+  // user's location lands for the first time, frame their position
+  // in the visible map area (above the open NearbyPanel) without
+  // requiring them to tap Near-me. Only fires ONCE per page load —
+  // a ref-based guard so the rider's subsequent panning isn't
+  // interrupted on every geo update. If the user has already
+  // initiated a manual fly via flyToUserSignal, that took
+  // precedence and we skip this entirely.
+  const initialFlyDoneRef = useRef(false);
+  useEffect(() => {
+    if (initialFlyDoneRef.current) return;
+    if (lastFlySignalRef.current !== 0) {
+      // User already triggered a manual fly; treat that as having
+      // satisfied the initial frame.
+      initialFlyDoneRef.current = true;
+      return;
+    }
+    if (!mapLoaded || !mapRef.current) return;
+    if (geo.lat == null || geo.lng == null) return;
+    const map = mapRef.current;
+    const vw = typeof window !== "undefined" ? window.innerWidth : 0;
+    const vh = typeof window !== "undefined" ? window.innerHeight : 0;
+    const isSmallScreen = vw < 640;
+    const padding = panelOpenRef.current
+      ? isSmallScreen
+        ? { bottom: Math.round(vh * 0.55) }
+        : { right: 360 }
+      : undefined;
+    map.flyTo({
+      center: [geo.lng, geo.lat],
+      zoom: 14,
+      duration: 1100,
+      padding,
+    });
+    initialFlyDoneRef.current = true;
+  }, [mapLoaded, geo.lat, geo.lng]);
+
   // Selection: dim non-selected via expressions on the consolidated layers.
   useEffect(() => {
     if (!mapLoaded || !mapRef.current || !lines) return;
@@ -1177,7 +1422,23 @@ export default function MapView({ selectedLine, stationStopId, onLineSelect, onS
     // Match all routes on the same shared-track corridor, not just the
     // single routeId. Picking "1" lights up 1/2/3; picking "A" lights up
     // A/C/E; etc.
-    const corridor = sel ? CORRIDOR[sel] ?? [sel] : null;
+    //
+    // When a TRIP is selected (no specific line), we go further: dim
+    // EVERY line in the network — including the ones the trip uses.
+    // The trip-overlay layer (`subway-trip-legs`) renders the actual
+    // ridden segments as bright thick polylines on top, so the rider
+    // sees only the segment they're traveling on, not the whole 4
+    // line from Bronx to Brooklyn. An empty corridor satisfies "no
+    // route is selected" for the line-paint expressions while still
+    // applying the dim treatment.
+    let corridor: string[] | null = null;
+    if (sel) {
+      corridor = CORRIDOR[sel] ?? [sel];
+    } else if (selectedTrip && selectedTrip.legs.length > 0) {
+      // Empty corridor → all lines fall through to the "dimmed" path
+      // of matchSel, since no line's routeId matches an empty list.
+      corridor = [];
+    }
     // For constants-only properties, a plain case expression is fine.
     const matchSel = (whenSelected: unknown, whenDimmed: unknown, whenNone: unknown) =>
       corridor === null
@@ -1284,7 +1545,7 @@ export default function MapView({ selectedLine, stationStopId, onLineSelect, onS
         }
       });
     }
-  }, [selectedLine, mapLoaded, lines]);
+  }, [selectedLine, selectedTrip, mapLoaded, lines]);
 
   // Fly to the station when a StationPanel opens — regardless of entry
   // point (map tap, Near Me panel row, LinePanel stop tap). The map click
@@ -1329,6 +1590,107 @@ export default function MapView({ selectedLine, stationStopId, onLineSelect, onS
       duration: 700,
     });
   }, [stationStopId, mapLoaded, lines]);
+
+  // Trip overlay sync. Push the leg LineStrings into the trip-legs
+  // source and the role-tagged stations into trip-stations. When the
+  // trip is cleared (null), both sources go to empty FCs and the
+  // dedicated layers render nothing. After updating data, fit the
+  // camera to the union of all leg coords with padding accounting
+  // for any open panel.
+  useEffect(() => {
+    if (!mapLoaded || !mapRef.current) return;
+    const map = mapRef.current;
+    const legSrc = map.getSource("subway-trip-legs") as
+      | { setData: (d: unknown) => void }
+      | undefined;
+    const stationSrc = map.getSource("subway-trip-stations") as
+      | { setData: (d: unknown) => void }
+      | undefined;
+    if (!legSrc || !stationSrc) return;
+
+    if (!selectedTrip || selectedTrip.legs.length === 0) {
+      legSrc.setData({ type: "FeatureCollection", features: [] });
+      stationSrc.setData({ type: "FeatureCollection", features: [] });
+      return;
+    }
+
+    // Leg lines — one Feature per leg with route color carried in
+    // properties so the paint expression picks it up.
+    legSrc.setData({
+      type: "FeatureCollection",
+      features: selectedTrip.legs.map((leg, i) => ({
+        type: "Feature",
+        properties: { color: leg.color, leg: i },
+        geometry: { type: "LineString", coordinates: leg.coordinates },
+      })),
+    });
+
+    // Station markers — three roles, distinct tints. Board comes
+    // from leg 1's boardStation, alight from the last leg's
+    // alightStation, transfer is the explicit transferStation if a
+    // 2-leg trip. Names are baked in for label rendering.
+    const stationFeatures: GeoJSON.Feature[] = [];
+    const start = selectedTrip.legs[0].boardStation;
+    stationFeatures.push({
+      type: "Feature",
+      properties: { name: start.name, kind: "board", tint: "#34d399" },
+      geometry: { type: "Point", coordinates: [start.lng, start.lat] },
+    });
+    if (selectedTrip.transferStation) {
+      const t = selectedTrip.transferStation;
+      stationFeatures.push({
+        type: "Feature",
+        properties: { name: t.name, kind: "transfer", tint: "#fbbf24" },
+        geometry: { type: "Point", coordinates: [t.lng, t.lat] },
+      });
+    }
+    const end = selectedTrip.legs[selectedTrip.legs.length - 1].alightStation;
+    stationFeatures.push({
+      type: "Feature",
+      properties: { name: end.name, kind: "alight", tint: "#38bdf8" },
+      geometry: { type: "Point", coordinates: [end.lng, end.lat] },
+    });
+    stationSrc.setData({ type: "FeatureCollection", features: stationFeatures });
+
+    // Fit camera to the bounding box of all leg coords. Padding
+    // accounts for the SearchSheet (still open) on the bottom (mobile)
+    // or right (desktop) so the trip lands in the visible map area.
+    let minLng = Infinity,
+      minLat = Infinity,
+      maxLng = -Infinity,
+      maxLat = -Infinity;
+    for (const leg of selectedTrip.legs) {
+      for (const [lng, lat] of leg.coordinates) {
+        if (lng < minLng) minLng = lng;
+        if (lng > maxLng) maxLng = lng;
+        if (lat < minLat) minLat = lat;
+        if (lat > maxLat) maxLat = lat;
+      }
+    }
+    if (
+      Number.isFinite(minLng) &&
+      Number.isFinite(minLat) &&
+      Number.isFinite(maxLng) &&
+      Number.isFinite(maxLat)
+    ) {
+      const isMobile = window.matchMedia("(max-width: 639px)").matches;
+      const bottomPad = isMobile
+        ? Math.round(window.innerHeight * 0.55) + 24
+        : 60;
+      const rightPad = isMobile ? 40 : 360;
+      map.fitBounds(
+        [
+          [minLng, minLat],
+          [maxLng, maxLat],
+        ],
+        {
+          padding: { top: 80, right: rightPad, bottom: bottomPad, left: 40 },
+          duration: 800,
+          maxZoom: 14,
+        },
+      );
+    }
+  }, [selectedTrip, mapLoaded]);
 
   if (noToken) {
     return (

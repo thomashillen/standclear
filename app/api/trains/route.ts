@@ -163,33 +163,23 @@ export async function GET() {
     }
   }
 
-  // Two-pass dedup. MTA's feeds occasionally echo the same physical
-  // train across multiple endpoints — sometimes with the same tripId,
-  // sometimes with a different one (the base nyct/gtfs feed and the
-  // route-specific gtfs-ace / gtfs-bdfm / etc. occasionally name the
-  // same trip differently after route reassignments). Without dedup
-  // the map renders phantom stacks of "4 E trains" or "3 R trains" at
-  // the same physical location.
+  // tripId-only dedup. MTA's feeds occasionally echo the same trip
+  // across endpoints (the base nyct/gtfs feed and the route-specific
+  // gtfs-ace / gtfs-bdfm overlap on some routes) — Map.set with
+  // last-wins so the route-specific feed (listed after the base feed
+  // in FEEDS) takes precedence.
   //
-  // Pass 1: tripId — collapses obvious cross-feed dups where MTA was
-  // consistent.
-  // Pass 2: compound key (routeId, direction, prevStopId, nextStopId,
-  // status). Two real physical trains physically can't share all five
-  // — signaling enforces a minimum spacing of one block, so any pair
-  // matching this key is the same train under different tripIds.
-  // Last write wins in both passes; route-specific feeds listed after
-  // the base feed in FEEDS naturally take precedence.
-  const byId = new Map<string, Train>();
-  for (const t of trains) byId.set(t.id, t);
-
-  const seenSegmentKey = new Set<string>();
-  const dedupedTrains: Train[] = [];
-  for (const t of byId.values()) {
-    const segmentKey = `${t.routeId}|${t.direction}|${t.prevStopId}|${t.nextStopId}|${t.status}`;
-    if (seenSegmentKey.has(segmentKey)) continue;
-    seenSegmentKey.add(segmentKey);
-    dedupedTrains.push(t);
-  }
+  // We deliberately do NOT dedup by (routeId, direction, stopId,
+  // status). Earlier versions tried, but at TERMINUS stations
+  // multiple trains legitimately queue up STOPPED_AT on the same
+  // platform waiting to depart (the J at Broad St, the 1 at South
+  // Ferry, etc.) — the layover queue is real, and dropping all but
+  // one undercounts the actual schedule. IN_TRANSIT_TO bunching
+  // during delays is the same kind of legitimate multi-train state.
+  // Trust the feed; tripId is the only universally-safe dedup axis.
+  const dedupedTrains = Array.from(
+    trains.reduce((m, t) => m.set(t.id, t), new Map<string, Train>()).values(),
+  );
 
   arrivals.sort((a, b) => a.eta - b.eta);
   const body: TrainsResponse = {

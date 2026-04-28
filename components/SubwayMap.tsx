@@ -1,15 +1,19 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useState } from "react";
-import { MapPin } from "lucide-react";
+import { useMemo, useState } from "react";
+import { MapPin, Search } from "lucide-react";
 import { useLines } from "@/lib/subwayData";
 import { useTrains } from "@/lib/useTrains";
+import { legGeometry, type TripPlan } from "@/lib/commuteRouting";
+import { buildStationIndex, type StationEntry } from "@/lib/stopsIndex";
 import AlertsButton from "./AlertsButton";
 import LinePanel from "./LinePanel";
 import LinePicker from "./LinePicker";
 import NearbyPanel from "./NearbyPanel";
+import SearchSheet from "./SearchSheet";
 import StationPanel from "./StationPanel";
+import type { SelectedTrip } from "./MapView";
 
 const MapView = dynamic(() => import("./MapView"), {
   ssr: false,
@@ -28,6 +32,14 @@ export default function SubwayMap() {
   // Mounting the panel also subscribes to geolocation, which on iOS Safari
   // gives the permission prompt a cold-start path. Users can dismiss.
   const [nearbyOpen, setNearbyOpen] = useState(true);
+  // SearchSheet state. Mutually exclusive with the other panels; the
+  // handler below closes them when search opens.
+  const [searchOpen, setSearchOpen] = useState(false);
+  // Selected trip from SearchSheet's directions mode. When set, the
+  // map renders the legs + station markers and fits the camera.
+  const [selectedTripPlan, setSelectedTripPlan] = useState<TripPlan | null>(
+    null,
+  );
   // Fly-to-user signal — increments each time the user taps Near-me so
   // MapView can fly the camera to their location (waiting for geo if it
   // isn't available yet). Counter, not a boolean, so successive taps
@@ -40,10 +52,11 @@ export default function SubwayMap() {
     setSelectedLine(line);
     setFocusStopId(stopId);
     // Panels are mutually exclusive — opening a line replaces nearby /
-    // station views, not layered on top.
+    // station / search views, not layered on top.
     if (line) {
       setNearbyOpen(false);
       setStationStopId(null);
+      setSearchOpen(false);
     }
   };
 
@@ -52,6 +65,23 @@ export default function SubwayMap() {
     setSelectedLine(null);
     setFocusStopId(undefined);
     setNearbyOpen(false);
+    setSearchOpen(false);
+    // Tapping a station drops the trip overlay — the rider has moved
+    // on from the directions context.
+    setSelectedTripPlan(null);
+  };
+
+  const handleSearchToggle = () => {
+    const next = !searchOpen;
+    setSearchOpen(next);
+    if (next) {
+      // Search takes the panel slot; close every other surface so the
+      // sheet can claim the full bottom area without layering issues.
+      setNearbyOpen(false);
+      setSelectedLine(null);
+      setFocusStopId(undefined);
+      setStationStopId(null);
+    }
   };
 
   const handleNearbyToggle = () => {
@@ -61,10 +91,7 @@ export default function SubwayMap() {
       setSelectedLine(null);
       setFocusStopId(undefined);
       setStationStopId(null);
-      // Always fly on tap, even if the panel was already open — the
-      // user is asking to be re-centered. Counter increments either
-      // way (open or re-open), but we only signal on "open" since
-      // closing the panel doesn't imply a camera move.
+      setSearchOpen(false);
     }
     // Bump the signal both for open AND re-tap-while-open. Tapping
     // Near-me when the panel is already open is "find me again",
@@ -74,6 +101,88 @@ export default function SubwayMap() {
 
   const totalTrains = data?.trains.length ?? 0;
   const stale = data ? Date.now() - data.generatedAt > 60_000 : false;
+
+  // Stable identifier for the selected plan, also passed to SearchSheet
+  // so its TripPlanRow can show the right selected highlight without
+  // having to compare plan objects by reference. Same string-key
+  // recipe SearchSheet uses internally.
+  const selectedTripKey = useMemo(() => {
+    if (!selectedTripPlan) return null;
+    return (
+      selectedTripPlan.legs.map((l) => `${l.routeId}-${l.direction}`).join("|") +
+      (selectedTripPlan.transferComplexId
+        ? `:${selectedTripPlan.transferComplexId}`
+        : "")
+    );
+  }, [selectedTripPlan]);
+
+  // Resolve the selected TripPlan into the SelectedTrip DTO MapView
+  // expects: per-leg coordinates from legGeometry + station coords
+  // pulled from the merged station index. Returns null when nothing
+  // is selected so MapView clears its overlay sources.
+  const selectedTrip = useMemo<SelectedTrip | null>(() => {
+    if (!selectedTripPlan || !lines) return null;
+    const index = buildStationIndex(lines);
+    const stationByComplexId = new Map<string, StationEntry>();
+    for (const s of index) stationByComplexId.set(s.stopId, s);
+
+    const lineByRouteId = new Map(
+      Object.values(lines).map((line) => [line.routeId, line]),
+    );
+
+    const legDtos: SelectedTrip["legs"] = [];
+    for (const leg of selectedTripPlan.legs) {
+      const line = lineByRouteId.get(leg.routeId);
+      if (!line) return null;
+      const coords = legGeometry(line, leg.boardStopId, leg.alightStopId);
+      if (!coords) return null;
+      const board = stationByComplexId.get(leg.boardComplexId);
+      const alight = stationByComplexId.get(leg.alightComplexId);
+      if (!board || !alight) return null;
+      legDtos.push({
+        routeId: leg.routeId,
+        color: line.color,
+        coordinates: coords,
+        boardStation: {
+          stopId: board.stopId,
+          name: board.name,
+          lng: board.lng,
+          lat: board.lat,
+        },
+        alightStation: {
+          stopId: alight.stopId,
+          name: alight.name,
+          lng: alight.lng,
+          lat: alight.lat,
+        },
+      });
+    }
+
+    const transferComplex = selectedTripPlan.transferComplexId
+      ? stationByComplexId.get(selectedTripPlan.transferComplexId)
+      : null;
+
+    return {
+      legs: legDtos,
+      transferStation: transferComplex
+        ? {
+            stopId: transferComplex.stopId,
+            name: transferComplex.name,
+            lng: transferComplex.lng,
+            lat: transferComplex.lat,
+          }
+        : undefined,
+    };
+  }, [selectedTripPlan, lines]);
+
+  // Trip selection handler — called from SearchSheet when a row is
+  // tapped. Pass null to clear (which is what tapping the same row
+  // a second time triggers from SearchSheet's side). When the rider
+  // clears the trip we don't bounce the camera back; they can pan or
+  // tap Near-me to re-center.
+  const handleTripSelect = (plan: TripPlan | null) => {
+    setSelectedTripPlan(plan);
+  };
 
   return (
     <div className="relative flex flex-col h-full bg-gray-950 text-white">
@@ -91,8 +200,10 @@ export default function SubwayMap() {
           panelOpen={
             (nearbyOpen && !stationStopId) ||
             !!stationStopId ||
-            (!!selectedLine && !nearbyOpen && !stationStopId)
+            (!!selectedLine && !nearbyOpen && !stationStopId) ||
+            searchOpen
           }
+          selectedTrip={selectedTrip}
         />
         {selectedLine && !nearbyOpen && !stationStopId && (
           <LinePanel
@@ -113,9 +224,25 @@ export default function SubwayMap() {
           />
         )}
         <NearbyPanel
-          open={nearbyOpen && !stationStopId}
+          open={nearbyOpen && !stationStopId && !searchOpen}
           onClose={() => setNearbyOpen(false)}
           onStationOpen={handleStationOpen}
+        />
+        <SearchSheet
+          open={searchOpen}
+          onClose={() => {
+            // Closing the directions sheet should restore the
+            // default map: drop the trip overlay so the rider isn't
+            // looking at a leftover route after they've moved on.
+            // Tapping the same plan twice still toggles overlay
+            // off without closing the sheet — this is the
+            // "actually exit" path.
+            setSearchOpen(false);
+            setSelectedTripPlan(null);
+          }}
+          onStationOpen={handleStationOpen}
+          onTripSelect={handleTripSelect}
+          selectedTripKey={selectedTripKey}
         />
       </div>
 
@@ -194,6 +321,22 @@ export default function SubwayMap() {
             )}
           </span>
         </div>
+
+        {/* Search & directions — Apple-Maps-style sheet for finding a
+            station or planning a trip. Mutually exclusive with the
+            other panels; opening it closes Near Me / Line / Station. */}
+        <button
+          onClick={handleSearchToggle}
+          aria-label="Search stations and plan trips"
+          aria-pressed={searchOpen}
+          className={`pointer-events-auto press flex items-center justify-center w-11 h-11 rounded-full touch-manipulation flex-shrink-0 transition-colors border shadow-[0_6px_20px_rgba(0,0,0,0.45)] ${
+            searchOpen
+              ? "bg-white text-gray-950 border-white/30 shadow-[0_6px_20px_rgba(255,255,255,0.20)]"
+              : "ios-glass text-gray-100 border-white/[0.10]"
+          }`}
+        >
+          <Search className="w-[18px] h-[18px]" />
+        </button>
 
         {/* Service alerts — bell with severity-tinted background and a
             count badge. Already self-styling; sits as its own floating

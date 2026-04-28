@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { ArrowUp, ArrowDown, Star, X, Home, Briefcase } from "lucide-react";
 import { useLines } from "@/lib/subwayData";
 import { useTrains, type Arrival } from "@/lib/useTrains";
@@ -485,6 +485,12 @@ function AnchorChip({
   );
 }
 
+// Cap the default visible arrivals per direction so both N and S
+// fit on screen without scrolling. Riders who want more tap "Show
+// all" — anything beyond the next handful is rarely actionable
+// without expand intent anyway.
+const DEFAULT_ARRIVALS_PER_DIRECTION = 4;
+
 function DirectionSection({
   label,
   icon,
@@ -504,10 +510,16 @@ function DirectionSection({
   direction: "N" | "S";
   onSelectLine: (routeId: string) => void;
 }) {
+  const [expanded, setExpanded] = useState(false);
+
   // Drop arrivals whose eta has already passed (5s grace for trains
   // pulling in). Re-runs each tick of `now` so departed trains drop
   // out the moment they leave, not when the feed next polls.
   const visible = arrivals.filter((a) => a.eta - now / 1000 > -5);
+  const shown = expanded
+    ? visible
+    : visible.slice(0, DEFAULT_ARRIVALS_PER_DIRECTION);
+  const overflow = visible.length - shown.length;
 
   return (
     <section>
@@ -526,7 +538,7 @@ function DirectionSection({
         </div>
       ) : (
         <div>
-          {visible.map((a, i) => {
+          {shown.map((a, i) => {
             // Resolve express variants (6X, 7X) to their base line so the
             // badge picks up the familiar color and the row can show the
             // terminus. `isExpress` then switches the bullet to a diamond
@@ -544,6 +556,15 @@ function DirectionSection({
               />
             );
           })}
+          {(overflow > 0 || expanded) && (
+            <button
+              type="button"
+              onClick={() => setExpanded((x) => !x)}
+              className="press w-full px-4 py-2.5 text-[12px] font-semibold text-gray-300 hover:text-white hover:bg-white/[0.04] active:bg-white/[0.06] border-t border-white/[0.04] touch-manipulation"
+            >
+              {expanded ? "Show less" : `Show all (${overflow} more)`}
+            </button>
+          )}
         </div>
       )}
     </section>

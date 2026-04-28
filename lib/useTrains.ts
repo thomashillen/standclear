@@ -51,25 +51,14 @@ function persistToStorage(data: TrainsResponse) {
   }
 }
 
-// Backstop dedup applied to every API response. The API already dedupes,
-// but in dev mode (where Next.js sometimes serves a stale module) or
-// when an old service-worker cached response is replayed, we want the
-// client to also enforce the rule. Compound key: two physical trains
-// can't share routeId+direction+segment+status because signaling
-// enforces minimum spacing of one block.
+// Backstop dedup. Mirrors the API: tripId-only, last-wins. We do
+// NOT dedup STOPPED_AT trains by (routeId|direction|stopId) — at
+// terminus stations the MTA queues multiple trains STOPPED_AT
+// awaiting departure, and that's not a phantom, that's the schedule.
 function dedupeResponse(data: TrainsResponse): TrainsResponse {
   const byId = new Map<string, Train>();
   for (const t of data.trains) byId.set(t.id, t);
-
-  const seenSegment = new Set<string>();
-  const trains: Train[] = [];
-  for (const t of byId.values()) {
-    const segKey = `${t.routeId}|${t.direction}|${t.prevStopId}|${t.nextStopId}|${t.status}`;
-    if (seenSegment.has(segKey)) continue;
-    seenSegment.add(segKey);
-    trains.push(t);
-  }
-  return { ...data, trains };
+  return { ...data, trains: Array.from(byId.values()) };
 }
 
 async function refresh() {

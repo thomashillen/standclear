@@ -70,14 +70,18 @@ export function haversineMeters(
 //   the complex map into gtfsData.json so this table is data-driven.
 const KNOWN_COMPLEXES: string[][] = [
   ["635", "L03", "R20"],          // 14 St-Union Sq (4/5/6 + L + N/Q/R/W)
+  ["132", "A31", "L01", "L02", "D19"], // West 14 St (1/2/3 + A/C/E + L + F/M) — connected via passageways across 7/8/6 Aves
   ["127", "725", "R16", "902"],   // Times Sq-42 St (1/2/3 + 7 + N/Q/R/W + S shuttle)
   ["631", "723", "901"],          // Grand Central-42 St (4/5/6 + 7 + S shuttle)
   ["D17", "R17"],                 // 34 St-Herald Sq (B/D/F/M + N/Q/R/W)
   ["125", "A24"],                 // 59 St-Columbus Circle (1 + A/B/C/D)
+  ["629", "R11"],                 // Lexington Av/59 St (4/5/6 + N/R/W)
+  ["630", "F11"],                 // 51 St (6) + Lexington Av/53 St (E)
   ["A32", "D20"],                 // W 4 St-Wash Sq (A/C/E + B/D/F/M)
+  ["637", "D21"],                 // Bleecker St (6) + Broadway-Lafayette (B/D/F/M)
   ["235", "D24", "R31"],          // Atlantic Av-Barclays Ctr (2/3/4/5 + B/Q + D/N/R/W)
   ["A51", "J27", "L22"],          // Broadway Junction (A/C + J/Z + L)
-  ["719", "G22"],                 // Court Sq (7 + E/M/G)
+  ["719", "G22", "F09"],          // Court Sq (7 + G + E/M)
   ["232", "423"],                 // Borough Hall (R + 4/5)
   ["A41", "R29"],                 // Jay St-MetroTech (A/C/F + R)
   ["229", "418", "A38", "M22"],   // Fulton St (2/3 + 4/5 + A/C + J/Z) — NOT G36 in Brooklyn
@@ -248,6 +252,18 @@ const RUN_MPS = 3.5;
 const GRID_FACTOR = 1.3;
 const ENTRY_OVERHEAD_S = 20;
 const CHILL_BUFFER_S = 120;
+
+/**
+ * Estimate walking time in minutes for a given as-the-crow-flies
+ * distance, using the same NYC pedestrian model as `catchVerdict`:
+ * 1.4 m/s walking pace × 1.3 grid-detour factor. Floor of 1 min so
+ * a 50-meter walk doesn't render as "0 min walk" in the trip planner.
+ */
+export function walkMinutes(meters: number): number {
+  if (!Number.isFinite(meters) || meters <= 0) return 0;
+  const seconds = (meters * GRID_FACTOR) / WALK_MPS;
+  return Math.max(1, Math.round(seconds / 60));
+}
 
 export function catchVerdict(
   distanceMeters: number,
