@@ -1,40 +1,46 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
   <defs>
-    <linearGradient id="body" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#f4f4f4"/>
+    <linearGradient id="body" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#9c9c9c"/>
+      <stop offset="18%" stop-color="#e6e6e6"/>
       <stop offset="50%" stop-color="#c8c8c8"/>
-      <stop offset="100%" stop-color="#909090"/>
+      <stop offset="82%" stop-color="#e6e6e6"/>
+      <stop offset="100%" stop-color="#9c9c9c"/>
     </linearGradient>
-    <linearGradient id="screen" x1="0%" y1="0%" x2="0%" y2="100%">
-      <stop offset="0%" stop-color="#fafafa"/>
-      <stop offset="100%" stop-color="#cfcfcf"/>
+    <linearGradient id="window" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#2d2d2d"/>
+      <stop offset="100%" stop-color="#161616"/>
     </linearGradient>
-    <linearGradient id="bumper" x1="0%" y1="0%" x2="100%" y2="0%">
-      <stop offset="0%" stop-color="#a0a0a0"/>
-      <stop offset="50%" stop-color="#d8d8d8"/>
-      <stop offset="100%" stop-color="#a0a0a0"/>
+    <linearGradient id="door" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#a8a8a8"/>
+      <stop offset="50%" stop-color="#dcdcdc"/>
+      <stop offset="100%" stop-color="#a8a8a8"/>
     </linearGradient>
+    <radialGradient id="headlight" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="65%" stop-color="#fafaef"/>
+      <stop offset="100%" stop-color="#cdc89a"/>
+    </radialGradient>
   </defs>
 
   <rect width="512" height="512" fill="#0a0a0a"/>
 
-  <g transform="translate(181 76)">
-    <rect x="-10" y="87" width="20" height="45" rx="4" fill="url(#bumper)" stroke="#7a7a7a" stroke-width="0.75"/>
-    <rect x="-10" y="165" width="20" height="45" rx="4" fill="url(#bumper)" stroke="#7a7a7a" stroke-width="0.75"/>
-    <rect x="160" y="87" width="20" height="45" rx="4" fill="url(#bumper)" stroke="#7a7a7a" stroke-width="0.75"/>
-    <rect x="160" y="165" width="20" height="45" rx="4" fill="url(#bumper)" stroke="#7a7a7a" stroke-width="0.75"/>
+  <g transform="translate(64 64) scale(0.75)">
+    <rect x="32" y="20" width="448" height="464" rx="52" fill="url(#body)" stroke="#5a5a5a" stroke-width="2"/>
 
-    <rect x="0" y="0" width="170" height="360" rx="34" fill="url(#body)" stroke="#7a7a7a" stroke-width="1"/>
+    <rect x="180" y="48" width="152" height="48" rx="8" fill="#141414"/>
 
-    <circle cx="30" cy="38" r="9" fill="#ffd54a" stroke="#b89030" stroke-width="0.75"/>
-    <circle cx="140" cy="38" r="9" fill="#ffd54a" stroke="#b89030" stroke-width="0.75"/>
+    <rect x="60" y="120" width="148" height="184" rx="14" fill="url(#window)" stroke="#3a3a3a" stroke-width="1"/>
+    <rect x="304" y="120" width="148" height="184" rx="14" fill="url(#window)" stroke="#3a3a3a" stroke-width="1"/>
 
-    <rect x="63" y="24" width="44" height="28" rx="4" fill="#1a1a1a"/>
+    <rect x="214" y="112" width="84" height="252" rx="6" fill="url(#door)" stroke="#7a7a7a" stroke-width="1.5"/>
+    <line x1="256" y1="118" x2="256" y2="358" stroke="#7e7e7e" stroke-width="2"/>
+    <rect x="232" y="220" width="5" height="32" rx="1.5" fill="#5a5a5a"/>
+    <rect x="275" y="220" width="5" height="32" rx="1.5" fill="#5a5a5a"/>
 
-    <rect x="18" y="69" width="134" height="213" rx="18" fill="url(#screen)" stroke="#9a9a9a" stroke-width="1"/>
+    <circle cx="128" cy="404" r="40" fill="url(#headlight)" stroke="#7a7a7a" stroke-width="3"/>
+    <circle cx="384" cy="404" r="40" fill="url(#headlight)" stroke="#7a7a7a" stroke-width="3"/>
 
-    <rect x="15" y="303" width="44" height="42" rx="4" fill="#1a1a1a"/>
-    <rect x="74" y="303" width="22" height="42" rx="4" fill="#1a1a1a"/>
-    <rect x="111" y="303" width="44" height="42" rx="4" fill="#1a1a1a"/>
+    <rect x="80" y="468" width="352" height="22" rx="3" fill="#141414"/>
   </g>
 </svg>
