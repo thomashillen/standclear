@@ -16,7 +16,7 @@
     </linearGradient>
   </defs>
 
-  <rect width="512" height="512" rx="96" fill="#0a0a0a"/>
+  <rect width="512" height="512" fill="#0a0a0a"/>
 
   <g transform="translate(146 16)">
     <rect x="-14" y="116" width="28" height="60" rx="6" fill="url(#bumper)" stroke="#7a7a7a" stroke-width="1"/>
