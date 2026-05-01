@@ -21,6 +21,7 @@ export type TripSelection = {
 };
 import LinePanel from "./LinePanel";
 import LinePicker from "./LinePicker";
+import LiveTrainsPopup from "./LiveTrainsPopup";
 import MoreSheet from "./MoreSheet";
 import NearbyPanel from "./NearbyPanel";
 import SearchSheet from "./SearchSheet";
@@ -58,6 +59,11 @@ export default function SubwayMap() {
   // header stays compact. Mutually exclusive with other sheets only at
   // the visual level; underneath, MoreSheet is its own modal Dialog.
   const [moreOpen, setMoreOpen] = useState(false);
+  // System Pulse popup — surfaced from the live-feed pill in the
+  // floating header. Independent dialog (not mutually exclusive with
+  // panels) so a rider mid-trip can peek at fleet stats without
+  // losing their context.
+  const [livePulseOpen, setLivePulseOpen] = useState(false);
   // Anchor-pick mode for the SearchSheet — when set, tapping a
   // station/place row pins that as the chosen anchor instead of
   // opening directions. Set by MoreSheet's "Set Home" / "Set Work"
@@ -329,6 +335,10 @@ export default function SubwayMap() {
           onSetHome={() => handleSetAnchorFromMore("home")}
           onSetWork={() => handleSetAnchorFromMore("work")}
         />
+        <LiveTrainsPopup
+          open={livePulseOpen}
+          onClose={() => setLivePulseOpen(false)}
+        />
         <SearchSheet
           initialMode={searchInitialMode}
           anchorPickMode={searchAnchorPick}
@@ -391,19 +401,21 @@ export default function SubwayMap() {
         {/* Live-feed pill — pulsing dot + train count. The number
             communicates "system scale right now" at a glance, the
             color signals freshness (green = live, amber = stale,
-            gray = connecting). Pill shape (auto width) so it grows
-            naturally with the count without ever clipping. */}
-        <div
-          className="pointer-events-auto flex items-center gap-1.5 h-9 px-2.5 flex-shrink-0 rounded-full ios-glass border border-white/[0.10] shadow-[0_6px_20px_rgba(0,0,0,0.45)]"
-          role="status"
-          aria-live="polite"
+            gray = connecting). Tap opens the System Pulse popup with
+            direction split, status mix, and per-line breakdown. Pill
+            shape (auto width) so it grows naturally with the count
+            without ever clipping. */}
+        <button
+          type="button"
+          onClick={() => setLivePulseOpen(true)}
           aria-label={
             !data
               ? "Connecting to live feed"
               : stale
-                ? "Live feed is stale"
-                : `${totalTrains} trains live`
+                ? "Live feed is stale — tap for details"
+                : `${totalTrains} trains live — tap for system pulse`
           }
+          aria-pressed={livePulseOpen}
           title={
             !data
               ? "Connecting…"
@@ -411,6 +423,7 @@ export default function SubwayMap() {
                 ? "Stale — last refresh more than a minute ago"
                 : `${totalTrains} trains live`
           }
+          className="pointer-events-auto press flex items-center gap-1.5 h-9 px-2.5 flex-shrink-0 rounded-full ios-glass border border-white/[0.10] shadow-[0_6px_20px_rgba(0,0,0,0.45)] touch-manipulation"
         >
           <span className="relative flex w-2 h-2">
             <span
@@ -432,7 +445,7 @@ export default function SubwayMap() {
           <span className="text-[12px] font-bold tabular-nums text-gray-100 leading-none">
             {data ? totalTrains : "…"}
           </span>
-        </div>
+        </button>
 
         {/* Search & directions — Apple-Maps-style sheet for finding a
             station or planning a trip. Mutually exclusive with the

@@ -506,7 +506,19 @@ export default function StationPanel({ stopId, onClose, onSelectLine }: Props) {
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto ios-scroll">
+      <div
+        className="flex-1 overflow-y-auto ios-scroll"
+        // At half detent the sheet's bottom extends below the viewport, so
+        // content past the visible area becomes unreachable — flex-1 sizes
+        // the scroller to the sheet's full 88dvh, but only ~55dvh is on
+        // screen, and overflow doesn't trigger when the container thinks
+        // its content fits. Pad by the below-fold height (33dvh = 88dvh
+        // − 55dvh) at half detent so every row can be scrolled into the
+        // visible area. Mirrors LinePanel's fix.
+        style={{
+          paddingBottom: detent === "half" ? "calc(88dvh - 55dvh)" : undefined,
+        }}
+      >
         {!data && (
           <div className="text-center text-xs text-gray-500 py-8 animate-pulse">
             Loading live arrivals…
