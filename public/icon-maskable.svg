@@ -1,11 +1,40 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="body" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#f4f4f4"/>
+      <stop offset="50%" stop-color="#c8c8c8"/>
+      <stop offset="100%" stop-color="#909090"/>
+    </linearGradient>
+    <linearGradient id="screen" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#fafafa"/>
+      <stop offset="100%" stop-color="#cfcfcf"/>
+    </linearGradient>
+    <linearGradient id="bumper" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#a0a0a0"/>
+      <stop offset="50%" stop-color="#d8d8d8"/>
+      <stop offset="100%" stop-color="#a0a0a0"/>
+    </linearGradient>
+  </defs>
+
   <rect width="512" height="512" fill="#0a0a0a"/>
-  <g transform="translate(144 168)">
-    <rect x="0" y="0" width="224" height="176" rx="32" fill="#22c55e"/>
-    <circle cx="56" cy="160" r="20" fill="#0a0a0a"/>
-    <circle cx="168" cy="160" r="20" fill="#0a0a0a"/>
-    <rect x="28" y="36" width="68" height="56" rx="8" fill="#0a0a0a"/>
-    <rect x="128" y="36" width="68" height="56" rx="8" fill="#0a0a0a"/>
-    <rect x="104" y="36" width="16" height="56" rx="4" fill="#0a0a0a"/>
+
+  <g transform="translate(181 76)">
+    <rect x="-10" y="87" width="20" height="45" rx="4" fill="url(#bumper)" stroke="#7a7a7a" stroke-width="0.75"/>
+    <rect x="-10" y="165" width="20" height="45" rx="4" fill="url(#bumper)" stroke="#7a7a7a" stroke-width="0.75"/>
+    <rect x="160" y="87" width="20" height="45" rx="4" fill="url(#bumper)" stroke="#7a7a7a" stroke-width="0.75"/>
+    <rect x="160" y="165" width="20" height="45" rx="4" fill="url(#bumper)" stroke="#7a7a7a" stroke-width="0.75"/>
+
+    <rect x="0" y="0" width="170" height="360" rx="34" fill="url(#body)" stroke="#7a7a7a" stroke-width="1"/>
+
+    <circle cx="30" cy="38" r="9" fill="#ffd54a" stroke="#b89030" stroke-width="0.75"/>
+    <circle cx="140" cy="38" r="9" fill="#ffd54a" stroke="#b89030" stroke-width="0.75"/>
+
+    <rect x="63" y="24" width="44" height="28" rx="4" fill="#1a1a1a"/>
+
+    <rect x="18" y="69" width="134" height="213" rx="18" fill="url(#screen)" stroke="#9a9a9a" stroke-width="1"/>
+
+    <rect x="15" y="303" width="44" height="42" rx="4" fill="#1a1a1a"/>
+    <rect x="74" y="303" width="22" height="42" rx="4" fill="#1a1a1a"/>
+    <rect x="111" y="303" width="44" height="42" rx="4" fill="#1a1a1a"/>
   </g>
 </svg>
