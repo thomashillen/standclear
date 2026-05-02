@@ -70,27 +70,38 @@ function normalizeEndpoint(value: unknown): CommuteEndpoint | null {
   return null;
 }
 
+function tryParseV3(raw: string | null): CommuteState | null {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as {
+      home?: unknown;
+      work?: unknown;
+      favorites?: string[];
+    };
+    return {
+      home: normalizeEndpoint(parsed.home),
+      work: normalizeEndpoint(parsed.work),
+      favorites: new Set(parsed.favorites ?? []),
+    };
+  } catch {
+    return null;
+  }
+}
+
 function load(): CommuteState {
   if (cache) return cache;
   if (typeof window === "undefined") return emptyState();
   try {
     // Prefer the current key; fall back to the pre-rename v3 key so
     // riders coming from a SubwaySurfer-branded install keep their
-    // pinned Home/Work and favorites across the rename.
-    const rawV3 =
-      window.localStorage.getItem(KEY) ??
-      window.localStorage.getItem(KEY_V3_LEGACY);
-    if (rawV3) {
-      const parsed = JSON.parse(rawV3) as {
-        home?: unknown;
-        work?: unknown;
-        favorites?: string[];
-      };
-      cache = {
-        home: normalizeEndpoint(parsed.home),
-        work: normalizeEndpoint(parsed.work),
-        favorites: new Set(parsed.favorites ?? []),
-      };
+    // pinned Home/Work and favorites across the rename. Parse each
+    // key independently so a corrupted new key doesn't shadow an
+    // intact legacy record during the rollout.
+    const v3 =
+      tryParseV3(window.localStorage.getItem(KEY)) ??
+      tryParseV3(window.localStorage.getItem(KEY_V3_LEGACY));
+    if (v3) {
+      cache = v3;
       // Re-write under the new key so subsequent loads short-circuit
       // and we can stop reading the legacy key once it's empty.
       saveRaw(cache);

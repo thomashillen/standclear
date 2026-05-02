@@ -135,6 +135,27 @@ describe("useFavorites — migrations", () => {
     expect(commute.current.home).toBeNull();
     expect(commute.current.work).toBeNull();
   });
+
+  it("falls back to the legacy v3 record when the new key is corrupt", async () => {
+    // A partial rollout could leave a malformed write under the new
+    // key while the legacy record is still intact — riders shouldn't
+    // lose their pinned Home/Work in that case.
+    localStorage.setItem("standclear:commute:v3", "{not json");
+    localStorage.setItem(
+      "subwaysurfer:commute:v3",
+      JSON.stringify({
+        home: { kind: "station", stopId: "635" },
+        work: { kind: "station", stopId: "631" },
+        favorites: ["L03"],
+      }),
+    );
+    const { useCommute, useFavorites } = await freshImport();
+    const { result: commute } = renderHook(() => useCommute());
+    const { result: favs } = renderHook(() => useFavorites());
+    expect(commute.current.home).toEqual({ kind: "station", stopId: "635" });
+    expect(commute.current.work).toEqual({ kind: "station", stopId: "631" });
+    expect(favs.current.favorites.has("L03")).toBe(true);
+  });
 });
 
 describe("useCommute — anchor assignment", () => {

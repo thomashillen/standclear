@@ -146,4 +146,19 @@ describe("useRecentSearches", () => {
     expect(result.current.recents).toHaveLength(1);
     expect(result.current.recents[0]).toMatchObject({ stopId: "635" });
   });
+
+  it("falls back to legacy recents when the new key is corrupt", async () => {
+    localStorage.setItem(STORAGE_KEY, "{not-json");
+    localStorage.setItem(
+      LEGACY_STORAGE_KEY,
+      JSON.stringify({
+        v: 1,
+        items: [{ kind: "station", stopId: "635", name: "Union Sq", addedAt: 0 }],
+      }),
+    );
+    const { useRecentSearches } = await freshImport();
+    const { result } = renderHook(() => useRecentSearches());
+    expect(result.current.recents).toHaveLength(1);
+    expect(result.current.recents[0]).toMatchObject({ stopId: "635" });
+  });
 });

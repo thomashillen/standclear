@@ -39,16 +39,27 @@ interface Stored {
   items: RecentSearch[];
 }
 
+function tryParse(raw: string | null): RecentSearch[] | null {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as Stored;
+    if (parsed.v !== 1 || !Array.isArray(parsed.items)) return null;
+    return parsed.items;
+  } catch {
+    return null;
+  }
+}
+
 function load(): RecentSearch[] {
   if (typeof window === "undefined") return [];
   try {
-    const raw =
-      localStorage.getItem(STORAGE_KEY) ??
-      localStorage.getItem(LEGACY_STORAGE_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw) as Stored;
-    if (parsed.v !== 1 || !Array.isArray(parsed.items)) return [];
-    return parsed.items;
+    // Parse each key independently so a corrupted new-key payload
+    // doesn't drop an intact legacy record during the rename rollout.
+    return (
+      tryParse(localStorage.getItem(STORAGE_KEY)) ??
+      tryParse(localStorage.getItem(LEGACY_STORAGE_KEY)) ??
+      []
+    );
   } catch {
     return [];
   }
