@@ -7,7 +7,8 @@ async function freshImport() {
   return await import("./useRecentSearches");
 }
 
-const STORAGE_KEY = "subwaysurfer.recents.v1";
+const STORAGE_KEY = "standclear.recents.v1";
+const LEGACY_STORAGE_KEY = "subwaysurfer.recents.v1";
 
 function placeFixture(over: Partial<Place> = {}): Place {
   return {
@@ -130,5 +131,19 @@ describe("useRecentSearches", () => {
     const { useRecentSearches } = await freshImport();
     const { result } = renderHook(() => useRecentSearches());
     expect(result.current.recents).toEqual([]);
+  });
+
+  it("reads from the pre-rename subwaysurfer.recents.v1 key when the new key is absent", async () => {
+    localStorage.setItem(
+      LEGACY_STORAGE_KEY,
+      JSON.stringify({
+        v: 1,
+        items: [{ kind: "station", stopId: "635", name: "Union Sq", addedAt: 0 }],
+      }),
+    );
+    const { useRecentSearches } = await freshImport();
+    const { result } = renderHook(() => useRecentSearches());
+    expect(result.current.recents).toHaveLength(1);
+    expect(result.current.recents[0]).toMatchObject({ stopId: "635" });
   });
 });

@@ -841,7 +841,7 @@ export default function NearbyPanel({
                 Location is blocked
               </p>
               <p className="text-[11px] text-gray-500 mt-1 max-w-[240px] mx-auto">
-                Enable location access for SubwaySurfer in your browser
+                Enable location access for StandClear in your browser
                 settings, then reopen this panel.
               </p>
             </div>

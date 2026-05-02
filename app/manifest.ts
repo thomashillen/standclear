@@ -2,8 +2,8 @@ import type { MetadataRoute } from "next";
 
 export default function manifest(): MetadataRoute.Manifest {
   return {
-    name: "SubwaySurfer — NYC Subway Tracker",
-    short_name: "SubwaySurfer",
+    name: "StandClear — NYC Subway Tracker",
+    short_name: "StandClear",
     description:
       "Real-time NYC subway tracking with arrivals, nearby stations, and service alerts.",
     start_url: "/",

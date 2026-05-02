@@ -382,7 +382,7 @@ export default function SubwayMap() {
             line picker more room. Identity cue only, not navigation. */}
         <div
           className="pointer-events-auto hidden sm:flex items-center justify-center w-11 h-11 rounded-full ios-glass border border-white/[0.10] shadow-[0_6px_20px_rgba(0,0,0,0.45)] text-[22px] flex-shrink-0 select-none"
-          aria-label="SubwaySurfer"
+          aria-label="StandClear"
         >
           🚇
         </div>

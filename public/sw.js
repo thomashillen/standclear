@@ -1,11 +1,11 @@
-// SubwaySurfer service worker.
+// StandClear service worker.
 //
 // Strategy:
 //   * Precache nothing at install. The Next.js build hashes bundle names into
 //     chunks we cannot know at SW-author time; instead we cache-on-use.
 //   * Runtime caching lives in two buckets:
-//       subwaysurfer-static  — CSS, JS, fonts, icons, images. Cache-first.
-//       subwaysurfer-data    — /api/trains and /api/alerts. Stale-while-
+//       standclear-static  — CSS, JS, fonts, icons, images. Cache-first.
+//       standclear-data    — /api/trains and /api/alerts. Stale-while-
 //         revalidate so the app opens instantly and refreshes in the
 //         background. The UI already polls, so showing last-known data for
 //         a second while the network catches up is preferable to a spinner.
@@ -14,12 +14,14 @@
 //   * Opaque or failed fetches are never cached.
 //
 // Bump CACHE_VERSION when the SW logic changes meaningfully — older caches
-// are purged on activate.
+// are purged on activate. Caches written by the previous brand prefix
+// (subwaysurfer-*) are also evicted on activate so a one-time deploy
+// reclaims their storage.
 
-const CACHE_VERSION = "v2";
-const STATIC_CACHE = `subwaysurfer-static-${CACHE_VERSION}`;
-const DATA_CACHE = `subwaysurfer-data-${CACHE_VERSION}`;
-const HTML_CACHE = `subwaysurfer-html-${CACHE_VERSION}`;
+const CACHE_VERSION = "v3";
+const STATIC_CACHE = `standclear-static-${CACHE_VERSION}`;
+const DATA_CACHE = `standclear-data-${CACHE_VERSION}`;
+const HTML_CACHE = `standclear-html-${CACHE_VERSION}`;
 
 const KNOWN_CACHES = new Set([STATIC_CACHE, DATA_CACHE, HTML_CACHE]);
 
@@ -45,7 +47,11 @@ self.addEventListener("activate", (event) => {
       const names = await caches.keys();
       await Promise.all(
         names
-          .filter((n) => n.startsWith("subwaysurfer-") && !KNOWN_CACHES.has(n))
+          .filter(
+            (n) =>
+              (n.startsWith("standclear-") || n.startsWith("subwaysurfer-")) &&
+              !KNOWN_CACHES.has(n),
+          )
           .map((n) => caches.delete(n)),
       );
       await self.clients.claim();

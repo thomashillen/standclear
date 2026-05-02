@@ -14,7 +14,7 @@ const POLL_MS = 8_000;
 // Persist the last successful response to localStorage so a cold boot
 // surfaces the last-known state immediately instead of a "Connecting…"
 // pulse. The poll loop replaces it with fresh data on first success.
-const STORAGE_KEY = "subwaysurfer:trains:v1";
+const STORAGE_KEY = "standclear:trains:v1";
 
 let cache: { data: TrainsResponse | null; ts: number; promise: Promise<void> | null } = {
   data: null,

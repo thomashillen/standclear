@@ -11,9 +11,15 @@ import { useCallback, useEffect, useState } from "react";
 // targets a real station — the address endpoint carries coords + name
 // for the walk leg, while the underlying nearest station is resolved
 // at read time from the live station index.
+//
+// The brand renamed from "subwaysurfer" to "standclear", so the live
+// key now sits under the standclear namespace at the same v3 schema.
+// Old subwaysurfer:* keys are read once on cold load and forwarded
+// into the new key.
 const KEY_V1 = "subwaysurfer:favorites:v1";
 const KEY_V2 = "subwaysurfer:commute:v2";
-const KEY = "subwaysurfer:commute:v3";
+const KEY_V3_LEGACY = "subwaysurfer:commute:v3";
+const KEY = "standclear:commute:v3";
 
 /**
  * A commute anchor is either a station pin (just the stopId, station
@@ -68,8 +74,12 @@ function load(): CommuteState {
   if (cache) return cache;
   if (typeof window === "undefined") return emptyState();
   try {
-    // Prefer v3 if it exists.
-    const rawV3 = window.localStorage.getItem(KEY);
+    // Prefer the current key; fall back to the pre-rename v3 key so
+    // riders coming from a SubwaySurfer-branded install keep their
+    // pinned Home/Work and favorites across the rename.
+    const rawV3 =
+      window.localStorage.getItem(KEY) ??
+      window.localStorage.getItem(KEY_V3_LEGACY);
     if (rawV3) {
       const parsed = JSON.parse(rawV3) as {
         home?: unknown;
@@ -81,6 +91,9 @@ function load(): CommuteState {
         work: normalizeEndpoint(parsed.work),
         favorites: new Set(parsed.favorites ?? []),
       };
+      // Re-write under the new key so subsequent loads short-circuit
+      // and we can stop reading the legacy key once it's empty.
+      saveRaw(cache);
       return cache;
     }
     // Migrate v2 → v3: wrap raw stopIds as { kind: "station", stopId }.

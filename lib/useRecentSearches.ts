@@ -11,7 +11,10 @@ import type { Place } from "./geocoding";
 // Storage shape (versioned). Bumping the version on schema change
 // drops old entries cleanly rather than crashing on parse.
 
-const STORAGE_KEY = "subwaysurfer.recents.v1";
+const STORAGE_KEY = "standclear.recents.v1";
+// Pre-rename key. Read once on cold load so existing rider history
+// survives the brand change; new writes go to STORAGE_KEY only.
+const LEGACY_STORAGE_KEY = "subwaysurfer.recents.v1";
 const CAP = 10;
 
 export type RecentSearch =
@@ -39,7 +42,9 @@ interface Stored {
 function load(): RecentSearch[] {
   if (typeof window === "undefined") return [];
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw =
+      localStorage.getItem(STORAGE_KEY) ??
+      localStorage.getItem(LEGACY_STORAGE_KEY);
     if (!raw) return [];
     const parsed = JSON.parse(raw) as Stored;
     if (parsed.v !== 1 || !Array.isArray(parsed.items)) return [];
