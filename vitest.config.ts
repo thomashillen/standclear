@@ -8,7 +8,14 @@ export default defineConfig({
     },
   },
   test: {
+    // jsdom by default so hooks have window/document/localStorage.
+    // Pure-logic tests (e.g. lib/stopsIndex.test.ts) and Node-only tests
+    // (e.g. app/api/trains/route.test.ts) override per-file via a
+    // `// @vitest-environment node` directive at the top.
+    environment: "jsdom",
     include: ["**/*.test.ts", "**/*.test.tsx"],
     exclude: ["node_modules", ".next", "data"],
+    setupFiles: ["./vitest.setup.ts"],
+    restoreMocks: true,
   },
 });
