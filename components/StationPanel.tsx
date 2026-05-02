@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ArrowUp, ArrowDown, Star, X, Home, Briefcase } from "lucide-react";
 import { useLines } from "@/lib/subwayData";
 import { useTrains, type Arrival, type Train } from "@/lib/useTrains";
@@ -212,63 +212,70 @@ export default function StationPanel({ stopId, onClose, onSelectLine }: Props) {
   // is implicitly stale (the new stopId won't match the old one) and
   // gets cleaned up.
   const STOPPED_AT_GRACE_MS = 25_000;
-  const stoppedAtMemoRef = useRef<
-    Map<string, { stopId: string; lastSeenMs: number; train: Train }>
-  >(new Map());
+  type StoppedAtMemo = Map<
+    string,
+    { stopId: string; lastSeenMs: number; train: Train }
+  >;
+  // Held in state (not a ref) so the useMemo below can read it without
+  // tripping react-hooks/refs. Functional updates preserve the
+  // "outlives the current data snapshot" property the memo relied on.
+  const [stoppedAtMemo, setStoppedAtMemo] = useState<StoppedAtMemo>(
+    () => new Map(),
+  );
 
-  // Update the memo on every fresh data tick. Deliberately a side
-  // effect rather than derived state — we want the memo to outlive
-  // the current data snapshot so a brief absence from data.trains
-  // doesn't drop the entry.
+  // Update the memo on every fresh data tick.
   useEffect(() => {
     if (!data) return;
-    const memo = stoppedAtMemoRef.current;
-    const nowMs = Date.now();
-    // Record currently STOPPED_AT trains. Existing entries get their
-    // timestamp refreshed; new ones get added.
-    for (const t of data.trains) {
-      if (t.status !== "STOPPED_AT") continue;
-      memo.set(t.id, {
-        stopId: t.prevStopId,
-        lastSeenMs: nowMs,
-        train: t,
-      });
-    }
-    // GC: drop entries that are clearly stale.
-    //
-    //   1. Time expiry — past the grace window, no recent confirmation.
-    //
-    //   2. Train CONFIRMED at a different stop — but only when that
-    //      confirmation comes from another STOPPED_AT report. We do
-    //      NOT trust a status-change-to-IN_TRANSIT_TO as evidence
-    //      the train moved: the API's prevStopId field is computed
-    //      differently for IT vs. STOPPED_AT (one uses the feed's
-    //      stop_time_updates index, the other defaults to the
-    //      vehicle's current stopId), so a mere status flip can
-    //      flip prevStopId even when the train hasn't moved. Using
-    //      that as a deletion signal is exactly the bug that caused
-    //      the original flicker, where a STOPPED_AT → IT
-    //      oscillation immediately blew away the memo entry.
-    //
-    //      A FRESH STOPPED_AT at a different parent stopId is a
-    //      strong signal — the train is now physically at another
-    //      platform. Only that drops the entry early.
-    const liveByTrip = new Map<string, Train>();
-    for (const t of data.trains) liveByTrip.set(t.id, t);
-    for (const [tripId, entry] of memo) {
-      if (nowMs - entry.lastSeenMs > STOPPED_AT_GRACE_MS) {
-        memo.delete(tripId);
-        continue;
+    setStoppedAtMemo((prev) => {
+      const next: StoppedAtMemo = new Map(prev);
+      const nowMs = Date.now();
+      // Record currently STOPPED_AT trains. Existing entries get their
+      // timestamp refreshed; new ones get added.
+      for (const t of data.trains) {
+        if (t.status !== "STOPPED_AT") continue;
+        next.set(t.id, {
+          stopId: t.prevStopId,
+          lastSeenMs: nowMs,
+          train: t,
+        });
       }
-      const live = liveByTrip.get(tripId);
-      if (
-        live &&
-        live.status === "STOPPED_AT" &&
-        live.prevStopId !== entry.stopId
-      ) {
-        memo.delete(tripId);
+      // GC: drop entries that are clearly stale.
+      //
+      //   1. Time expiry — past the grace window, no recent confirmation.
+      //
+      //   2. Train CONFIRMED at a different stop — but only when that
+      //      confirmation comes from another STOPPED_AT report. We do
+      //      NOT trust a status-change-to-IN_TRANSIT_TO as evidence
+      //      the train moved: the API's prevStopId field is computed
+      //      differently for IT vs. STOPPED_AT (one uses the feed's
+      //      stop_time_updates index, the other defaults to the
+      //      vehicle's current stopId), so a mere status flip can
+      //      flip prevStopId even when the train hasn't moved. Using
+      //      that as a deletion signal is exactly the bug that caused
+      //      the original flicker, where a STOPPED_AT → IT
+      //      oscillation immediately blew away the memo entry.
+      //
+      //      A FRESH STOPPED_AT at a different parent stopId is a
+      //      strong signal — the train is now physically at another
+      //      platform. Only that drops the entry early.
+      const liveByTrip = new Map<string, Train>();
+      for (const t of data.trains) liveByTrip.set(t.id, t);
+      for (const [tripId, entry] of next) {
+        if (nowMs - entry.lastSeenMs > STOPPED_AT_GRACE_MS) {
+          next.delete(tripId);
+          continue;
+        }
+        const live = liveByTrip.get(tripId);
+        if (
+          live &&
+          live.status === "STOPPED_AT" &&
+          live.prevStopId !== entry.stopId
+        ) {
+          next.delete(tripId);
+        }
       }
-    }
+      return next;
+    });
   }, [data]);
 
   const { north, south } = useMemo(() => {
@@ -288,7 +295,7 @@ export default function StationPanel({ stopId, onClose, onSelectLine }: Props) {
     // oscillation that would otherwise flicker the row.
     const seen = new Set<string>();
     const nowMs = Date.now();
-    const memo = stoppedAtMemoRef.current;
+    const memo = stoppedAtMemo;
     const considered = new Set<string>();
     for (const t of data.trains) {
       if (t.status !== "STOPPED_AT") continue;
@@ -340,7 +347,7 @@ export default function StationPanel({ stopId, onClose, onSelectLine }: Props) {
     s.sort((x, y) => x.eta - y.eta);
 
     return { north: n, south: s };
-  }, [data, stationIds]);
+  }, [data, stationIds, stoppedAtMemo]);
 
   // For each route serving the station, figure out which terminus matches
   // each direction by checking which end of the stop list has a higher
