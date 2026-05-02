@@ -115,6 +115,14 @@ function bindVisibility() {
   });
 }
 
+/** Manually trigger a fetch of /api/trains. Used by the directions
+ *  panel's refresh button so a rider can pull fresh next-train ETAs
+ *  on demand without waiting for the next poll tick. Coalesces with
+ *  the auto-poll's in-flight promise via the cache.promise gate. */
+export function refreshTrains(): Promise<void> {
+  return refresh();
+}
+
 export function useTrains(): TrainsResponse | null {
   // Initial render must match the server (always null on first SSR
   // pass) to avoid hydration mismatch — so we DON'T hydrate from

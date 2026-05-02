@@ -55,6 +55,15 @@ export interface SelectedTrip {
    *  alighting station to this coord (a saved address or geocoded
    *  destination). Undefined for station-only destinations. */
   walkTo?: { lng: number; lat: number; name?: string };
+  /** Resolved street-following pedestrian path for the start walk leg
+   *  (rider's origin → boarding station). When present the dashed
+   *  walking line traces this geometry instead of a straight crow's
+   *  flies segment. Falls back to a straight line until the API
+   *  resolves (or if the fetch fails). [lng, lat] coordinate order. */
+  walkFromCoords?: [number, number][];
+  /** Same idea for the destination walk leg (alighting station →
+   *  destination). */
+  walkToCoords?: [number, number][];
 }
 
 function nearestStop(stops: Stop[], lng: number, lat: number): Stop | null {
@@ -1723,36 +1732,40 @@ export default function MapView({ selectedLine, stationStopId, onLineSelect, onS
     }
     stationSrc.setData({ type: "FeatureCollection", features: stationFeatures });
 
-    // Walk legs — straight dashed line from the rider's actual origin
-    // to the boarding station, and from the alighting station to the
-    // destination address. We don't fetch actual pedestrian routing
-    // (would need a separate API call); the straight line is the
-    // standard transit-app convention for "you walk this part."
+    // Walk legs — pedestrian path from the rider's actual origin to
+    // the boarding station, and from the alighting station to the
+    // destination address. When the parent has resolved the walk via
+    // Mapbox Directions (walkFromCoords / walkToCoords), use that
+    // street-following geometry; otherwise fall back to a straight
+    // crow-flies segment so the dashed line still appears while the
+    // API request is in flight (or if it failed entirely).
     const walkFeatures: GeoJSON.Feature[] = [];
     if (selectedTrip.walkFrom) {
+      const coords =
+        selectedTrip.walkFromCoords && selectedTrip.walkFromCoords.length >= 2
+          ? selectedTrip.walkFromCoords
+          : [
+              [selectedTrip.walkFrom.lng, selectedTrip.walkFrom.lat] as [number, number],
+              [start.lng, start.lat] as [number, number],
+            ];
       walkFeatures.push({
         type: "Feature",
         properties: { kind: "from" },
-        geometry: {
-          type: "LineString",
-          coordinates: [
-            [selectedTrip.walkFrom.lng, selectedTrip.walkFrom.lat],
-            [start.lng, start.lat],
-          ],
-        },
+        geometry: { type: "LineString", coordinates: coords },
       });
     }
     if (selectedTrip.walkTo) {
+      const coords =
+        selectedTrip.walkToCoords && selectedTrip.walkToCoords.length >= 2
+          ? selectedTrip.walkToCoords
+          : [
+              [end.lng, end.lat] as [number, number],
+              [selectedTrip.walkTo.lng, selectedTrip.walkTo.lat] as [number, number],
+            ];
       walkFeatures.push({
         type: "Feature",
         properties: { kind: "to" },
-        geometry: {
-          type: "LineString",
-          coordinates: [
-            [end.lng, end.lat],
-            [selectedTrip.walkTo.lng, selectedTrip.walkTo.lat],
-          ],
-        },
+        geometry: { type: "LineString", coordinates: coords },
       });
     }
     walkSrc.setData({ type: "FeatureCollection", features: walkFeatures });
@@ -1775,12 +1788,21 @@ export default function MapView({ selectedLine, stationStopId, onLineSelect, onS
     }
     // Walking endpoints participate in the bounds too — otherwise the
     // dashed walks disappear off-screen at the start/end of the
-    // animation when they extend past the subway segment.
+    // animation when they extend past the subway segment. When a
+    // street-following walk path is resolved, fold every vertex into
+    // the bounds so a curved walk that sweeps past the endpoint stays
+    // visible (e.g. routing around a one-way street).
     if (selectedTrip.walkFrom) {
       expand(selectedTrip.walkFrom.lng, selectedTrip.walkFrom.lat);
     }
     if (selectedTrip.walkTo) {
       expand(selectedTrip.walkTo.lng, selectedTrip.walkTo.lat);
+    }
+    if (selectedTrip.walkFromCoords) {
+      for (const [lng, lat] of selectedTrip.walkFromCoords) expand(lng, lat);
+    }
+    if (selectedTrip.walkToCoords) {
+      for (const [lng, lat] of selectedTrip.walkToCoords) expand(lng, lat);
     }
     if (
       Number.isFinite(minLng) &&

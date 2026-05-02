@@ -1,12 +1,16 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { MapPin, MoreHorizontal, Search, X } from "lucide-react";
 import { useLines } from "@/lib/subwayData";
 import { useTrains } from "@/lib/useTrains";
 import { legGeometry, type TripPlan } from "@/lib/commuteRouting";
 import { buildStationIndex, type StationEntry } from "@/lib/stopsIndex";
+import {
+  fetchWalkingRoute,
+  type WalkingRoute,
+} from "@/lib/walkingDirections";
 
 /**
  * What the panels hand back when a rider taps a trip plan. Wraps the
@@ -92,6 +96,13 @@ export default function SubwayMap() {
   // markers + walking segments and fits the camera.
   const [selectedTripSelection, setSelectedTripSelection] =
     useState<TripSelection | null>(null);
+  // Resolved street-following walking routes for the trip's start
+  // and end walk segments. Fetched from Mapbox Directions (walking
+  // profile) when a selection has address endpoints. The map renders
+  // the resolved geometry as the dashed walk line; the SearchSheet
+  // expanded view renders the per-step instructions.
+  const [walkFromRoute, setWalkFromRoute] = useState<WalkingRoute | null>(null);
+  const [walkToRoute, setWalkToRoute] = useState<WalkingRoute | null>(null);
   // Fly-to-user signal — increments each time the user taps Near-me so
   // MapView can fly the camera to their location (waiting for geo if it
   // isn't available yet). Counter, not a boolean, so successive taps
@@ -210,6 +221,21 @@ export default function SubwayMap() {
     );
   }, [selectedTripSelection]);
 
+  // Reset cached walk routes whenever the underlying selection
+  // (or its endpoints) changes — otherwise a switch from plan A to
+  // plan B would briefly render plan A's resolved walk path against
+  // plan B's stations.
+  useEffect(() => {
+    setWalkFromRoute(null);
+    setWalkToRoute(null);
+  }, [
+    selectedTripSelection?.walkFrom?.lng,
+    selectedTripSelection?.walkFrom?.lat,
+    selectedTripSelection?.walkTo?.lng,
+    selectedTripSelection?.walkTo?.lat,
+    selectedTripSelection?.plan,
+  ]);
+
   // Resolve the selected TripPlan into the SelectedTrip DTO MapView
   // expects: per-leg coordinates from legGeometry + station coords
   // pulled from the merged station index, plus the rider's actual
@@ -270,8 +296,47 @@ export default function SubwayMap() {
         : undefined,
       walkFrom: selectedTripSelection.walkFrom,
       walkTo: selectedTripSelection.walkTo,
+      walkFromCoords: walkFromRoute?.coordinates,
+      walkToCoords: walkToRoute?.coordinates,
     };
-  }, [selectedTripSelection, lines]);
+  }, [selectedTripSelection, lines, walkFromRoute, walkToRoute]);
+
+  // Fetch real pedestrian routes from Mapbox Directions (walking
+  // profile) once we know both the rider's walk endpoint and the
+  // resolved boarding / alighting station for the selected plan.
+  // Without this the dashed walk segment would just be a straight
+  // crow-flies line and the rider would have no idea which streets
+  // to actually take. AbortController cancels any in-flight request
+  // when the rider switches plans mid-fetch so we don't slam stale
+  // routes into state. legs[].boardStation comes from selectedTrip
+  // so it auto-resolves through the station index just like
+  // anything the map renders.
+  useEffect(() => {
+    if (!selectedTrip) return;
+    const board = selectedTrip.legs[0]?.boardStation;
+    const alight =
+      selectedTrip.legs[selectedTrip.legs.length - 1]?.alightStation;
+    let cancelled = false;
+    if (selectedTrip.walkFrom && board) {
+      fetchWalkingRoute(
+        { lng: selectedTrip.walkFrom.lng, lat: selectedTrip.walkFrom.lat },
+        { lng: board.lng, lat: board.lat },
+      ).then((route) => {
+        if (!cancelled && route) setWalkFromRoute(route);
+      });
+    }
+    if (selectedTrip.walkTo && alight) {
+      fetchWalkingRoute(
+        { lng: alight.lng, lat: alight.lat },
+        { lng: selectedTrip.walkTo.lng, lat: selectedTrip.walkTo.lat },
+      ).then((route) => {
+        if (!cancelled && route) setWalkToRoute(route);
+      });
+    }
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedTrip]);
 
   // Trip selection handler — called from SearchSheet / NearbyPanel
   // when a plan row is tapped. Receives the plan plus optional
@@ -363,6 +428,8 @@ export default function SubwayMap() {
           onStationOpen={handleStationOpen}
           onTripSelect={handleTripSelect}
           selectedTripKey={selectedTripKey}
+          walkFromRoute={walkFromRoute}
+          walkToRoute={walkToRoute}
         />
       </div>
 
