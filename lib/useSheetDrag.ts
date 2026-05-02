@@ -64,6 +64,12 @@ export function useSheetDrag({
   // correct value before paint in practice (useEffect flush is
   // synchronous for the initial mount batch in React 18+).
   const [isMobile, setIsMobile] = useState(false);
+  // Mirrors `dragStartY.current !== null`. Held in state so the render
+  // path can read it without tripping react-hooks/refs (refs aren't
+  // safe to read during render — only mutate from event handlers /
+  // effects). Toggled in lockstep with dragStartY at the pointer
+  // down / up / cancel boundaries.
+  const [isDragging, setIsDragging] = useState(false);
   const dragStartY = useRef<number | null>(null);
   const dragMoved = useRef(false);
 
@@ -96,6 +102,7 @@ export function useSheetDrag({
       setDetentState("half");
       dragStartY.current = null;
       dragMoved.current = false;
+      setIsDragging(false);
     }
   }, [open]);
 
@@ -113,6 +120,7 @@ export function useSheetDrag({
       if (t && t.closest("button, a, input, [data-no-drag]")) return;
       dragStartY.current = e.clientY;
       dragMoved.current = false;
+      setIsDragging(true);
       (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
     },
     onPointerMove: (e: React.PointerEvent<HTMLElement>) => {
@@ -127,6 +135,7 @@ export function useSheetDrag({
       if (dragStartY.current === null) return;
       const dy = e.clientY - dragStartY.current;
       dragStartY.current = null;
+      setIsDragging(false);
 
       if (detent === "half") {
         if (dy > dismissPx) {
@@ -142,6 +151,7 @@ export function useSheetDrag({
     onPointerCancel: (e: React.PointerEvent<HTMLElement>) => {
       void e;
       dragStartY.current = null;
+      setIsDragging(false);
       setDragY(0);
     },
   };
@@ -157,7 +167,6 @@ export function useSheetDrag({
   }, [detent, setDetent]);
 
   const restingY = detent === "full" ? fullRestingY : halfRestingY;
-  const isDragging = dragStartY.current !== null;
   const sheetStyle: React.CSSProperties = isMobile
     ? {
         transform: `translateY(calc(${restingY} + ${dragY}px))`,

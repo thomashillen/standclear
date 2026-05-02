@@ -20,12 +20,8 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      # Lint is informational while pre-existing react-hooks/* errors
-      # in lib/useTrains.ts and lib/useSheetDrag.ts are still open. Flip
-      # `continue-on-error` to false once those are fixed.
       - name: Lint
         run: npm run lint
-        continue-on-error: true
 
       - name: Test
         run: npm test

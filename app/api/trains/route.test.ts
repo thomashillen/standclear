@@ -9,7 +9,13 @@ const FeedMessage = GtfsRealtimeBindings.transit_realtime.FeedMessage;
 // return, then wrap it in a Response so the route's fetch sees something
 // realistic instead of a hand-rolled stub. Keeping it as a small helper
 // makes each test fixture readable.
-function feed(entities: object[], timestampSec = 1_700_000_000): Buffer {
+type FeedEntity = NonNullable<
+  Parameters<typeof FeedMessage.create>[0]
+>["entity"] extends (infer E)[] | null | undefined
+  ? E
+  : never;
+
+function feed(entities: FeedEntity[], timestampSec = 1_700_000_000): Buffer {
   const message = FeedMessage.create({
     header: {
       gtfsRealtimeVersion: "2.0",
