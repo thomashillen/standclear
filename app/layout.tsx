@@ -1,12 +1,13 @@
 import type { Metadata, Viewport } from "next";
 import { Inter } from "next/font/google";
+import { Analytics } from "@vercel/analytics/next";
 import "./globals.css";
 import RegisterSW from "@/components/RegisterSW";
 
 const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "SubwaySurfer — NYC Subway Tracker",
+  title: "StandClear — NYC Subway Tracker",
   description: "Real-time NYC subway visualization across all 23 lines, powered by Mapbox.",
   icons: {
     icon: [
@@ -21,7 +22,7 @@ export const metadata: Metadata = {
   appleWebApp: {
     capable: true,
     statusBarStyle: "black-translucent",
-    title: "SubwaySurfer",
+    title: "StandClear",
   },
 };
 
@@ -43,6 +44,7 @@ export default function RootLayout({
       >
         {children}
         <RegisterSW />
+        <Analytics />
       </body>
     </html>
   );

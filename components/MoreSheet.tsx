@@ -226,7 +226,7 @@ export default function MoreSheet({ open, onClose, onSetHome, onSetWork }: Props
                 </span>
                 <span className="flex-1 min-w-0 text-left">
                   <span className="block text-[14px] font-semibold text-gray-100">
-                    About SubwaySurfer
+                    About StandClear
                   </span>
                   <span className="block text-[12px] text-gray-400 truncate">
                     What this app does, where the data comes from
@@ -279,7 +279,7 @@ function AboutDialog({
             <span className="text-[26px]" aria-hidden>
               🚇
             </span>
-            SubwaySurfer
+            StandClear
           </DialogTitle>
           <DialogDescription className="text-gray-400">
             Live, real-time NYC subway in your pocket.
@@ -289,7 +289,7 @@ function AboutDialog({
         <div className="flex-1 overflow-y-auto ios-scroll -mx-2 px-2 mt-2 space-y-4">
           <section>
             <p className="text-[13px] text-gray-300 leading-relaxed">
-              SubwaySurfer is a real-time view of the NYC subway,
+              StandClear is a real-time view of the NYC subway,
               streaming train positions, arrivals, and service alerts
               straight from the MTA. Plan a trip, see exactly when the
               next train arrives, and watch the system breathe.
@@ -375,7 +375,7 @@ function AboutDialog({
               <p className="mt-2 text-gray-500 text-[11px]">
                 MTA, the M logo, route bullets, and station names are
                 trademarks of the New York Metropolitan Transportation
-                Authority. SubwaySurfer is unaffiliated and uses
+                Authority. StandClear is unaffiliated and uses
                 publicly published transit data.
               </p>
             </div>

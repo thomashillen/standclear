@@ -12,7 +12,7 @@ const POLL_MS = 60_000;
 // Persist the last successful response to localStorage so the alerts
 // bell shows the right tone immediately on cold boot, instead of
 // flashing "All clear" before the first network call lands.
-const STORAGE_KEY = "subwaysurfer:alerts:v1";
+const STORAGE_KEY = "standclear:alerts:v1";
 
 let cache: { data: AlertsResponse | null; promise: Promise<void> | null } = {
   data: null,

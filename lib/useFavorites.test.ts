@@ -39,7 +39,7 @@ describe("useFavorites — toggle", () => {
     const { result } = renderHook(() => useFavorites());
     act(() => result.current.toggle("635"));
 
-    const raw = localStorage.getItem("subwaysurfer:commute:v3");
+    const raw = localStorage.getItem("standclear:commute:v3");
     expect(raw).not.toBeNull();
     const parsed = JSON.parse(raw!) as { favorites: string[] };
     expect(parsed.favorites).toContain("635");
@@ -66,7 +66,7 @@ describe("useFavorites — migrations", () => {
     expect(commute.current.work).toBeNull();
 
     // Migration should have written a v3 record.
-    const v3 = localStorage.getItem("subwaysurfer:commute:v3");
+    const v3 = localStorage.getItem("standclear:commute:v3");
     expect(v3).not.toBeNull();
   });
 
@@ -86,7 +86,7 @@ describe("useFavorites — migrations", () => {
 
   it("reads a v3 record with an address anchor as-is", async () => {
     localStorage.setItem(
-      "subwaysurfer:commute:v3",
+      "standclear:commute:v3",
       JSON.stringify({
         home: { kind: "address", name: "123 Main St", lng: -73.99, lat: 40.73 },
         work: { kind: "station", stopId: "631" },
@@ -104,8 +104,30 @@ describe("useFavorites — migrations", () => {
     expect(result.current.work).toEqual({ kind: "station", stopId: "631" });
   });
 
+  it("forwards a pre-rename subwaysurfer:commute:v3 record into the new key", async () => {
+    localStorage.setItem(
+      "subwaysurfer:commute:v3",
+      JSON.stringify({
+        home: { kind: "station", stopId: "635" },
+        work: { kind: "station", stopId: "631" },
+        favorites: ["L03"],
+      }),
+    );
+    const { useCommute, useFavorites } = await freshImport();
+    const { result: commute } = renderHook(() => useCommute());
+    const { result: favs } = renderHook(() => useFavorites());
+
+    expect(commute.current.home).toEqual({ kind: "station", stopId: "635" });
+    expect(commute.current.work).toEqual({ kind: "station", stopId: "631" });
+    expect(favs.current.favorites.has("L03")).toBe(true);
+
+    // The legacy record should have been re-written under the new key.
+    const newKey = localStorage.getItem("standclear:commute:v3");
+    expect(newKey).not.toBeNull();
+  });
+
   it("falls back to empty state when v3 JSON is corrupt", async () => {
-    localStorage.setItem("subwaysurfer:commute:v3", "{not json");
+    localStorage.setItem("standclear:commute:v3", "{not json");
     const { useFavorites, useCommute } = await freshImport();
     const { result: favs } = renderHook(() => useFavorites());
     const { result: commute } = renderHook(() => useCommute());
