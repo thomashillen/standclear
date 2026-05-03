@@ -1416,16 +1416,13 @@ export default function SearchSheet({
                   walkToRoute={walkToRoute ?? null}
                   walkFromMeters={expWalkFromMeters}
                   walkToMeters={expWalkToMeters}
-                  fromName={
-                    tripFrom.address?.name ??
-                    tripFrom.displayName ??
-                    tripFrom.name
-                  }
                   toName={
                     tripTo.address?.name ??
                     tripTo.displayName ??
                     tripTo.name
                   }
+                  arrivalsByStation={arrivalsByStation}
+                  now={now}
                   onBack={() => setExpandedPlan(null)}
                 />
               );
