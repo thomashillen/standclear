@@ -13,11 +13,6 @@ import {
   Compass,
   Footprints,
   TrainFront,
-  CornerUpLeft,
-  CornerUpRight,
-  CornerDownLeft,
-  CornerDownRight,
-  ArrowUpRight,
   CircleDot,
   MapPin,
 } from "lucide-react";
@@ -25,7 +20,7 @@ import type { Arrival } from "@/lib/useTrains";
 import { catchVerdict, walkMinutes, type CatchVerdict, type StationEntry } from "@/lib/stopsIndex";
 import type { CommuteAnchor } from "@/lib/useFavorites";
 import { estimateTripTimeSec, type TripPlan } from "@/lib/commuteRouting";
-import type { WalkingRoute, WalkingStep } from "@/lib/walkingDirections";
+import type { WalkingRoute } from "@/lib/walkingDirections";
 
 // ─── Shared types ───────────────────────────────────────────────────
 
@@ -614,37 +609,15 @@ export function TripPlanRow({
   );
 }
 
-// ─── Trip plan detail (expanded A→Z step-by-step view) ──────────────
-// Renders a single TripPlan with full step-by-step directions:
-//   • Walk steps from the rider's origin to the boarding station
-//     (each Mapbox Directions step rendered as its own row with
-//     maneuver icon + instruction + distance).
+// ─── Trip plan detail (expanded summary view) ───────────────────────
+// Renders a single TripPlan as a high-level summary:
+//   • Walk to the boarding station (duration + distance only).
 //   • Subway leg(s): board at X, ride N stops, transfer at Y, ride
 //     M stops, alight at Z.
-//   • Walk steps from the alighting station to the destination.
-// Includes a back button so the rider can return to the plan list
-// without losing the search context. Independent of which panel is
-// hosting it (SearchSheet today, possibly NearbyPanel tomorrow).
-
-function maneuverIcon(step: WalkingStep): React.ReactNode {
-  const m = step.modifier ?? "";
-  const t = step.maneuver ?? "";
-  const cls = "w-4 h-4";
-  if (t === "depart") return <CircleDot className={cls} />;
-  if (t === "arrive") return <MapPin className={cls} />;
-  if (m.includes("right")) {
-    if (m.includes("sharp")) return <CornerDownRight className={cls} />;
-    if (m.includes("slight")) return <ArrowUpRight className={cls} />;
-    return <CornerUpRight className={cls} />;
-  }
-  if (m.includes("left")) {
-    if (m.includes("sharp")) return <CornerDownLeft className={cls} />;
-    if (m.includes("slight"))
-      return <ArrowUpRight className={`${cls} -scale-x-100`} />;
-    return <CornerUpLeft className={cls} />;
-  }
-  return <ArrowUp className={cls} />;
-}
+//   • Walk to the destination (duration + distance only).
+// Turn-by-turn walking instructions are intentionally omitted — the
+// rider just wants to know which station to walk to and how long it
+// takes, not every street corner.
 
 function fmtStepDistance(meters: number): string {
   if (!Number.isFinite(meters) || meters <= 0) return "";
@@ -652,73 +625,21 @@ function fmtStepDistance(meters: number): string {
   return `${(meters / 1000).toFixed(1)} km`;
 }
 
-function WalkStepsList({
-  route,
-  loading,
-  fallbackMinutes,
-  fallbackDistance,
-}: {
-  route: WalkingRoute | null;
-  loading: boolean;
-  /** Estimated walk minutes from the haversine fallback so the rider
-   *  always sees a number even when the API hasn't responded yet. */
-  fallbackMinutes?: number;
-  fallbackDistance?: string;
-}) {
-  if (!route) {
-    return (
-      <p className="text-[12px] text-gray-500 px-1">
-        {loading
-          ? "Finding the best walking route…"
-          : fallbackMinutes
-            ? `About ${fallbackMinutes} min walk${fallbackDistance ? ` · ${fallbackDistance}` : ""}.`
-            : "Walk to the station."}
-      </p>
-    );
-  }
-  return (
-    <ol className="space-y-1.5">
-      {route.steps.map((step, i) => (
-        <li
-          key={`step-${i}`}
-          className="flex items-start gap-2.5 px-1 py-1 rounded-lg"
-        >
-          <span className="flex-shrink-0 w-7 h-7 rounded-full bg-white/[0.06] text-gray-200 flex items-center justify-center mt-0.5">
-            {maneuverIcon(step)}
-          </span>
-          <div className="flex-1 min-w-0">
-            <p className="text-[13px] text-gray-100 leading-snug">
-              {step.instruction}
-            </p>
-            {step.distance > 0 && (
-              <p className="text-[11px] text-gray-500 tabular-nums mt-0.5">
-                {fmtStepDistance(step.distance)}
-              </p>
-            )}
-          </div>
-        </li>
-      ))}
-    </ol>
-  );
-}
-
 interface TripPlanDetailProps {
   plan: TripPlan;
   routeColors: RouteColorMap;
   stationsByComplexId: Map<string, StationEntry>;
-  /** Resolved walking route from origin → boarding station. Null
-   *  while in flight or if no walk is required (station origin). */
+  /** Resolved walking route from origin → boarding station. Used
+   *  only to display the precise walk duration + distance in the
+   *  section header when available. */
   walkFromRoute: WalkingRoute | null;
   walkToRoute: WalkingRoute | null;
-  /** True while a walk fetch is pending — controls loading copy. */
-  walkFromLoading: boolean;
-  walkToLoading: boolean;
-  /** Crow-flies fallback distances (meters) used when the API hasn't
-   *  resolved yet — keeps a useful estimate on screen during loading. */
+  /** Crow-flies fallback distances (meters) used until the API
+   *  resolves — keeps a useful estimate on screen meanwhile. */
   walkFromMeters?: number;
   walkToMeters?: number;
-  /** Display labels for the rider's origin and destination so the
-   *  step list can read like "Walk from Home to 14 St-Union Sq". */
+  /** Display label for the rider's origin so the walk section can
+   *  read "From Home". */
   fromName?: string;
   toName?: string;
   onBack: () => void;
@@ -730,8 +651,6 @@ export function TripPlanDetail({
   stationsByComplexId,
   walkFromRoute,
   walkToRoute,
-  walkFromLoading,
-  walkToLoading,
   walkFromMeters,
   walkToMeters,
   fromName,
@@ -805,20 +724,11 @@ export function TripPlanDetail({
             )}
           </header>
           {fromName && (
-            <p className="text-[11px] text-gray-500 px-1 mb-2 truncate">
+            <p className="text-[11px] text-gray-500 px-1 truncate">
               From <span className="text-gray-300">{fromName}</span>
             </p>
           )}
-          {(walkFromMeters && walkFromMeters > 0) || walkFromRoute ? (
-            <WalkStepsList
-              route={walkFromRoute}
-              loading={walkFromLoading}
-              fallbackMinutes={walkFromMin}
-              fallbackDistance={
-                walkFromMeters ? fmtStepDistance(walkFromMeters) : undefined
-              }
-            />
-          ) : (
+          {!((walkFromMeters && walkFromMeters > 0) || walkFromRoute) && (
             <p className="text-[12px] text-gray-500 px-1">
               You&apos;re starting at the station — no walking required.
             </p>
@@ -932,14 +842,6 @@ export function TripPlanDetail({
                 : `~${walkToMin} min${walkToMeters ? ` · ${fmtStepDistance(walkToMeters)}` : ""}`}
             </span>
           </header>
-          <WalkStepsList
-            route={walkToRoute}
-            loading={walkToLoading}
-            fallbackMinutes={walkToMin}
-            fallbackDistance={
-              walkToMeters ? fmtStepDistance(walkToMeters) : undefined
-            }
-          />
         </section>
       )}
     </div>

@@ -1414,10 +1414,6 @@ export default function SearchSheet({
                   stationsByComplexId={stationsByComplexId}
                   walkFromRoute={walkFromRoute ?? null}
                   walkToRoute={walkToRoute ?? null}
-                  walkFromLoading={
-                    !!tripFrom.address && !walkFromRoute
-                  }
-                  walkToLoading={!!tripTo.address && !walkToRoute}
                   walkFromMeters={expWalkFromMeters}
                   walkToMeters={expWalkToMeters}
                   fromName={
