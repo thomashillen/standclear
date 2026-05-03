@@ -28,6 +28,11 @@ interface MapViewProps {
    *  markers, and flies the camera to fit the trip bounds. Null when
    *  nothing is selected (the trip layers render an empty FC). */
   selectedTrip?: SelectedTrip | null;
+  /** When set, the camera fits to just this leg's bounds (plus its
+   *  board/alight stations) instead of the full trip. Lets the
+   *  expanded route detail zoom into a specific subway leg when the
+   *  rider taps it. */
+  focusedLegIndex?: number | null;
 }
 
 /** Lightweight DTO between SubwayMap (which holds the user's chosen
@@ -324,7 +329,7 @@ function makeTrainIcon(color: string): ImageData {
   return ctx.getImageData(0, 0, W, H);
 }
 
-export default function MapView({ selectedLine, stationStopId, onLineSelect, onStationOpen, flyToUserSignal, panelOpen, selectedTrip }: MapViewProps) {
+export default function MapView({ selectedLine, stationStopId, onLineSelect, onStationOpen, flyToUserSignal, panelOpen, selectedTrip, focusedLegIndex }: MapViewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<MapboxMap | null>(null);
   const [mapLoaded, setMapLoaded] = useState(false);
@@ -1783,26 +1788,43 @@ export default function MapView({ selectedLine, stationStopId, onLineSelect, onS
       if (lat < minLat) minLat = lat;
       if (lat > maxLat) maxLat = lat;
     };
-    for (const leg of selectedTrip.legs) {
-      for (const [lng, lat] of leg.coordinates) expand(lng, lat);
-    }
-    // Walking endpoints participate in the bounds too — otherwise the
-    // dashed walks disappear off-screen at the start/end of the
-    // animation when they extend past the subway segment. When a
-    // street-following walk path is resolved, fold every vertex into
-    // the bounds so a curved walk that sweeps past the endpoint stays
-    // visible (e.g. routing around a one-way street).
-    if (selectedTrip.walkFrom) {
-      expand(selectedTrip.walkFrom.lng, selectedTrip.walkFrom.lat);
-    }
-    if (selectedTrip.walkTo) {
-      expand(selectedTrip.walkTo.lng, selectedTrip.walkTo.lat);
-    }
-    if (selectedTrip.walkFromCoords) {
-      for (const [lng, lat] of selectedTrip.walkFromCoords) expand(lng, lat);
-    }
-    if (selectedTrip.walkToCoords) {
-      for (const [lng, lat] of selectedTrip.walkToCoords) expand(lng, lat);
+    // When the rider has tapped a specific leg in the expanded route
+    // detail, fit to just that leg's coords + its terminal stations.
+    // Otherwise frame the whole trip including walks. Negative or
+    // out-of-range indices are treated as "no focus".
+    const focusLeg =
+      typeof focusedLegIndex === "number" &&
+      focusedLegIndex >= 0 &&
+      focusedLegIndex < selectedTrip.legs.length
+        ? selectedTrip.legs[focusedLegIndex]
+        : null;
+    if (focusLeg) {
+      for (const [lng, lat] of focusLeg.coordinates) expand(lng, lat);
+      expand(focusLeg.boardStation.lng, focusLeg.boardStation.lat);
+      expand(focusLeg.alightStation.lng, focusLeg.alightStation.lat);
+    } else {
+      for (const leg of selectedTrip.legs) {
+        for (const [lng, lat] of leg.coordinates) expand(lng, lat);
+      }
+      // Walking endpoints participate in the bounds too — otherwise
+      // the dashed walks disappear off-screen at the start/end of
+      // the animation when they extend past the subway segment.
+      // When a street-following walk path is resolved, fold every
+      // vertex into the bounds so a curved walk that sweeps past
+      // the endpoint stays visible (e.g. routing around a one-way
+      // street).
+      if (selectedTrip.walkFrom) {
+        expand(selectedTrip.walkFrom.lng, selectedTrip.walkFrom.lat);
+      }
+      if (selectedTrip.walkTo) {
+        expand(selectedTrip.walkTo.lng, selectedTrip.walkTo.lat);
+      }
+      if (selectedTrip.walkFromCoords) {
+        for (const [lng, lat] of selectedTrip.walkFromCoords) expand(lng, lat);
+      }
+      if (selectedTrip.walkToCoords) {
+        for (const [lng, lat] of selectedTrip.walkToCoords) expand(lng, lat);
+      }
     }
     if (
       Number.isFinite(minLng) &&
@@ -1834,7 +1856,7 @@ export default function MapView({ selectedLine, stationStopId, onLineSelect, onS
         },
       );
     }
-  }, [selectedTrip, mapLoaded]);
+  }, [selectedTrip, mapLoaded, focusedLegIndex]);
 
   if (noToken) {
     return (

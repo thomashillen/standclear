@@ -491,24 +491,6 @@ export function TripPlanRow({
       style={selectedStyle}
       className={`rounded-2xl px-3.5 pt-3 pb-3 ${ringCls} ${interactiveCls} transition-all duration-200`}
     >
-      {walkFromMin > 0 && (
-        <div className="flex items-center gap-1.5 text-[11px] text-gray-400 mb-2">
-          <Footprints className="w-3 h-3 flex-shrink-0" />
-          <span className="truncate">
-            <span className="text-gray-200 font-semibold tabular-nums">
-              {walkFromMin} min
-            </span>{" "}
-            walk from{" "}
-            {walkFromName ? (
-              <span className="text-gray-200">{walkFromName}</span>
-            ) : (
-              "your start"
-            )}{" "}
-            to{" "}
-            <span className="text-gray-300">{origin.name}</span>
-          </span>
-        </div>
-      )}
       <div className="flex items-center gap-1.5 mb-1.5 flex-wrap">
         {leg1Info && leg1 && (
           <RouteBullet
@@ -561,46 +543,60 @@ export function TripPlanRow({
           direction right now.
         </p>
       ) : (
-        <div className="flex flex-wrap gap-x-3 gap-y-1.5">
-          {upcoming.map((a, i) => {
-            const info = routeColors.get(a.routeId);
-            if (!info) return null;
-            return (
-              <span
-                key={`${a.tripId}-${i}`}
-                className="inline-flex items-center gap-1"
-              >
-                <RouteBullet
-                  id={info.displayId}
-                  color={info.color}
-                  textColor={info.textColor}
-                />
-                <span className="text-[13px] font-semibold tabular-nums text-gray-100">
-                  {fmtEta(a.eta, now)}
-                </span>
+        <div className="flex items-center gap-1.5 flex-wrap">
+          {leg1Info && (
+            <RouteBullet
+              id={leg1Info.displayId}
+              color={leg1Info.color}
+              textColor={leg1Info.textColor}
+            />
+          )}
+          <span className="text-[13px] tabular-nums text-gray-100 leading-snug">
+            <span className="text-gray-500">in </span>
+            {upcoming.map((a, i) => (
+              <span key={`${a.tripId}-${i}`}>
+                {i > 0 && <span className="text-gray-600"> · </span>}
+                <span className="font-semibold">{fmtEta(a.eta, now)}</span>
               </span>
-            );
-          })}
-          <span className="text-[11px] text-gray-500 ml-1 self-center">
+            ))}
+          </span>
+          <span className="text-[11px] text-gray-500 ml-0.5 self-center">
             at {origin.name}
           </span>
         </div>
       )}
-      {walkToMin > 0 && (
-        <div className="flex items-center gap-1.5 text-[11px] text-gray-400 mt-2">
+      {(walkFromMin > 0 || walkToMin > 0) && (
+        <div className="flex items-center gap-1.5 text-[11px] text-gray-400 mt-2 flex-wrap">
           <Footprints className="w-3 h-3 flex-shrink-0" />
-          <span className="truncate">
-            then{" "}
-            <span className="text-gray-200 font-semibold tabular-nums">
-              {walkToMin} min
-            </span>{" "}
-            walk to{" "}
-            {walkToName ? (
-              <span className="text-gray-200">{walkToName}</span>
-            ) : (
-              "your destination"
-            )}
-          </span>
+          {walkFromMin > 0 && (
+            <span className="truncate">
+              <span className="text-gray-200 font-semibold tabular-nums">
+                {walkFromMin} min
+              </span>
+              {walkFromName ? (
+                <>
+                  {" "}from{" "}
+                  <span className="text-gray-200">{walkFromName}</span>
+                </>
+              ) : null}
+            </span>
+          )}
+          {walkFromMin > 0 && walkToMin > 0 && (
+            <span className="text-gray-600">·</span>
+          )}
+          {walkToMin > 0 && (
+            <span className="truncate">
+              <span className="text-gray-200 font-semibold tabular-nums">
+                {walkToMin} min
+              </span>{" "}
+              to{" "}
+              {walkToName ? (
+                <span className="text-gray-200">{walkToName}</span>
+              ) : (
+                "destination"
+              )}
+            </span>
+          )}
         </div>
       )}
     </Container>
@@ -640,7 +636,9 @@ function fmtWalkMeta(
 
 // Single timeline row: round icon on the left (with an optional
 // vertical connector line below it), title in the middle, and a meta
-// string (right-aligned) for the duration/distance summary.
+// string (right-aligned) for the duration/distance summary. Becomes
+// a tappable button when `onClick` is provided — used to focus the
+// map on a specific subway leg.
 function TimelineRow({
   icon,
   iconBg,
@@ -648,6 +646,8 @@ function TimelineRow({
   subtitle,
   meta,
   showConnector,
+  onClick,
+  selected,
 }: {
   icon: React.ReactNode;
   /** Tailwind classes for the icon's background + foreground. */
@@ -658,7 +658,16 @@ function TimelineRow({
   /** Whether to render the vertical line under this row connecting
    *  it to the next one. Off for the last row. */
   showConnector: boolean;
+  onClick?: () => void;
+  selected?: boolean;
 }) {
+  const interactive = !!onClick;
+  const Inner: React.ElementType = interactive ? "button" : "div";
+  const interactiveCls = interactive
+    ? `press touch-manipulation w-full text-left rounded-lg -mx-2 px-2 py-1 transition-colors ${
+        selected ? "bg-white/[0.08]" : "hover:bg-white/[0.04]"
+      }`
+    : "";
   return (
     <li className="flex items-start gap-3">
       <div className="flex flex-col items-center self-stretch">
@@ -671,7 +680,12 @@ function TimelineRow({
           <span className="flex-1 w-px bg-white/10 mt-1 mb-1" />
         )}
       </div>
-      <div className="flex-1 min-w-0 pb-3">
+      <Inner
+        type={interactive ? "button" : undefined}
+        onClick={onClick}
+        aria-pressed={interactive ? !!selected : undefined}
+        className={`flex-1 min-w-0 pb-3 ${interactiveCls}`}
+      >
         <div className="flex items-baseline gap-2">
           <p className="text-[13px] text-gray-100 leading-snug flex-1 min-w-0">
             {title}
@@ -687,7 +701,7 @@ function TimelineRow({
             {subtitle}
           </p>
         )}
-      </div>
+      </Inner>
     </li>
   );
 }
@@ -713,6 +727,12 @@ interface TripPlanDetailProps {
    *  absent. */
   arrivalsByStation?: Map<string, Arrival[]>;
   now?: number;
+  /** Index of the leg the rider has zoomed in on, or null for the
+   *  whole-trip view. Owned by SubwayMap so the camera can refit. */
+  focusedLegIndex?: number | null;
+  /** Toggle map focus on a specific leg. Tap the same leg again to
+   *  return to the whole-trip frame. */
+  onFocusLeg?: (i: number | null) => void;
   onBack: () => void;
 }
 
@@ -727,6 +747,8 @@ export function TripPlanDetail({
   toName,
   arrivalsByStation,
   now,
+  focusedLegIndex,
+  onFocusLeg,
   onBack,
 }: TripPlanDetailProps) {
   const board = stationsByComplexId.get(plan.legs[0].boardComplexId);
@@ -757,6 +779,27 @@ export function TripPlanDetail({
   );
   const totalMin = Math.max(1, Math.round(totalSec / 60));
 
+  // Soonest upcoming arrival on leg 1 — drives the "L in 2m" hint
+  // next to the total. Filters by leg 1's route + direction so the
+  // countdown corresponds to the train the rider needs to catch.
+  const nextLeg1Eta = useMemo(() => {
+    if (!arrivalsByStation || typeof now !== "number") return null;
+    const leg1 = plan.legs[0];
+    if (!leg1) return null;
+    const arrivals = arrivalsByStation.get(leg1.boardComplexId);
+    if (!arrivals) return null;
+    const cutoff = now / 1000 - 5;
+    let earliest = Infinity;
+    for (const a of arrivals) {
+      if (a.routeId !== leg1.routeId) continue;
+      if (a.direction !== leg1.direction) continue;
+      if (a.eta < cutoff) continue;
+      if (a.eta < earliest) earliest = a.eta;
+    }
+    return Number.isFinite(earliest) ? earliest : null;
+  }, [arrivalsByStation, now, plan]);
+  const leg1Info = routeColors.get(plan.legs[0].routeId);
+
   const showWalkFrom = !!board;
   const showWalkTo =
     !!alight && walkToMeters !== undefined && walkToMeters > 0;
@@ -782,6 +825,21 @@ export function TripPlanDetail({
           </span>
           <span className="text-[13px] text-gray-400">min total</span>
         </div>
+        {nextLeg1Eta !== null && leg1Info && typeof now === "number" && (
+          <div className="ml-auto flex items-center gap-1.5 flex-shrink-0">
+            <RouteBullet
+              id={leg1Info.displayId}
+              color={leg1Info.color}
+              textColor={leg1Info.textColor}
+            />
+            <span className="text-[13px] tabular-nums text-gray-200">
+              <span className="text-gray-500">in </span>
+              <span className="font-semibold text-gray-100">
+                {fmtEta(nextLeg1Eta, now)}
+              </span>
+            </span>
+          </div>
+        )}
       </div>
 
       <ol className="px-1">
@@ -815,6 +873,7 @@ export function TripPlanDetail({
           const info = routeColors.get(leg.routeId);
           const legAlight = stationsByComplexId.get(leg.alightComplexId);
           const isLastLeg = i === plan.legs.length - 1;
+          const isFocused = focusedLegIndex === i;
           return (
             <TimelineRow
               key={`detail-leg-${i}`}
@@ -840,8 +899,20 @@ export function TripPlanDetail({
                   </span>
                 </>
               }
-              subtitle={!isLastLeg ? "Transfer here" : undefined}
+              subtitle={
+                isFocused
+                  ? "Tap again to see whole trip"
+                  : !isLastLeg
+                    ? "Transfer here"
+                    : undefined
+              }
               showConnector={!isLastLeg || showWalkTo}
+              onClick={
+                onFocusLeg
+                  ? () => onFocusLeg(isFocused ? null : i)
+                  : undefined
+              }
+              selected={isFocused}
             />
           );
         })}
