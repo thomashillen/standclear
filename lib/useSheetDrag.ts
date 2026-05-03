@@ -38,6 +38,11 @@ interface SheetDragOptions {
   onDismiss: () => void;
   // Called when detent changes, e.g. to trigger haptic feedback.
   onDetentChange?: (d: Detent) => void;
+  // When false, a downward drag past the dismiss threshold collapses
+  // back to half instead of closing the sheet. Used by SearchSheet so
+  // a rider doesn't accidentally lose their in-progress directions
+  // search by pulling the sheet down a touch too far. Default true.
+  dismissOnDrag?: boolean;
 }
 
 // Single-pointer drag with two detents (half / full) + a dismiss threshold
@@ -54,6 +59,7 @@ export function useSheetDrag({
   open,
   onDismiss,
   onDetentChange,
+  dismissOnDrag = true,
 }: SheetDragOptions): SheetDragResult {
   const [detent, setDetentState] = useState<Detent>("half");
   const [dragY, setDragY] = useState(0);
@@ -138,7 +144,7 @@ export function useSheetDrag({
       setIsDragging(false);
 
       if (detent === "half") {
-        if (dy > dismissPx) {
+        if (dy > dismissPx && dismissOnDrag) {
           onDismiss();
         } else if (dy < -commitPx) {
           setDetent("full");
