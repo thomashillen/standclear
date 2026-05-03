@@ -1,19 +1,27 @@
 "use client";
 
 /**
- * Mapbox Forward Geocoding helper. Resolves a free-text query
- * (address, neighborhood, place name) into one or more `Place`
- * results with lat/lng. The trip planner uses these to let riders
- * search for "123 Main St" or "Williamsburg" instead of only known
- * subway station names — the picked place is then mapped to its
- * nearest station for the actual subway routing leg, with a walk
- * step from the address to that station.
+ * Mapbox Search Box `/forward` helper. Resolves a free-text query
+ * (address, neighborhood, restaurant, business, landmark) into one
+ * or more `Place` results with lat/lng. The trip planner uses these
+ * to let riders search for "shake shack" or "123 Main St" instead
+ * of only known subway station names — the picked place is then
+ * mapped to its nearest station for the actual subway routing leg,
+ * with a walk step from the address to that station.
+ *
+ * Uses the Search Box `/forward` single-call endpoint (not the
+ * legacy v5 geocoder, which had thin POI/business coverage —
+ * "shake shack", "joe's pizza", and most local restaurants didn't
+ * resolve). Search Box ships Mapbox's full POI dataset, including
+ * restaurants, cafes, bars, shops, and chain brands, while still
+ * returning coordinates inline so we don't need a two-step
+ * suggest+retrieve flow.
  *
  * Bounded to NYC (rough bbox covering the five boroughs + a buffer
- * for nearby commuter destinations) so we don't get geocoding noise
- * from the rest of the country. Proximity-biased to the rider's
- * current location when known, so a search for "Broadway" in
- * Brooklyn surfaces the right Broadway, not Manhattan's.
+ * for nearby commuter destinations) so we don't get noise from the
+ * rest of the country. Proximity-biased to the rider's current
+ * location when known, so a search for "Broadway" in Brooklyn
+ * surfaces the right Broadway, not Manhattan's.
  */
 
 export interface Place {
@@ -29,6 +37,20 @@ export interface Place {
 // Tuned to keep autocomplete results in the NYC subway-relevant
 // region without clipping legitimate matches at the edges.
 const NYC_BBOX = "-74.20,40.55,-73.70,40.92";
+
+interface SearchBoxFeature {
+  type?: "Feature";
+  geometry?: { coordinates?: [number, number] };
+  properties?: {
+    mapbox_id?: string;
+    name?: string;
+    name_preferred?: string;
+    place_formatted?: string;
+    full_address?: string;
+    address?: string;
+    feature_type?: string;
+  };
+}
 
 /**
  * Forward-geocode a query string. Returns up to `limit` ranked
@@ -50,32 +72,30 @@ export async function geocodePlaces(
   const token = process.env.NEXT_PUBLIC_MAPBOX_TOKEN;
   if (!token) return [];
 
-  const url = new URL(
-    `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(trimmed)}.json`,
-  );
+  const url = new URL("https://api.mapbox.com/search/searchbox/v1/forward");
+  url.searchParams.set("q", trimmed);
   url.searchParams.set("access_token", token);
-  // Bumped from 5 → 10 so business / POI results surface alongside
-  // address matches. Mapbox can return a mix per query; with only 5
-  // slots and addresses ranking high for ambiguous queries, named
-  // places like restaurants, shops, and landmarks were getting
-  // squeezed out. 10 gives the ranker enough room to include both.
-  url.searchParams.set("limit", String(options.limit ?? 10));
+  // Search Box /forward caps `limit` at 10. Same ceiling as the v5
+  // path — gives the ranker enough room to mix POIs and addresses.
+  url.searchParams.set("limit", String(Math.min(options.limit ?? 10, 10)));
   url.searchParams.set("bbox", NYC_BBOX);
-  // POI listed first to nudge Mapbox's relevance ranker toward
-  // returning businesses + landmarks alongside addresses. Order
-  // doesn't strictly affect ranking but the documented hint helps
-  // for ambiguous queries like "starbucks" vs "550 madison".
+  // Include POI (restaurants, shops, landmarks) alongside the
+  // geographic types riders also need. `category` lets queries like
+  // "coffee" match POI categories rather than only literal names.
   url.searchParams.set(
     "types",
-    "poi,address,neighborhood,locality,place",
+    "poi,category,address,street,neighborhood,locality,place",
   );
+  // Constrain to US so a query like "broadway" doesn't bleed into
+  // global namesakes. The bbox already restricts to NYC, but the
+  // country hint also informs ranking.
+  url.searchParams.set("country", "us");
   if (options.proximity) {
     url.searchParams.set(
       "proximity",
       `${options.proximity.lng},${options.proximity.lat}`,
     );
   }
-  url.searchParams.set("autocomplete", "true");
   // English-language POI names — without this Mapbox occasionally
   // returns translated names for international chains (e.g. Cyrillic
   // for a Russian-named cafe), which is jarring in a NYC transit app.
@@ -86,44 +106,39 @@ export async function geocodePlaces(
     // Surface non-2xx so the caller can decide whether to ignore
     // (e.g., 429 rate limits) vs. retry. Body is small JSON; we
     // don't bother parsing it for the caller.
-    throw new Error(`Mapbox geocoding HTTP ${res.status}`);
+    throw new Error(`Mapbox Search Box HTTP ${res.status}`);
   }
   const data = (await res.json()) as {
-    features?: {
-      id: string;
-      text: string;
-      place_name?: string;
-      center: [number, number];
-      context?: { text: string }[];
-    }[];
+    features?: SearchBoxFeature[];
   };
 
   if (!data.features) return [];
 
-  return data.features.map((f) => {
-    // For address features Mapbox stores the house number in `address`
-    // and the street name in `text`. The full street address ("550
-    // Madison Avenue") only appears in `place_name`. Using `text`
-    // alone drops the number — wrong for a transit picker where the
-    // exact building matters. Take the first comma-separated part of
-    // `place_name`, which is "550 Madison Avenue" for addresses,
-    // "Empire State Building" for POIs, "Williamsburg" for
-    // neighborhoods. Cleanest single source for the display title.
-    const fullName = f.place_name ?? f.text;
-    const parts = fullName.split(",").map((s) => s.trim()).filter(Boolean);
-    const title = parts[0] ?? f.text;
-    // Drop the country tail if present — every result is in NYC.
-    const ctx = parts
-      .slice(1)
-      .filter((p) => p !== "United States" && p !== "USA");
-    return {
-      id: f.id,
+  const places: Place[] = [];
+  for (const f of data.features) {
+    const coords = f.geometry?.coordinates;
+    if (!coords || coords.length < 2) continue;
+    const props = f.properties ?? {};
+    // `name` is the display title ("Shake Shack", "550 Madison Ave",
+    // "Williamsburg"). `place_formatted` is the human-readable
+    // subtitle ("New York, NY 10019"). Strip a trailing ", United
+    // States" so the subtitle stays compact in narrow rows.
+    const title = props.name_preferred ?? props.name ?? props.address ?? "";
+    if (!title) continue;
+    const subtitle = (props.place_formatted ?? "")
+      .split(",")
+      .map((s) => s.trim())
+      .filter((s) => s && s !== "United States" && s !== "USA")
+      .join(", ");
+    places.push({
+      id: props.mapbox_id ?? `${coords[0]},${coords[1]}`,
       name: title,
-      context: ctx.join(", "),
-      lng: f.center[0],
-      lat: f.center[1],
-    } satisfies Place;
-  });
+      context: subtitle,
+      lng: coords[0],
+      lat: coords[1],
+    });
+  }
+  return places;
 }
 
 /**
