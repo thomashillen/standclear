@@ -101,6 +101,11 @@ interface Props {
    *  the API is still resolving. */
   walkFromRoute?: WalkingRoute | null;
   walkToRoute?: WalkingRoute | null;
+  /** Index of the leg the rider has zoomed in on from the expanded
+   *  route detail. Owned by SubwayMap so the map can refit. Null
+   *  means "frame the whole trip". */
+  focusedLegIndex?: number | null;
+  onFocusLeg?: (i: number | null) => void;
 }
 
 // ─── SearchSheet ─────────────────────────────────────────────────────
@@ -196,6 +201,8 @@ export default function SearchSheet({
   presetTrip = null,
   walkFromRoute = null,
   walkToRoute = null,
+  focusedLegIndex = null,
+  onFocusLeg,
 }: Props) {
   const lines = useLines();
   const data = useTrains();
@@ -1414,23 +1421,21 @@ export default function SearchSheet({
                   stationsByComplexId={stationsByComplexId}
                   walkFromRoute={walkFromRoute ?? null}
                   walkToRoute={walkToRoute ?? null}
-                  walkFromLoading={
-                    !!tripFrom.address && !walkFromRoute
-                  }
-                  walkToLoading={!!tripTo.address && !walkToRoute}
                   walkFromMeters={expWalkFromMeters}
                   walkToMeters={expWalkToMeters}
-                  fromName={
-                    tripFrom.address?.name ??
-                    tripFrom.displayName ??
-                    tripFrom.name
-                  }
                   toName={
                     tripTo.address?.name ??
                     tripTo.displayName ??
                     tripTo.name
                   }
-                  onBack={() => setExpandedPlan(null)}
+                  arrivalsByStation={arrivalsByStation}
+                  now={now}
+                  focusedLegIndex={focusedLegIndex}
+                  onFocusLeg={onFocusLeg}
+                  onBack={() => {
+                    setExpandedPlan(null);
+                    onFocusLeg?.(null);
+                  }}
                 />
               );
             })()

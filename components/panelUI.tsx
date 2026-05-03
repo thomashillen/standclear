@@ -13,19 +13,12 @@ import {
   Compass,
   Footprints,
   TrainFront,
-  CornerUpLeft,
-  CornerUpRight,
-  CornerDownLeft,
-  CornerDownRight,
-  ArrowUpRight,
-  CircleDot,
-  MapPin,
 } from "lucide-react";
 import type { Arrival } from "@/lib/useTrains";
 import { catchVerdict, walkMinutes, type CatchVerdict, type StationEntry } from "@/lib/stopsIndex";
 import type { CommuteAnchor } from "@/lib/useFavorites";
 import { estimateTripTimeSec, type TripPlan } from "@/lib/commuteRouting";
-import type { WalkingRoute, WalkingStep } from "@/lib/walkingDirections";
+import type { WalkingRoute } from "@/lib/walkingDirections";
 
 // ─── Shared types ───────────────────────────────────────────────────
 
@@ -498,24 +491,6 @@ export function TripPlanRow({
       style={selectedStyle}
       className={`rounded-2xl px-3.5 pt-3 pb-3 ${ringCls} ${interactiveCls} transition-all duration-200`}
     >
-      {walkFromMin > 0 && (
-        <div className="flex items-center gap-1.5 text-[11px] text-gray-400 mb-2">
-          <Footprints className="w-3 h-3 flex-shrink-0" />
-          <span className="truncate">
-            <span className="text-gray-200 font-semibold tabular-nums">
-              {walkFromMin} min
-            </span>{" "}
-            walk from{" "}
-            {walkFromName ? (
-              <span className="text-gray-200">{walkFromName}</span>
-            ) : (
-              "your start"
-            )}{" "}
-            to{" "}
-            <span className="text-gray-300">{origin.name}</span>
-          </span>
-        </div>
-      )}
       <div className="flex items-center gap-1.5 mb-1.5 flex-wrap">
         {leg1Info && leg1 && (
           <RouteBullet
@@ -568,83 +543,76 @@ export function TripPlanRow({
           direction right now.
         </p>
       ) : (
-        <div className="flex flex-wrap gap-x-3 gap-y-1.5">
-          {upcoming.map((a, i) => {
-            const info = routeColors.get(a.routeId);
-            if (!info) return null;
-            return (
-              <span
-                key={`${a.tripId}-${i}`}
-                className="inline-flex items-center gap-1"
-              >
-                <RouteBullet
-                  id={info.displayId}
-                  color={info.color}
-                  textColor={info.textColor}
-                />
-                <span className="text-[13px] font-semibold tabular-nums text-gray-100">
-                  {fmtEta(a.eta, now)}
-                </span>
+        <div className="flex items-center gap-1.5 flex-wrap">
+          {leg1Info && (
+            <RouteBullet
+              id={leg1Info.displayId}
+              color={leg1Info.color}
+              textColor={leg1Info.textColor}
+            />
+          )}
+          <span className="text-[13px] tabular-nums text-gray-100 leading-snug">
+            <span className="text-gray-500">in </span>
+            {upcoming.map((a, i) => (
+              <span key={`${a.tripId}-${i}`}>
+                {i > 0 && <span className="text-gray-600"> · </span>}
+                <span className="font-semibold">{fmtEta(a.eta, now)}</span>
               </span>
-            );
-          })}
-          <span className="text-[11px] text-gray-500 ml-1 self-center">
+            ))}
+          </span>
+          <span className="text-[11px] text-gray-500 ml-0.5 self-center">
             at {origin.name}
           </span>
         </div>
       )}
-      {walkToMin > 0 && (
-        <div className="flex items-center gap-1.5 text-[11px] text-gray-400 mt-2">
+      {(walkFromMin > 0 || walkToMin > 0) && (
+        <div className="flex items-center gap-1.5 text-[11px] text-gray-400 mt-2 flex-wrap">
           <Footprints className="w-3 h-3 flex-shrink-0" />
-          <span className="truncate">
-            then{" "}
-            <span className="text-gray-200 font-semibold tabular-nums">
-              {walkToMin} min
-            </span>{" "}
-            walk to{" "}
-            {walkToName ? (
-              <span className="text-gray-200">{walkToName}</span>
-            ) : (
-              "your destination"
-            )}
-          </span>
+          {walkFromMin > 0 && (
+            <span className="truncate">
+              <span className="text-gray-200 font-semibold tabular-nums">
+                {walkFromMin} min
+              </span>
+              {walkFromName ? (
+                <>
+                  {" "}from{" "}
+                  <span className="text-gray-200">{walkFromName}</span>
+                </>
+              ) : null}
+            </span>
+          )}
+          {walkFromMin > 0 && walkToMin > 0 && (
+            <span className="text-gray-600">·</span>
+          )}
+          {walkToMin > 0 && (
+            <span className="truncate">
+              <span className="text-gray-200 font-semibold tabular-nums">
+                {walkToMin} min
+              </span>{" "}
+              to{" "}
+              {walkToName ? (
+                <span className="text-gray-200">{walkToName}</span>
+              ) : (
+                "destination"
+              )}
+            </span>
+          )}
         </div>
       )}
     </Container>
   );
 }
 
-// ─── Trip plan detail (expanded A→Z step-by-step view) ──────────────
-// Renders a single TripPlan with full step-by-step directions:
-//   • Walk steps from the rider's origin to the boarding station
-//     (each Mapbox Directions step rendered as its own row with
-//     maneuver icon + instruction + distance).
-//   • Subway leg(s): board at X, ride N stops, transfer at Y, ride
-//     M stops, alight at Z.
-//   • Walk steps from the alighting station to the destination.
-// Includes a back button so the rider can return to the plan list
-// without losing the search context. Independent of which panel is
-// hosting it (SearchSheet today, possibly NearbyPanel tomorrow).
-
-function maneuverIcon(step: WalkingStep): React.ReactNode {
-  const m = step.modifier ?? "";
-  const t = step.maneuver ?? "";
-  const cls = "w-4 h-4";
-  if (t === "depart") return <CircleDot className={cls} />;
-  if (t === "arrive") return <MapPin className={cls} />;
-  if (m.includes("right")) {
-    if (m.includes("sharp")) return <CornerDownRight className={cls} />;
-    if (m.includes("slight")) return <ArrowUpRight className={cls} />;
-    return <CornerUpRight className={cls} />;
-  }
-  if (m.includes("left")) {
-    if (m.includes("sharp")) return <CornerDownLeft className={cls} />;
-    if (m.includes("slight"))
-      return <ArrowUpRight className={`${cls} -scale-x-100`} />;
-    return <CornerUpLeft className={cls} />;
-  }
-  return <ArrowUp className={cls} />;
-}
+// ─── Trip plan detail (expanded summary view) ───────────────────────
+// Renders a single TripPlan as a single-column timeline of high-level
+// steps. Each step is one row:
+//   • Walk to the boarding station.
+//   • Take the [route] N stops to the next station (one row per leg —
+//     the implicit transfer is "the next subway row continues from
+//     where the previous one ended").
+//   • Walk to the destination.
+// Turn-by-turn walking and per-leg subheaders are intentionally
+// omitted — the rider just wants the punch list, not a play-by-play.
 
 function fmtStepDistance(meters: number): string {
   if (!Number.isFinite(meters) || meters <= 0) return "";
@@ -652,53 +620,89 @@ function fmtStepDistance(meters: number): string {
   return `${(meters / 1000).toFixed(1)} km`;
 }
 
-function WalkStepsList({
-  route,
-  loading,
-  fallbackMinutes,
-  fallbackDistance,
-}: {
-  route: WalkingRoute | null;
-  loading: boolean;
-  /** Estimated walk minutes from the haversine fallback so the rider
-   *  always sees a number even when the API hasn't responded yet. */
-  fallbackMinutes?: number;
-  fallbackDistance?: string;
-}) {
-  if (!route) {
-    return (
-      <p className="text-[12px] text-gray-500 px-1">
-        {loading
-          ? "Finding the best walking route…"
-          : fallbackMinutes
-            ? `About ${fallbackMinutes} min walk${fallbackDistance ? ` · ${fallbackDistance}` : ""}.`
-            : "Walk to the station."}
-      </p>
-    );
+function fmtWalkMeta(
+  route: WalkingRoute | null,
+  fallbackMin: number,
+  fallbackMeters?: number,
+): string | undefined {
+  if (route) {
+    return `${Math.max(1, Math.round(route.duration / 60))} min · ${fmtStepDistance(route.distance)}`;
   }
+  if (fallbackMin > 0) {
+    return `~${fallbackMin} min${fallbackMeters ? ` · ${fmtStepDistance(fallbackMeters)}` : ""}`;
+  }
+  return undefined;
+}
+
+// Single timeline row: round icon on the left (with an optional
+// vertical connector line below it), title in the middle, and a meta
+// string (right-aligned) for the duration/distance summary. Becomes
+// a tappable button when `onClick` is provided — used to focus the
+// map on a specific subway leg.
+function TimelineRow({
+  icon,
+  iconBg,
+  title,
+  subtitle,
+  meta,
+  showConnector,
+  onClick,
+  selected,
+}: {
+  icon: React.ReactNode;
+  /** Tailwind classes for the icon's background + foreground. */
+  iconBg: string;
+  title: React.ReactNode;
+  subtitle?: React.ReactNode;
+  meta?: string;
+  /** Whether to render the vertical line under this row connecting
+   *  it to the next one. Off for the last row. */
+  showConnector: boolean;
+  onClick?: () => void;
+  selected?: boolean;
+}) {
+  const interactive = !!onClick;
+  const Inner: React.ElementType = interactive ? "button" : "div";
+  const interactiveCls = interactive
+    ? `press touch-manipulation w-full text-left rounded-lg -mx-2 px-2 py-1 transition-colors ${
+        selected ? "bg-white/[0.08]" : "hover:bg-white/[0.04]"
+      }`
+    : "";
   return (
-    <ol className="space-y-1.5">
-      {route.steps.map((step, i) => (
-        <li
-          key={`step-${i}`}
-          className="flex items-start gap-2.5 px-1 py-1 rounded-lg"
+    <li className="flex items-start gap-3">
+      <div className="flex flex-col items-center self-stretch">
+        <span
+          className={`flex-shrink-0 w-7 h-7 rounded-full flex items-center justify-center ${iconBg}`}
         >
-          <span className="flex-shrink-0 w-7 h-7 rounded-full bg-white/[0.06] text-gray-200 flex items-center justify-center mt-0.5">
-            {maneuverIcon(step)}
-          </span>
-          <div className="flex-1 min-w-0">
-            <p className="text-[13px] text-gray-100 leading-snug">
-              {step.instruction}
-            </p>
-            {step.distance > 0 && (
-              <p className="text-[11px] text-gray-500 tabular-nums mt-0.5">
-                {fmtStepDistance(step.distance)}
-              </p>
-            )}
-          </div>
-        </li>
-      ))}
-    </ol>
+          {icon}
+        </span>
+        {showConnector && (
+          <span className="flex-1 w-px bg-white/10 mt-1 mb-1" />
+        )}
+      </div>
+      <Inner
+        type={interactive ? "button" : undefined}
+        onClick={onClick}
+        aria-pressed={interactive ? !!selected : undefined}
+        className={`flex-1 min-w-0 pb-3 ${interactiveCls}`}
+      >
+        <div className="flex items-baseline gap-2">
+          <p className="text-[13px] text-gray-100 leading-snug flex-1 min-w-0">
+            {title}
+          </p>
+          {meta && (
+            <span className="text-[11px] tabular-nums text-gray-400 flex-shrink-0">
+              {meta}
+            </span>
+          )}
+        </div>
+        {subtitle && (
+          <p className="text-[11px] text-gray-500 mt-0.5 truncate">
+            {subtitle}
+          </p>
+        )}
+      </Inner>
+    </li>
   );
 }
 
@@ -706,21 +710,29 @@ interface TripPlanDetailProps {
   plan: TripPlan;
   routeColors: RouteColorMap;
   stationsByComplexId: Map<string, StationEntry>;
-  /** Resolved walking route from origin → boarding station. Null
-   *  while in flight or if no walk is required (station origin). */
+  /** Resolved walking route from origin → boarding station. Used
+   *  only to display the precise walk duration + distance when
+   *  available. */
   walkFromRoute: WalkingRoute | null;
   walkToRoute: WalkingRoute | null;
-  /** True while a walk fetch is pending — controls loading copy. */
-  walkFromLoading: boolean;
-  walkToLoading: boolean;
-  /** Crow-flies fallback distances (meters) used when the API hasn't
-   *  resolved yet — keeps a useful estimate on screen during loading. */
+  /** Crow-flies fallback distances (meters) used until the API
+   *  resolves — keeps a useful estimate on screen meanwhile. */
   walkFromMeters?: number;
   walkToMeters?: number;
-  /** Display labels for the rider's origin and destination so the
-   *  step list can read like "Walk from Home to 14 St-Union Sq". */
-  fromName?: string;
+  /** Display label for the rider's destination, used in the final
+   *  walk row title ("Walk to Brooklyn Office"). */
   toName?: string;
+  /** Live arrivals + clock so the header total matches the plan
+   *  row's countdown. Falls back to a generic wait constant when
+   *  absent. */
+  arrivalsByStation?: Map<string, Arrival[]>;
+  now?: number;
+  /** Index of the leg the rider has zoomed in on, or null for the
+   *  whole-trip view. Owned by SubwayMap so the camera can refit. */
+  focusedLegIndex?: number | null;
+  /** Toggle map focus on a specific leg. Tap the same leg again to
+   *  return to the whole-trip frame. */
+  onFocusLeg?: (i: number | null) => void;
   onBack: () => void;
 }
 
@@ -730,218 +742,198 @@ export function TripPlanDetail({
   stationsByComplexId,
   walkFromRoute,
   walkToRoute,
-  walkFromLoading,
-  walkToLoading,
   walkFromMeters,
   walkToMeters,
-  fromName,
   toName,
+  arrivalsByStation,
+  now,
+  focusedLegIndex,
+  onFocusLeg,
   onBack,
 }: TripPlanDetailProps) {
   const board = stationsByComplexId.get(plan.legs[0].boardComplexId);
   const alight = stationsByComplexId.get(
     plan.legs[plan.legs.length - 1].alightComplexId,
   );
-  const transfer = plan.transferComplexId
-    ? stationsByComplexId.get(plan.transferComplexId)
-    : null;
 
   const walkFromMin = walkFromMeters ? walkMinutes(walkFromMeters) : 0;
   const walkToMin = walkToMeters ? walkMinutes(walkToMeters) : 0;
 
+  const totalSec = useMemo(
+    () =>
+      estimateTripTimeSec(plan, {
+        arrivalsByStation,
+        nowSec: typeof now === "number" ? now / 1000 : undefined,
+        walkFromMeters: walkFromMeters ?? 0,
+        walkToMeters: walkToMeters ?? 0,
+        stationsByComplexId,
+      }),
+    [
+      plan,
+      arrivalsByStation,
+      now,
+      walkFromMeters,
+      walkToMeters,
+      stationsByComplexId,
+    ],
+  );
+  const totalMin = Math.max(1, Math.round(totalSec / 60));
+
+  // Soonest upcoming arrival on leg 1 — drives the "L in 2m" hint
+  // next to the total. Filters by leg 1's route + direction so the
+  // countdown corresponds to the train the rider needs to catch.
+  const nextLeg1Eta = useMemo(() => {
+    if (!arrivalsByStation || typeof now !== "number") return null;
+    const leg1 = plan.legs[0];
+    if (!leg1) return null;
+    const arrivals = arrivalsByStation.get(leg1.boardComplexId);
+    if (!arrivals) return null;
+    const cutoff = now / 1000 - 5;
+    let earliest = Infinity;
+    for (const a of arrivals) {
+      if (a.routeId !== leg1.routeId) continue;
+      if (a.direction !== leg1.direction) continue;
+      if (a.eta < cutoff) continue;
+      if (a.eta < earliest) earliest = a.eta;
+    }
+    return Number.isFinite(earliest) ? earliest : null;
+  }, [arrivalsByStation, now, plan]);
+  const leg1Info = routeColors.get(plan.legs[0].routeId);
+
+  const showWalkFrom = !!board;
+  const showWalkTo =
+    !!alight && walkToMeters !== undefined && walkToMeters > 0;
+  const walkFromActive = walkFromRoute || (walkFromMeters ?? 0) > 0;
+
   return (
     <div className="px-3 pb-6">
-      {/* Header — back button + plan summary ribbon. The ribbon
-          mirrors the plan row's visual so the rider visibly stays
-          on the same trip after expanding. */}
-      <div className="flex items-center gap-2 mb-3">
+      {/* Header — back button + total trip time. The unexpanded plan
+          row already showed the bullets, so we surface the most
+          decision-useful number (total minutes) here instead. */}
+      <div className="flex items-center gap-3 mb-4">
         <button
           type="button"
           onClick={onBack}
           aria-label="Back to route options"
-          className="press flex-shrink-0 inline-flex items-center gap-1.5 h-9 pl-2 pr-3 rounded-full bg-white/[0.08] hover:bg-white/[0.14] text-[13px] font-semibold text-gray-100 touch-manipulation"
+          className="press flex-shrink-0 inline-flex items-center justify-center w-9 h-9 rounded-full bg-white/[0.08] hover:bg-white/[0.14] text-gray-100 touch-manipulation"
         >
           <ArrowLeft className="w-4 h-4" />
-          Routes
         </button>
-        <div className="flex items-center gap-1 ml-auto flex-shrink-0">
-          {plan.legs.map((leg, i) => {
-            const info = routeColors.get(leg.routeId);
-            if (!info) return null;
-            return (
-              <span key={`detail-bullet-${i}`} className="flex items-center gap-1">
-                {i > 0 && (
-                  <ArrowRight className="w-3 h-3 text-gray-500" />
-                )}
-                <RouteBullet
-                  id={info.displayId}
-                  color={info.color}
-                  textColor={info.textColor}
-                />
-              </span>
-            );
-          })}
+        <div className="flex items-baseline gap-1.5 min-w-0">
+          <span className="text-[22px] font-bold tabular-nums text-gray-100 leading-none">
+            {totalMin}
+          </span>
+          <span className="text-[13px] text-gray-400">min total</span>
         </div>
+        {nextLeg1Eta !== null && leg1Info && typeof now === "number" && (
+          <div className="ml-auto flex items-center gap-1.5 flex-shrink-0">
+            <RouteBullet
+              id={leg1Info.displayId}
+              color={leg1Info.color}
+              textColor={leg1Info.textColor}
+            />
+            <span className="text-[13px] tabular-nums text-gray-200">
+              <span className="text-gray-500">in </span>
+              <span className="font-semibold text-gray-100">
+                {fmtEta(nextLeg1Eta, now)}
+              </span>
+            </span>
+          </div>
+        )}
       </div>
 
-      {/* Walk from origin → board station */}
-      {board && (
-        <section className="mb-4">
-          <header className="flex items-center gap-2 mb-2 px-1">
-            <span className="w-6 h-6 rounded-full bg-emerald-300/20 text-emerald-200 flex items-center justify-center">
-              <Footprints className="w-3.5 h-3.5" />
-            </span>
-            <h4 className="text-[13px] font-bold tracking-tight text-gray-100">
-              {walkFromMin > 0 || walkFromRoute
-                ? `Walk to ${board.name}`
-                : `Start at ${board.name}`}
-            </h4>
-            {(walkFromRoute || walkFromMin > 0) && (
-              <span className="ml-auto text-[11px] tabular-nums text-gray-400">
-                {walkFromRoute
-                  ? `${Math.max(1, Math.round(walkFromRoute.duration / 60))} min · ${fmtStepDistance(walkFromRoute.distance)}`
-                  : `~${walkFromMin} min${walkFromMeters ? ` · ${fmtStepDistance(walkFromMeters)}` : ""}`}
-              </span>
-            )}
-          </header>
-          {fromName && (
-            <p className="text-[11px] text-gray-500 px-1 mb-2 truncate">
-              From <span className="text-gray-300">{fromName}</span>
-            </p>
-          )}
-          {(walkFromMeters && walkFromMeters > 0) || walkFromRoute ? (
-            <WalkStepsList
-              route={walkFromRoute}
-              loading={walkFromLoading}
-              fallbackMinutes={walkFromMin}
-              fallbackDistance={
-                walkFromMeters ? fmtStepDistance(walkFromMeters) : undefined
-              }
-            />
-          ) : (
-            <p className="text-[12px] text-gray-500 px-1">
-              You&apos;re starting at the station — no walking required.
-            </p>
-          )}
-        </section>
-      )}
-
-      {/* Subway legs — synthesized from the TripPlan: board, ride N
-          stops, transfer (if any), ride M stops, alight. Numbers are
-          stop counts, the same metric used elsewhere. */}
-      {plan.legs.map((leg, i) => {
-        const info = routeColors.get(leg.routeId);
-        const legBoard = stationsByComplexId.get(leg.boardComplexId);
-        const legAlight = stationsByComplexId.get(leg.alightComplexId);
-        const isLast = i === plan.legs.length - 1;
-        return (
-          <section key={`detail-leg-${i}`} className="mb-4">
-            <header className="flex items-center gap-2 mb-2 px-1">
-              <span className="w-6 h-6 rounded-full bg-white/[0.10] flex items-center justify-center">
-                <TrainFront className="w-3.5 h-3.5 text-gray-100" />
-              </span>
-              <h4 className="text-[13px] font-bold tracking-tight text-gray-100">
-                Take the
-              </h4>
-              {info && (
-                <RouteBullet
-                  id={info.displayId}
-                  color={info.color}
-                  textColor={info.textColor}
-                />
-              )}
-              <span className="text-[11px] text-gray-400">
-                {leg.direction === "N" ? "Northbound" : "Southbound"}
-              </span>
-              <span className="ml-auto text-[11px] tabular-nums text-gray-400">
-                {leg.stopCount} stop{leg.stopCount === 1 ? "" : "s"}
-              </span>
-            </header>
-            <ol className="space-y-1.5">
-              <li className="flex items-start gap-2.5 px-1 py-1 rounded-lg">
-                <span className="flex-shrink-0 w-7 h-7 rounded-full bg-emerald-500/20 text-emerald-300 flex items-center justify-center mt-0.5">
-                  <CircleDot className="w-3.5 h-3.5" />
-                </span>
-                <div className="flex-1 min-w-0">
-                  <p className="text-[13px] text-gray-100 leading-snug">
-                    Board the{" "}
-                    <span className="font-semibold">
-                      {info?.displayId ?? leg.routeId}
-                    </span>{" "}
-                    train at{" "}
-                    <span className="font-semibold">
-                      {legBoard?.name ?? "the station"}
-                    </span>
-                    .
-                  </p>
-                </div>
-              </li>
-              <li className="flex items-start gap-2.5 px-1 py-1 rounded-lg">
-                <span className="flex-shrink-0 w-7 h-7 rounded-full bg-white/[0.06] text-gray-200 flex items-center justify-center mt-0.5">
-                  {leg.direction === "N" ? (
-                    <ArrowUp className="w-4 h-4" />
-                  ) : (
-                    <ArrowDown className="w-4 h-4" />
-                  )}
-                </span>
-                <div className="flex-1 min-w-0">
-                  <p className="text-[13px] text-gray-100 leading-snug">
-                    Ride {leg.stopCount} stop{leg.stopCount === 1 ? "" : "s"}{" "}
-                    {leg.direction === "N" ? "northbound" : "southbound"}.
-                  </p>
-                </div>
-              </li>
-              <li className="flex items-start gap-2.5 px-1 py-1 rounded-lg">
-                <span
-                  className={`flex-shrink-0 w-7 h-7 rounded-full flex items-center justify-center mt-0.5 ${
-                    isLast
-                      ? "bg-sky-500/20 text-sky-300"
-                      : "bg-amber-500/20 text-amber-300"
-                  }`}
-                >
-                  <MapPin className="w-3.5 h-3.5" />
-                </span>
-                <div className="flex-1 min-w-0">
-                  <p className="text-[13px] text-gray-100 leading-snug">
-                    {isLast ? "Get off" : "Transfer"} at{" "}
-                    <span className="font-semibold">
-                      {legAlight?.name ?? "the station"}
-                    </span>
-                    {!isLast && transfer ? "." : "."}
-                  </p>
-                </div>
-              </li>
-            </ol>
-          </section>
-        );
-      })}
-
-      {/* Walk from alight station → destination */}
-      {alight && walkToMeters !== undefined && walkToMeters > 0 && (
-        <section className="mb-2">
-          <header className="flex items-center gap-2 mb-2 px-1">
-            <span className="w-6 h-6 rounded-full bg-sky-300/20 text-sky-200 flex items-center justify-center">
-              <Footprints className="w-3.5 h-3.5" />
-            </span>
-            <h4 className="text-[13px] font-bold tracking-tight text-gray-100">
-              Walk to {toName ?? "your destination"}
-            </h4>
-            <span className="ml-auto text-[11px] tabular-nums text-gray-400">
-              {walkToRoute
-                ? `${Math.max(1, Math.round(walkToRoute.duration / 60))} min · ${fmtStepDistance(walkToRoute.distance)}`
-                : `~${walkToMin} min${walkToMeters ? ` · ${fmtStepDistance(walkToMeters)}` : ""}`}
-            </span>
-          </header>
-          <WalkStepsList
-            route={walkToRoute}
-            loading={walkToLoading}
-            fallbackMinutes={walkToMin}
-            fallbackDistance={
-              walkToMeters ? fmtStepDistance(walkToMeters) : undefined
+      <ol className="px-1">
+        {showWalkFrom && (
+          <TimelineRow
+            icon={<Footprints className="w-3.5 h-3.5" />}
+            iconBg="bg-emerald-300/20 text-emerald-200"
+            title={
+              walkFromActive ? (
+                <>
+                  Walk to{" "}
+                  <span className="font-semibold">{board.name}</span>
+                </>
+              ) : (
+                <>
+                  Start at{" "}
+                  <span className="font-semibold">{board.name}</span>
+                </>
+              )
             }
+            meta={
+              walkFromActive
+                ? fmtWalkMeta(walkFromRoute, walkFromMin, walkFromMeters)
+                : undefined
+            }
+            showConnector
           />
-        </section>
-      )}
+        )}
+
+        {plan.legs.map((leg, i) => {
+          const info = routeColors.get(leg.routeId);
+          const legAlight = stationsByComplexId.get(leg.alightComplexId);
+          const isLastLeg = i === plan.legs.length - 1;
+          const isFocused = focusedLegIndex === i;
+          return (
+            <TimelineRow
+              key={`detail-leg-${i}`}
+              icon={
+                info ? (
+                  <RouteBullet
+                    id={info.displayId}
+                    color={info.color}
+                    textColor={info.textColor}
+                  />
+                ) : (
+                  <TrainFront className="w-3.5 h-3.5 text-gray-100" />
+                )
+              }
+              iconBg="bg-transparent"
+              title={
+                <>
+                  Ride {leg.stopCount} stop
+                  {leg.stopCount === 1 ? "" : "s"}{" "}
+                  {leg.direction === "N" ? "northbound" : "southbound"} to{" "}
+                  <span className="font-semibold">
+                    {legAlight?.name ?? "the station"}
+                  </span>
+                </>
+              }
+              subtitle={
+                isFocused
+                  ? "Tap again to see whole trip"
+                  : !isLastLeg
+                    ? "Transfer here"
+                    : undefined
+              }
+              showConnector={!isLastLeg || showWalkTo}
+              onClick={
+                onFocusLeg
+                  ? () => onFocusLeg(isFocused ? null : i)
+                  : undefined
+              }
+              selected={isFocused}
+            />
+          );
+        })}
+
+        {showWalkTo && (
+          <TimelineRow
+            icon={<Footprints className="w-3.5 h-3.5" />}
+            iconBg="bg-sky-300/20 text-sky-200"
+            title={
+              <>
+                Walk to{" "}
+                <span className="font-semibold">
+                  {toName ?? "your destination"}
+                </span>
+              </>
+            }
+            meta={fmtWalkMeta(walkToRoute, walkToMin, walkToMeters)}
+            showConnector={false}
+          />
+        )}
+      </ol>
     </div>
   );
 }

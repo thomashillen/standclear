@@ -96,6 +96,13 @@ export default function SubwayMap() {
   // markers + walking segments and fits the camera.
   const [selectedTripSelection, setSelectedTripSelection] =
     useState<TripSelection | null>(null);
+  // Index of the leg the rider has zoomed in on from the expanded
+  // route detail. Null means "frame the whole trip" (default).
+  // Cleared whenever the trip selection changes so a new plan opens
+  // at full extent.
+  const [focusedLegIndex, setFocusedLegIndex] = useState<number | null>(
+    null,
+  );
   // Resolved street-following walking routes for the trip's start
   // and end walk segments. Fetched from Mapbox Directions (walking
   // profile) when a selection has address endpoints. The map renders
@@ -342,9 +349,12 @@ export default function SubwayMap() {
   // when a plan row is tapped. Receives the plan plus optional
   // walking endpoints (rider's actual coords vs. station coords) so
   // the map can draw dashed pedestrian legs at start/end. Pass null
-  // to clear.
+  // to clear. Resets any per-leg focus so the new plan opens framed
+  // at full extent rather than zoomed into a leg from the previous
+  // plan.
   const handleTripSelect = (selection: TripSelection | null) => {
     setSelectedTripSelection(selection);
+    setFocusedLegIndex(null);
   };
 
   return (
@@ -367,6 +377,7 @@ export default function SubwayMap() {
             searchOpen
           }
           selectedTrip={selectedTrip}
+          focusedLegIndex={focusedLegIndex}
         />
         {selectedLine && !nearbyOpen && !stationStopId && (
           <LinePanel
@@ -422,6 +433,7 @@ export default function SubwayMap() {
             // "actually exit" path.
             setSearchOpen(false);
             setSelectedTripSelection(null);
+            setFocusedLegIndex(null);
             setSearchAnchorPick(null);
             setSearchPresetTrip(null);
           }}
@@ -430,6 +442,8 @@ export default function SubwayMap() {
           selectedTripKey={selectedTripKey}
           walkFromRoute={walkFromRoute}
           walkToRoute={walkToRoute}
+          focusedLegIndex={focusedLegIndex}
+          onFocusLeg={setFocusedLegIndex}
         />
       </div>
 
