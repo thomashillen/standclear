@@ -147,48 +147,6 @@ type TripEndpoint = StationEntry & {
 };
 
 // ─── Set-as-Home/Work toggle button ─────────────────────────────────
-// Compact icon button that pins a station or address as the rider's
-// Home or Work anchor. Active state matches the StationPanel chip
-// vocabulary (emerald for Home, sky for Work) so a rider sees the
-// same visual whether they pin from the station detail or the
-// directions picker. Stops propagation so tapping the button doesn't
-// also fire the picker row's pick-and-fill handler.
-function AnchorIconButton({
-  anchor,
-  active,
-  onClick,
-}: {
-  anchor: "home" | "work";
-  active: boolean;
-  onClick: () => void;
-}) {
-  const Icon = anchor === "home" ? Home : Briefcase;
-  const activeClass =
-    anchor === "home"
-      ? "bg-emerald-300/20 text-emerald-200 ring-1 ring-emerald-300/40"
-      : "bg-sky-300/20 text-sky-200 ring-1 ring-sky-300/40";
-  const inactiveClass =
-    "text-gray-500 hover:text-gray-100 hover:bg-white/[0.06]";
-  return (
-    <button
-      type="button"
-      onClick={(e) => {
-        e.stopPropagation();
-        onClick();
-      }}
-      aria-pressed={active}
-      aria-label={
-        active ? `Unset as ${anchor}` : `Set as ${anchor}`
-      }
-      className={`press w-7 h-7 flex items-center justify-center rounded-full touch-manipulation ${
-        active ? activeClass : inactiveClass
-      }`}
-    >
-      <Icon className="w-3.5 h-3.5" />
-    </button>
-  );
-}
-
 export default function SearchSheet({
   open,
   onClose,
@@ -216,10 +174,8 @@ export default function SearchSheet({
   const {
     home,
     work,
-    anchorOf,
     assignAnchor,
     assignAnchorAddress,
-    setAnchor,
   } = useCommute();
 
   // Mode: which pane is showing. Defaults from `initialMode` so the
@@ -639,44 +595,6 @@ export default function SearchSheet({
   const swapTrip = () => {
     setTripFrom(tripTo);
     setTripTo(tripFrom);
-  };
-
-  // ── Anchor toggles for picker rows ─────────────────────────────
-  // Each picker row carries a Home and a Work icon button. Tapping
-  // assigns/clears the rider's commute anchor. Stations route through
-  // assignAnchor (preserves the favorites-add side effect for stops);
-  // addresses go through assignAnchorAddress.
-  const isStationAnchored = (
-    stopId: string,
-    anchor: "home" | "work",
-  ): boolean => {
-    const ep = anchor === "home" ? home : work;
-    return ep?.kind === "station" && ep.stopId === stopId;
-  };
-  const isAddressAnchored = (
-    place: Place,
-    anchor: "home" | "work",
-  ): boolean => {
-    const ep = anchor === "home" ? home : work;
-    return (
-      ep?.kind === "address" &&
-      ep.name === place.name &&
-      ep.lng === place.lng &&
-      ep.lat === place.lat
-    );
-  };
-  const toggleStationAnchor = (stopId: string, anchor: "home" | "work") => {
-    if (isStationAnchored(stopId, anchor)) setAnchor(anchor, null);
-    else assignAnchor(anchor, stopId);
-  };
-  const toggleAddressAnchor = (place: Place, anchor: "home" | "work") => {
-    if (isAddressAnchored(place, anchor)) setAnchor(anchor, null);
-    else
-      assignAnchorAddress(anchor, {
-        name: place.name,
-        lng: place.lng,
-        lat: place.lat,
-      });
   };
 
   const pickPlannerStation = (s: StationEntry) => {
@@ -1165,7 +1083,6 @@ export default function SearchSheet({
                         }
                         onStationOpen(s.stopId);
                       }}
-                      anchor={anchorOf(s.stopId)}
                       // Tap = compass = "directions to here from
                       // current location". Single unified handler so
                       // both stations and places hit the same flow.
@@ -1238,16 +1155,6 @@ export default function SearchSheet({
                           </div>
                         </button>
                         <div className="flex items-center gap-0.5 flex-shrink-0 pt-0.5">
-                          <AnchorIconButton
-                            anchor="home"
-                            active={isAddressAnchored(place, "home")}
-                            onClick={() => toggleAddressAnchor(place, "home")}
-                          />
-                          <AnchorIconButton
-                            anchor="work"
-                            active={isAddressAnchored(place, "work")}
-                            onClick={() => toggleAddressAnchor(place, "work")}
-                          />
                           {/* Directions compass — a place row's main
                               CTA. Mirrors the StationRow compass so the
                               affordance is consistent across kinds. */}
@@ -1321,18 +1228,6 @@ export default function SearchSheet({
                           {s.name}
                         </p>
                       </button>
-                      <div className="flex items-center gap-0.5 flex-shrink-0 pt-0.5">
-                        <AnchorIconButton
-                          anchor="home"
-                          active={isStationAnchored(s.stopId, "home")}
-                          onClick={() => toggleStationAnchor(s.stopId, "home")}
-                        />
-                        <AnchorIconButton
-                          anchor="work"
-                          active={isStationAnchored(s.stopId, "work")}
-                          onClick={() => toggleStationAnchor(s.stopId, "work")}
-                        />
-                      </div>
                     </div>
                   ))}
                 </>
@@ -1380,18 +1275,6 @@ export default function SearchSheet({
                           </p>
                         </div>
                       </button>
-                      <div className="flex items-center gap-0.5 flex-shrink-0 pt-0.5">
-                        <AnchorIconButton
-                          anchor="home"
-                          active={isAddressAnchored(place, "home")}
-                          onClick={() => toggleAddressAnchor(place, "home")}
-                        />
-                        <AnchorIconButton
-                          anchor="work"
-                          active={isAddressAnchored(place, "work")}
-                          onClick={() => toggleAddressAnchor(place, "work")}
-                        />
-                      </div>
                     </div>
                   ))}
                 </>
