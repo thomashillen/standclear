@@ -740,13 +740,42 @@ export default function MapView({ selectedLine, stationStopId, onLineSelect, onS
           type: "symbol",
           source: "subway-trip-stations",
           layout: {
-            "text-field": ["get", "name"],
+            // Origin and destination labels would just repeat what the
+            // route-details panel already shows ("From: Current location",
+            // "To: Times Square") and they tend to sit right on top of
+            // the board/alight station labels when the walk is short —
+            // suppress them on the map so only the subway-station names
+            // (board / transfer / alight) render.
+            "text-field": [
+              "case",
+              [
+                "any",
+                ["==", ["get", "kind"], "origin"],
+                ["==", ["get", "kind"], "destination"],
+              ],
+              "",
+              ["get", "name"],
+            ],
             "text-font": ["DIN Pro Bold", "Open Sans Bold", "Arial Unicode MS Bold"],
             "text-size": 12,
             "text-offset": [0, 1.2],
             "text-anchor": "top",
-            "text-allow-overlap": true,
-            "text-ignore-placement": true,
+            // Let Mapbox's collision detection drop overlapping labels
+            // (transfer + alight stations are often the same complex,
+            // e.g. Times Sq-42 St and Grand Central-42 St). The sort
+            // key below picks which label wins — the rider needs to
+            // see where to get OFF more than where to transfer, so
+            // alight ranks first.
+            "text-allow-overlap": false,
+            "text-ignore-placement": false,
+            "symbol-sort-key": [
+              "match",
+              ["get", "kind"],
+              "alight", 0,
+              "board", 1,
+              "transfer", 2,
+              3,
+            ],
           },
           paint: {
             "text-color": "#ffffff",

@@ -472,10 +472,14 @@ export default function StationPanel({ stopId, onClose, onSelectLine }: Props) {
 
         {/* Save / Home / Work — three toggleable anchor chips. Tapping
             an active chip clears that anchor; tapping an inactive one
-            sets it (Home and Work are mutually exclusive). */}
+            sets it (Home and Work are mutually exclusive). Labels flip
+            between command form ("Set Home") when inactive and state
+            form ("Home") when this station is the current anchor, so
+            the chip reads as either an action to take or a fact about
+            this station — never as an ambiguous static label. */}
         <div className="flex items-center gap-2 flex-wrap">
           <AnchorChip
-            label="Save"
+            label={isFav ? "Saved" : "Save"}
             icon={<Star className={`w-[15px] h-[15px] ${isFav ? "fill-amber-300 text-amber-300" : ""}`} />}
             active={isFav}
             activeRing="ring-amber-300/40"
@@ -484,7 +488,7 @@ export default function StationPanel({ stopId, onClose, onSelectLine }: Props) {
             aria-label={isFav ? "Remove from favorites" : "Add to favorites"}
           />
           <AnchorChip
-            label="Home"
+            label={commute.isHome(favId) ? "Home" : "Set Home"}
             icon={
               <Home
                 className={`w-[15px] h-[15px] ${
@@ -503,7 +507,7 @@ export default function StationPanel({ stopId, onClose, onSelectLine }: Props) {
             aria-label={commute.isHome(favId) ? "Unset as Home" : "Set as Home"}
           />
           <AnchorChip
-            label="Work"
+            label={commute.isWork(favId) ? "Work" : "Set Work"}
             icon={
               <Briefcase
                 className={`w-[15px] h-[15px] ${

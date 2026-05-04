@@ -904,6 +904,7 @@ export default function SearchSheet({
                 // a single tap that wipes everything.
                 if (expandedPlan) {
                   setExpandedPlan(null);
+                  onFocusLeg?.(null);
                   return;
                 }
                 setMode("search");
@@ -1532,10 +1533,6 @@ export default function SearchSheet({
                   now={now}
                   focusedLegIndex={focusedLegIndex}
                   onFocusLeg={onFocusLeg}
-                  onBack={() => {
-                    setExpandedPlan(null);
-                    onFocusLeg?.(null);
-                  }}
                 />
               );
             })()
