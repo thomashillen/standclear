@@ -98,10 +98,17 @@ export default function MoreSheet({ open, onClose, onSetHome, onSetWork }: Props
     onDismiss: onClose,
   });
 
-  if (!open) return null;
+  // Note: don't early-return null when !open. AlertsDialog and
+  // AboutDialog render as siblings of the panel below, and the
+  // "Service alerts" / "About" rows close MoreSheet *and* open the
+  // sibling dialog in the same handler. If we returned null on close,
+  // those dialogs would unmount before they could mount-with-open=true,
+  // which would manifest as "tapping the alerts row does nothing."
+  // The panel div itself is gated by `open &&` instead.
 
   return (
     <>
+      {open && (
       <div
         className="
           absolute z-20 overflow-hidden flex flex-col
@@ -284,6 +291,7 @@ export default function MoreSheet({ open, onClose, onSetHome, onSetWork }: Props
           </section>
         </div>
       </div>
+      )}
 
       <AlertsDialog open={alertsOpen} onOpenChange={setAlertsOpen} />
       <AboutDialog open={aboutOpen} onOpenChange={setAboutOpen} />
