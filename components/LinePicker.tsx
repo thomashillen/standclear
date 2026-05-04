@@ -1,8 +1,8 @@
 "use client";
 
 import * as DialogPrimitive from "@radix-ui/react-dialog";
-import { ChevronDown } from "lucide-react";
-import { useState } from "react";
+import { ChevronDown, X } from "lucide-react";
+import { useRef, useState } from "react";
 import { LINE_GROUPS, type Lines } from "@/lib/subwayData";
 
 interface LinePickerProps {
@@ -11,13 +11,15 @@ interface LinePickerProps {
   onSelect: (line: string | null) => void;
 }
 
-const GROUP_LABELS: Record<string, string> = {
-  IRT: "Numbered lines",
-  IND: "8 Av · 6 Av · Crosstown",
-  BMT: "Nassau · Canarsie · Broadway",
-  S: "Shuttles",
-  SI: "Staten Island",
-};
+// Flat MTA-ordered list — numbered → ACE → BDFM/G → JZ/L → NQRW →
+// shuttles → SI. Bullets are self-categorizing by color so the old
+// section headers (Numbered lines / 8 Av · 6 Av / etc.) were just
+// stretching the panel without aiding findability.
+const ORDERED_LINES: string[] = LINE_GROUPS.flatMap((g) => g.lines);
+
+// Mobile drag-to-dismiss threshold. Matches NearbyPanel / SearchSheet
+// so the gesture grammar is consistent across sheets.
+const DISMISS_PX = 120;
 
 export default function LinePicker({ lines, selectedLine, onSelect }: LinePickerProps) {
   const [open, setOpen] = useState(false);
@@ -28,16 +30,57 @@ export default function LinePicker({ lines, selectedLine, onSelect }: LinePicker
     setOpen(false);
   };
 
+  // Mobile-only drag-to-dismiss. The sheet sits at rest (translateY 0)
+  // and follows the rider's finger down; past DISMISS_PX it closes,
+  // otherwise it bounces back. Upward drag rubber-bands so the surface
+  // feels physical rather than rigid. Desktop uses a centered modal
+  // and skips the gesture entirely.
+  const [dragY, setDragY] = useState(0);
+  const [isDragging, setIsDragging] = useState(false);
+  const dragStartY = useRef<number | null>(null);
+
+  const isMobile = () =>
+    typeof window !== "undefined" && window.matchMedia("(max-width: 639px)").matches;
+
+  const onPointerDown = (e: React.PointerEvent<HTMLElement>) => {
+    if (!isMobile()) return;
+    // Skip drag-init on interactive children (close button, line
+    // bullets) so taps register normally.
+    const t = e.target as HTMLElement | null;
+    if (t && t.closest("button, a, input, [data-no-drag]")) return;
+    dragStartY.current = e.clientY;
+    setIsDragging(true);
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+  };
+  const onPointerMove = (e: React.PointerEvent<HTMLElement>) => {
+    if (dragStartY.current === null) return;
+    const dy = e.clientY - dragStartY.current;
+    setDragY(dy < 0 ? dy * 0.25 : dy);
+  };
+  const onPointerUp = (e: React.PointerEvent<HTMLElement>) => {
+    if (dragStartY.current === null) return;
+    const dy = e.clientY - dragStartY.current;
+    dragStartY.current = null;
+    setIsDragging(false);
+    if (dy > DISMISS_PX) {
+      setOpen(false);
+      setDragY(0);
+      return;
+    }
+    setDragY(0);
+  };
+  const onPointerCancel = () => {
+    dragStartY.current = null;
+    setIsDragging(false);
+    setDragY(0);
+  };
+
   return (
     <DialogPrimitive.Root open={open} onOpenChange={setOpen}>
       <DialogPrimitive.Trigger asChild>
         <button
           // Sized to match the live-count pill (h-9 / 36px) so the
-          // header reads as a row of consistent-height controls. The
-          // round 44px buttons (search / near-me / more) sit slightly
-          // taller, which is fine — they're visually a different
-          // shape so a small height delta reads as intentional rather
-          // than misaligned.
+          // header reads as a row of consistent-height controls.
           className="press flex items-center gap-1.5 px-2.5 h-9 rounded-full bg-white/[0.08] hover:bg-white/[0.12] border border-white/[0.08] min-w-0 max-w-[260px] touch-manipulation transition-colors"
           aria-label={selected ? `Line ${selected.id} — ${selected.name}. Tap to choose another line.` : "Choose a subway line"}
         >
@@ -49,9 +92,6 @@ export default function LinePicker({ lines, selectedLine, onSelect }: LinePicker
               >
                 {selected.id}
               </span>
-              {/* Line name shown on sm+ where we have room. On mobile the
-                  bullet alone identifies the line unambiguously, and
-                  truncated "8 Avenue Ex…" is just noise. */}
               <span className="hidden sm:inline text-[13px] font-semibold text-white truncate">
                 {selected.name}
               </span>
@@ -65,14 +105,14 @@ export default function LinePicker({ lines, selectedLine, onSelect }: LinePicker
 
       <DialogPrimitive.Portal>
         <DialogPrimitive.Overlay
-          className="fixed inset-0 z-50 bg-black/50 backdrop-blur-md data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=open]:fade-in-0 data-[state=closed]:fade-out-0"
+          className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=open]:fade-in-0 data-[state=closed]:fade-out-0"
         />
         <DialogPrimitive.Content
           className="
             fixed z-50 text-white ios-glass
-            inset-x-0 bottom-0 rounded-t-[28px] border-t border-white/[0.08] max-h-[85dvh] overflow-y-auto ios-scroll
+            inset-x-0 bottom-0 rounded-t-[22px] border-t border-white/[0.08]
             pb-[env(safe-area-inset-bottom)]
-            sm:inset-auto sm:left-1/2 sm:top-1/2 sm:-translate-x-1/2 sm:-translate-y-1/2 sm:rounded-[22px] sm:border sm:border-white/[0.08] sm:max-w-xl sm:w-full sm:max-h-[80dvh] sm:pb-0
+            sm:inset-auto sm:left-1/2 sm:top-1/2 sm:-translate-x-1/2 sm:-translate-y-1/2 sm:rounded-[18px] sm:border sm:border-white/[0.08] sm:max-w-sm sm:w-full sm:pb-0
             shadow-[0_20px_60px_-10px_rgba(0,0,0,0.7)]
             data-[state=open]:animate-in data-[state=closed]:animate-out
             data-[state=open]:slide-in-from-bottom data-[state=closed]:slide-out-to-bottom
@@ -88,59 +128,85 @@ export default function LinePicker({ lines, selectedLine, onSelect }: LinePicker
             Pick a line to focus on it, or All lines to see every train.
           </DialogPrimitive.Description>
 
-          <div className="sm:hidden flex justify-center pt-2.5 pb-1">
-            <div className="w-9 h-[5px] rounded-full bg-white/25" />
-          </div>
-
-          <div className="px-5 pt-3 pb-6 sm:p-6">
-            <button
-              onClick={() => pick(null)}
-              className={`press
-                w-full mb-6 h-12 rounded-2xl text-[15px] font-semibold transition-colors touch-manipulation
-                ${
-                  !selectedLine
-                    ? "bg-white text-gray-950 shadow-[0_4px_16px_rgba(255,255,255,0.18)]"
-                    : "bg-white/[0.08] text-white hover:bg-white/[0.12] border border-white/[0.06]"
-                }
-              `}
+          {/* Inner wrapper carries the drag transform so Radix's open /
+              close keyframe animations on DialogContent stay
+              independent of the user's drag. */}
+          <div
+            style={{
+              transform: dragY ? `translateY(${dragY}px)` : undefined,
+              transition: isDragging
+                ? "none"
+                : "transform 220ms var(--ease-ios)",
+            }}
+          >
+            {/* Header: drag handle (mobile) + title + close. Drag
+                handlers attach here so a touch on the bullet grid
+                below taps cleanly without intercepting as a drag. */}
+            <div
+              className="relative flex items-center justify-between px-4 pt-3 pb-2 sm:cursor-auto cursor-grab active:cursor-grabbing touch-none sm:pt-3.5 sm:pb-2"
+              onPointerDown={onPointerDown}
+              onPointerMove={onPointerMove}
+              onPointerUp={onPointerUp}
+              onPointerCancel={onPointerCancel}
             >
-              All lines
-            </button>
+              <div className="sm:hidden absolute top-1.5 left-1/2 -translate-x-1/2 w-9 h-[5px] rounded-full bg-white/30" />
+              <span className="text-[13px] font-bold tracking-tight text-white pt-2 sm:pt-0">
+                Lines
+              </span>
+              <DialogPrimitive.Close asChild>
+                <button
+                  data-no-drag
+                  className="press w-7 h-7 -mr-1 flex items-center justify-center rounded-full bg-white/[0.08] hover:bg-white/[0.12] text-white touch-manipulation"
+                  aria-label="Close"
+                >
+                  <X className="w-3.5 h-3.5" strokeWidth={2.5} />
+                </button>
+              </DialogPrimitive.Close>
+            </div>
 
-            {LINE_GROUPS.map((group) => (
-              <div key={group.label} className="mb-6 last:mb-0">
-                <div className="text-[11px] font-semibold text-gray-400 uppercase tracking-[0.08em] mb-3 px-1">
-                  {GROUP_LABELS[group.label] ?? group.label}
-                </div>
-                <div className="grid grid-cols-6 sm:grid-cols-8 gap-3">
-                  {group.lines.map((id) => {
-                    const line = lines?.[id];
-                    if (!line) return null;
-                    const active = selectedLine === id;
-                    return (
-                      <button
-                        key={id}
-                        onClick={() => pick(id)}
-                        className={`
-                          nyc-bullet aspect-square rounded-full text-[26px] leading-none flex items-center justify-center touch-manipulation
-                          transition-transform duration-200
-                          shadow-[0_2px_8px_rgba(0,0,0,0.3)]
-                          ${
-                            active
-                              ? "scale-[1.12] ring-[2.5px] ring-white/95"
-                              : "active:scale-[0.92] hover:scale-105"
-                          }
-                        `}
-                        style={{ backgroundColor: line.color, color: line.textColor }}
-                        aria-label={`${line.id} — ${line.name}`}
-                      >
-                        {line.id}
-                      </button>
-                    );
-                  })}
-                </div>
+            <div className="px-3 pt-1 pb-4 sm:px-4 sm:pt-1 sm:pb-4">
+              <button
+                onClick={() => pick(null)}
+                className={`press
+                  w-full mb-3 h-9 rounded-xl text-[13px] font-semibold transition-colors touch-manipulation
+                  ${
+                    !selectedLine
+                      ? "bg-white text-gray-950 shadow-[0_2px_10px_rgba(255,255,255,0.15)]"
+                      : "bg-white/[0.06] text-white hover:bg-white/[0.10] border border-white/[0.06]"
+                  }
+                `}
+              >
+                All lines
+              </button>
+
+              <div className="grid grid-cols-7 sm:grid-cols-8 gap-2">
+                {ORDERED_LINES.map((id) => {
+                  const line = lines?.[id];
+                  if (!line) return null;
+                  const active = selectedLine === id;
+                  return (
+                    <button
+                      key={id}
+                      onClick={() => pick(id)}
+                      className={`
+                        nyc-bullet aspect-square rounded-full text-[17px] leading-none flex items-center justify-center touch-manipulation
+                        transition-transform duration-150
+                        shadow-[0_1px_4px_rgba(0,0,0,0.25)]
+                        ${
+                          active
+                            ? "scale-[1.10] ring-2 ring-white/95"
+                            : "active:scale-[0.92] hover:scale-105"
+                        }
+                      `}
+                      style={{ backgroundColor: line.color, color: line.textColor }}
+                      aria-label={`${line.id} — ${line.name}`}
+                    >
+                      {line.id}
+                    </button>
+                  );
+                })}
               </div>
-            ))}
+            </div>
           </div>
         </DialogPrimitive.Content>
       </DialogPrimitive.Portal>
