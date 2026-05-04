@@ -970,6 +970,21 @@ export default function SearchSheet({
         style={{
           paddingBottom: "calc(28dvh + 1rem + env(safe-area-inset-bottom))",
         }}
+        // Mirror iOS native "scroll to dismiss keyboard": as soon as
+        // the rider drags the results, blur the focused input so the
+        // keyboard collapses and the full list becomes visible. Tap
+        // gestures alone don't fire touchmove, so this only triggers
+        // on actual scrolls. blur() is idempotent — repeated calls
+        // during a drag are harmless.
+        onTouchMove={() => {
+          const el = document.activeElement;
+          if (
+            el instanceof HTMLElement &&
+            (el.tagName === "INPUT" || el.tagName === "TEXTAREA")
+          ) {
+            el.blur();
+          }
+        }}
       >
         {mode === "search" ? (
           searchResults === null && searchPlaceRows.length === 0 ? (
