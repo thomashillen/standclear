@@ -75,6 +75,10 @@ interface Props {
       | { kind: "station"; stopId: string }
       | { kind: "address"; lng: number; lat: number; name: string };
   }) => void;
+  /** Out-of-service-area CTA. Closes the panel and asks the parent to
+   *  fly the camera back to a Manhattan overview so a non-NYC visitor
+   *  sees the system map instead of an empty list. */
+  onPreviewMap?: () => void;
 }
 
 /**
@@ -402,6 +406,17 @@ function GoingToCard({
 // Search and trip planning live in SearchSheet so they have their own
 // dedicated surface (Apple Maps pattern).
 
+// Distance from the nearest NYC subway stop above which we treat the
+// rider as "out of service area" — past ~50 mi the nearest-stations
+// list is just confusing noise and we should show an explicit message
+// instead. Slightly conservative so a Yonkers / Jersey City visitor
+// still sees real nearby stops.
+const OUT_OF_AREA_M = 80_000;
+
+// localStorage key for the rider's last-used sheet detent. Mirrors
+// the "standclear:" namespace used by useTrains / useFavorites etc.
+const DETENT_STORAGE_KEY = "standclear:near:detent";
+
 export default function NearbyPanel({
   open,
   onClose,
@@ -409,6 +424,7 @@ export default function NearbyPanel({
   onTripSelect,
   selectedTripKey,
   onSeeAllRoutes,
+  onPreviewMap,
 }: Props) {
   const geo = useGeolocation(open);
   const lines = useLines();
@@ -644,11 +660,55 @@ export default function NearbyPanel({
   }, [favorites, stationsByComplexId, nearby, anchorIds]);
 
   // Shared sheet drag with half/full detents + dismiss threshold.
+  // Half detent shows ~38dvh of the sheet — title row plus the first
+  // station card or the Going-to card — leaving the map dominant on
+  // first paint. Returning riders who explicitly pulled the sheet to
+  // full have that preference restored from localStorage just below.
   const { detent, sheetStyle, handlers, onHandleTap, setDetent } = useSheetDrag({
-    halfRestingY: "calc(88dvh - 60dvh)",
+    halfRestingY: "calc(88dvh - 38dvh)",
     open,
     onDismiss: onClose,
+    onDetentChange: (d) => {
+      try {
+        window.localStorage.setItem(DETENT_STORAGE_KEY, d);
+      } catch {
+        // Quota / private mode — best-effort only.
+      }
+    },
   });
+
+  // Restore the rider's last-used detent on first open. Initial
+  // useState in useSheetDrag stays at "half" (SSR-safe), then this
+  // post-mount effect promotes to "full" if that's what was saved.
+  // Runs once per panel-open cycle so re-opening doesn't re-promote
+  // mid-session if the rider just pulled it down.
+  const restoredDetentRef = useRef(false);
+  useEffect(() => {
+    if (!open) {
+      restoredDetentRef.current = false;
+      return;
+    }
+    if (restoredDetentRef.current) return;
+    restoredDetentRef.current = true;
+    try {
+      const saved = window.localStorage.getItem(DETENT_STORAGE_KEY);
+      if (saved === "full") setDetent("full");
+    } catch {
+      // Ignore — caller doesn't care, just falls back to "half".
+    }
+  }, [open, setDetent]);
+
+  // True once we've heard back from the geolocation API and the
+  // nearest NYC stop is far enough away that nothing in the panel
+  // (Going-to card, favorites, nearby list) is going to be useful.
+  // Driven off `nearbyAll[0]?.meters` rather than a separate
+  // calculation so it stays consistent with what the list would show.
+  const farFromNYC =
+    geo.status === "granted" &&
+    geo.lng != null &&
+    geo.lat != null &&
+    nearbyAll.length > 0 &&
+    nearbyAll[0].meters > OUT_OF_AREA_M;
 
   if (!open) return null;
 
@@ -698,16 +758,17 @@ export default function NearbyPanel({
 
       <div
         className="flex-1 overflow-y-auto ios-scroll"
-        // At half detent the sheet hangs ~28dvh below the visible
-        // viewport, so the last items in the scroll content end up
-        // physically below where the rider can see. Adding 28dvh of
-        // bottom padding pushes the scrollable bottom past the
-        // overlap — the rider can scroll to the end without dragging
-        // the sheet up. Harmless at full detent (just adds dead space
-        // at the bottom of the list, which already has visual breathing
-        // room from the safe-area inset).
+        // At half detent the sheet hangs ~50dvh below the visible
+        // viewport (88dvh tall, ~38dvh visible), so the last items in
+        // the scroll content end up physically below where the rider
+        // can see. Adding 50dvh of bottom padding pushes the
+        // scrollable bottom past the overlap — the rider can scroll
+        // to the end without dragging the sheet up. Harmless at full
+        // detent (just adds dead space at the bottom of the list,
+        // which already has visual breathing room from the safe-area
+        // inset).
         style={{
-          paddingBottom: "calc(28dvh + 1rem + env(safe-area-inset-bottom))",
+          paddingBottom: "calc(50dvh + 1rem + env(safe-area-inset-bottom))",
         }}
         // Match SearchSheet: scrolling the list dismisses any
         // focused on-screen keyboard so the rider can see the full
@@ -722,6 +783,35 @@ export default function NearbyPanel({
           }
         }}
       >
+        {/* Out-of-service-area banner. When the rider's location
+            resolves to a point >50mi from any NYC stop, the
+            nearest-stations list would just be confusing noise — show
+            an explicit message and a CTA that pulls them out to a
+            Manhattan overview. Returning above any commute / favorite
+            data so a rider passing through (e.g. on Acela) still
+            knows their saved pins are intact. */}
+        {farFromNYC && (
+          <div className="mx-4 mt-4 mb-2 rounded-2xl border border-white/[0.06] bg-white/[0.04] px-4 py-5 text-center">
+            <MapPin className="w-9 h-9 mx-auto mb-3 text-gray-400" />
+            <p className="text-sm text-gray-100 font-semibold mb-1">
+              You&apos;re outside NYC
+            </p>
+            <p className="text-[12px] text-gray-400 leading-snug max-w-[260px] mx-auto mb-4">
+              StandClear tracks the NYC subway. The nearest stop is about{" "}
+              {Math.round(nearbyAll[0].meters / 1609)} mi away.
+            </p>
+            {onPreviewMap && (
+              <button
+                onClick={onPreviewMap}
+                className="press inline-flex items-center gap-2 px-4 h-10 rounded-full bg-white text-gray-950 text-[13px] font-semibold shadow-[0_4px_16px_rgba(255,255,255,0.18)]"
+              >
+                Preview the map
+                <ArrowRight className="w-4 h-4" />
+              </button>
+            )}
+          </div>
+        )}
+
         {/* Hero card: when both Home and Work are set, show next
             departures in the rider's likely commute direction. */}
         {goingTo && home && work && (
@@ -760,7 +850,7 @@ export default function NearbyPanel({
 
         {/* First-run hint: shown only when neither anchor is set, the
             user has location, and no other empty state is visible. */}
-        {!home && !work && geo.lng != null && (
+        {!home && !work && geo.lng != null && !farFromNYC && (
           <div className="mx-4 mt-3 mb-1 rounded-2xl border border-white/[0.06] bg-white/[0.04] px-3.5 py-2.5">
             <p className="text-[12px] text-gray-300 leading-snug">
               <span className="font-semibold text-gray-100">Pin your commute.</span>{" "}
@@ -798,7 +888,7 @@ export default function NearbyPanel({
           </div>
         )}
 
-        {nearby.length > 0 && (
+        {nearby.length > 0 && !farFromNYC && (
           <div>
             <div className="px-4 pt-3 pb-1.5 text-[10px] font-semibold text-gray-500 uppercase tracking-wider">
               Nearest stations

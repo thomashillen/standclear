@@ -17,6 +17,11 @@ interface MapViewProps {
    *  arrived yet, the fly stays pending and triggers as soon as a
    *  position is available. */
   flyToUserSignal?: number;
+  /** Increments when the rider asks for a "Preview the map" reset
+   *  (e.g. they're outside NYC and the Near-me panel is useless).
+   *  The map flies to the canonical Manhattan overview that the map
+   *  initializes with. */
+  flyToDefaultSignal?: number;
   /** Whether any covering panel (NearbyPanel, LinePanel, StationPanel)
    *  is currently rendered. When true, fly-to-user applies camera
    *  padding so the user's location lands in the *visible* portion of
@@ -329,7 +334,7 @@ function makeTrainIcon(color: string): ImageData {
   return ctx.getImageData(0, 0, W, H);
 }
 
-export default function MapView({ selectedLine, stationStopId, onLineSelect, onStationOpen, flyToUserSignal, panelOpen, selectedTrip, focusedLegIndex }: MapViewProps) {
+export default function MapView({ selectedLine, stationStopId, onLineSelect, onStationOpen, flyToUserSignal, flyToDefaultSignal, panelOpen, selectedTrip, focusedLegIndex }: MapViewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<MapboxMap | null>(null);
   const [mapLoaded, setMapLoaded] = useState(false);
@@ -703,6 +708,21 @@ export default function MapView({ selectedLine, stationStopId, onLineSelect, onS
             "icon-size": iconSizeByZoom,
             "icon-allow-overlap": true,
             "icon-ignore-placement": true,
+          },
+          paint: {
+            // Fade train capsules in as the rider zooms into a
+            // neighborhood. At the default cold-start zoom (~11) the
+            // map shows 300+ trains across the whole system — visually
+            // overwhelming and the route letters are unreadable that
+            // small anyway. By z=12.5 the icons are fully visible.
+            // Runtime selection logic in the line-selection effect
+            // wraps this expression so dimming-by-corridor still works.
+            "icon-opacity": [
+              "interpolate", ["linear"], ["zoom"],
+              10.5, 0,
+              11.5, 0.55,
+              12.5, 1,
+            ],
           },
         });
         map.addLayer({
@@ -1388,6 +1408,24 @@ export default function MapView({ selectedLine, stationStopId, onLineSelect, onS
     lastFlySignalRef.current = sig;
     setPendingFly(true);
   }, [flyToUserSignal]);
+
+  // Reset-to-Manhattan fly. Driven by flyToDefaultSignal — the Near-me
+  // panel bumps it when an out-of-NYC rider taps "Preview the map" so
+  // the camera lands somewhere useful regardless of where the user
+  // happens to be. Mirrors the map's initial center/zoom so the
+  // viewport returns to the same canonical frame the page first paints.
+  const lastDefaultSignalRef = useRef(0);
+  useEffect(() => {
+    const sig = flyToDefaultSignal ?? 0;
+    if (sig === 0 || sig === lastDefaultSignalRef.current) return;
+    lastDefaultSignalRef.current = sig;
+    if (!mapLoaded || !mapRef.current) return;
+    mapRef.current.flyTo({
+      center: [-73.9857, 40.7484],
+      zoom: 11,
+      duration: 900,
+    });
+  }, [flyToDefaultSignal, mapLoaded]);
   useEffect(() => {
     if (!pendingFly) return;
     if (!mapLoaded || !mapRef.current) return;
@@ -1526,8 +1564,37 @@ export default function MapView({ selectedLine, stationStopId, onLineSelect, onS
       "circle-stroke-opacity",
       inCorridor ? ["case", inCorridor, 1, 0.1] : STOP_OPACITY_BY_ZOOM,
     );
-    map.setPaintProperty("subway-trains-icon", "icon-opacity", matchSel(1, 0, 1));
-    map.setPaintProperty("subway-trains-text", "text-opacity", matchSel(1, 0, 1));
+    // Train icon/text opacity must stay zoom-faded (so cold-start at
+    // z≈11 isn't a wall of capsules) AND respect line-selection
+    // dimming. Per the comment above, `zoom` has to live at the top of
+    // an interpolate, so we push the selection `case` into each stop's
+    // value rather than wrapping the whole interpolate.
+    const trainIconOpacity = inCorridor
+      ? [
+          "interpolate", ["linear"], ["zoom"],
+          10.5, 0,
+          11.5, ["case", inCorridor, 0.55, 0],
+          12.5, ["case", inCorridor, 1, 0],
+        ]
+      : [
+          "interpolate", ["linear"], ["zoom"],
+          10.5, 0,
+          11.5, 0.55,
+          12.5, 1,
+        ];
+    const trainTextOpacity = inCorridor
+      ? [
+          "interpolate", ["linear"], ["zoom"],
+          11.5, 0,
+          12.5, ["case", inCorridor, 1, 0],
+        ]
+      : [
+          "interpolate", ["linear"], ["zoom"],
+          11.5, 0,
+          12.5, 1,
+        ];
+    map.setPaintProperty("subway-trains-icon", "icon-opacity", trainIconOpacity);
+    map.setPaintProperty("subway-trains-text", "text-opacity", trainTextOpacity);
 
     if (sel) {
       import("mapbox-gl").then((mapboxgl) => {

@@ -5,6 +5,7 @@ import {
   Search,
   X,
   Compass,
+  ChevronRight,
   ArrowLeftRight,
   ArrowLeft,
   MapPin,
@@ -761,7 +762,7 @@ export default function SearchSheet({
               type="search"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search stations, places, addresses"
+              placeholder="Where are you going?"
               aria-label="Search NYC"
               // 16px font-size prevents iOS Safari from auto-zooming
               // on focus. Below that threshold Safari zooms the page
@@ -1003,7 +1004,7 @@ export default function SearchSheet({
                                 Subway station
                               </span>
                             </span>
-                            <Compass className="w-4 h-4 text-gray-500 flex-shrink-0" />
+                            <ChevronRight className="w-4 h-4 text-gray-500 flex-shrink-0" />
                           </button>
                         );
                       }
@@ -1077,27 +1078,24 @@ export default function SearchSheet({
                       now={now}
                       isFavorite={has(s.stopId)}
                       onFavoriteToggle={() => toggle(s.stopId)}
+                      // In a search context the dominant rider intent
+                      // is "take me there", so the row body starts
+                      // directions. Anchor-pick mode is the exception —
+                      // the row is a one-tap pin.
                       onTap={() => {
-                        // Anchor-pick mode short-circuits the default
-                        // station-open behavior — tapping a result
-                        // pins it as the chosen anchor and closes
-                        // the sheet.
                         if (anchorPickMode) {
                           assignAnchor(anchorPickMode, s.stopId);
                           onAnchorPicked?.();
                           return;
                         }
-                        onStationOpen(s.stopId);
+                        startDirectionsTo(s as TripEndpoint);
                       }}
-                      // Tap = compass = "directions to here from
-                      // current location". Single unified handler so
-                      // both stations and places hit the same flow.
-                      // Suppressed in anchor-pick mode — the row is
-                      // a one-tap pin, no secondary actions.
-                      onDirectionsFrom={
-                        anchorPickMode
-                          ? undefined
-                          : () => startDirectionsTo(s as TripEndpoint)
+                      // Chevron preserves a one-tap path to the
+                      // station's live arrivals / transfers panel for
+                      // riders who want to glance at trains rather
+                      // than navigate. Hidden in anchor-pick mode.
+                      onOpenInfo={
+                        anchorPickMode ? undefined : () => onStationOpen(s.stopId)
                       }
                     />
                   ))}
@@ -1160,22 +1158,6 @@ export default function SearchSheet({
                             </p>
                           </div>
                         </button>
-                        <div className="flex items-center gap-0.5 flex-shrink-0 pt-0.5">
-                          {/* Directions compass — a place row's main
-                              CTA. Mirrors the StationRow compass so the
-                              affordance is consistent across kinds. */}
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              startDirectionsTo(destination);
-                            }}
-                            aria-label={`Directions to ${place.name}`}
-                            className="press w-7 h-7 flex items-center justify-center rounded-full text-gray-400 hover:text-sky-300 active:text-sky-400 touch-manipulation"
-                          >
-                            <Compass className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
                       </div>
                     );
                   })}

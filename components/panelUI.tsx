@@ -10,6 +10,7 @@ import {
   Briefcase,
   ArrowRight,
   ArrowLeft,
+  ChevronRight,
   Compass,
   Footprints,
   TrainFront,
@@ -129,6 +130,13 @@ export interface StationRowProps {
    *  SearchSheet's search-mode results so a rider can jump from
    *  "find a station" to "plan a trip from here" without a detour. */
   onDirectionsFrom?: () => void;
+  /** When provided, render a chevron action button that opens the
+   *  station's detail panel (live arrivals, transfers). Used in
+   *  SearchSheet results where the row body itself is wired to
+   *  start a trip — this preserves a one-tap path to the station's
+   *  schedule for riders who want to glance at trains rather than
+   *  navigate. */
+  onOpenInfo?: () => void;
 }
 
 export function StationRow({
@@ -141,6 +149,7 @@ export function StationRow({
   onTap,
   anchor,
   onDirectionsFrom,
+  onOpenInfo,
 }: StationRowProps) {
   // Drop arrivals whose eta has already passed (5s grace so a train
   // STOPPED_AT the platform still shows for a beat). Filtering here,
@@ -243,6 +252,16 @@ export function StationRow({
               className="press p-2 text-gray-400 hover:text-sky-300 active:text-sky-400 touch-manipulation"
             >
               <Compass className="w-5 h-5" />
+            </button>
+          )}
+          {onOpenInfo && (
+            <button
+              type="button"
+              onClick={onOpenInfo}
+              aria-label={`Show ${station.name} details`}
+              className="press p-2 text-gray-500 hover:text-gray-200 active:text-gray-100 touch-manipulation"
+            >
+              <ChevronRight className="w-5 h-5" />
             </button>
           )}
           <button

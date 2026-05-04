@@ -65,6 +65,35 @@ function dirFromStop(id: string): "N" | "S" {
   return id.endsWith("S") ? "S" : "N";
 }
 
+// Cross-poll memory of where each trip was last seen. MTA's GTFS-RT
+// stopTimeUpdate only lists FUTURE stops, so an in-transit vehicle's
+// `idx` in the update array is 0 and the prior stop is unrecoverable
+// from a single snapshot. Persisting `(prev, cur)` between polls is
+// the only way to keep a real previous stop available for the client
+// to interpolate against — without it, every IN_TRANSIT_TO train
+// arrives with prevStopId === nextStopId and renders pinned to the
+// next platform until it teleports to the following one.
+//
+// Module scope on a Vercel Node runtime survives across requests in
+// the same instance. A cold start drops the map, so the first poll
+// after a new instance comes up will still teleport for one cycle —
+// acceptable, and steady state recovers immediately.
+type TripStopEntry = {
+  prev: string;
+  cur: string;
+  sinceMs: number;
+  lastSeenMs: number;
+};
+const tripStopCache = new Map<string, TripStopEntry>();
+const TRIP_STOP_TTL_MS = 30 * 60 * 1000;
+
+function pruneTripStopCache(nowMs: number) {
+  const cutoff = nowMs - TRIP_STOP_TTL_MS;
+  for (const [k, v] of tripStopCache) {
+    if (v.lastSeenMs < cutoff) tripStopCache.delete(k);
+  }
+}
+
 async function fetchFeed(url: string): Promise<{ trains: Train[]; arrivals: Arrival[] }> {
   const res = await fetch(url, { cache: "no-store" });
   if (!res.ok) {
@@ -84,7 +113,8 @@ async function fetchFeed(url: string): Promise<{ trains: Train[]; arrivals: Arri
     }
   }
 
-  const now = Math.floor(Date.now() / 1000);
+  const nowMs = Date.now();
+  const now = Math.floor(nowMs / 1000);
   const trains: Train[] = [];
   const arrivals: Arrival[] = [];
 
@@ -97,9 +127,39 @@ async function fetchFeed(url: string): Promise<{ trains: Train[]; arrivals: Arri
     const direction = dirFromStop(stopId);
     const updates = updatesByTrip.get(tripId) || [];
     const idx = updates.findIndex((u) => u.stopId === stopId);
+    const parentCur = parentStop(stopId);
 
-    let prevStopId = parentStop(stopId);
-    let nextStopId = parentStop(stopId);
+    // Update the cross-poll cache. When the train's current stopId
+    // differs from the cached one, it advanced to a new stop —
+    // promote the old `cur` to `prev` and reset the segment timer.
+    // Otherwise, preserve the learned prev and the segment-entry
+    // timestamp so progress can advance smoothly toward arrival.
+    const cached = tripStopCache.get(tripId);
+    let cachedPrev: string | null = null;
+    let segmentSinceMs = nowMs;
+    if (!cached) {
+      tripStopCache.set(tripId, {
+        prev: parentCur,
+        cur: parentCur,
+        sinceMs: nowMs,
+        lastSeenMs: nowMs,
+      });
+    } else if (cached.cur !== parentCur) {
+      cachedPrev = cached.cur;
+      tripStopCache.set(tripId, {
+        prev: cached.cur,
+        cur: parentCur,
+        sinceMs: nowMs,
+        lastSeenMs: nowMs,
+      });
+    } else {
+      cachedPrev = cached.prev !== parentCur ? cached.prev : null;
+      segmentSinceMs = cached.sinceMs;
+      cached.lastSeenMs = nowMs;
+    }
+
+    let prevStopId = parentCur;
+    const nextStopId = parentCur;
     let progress = 0;
     const statusIdx = v.currentStatus ?? 2;
     const status = STATUS_NAMES[statusIdx] || "IN_TRANSIT_TO";
@@ -107,6 +167,8 @@ async function fetchFeed(url: string): Promise<{ trains: Train[]; arrivals: Arri
     if (status === "STOPPED_AT") {
       progress = 1;
     } else if (idx > 0) {
+      // Trip update happens to include the prior stop — use it
+      // directly so schedule-based progress stays accurate.
       const prev = updates[idx - 1];
       const cur = updates[idx];
       if (prev?.stopId) prevStopId = parentStop(prev.stopId);
@@ -114,6 +176,19 @@ async function fetchFeed(url: string): Promise<{ trains: Train[]; arrivals: Arri
       const curArr = toSec(cur?.arrival?.time);
       if (prevDep && curArr && curArr > prevDep) {
         progress = Math.max(0, Math.min(1, (now - prevDep) / (curArr - prevDep)));
+      } else {
+        progress = status === "INCOMING_AT" ? 0.9 : 0.5;
+      }
+    } else if (cachedPrev) {
+      // Typical MTA shape: stopTimeUpdate is trimmed to future stops
+      // only, so idx === 0 and the prior stop has to come from the
+      // cross-poll cache. Progress is interpolated from the time we
+      // first saw this segment to the next stop's scheduled arrival.
+      prevStopId = cachedPrev;
+      const curArr = idx >= 0 ? toSec(updates[idx]?.arrival?.time) : null;
+      const sinceSec = Math.floor(segmentSinceMs / 1000);
+      if (curArr && curArr > sinceSec) {
+        progress = Math.max(0, Math.min(1, (now - sinceSec) / (curArr - sinceSec)));
       } else {
         progress = status === "INCOMING_AT" ? 0.9 : 0.5;
       }
@@ -151,6 +226,7 @@ async function fetchFeed(url: string): Promise<{ trains: Train[]; arrivals: Arri
 }
 
 export async function GET() {
+  pruneTripStopCache(Date.now());
   const results = await Promise.allSettled(FEEDS.map(fetchFeed));
   const trains: Train[] = [];
   const arrivals: Arrival[] = [];
