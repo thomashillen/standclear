@@ -677,24 +677,27 @@ export default function SearchSheet({
       "
       style={sheetStyle}
     >
-      {/* Combined handle + title row. Same conventions as NearbyPanel
-          so the two sheets feel like siblings. */}
+      {/* Drag handle — separate flow row above the title row so it
+          gets a proper tap target (h-7 = 28px) for the tap-to-toggle
+          gesture. Visual rhythm matches NearbyPanel / StationPanel /
+          LinePanel. */}
+      <button
+        type="button"
+        className="sm:hidden flex items-start justify-center h-7 pt-1.5 flex-shrink-0 touch-none w-full"
+        onClick={onHandleTap}
+        aria-label={detent === "half" ? "Expand panel" : "Collapse panel"}
+      >
+        <div className="w-9 h-[5px] rounded-full bg-white/25" />
+      </button>
+
+      {/* Title row — drag-zone for the panel. */}
       <div
-        className="relative flex items-center justify-between px-4 pt-3.5 pb-1.5 flex-shrink-0 sm:cursor-auto cursor-grab active:cursor-grabbing touch-none sm:pt-2"
+        className="relative flex items-center justify-between px-4 pt-1.5 pb-2 flex-shrink-0 sm:cursor-auto cursor-grab active:cursor-grabbing touch-none sm:pt-2"
         onPointerDown={handlers.onPointerDown}
         onPointerMove={handlers.onPointerMove}
         onPointerUp={handlers.onPointerUp}
         onPointerCancel={handlers.onPointerCancel}
       >
-        <button
-          type="button"
-          className="sm:hidden absolute top-1.5 left-1/2 -translate-x-1/2 w-9 h-[5px] rounded-full bg-white/30 hover:bg-white/50 touch-manipulation"
-          onClick={(e) => {
-            e.stopPropagation();
-            onHandleTap();
-          }}
-          aria-label={detent === "half" ? "Expand panel" : "Collapse panel"}
-        />
         <div className="flex items-center gap-2 text-white min-w-0">
           {mode === "directions" && (
             // Back-to-search arrow. The segmented control is gone

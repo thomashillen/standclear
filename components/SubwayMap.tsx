@@ -362,6 +362,21 @@ export default function SubwayMap() {
     setFocusedLegIndex(null);
   };
 
+  // True when any of the z-20 bottom-sheet panels is rendered (Nearby,
+  // Station, Line, Search, More). Drives both MapView's camera-padding
+  // offset and the conditional render of the floating "Route shown"
+  // pill — that pill sits at the top of the map at safe-top + 3.75rem
+  // and would otherwise visually overlap the panel's drag-handle /
+  // title row, which sits just below it at panel-top-rest. Excludes
+  // Radix-Dialog modals (LiveTrainsPopup, AlertsDialog, AboutDialog)
+  // — those render at z-50 and naturally cover the pill.
+  const panelOpen =
+    (nearbyOpen && !stationStopId) ||
+    !!stationStopId ||
+    (!!selectedLine && !nearbyOpen && !stationStopId) ||
+    searchOpen ||
+    moreOpen;
+
   return (
     <div className="relative flex flex-col h-full bg-gray-950 text-white">
       {/* ── Map fills the full viewport ── */}
@@ -376,12 +391,7 @@ export default function SubwayMap() {
           // Camera padding for fly-to-user when a panel is covering
           // part of the screen, so the user's location lands in the
           // visible map area rather than behind the panel.
-          panelOpen={
-            (nearbyOpen && !stationStopId) ||
-            !!stationStopId ||
-            (!!selectedLine && !nearbyOpen && !stationStopId) ||
-            searchOpen
-          }
+          panelOpen={panelOpen}
           selectedTrip={selectedTrip}
           focusedLegIndex={focusedLegIndex}
         />
@@ -598,7 +608,7 @@ export default function SubwayMap() {
           way out of directions mode without hunting for the X in a
           covered sheet. iOS-26 styling: glass pill, route-color dots
           for visual anchor, small X cap for the dismiss action. */}
-      {selectedTripSelection && (
+      {selectedTripSelection && !panelOpen && (
         <div
           className="absolute inset-x-0 z-30 flex justify-center px-3 pointer-events-none"
           style={{

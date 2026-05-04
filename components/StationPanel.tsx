@@ -414,7 +414,7 @@ export default function StationPanel({ stopId, onClose, onSelectLine }: Props) {
     >
       <button
         type="button"
-        className="sm:hidden flex items-center justify-center h-5 pt-1.5 flex-shrink-0 touch-none w-full"
+        className="sm:hidden flex items-start justify-center h-7 pt-1.5 flex-shrink-0 touch-none w-full"
         onClick={onHandleTap}
         aria-label={detent === "half" ? "Expand panel" : "Collapse panel"}
       >
