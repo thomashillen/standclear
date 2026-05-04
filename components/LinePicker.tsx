@@ -1,7 +1,7 @@
 "use client";
 
 import * as DialogPrimitive from "@radix-ui/react-dialog";
-import { ChevronDown, X } from "lucide-react";
+import { ChevronDown, Train, X } from "lucide-react";
 import { useRef, useState } from "react";
 import { LINE_GROUPS, type Lines } from "@/lib/subwayData";
 
@@ -110,10 +110,10 @@ export default function LinePicker({ lines, selectedLine, onSelect }: LinePicker
         <DialogPrimitive.Content
           className="
             fixed z-50 text-white ios-glass
-            inset-x-0 bottom-0 rounded-t-[22px] border-t border-white/[0.08]
+            inset-x-0 bottom-0 rounded-t-[28px] border-t border-white/[0.08]
             pb-[env(safe-area-inset-bottom)]
-            sm:inset-auto sm:left-1/2 sm:top-1/2 sm:-translate-x-1/2 sm:-translate-y-1/2 sm:rounded-[18px] sm:border sm:border-white/[0.08] sm:max-w-sm sm:w-full sm:pb-0
-            shadow-[0_20px_60px_-10px_rgba(0,0,0,0.7)]
+            sm:inset-auto sm:left-1/2 sm:top-1/2 sm:-translate-x-1/2 sm:-translate-y-1/2 sm:rounded-[22px] sm:border sm:border-white/[0.08] sm:max-w-sm sm:w-full sm:pb-0
+            shadow-[0_20px_60px_-10px_rgba(0,0,0,0.6)]
             data-[state=open]:animate-in data-[state=closed]:animate-out
             data-[state=open]:slide-in-from-bottom data-[state=closed]:slide-out-to-bottom
             sm:data-[state=open]:slide-in-from-bottom-0 sm:data-[state=closed]:slide-out-to-bottom-0
@@ -139,32 +139,39 @@ export default function LinePicker({ lines, selectedLine, onSelect }: LinePicker
                 : "transform 220ms var(--ease-ios)",
             }}
           >
-            {/* Header: drag handle (mobile) + title + close. Drag
-                handlers attach here so a touch on the bullet grid
-                below taps cleanly without intercepting as a drag. */}
+            {/* Header: drag handle (mobile, absolutely positioned at
+                the top edge so the row's vertical rhythm matches the
+                rest of the app) + title + close. Same flex layout,
+                paddings, and close-button visual weight as
+                SearchSheet / NearbyPanel. Drag handlers live on the
+                whole row so a touch on the handle or the title text
+                starts a drag; taps on the close button (and bullets
+                below) register normally via the data-no-drag /
+                button-skip in the pointerdown handler. */}
             <div
-              className="relative flex items-center justify-between px-4 pt-3 pb-2 sm:cursor-auto cursor-grab active:cursor-grabbing touch-none sm:pt-3.5 sm:pb-2"
+              className="relative flex items-center justify-between px-4 pt-3.5 pb-2.5 sm:cursor-auto cursor-grab active:cursor-grabbing touch-none sm:pt-4 sm:pb-3"
               onPointerDown={onPointerDown}
               onPointerMove={onPointerMove}
               onPointerUp={onPointerUp}
               onPointerCancel={onPointerCancel}
             >
-              <div className="sm:hidden absolute top-1.5 left-1/2 -translate-x-1/2 w-9 h-[5px] rounded-full bg-white/30" />
-              <span className="text-[13px] font-bold tracking-tight text-white pt-2 sm:pt-0">
-                Lines
-              </span>
+              <div className="sm:hidden absolute top-1.5 left-1/2 -translate-x-1/2 w-9 h-[5px] rounded-full bg-white/25" />
+              <div className="flex items-center gap-2 text-white">
+                <Train className="w-[17px] h-[17px]" />
+                <span className="font-black text-[16px] tracking-tight">Lines</span>
+              </div>
               <DialogPrimitive.Close asChild>
                 <button
                   data-no-drag
-                  className="press w-7 h-7 -mr-1 flex items-center justify-center rounded-full bg-white/[0.08] hover:bg-white/[0.12] text-white touch-manipulation"
-                  aria-label="Close"
+                  className="press text-white opacity-85 hover:opacity-100 w-9 h-9 -mr-1 flex items-center justify-center rounded-full bg-white/[0.08] hover:bg-white/[0.12] touch-manipulation flex-shrink-0"
+                  aria-label="Close panel"
                 >
-                  <X className="w-3.5 h-3.5" strokeWidth={2.5} />
+                  <X className="w-[16px] h-[16px]" strokeWidth={2.5} />
                 </button>
               </DialogPrimitive.Close>
             </div>
 
-            <div className="px-3 pt-1 pb-4 sm:px-4 sm:pt-1 sm:pb-4">
+            <div className="px-4 pt-1 pb-5 sm:px-4 sm:pt-2 sm:pb-5">
               <div className="grid grid-cols-7 sm:grid-cols-8 gap-2">
                 {ORDERED_LINES.map((id) => {
                   const line = lines?.[id];
