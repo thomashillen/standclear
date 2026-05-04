@@ -763,7 +763,13 @@ export default function SearchSheet({
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Search stations, places, addresses"
               aria-label="Search NYC"
-              className="w-full h-11 pl-10 pr-10 rounded-xl bg-white/[0.08] border border-white/[0.06] text-[15px] text-gray-50 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-white/25 focus:border-transparent transition-shadow"
+              // 16px font-size prevents iOS Safari from auto-zooming
+              // on focus. Below that threshold Safari zooms the page
+              // to make text legible, then doesn't always cleanly
+              // reset on blur — leaving the top floating UI shifted
+              // behind the Dynamic Island. Same constraint applies
+              // to every other input in the app.
+              className="w-full h-11 pl-10 pr-10 rounded-xl bg-white/[0.08] border border-white/[0.06] text-[16px] text-gray-50 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-white/25 focus:border-transparent transition-shadow"
               autoFocus
             />
             {query && (

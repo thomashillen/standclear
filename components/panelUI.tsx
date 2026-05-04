@@ -322,7 +322,10 @@ export function PlannerField({
           onChange={(e) => onQueryChange(e.target.value)}
           placeholder={station ? `Change ${label.toLowerCase()}` : placeholder}
           aria-label={`${label} station search`}
-          className="flex-1 min-w-0 bg-transparent text-[14px] text-gray-50 placeholder-gray-400 focus:outline-none"
+          // 16px font-size prevents iOS Safari from auto-zooming
+          // the page on focus, which leaves the layout shifted
+          // behind the Dynamic Island even after blur.
+          className="flex-1 min-w-0 bg-transparent text-[16px] text-gray-50 placeholder-gray-400 focus:outline-none"
         />
         {query && (
           <button
