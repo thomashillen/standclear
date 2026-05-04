@@ -548,6 +548,171 @@ export default function SearchSheet({
     [searchPlaceResults, index],
   );
 
+  // ── Fastest-route preview for the top search hit.
+  // As the rider types, surface the fastest plan from current location
+  // to whatever ranks first in the results. Stations win over places
+  // when both match — a transit app should privilege subway hits.
+  // Skipped in anchor-pick mode (the rider is choosing a Home/Work
+  // pin, not navigating) and when we have no geolocation to route
+  // from.
+  const topSearchDestination = useMemo<TripEndpoint | null>(() => {
+    if (mode !== "search") return null;
+    if (anchorPickMode) return null;
+    if (searchResults && searchResults.length > 0) {
+      return searchResults[0] as TripEndpoint;
+    }
+    if (searchPlaceRows.length > 0) {
+      const { place, nearest } = searchPlaceRows[0];
+      return { ...nearest, displayName: place.name, address: place };
+    }
+    return null;
+  }, [mode, anchorPickMode, searchResults, searchPlaceRows]);
+
+  const topSearchFastest = useMemo<{
+    plan: TripPlan;
+    origin: TripEndpoint;
+    destination: TripEndpoint;
+    walkFromMeters?: number;
+    walkToMeters?: number;
+  } | null>(() => {
+    if (!topSearchDestination || !lines) return null;
+    if (geo.lat == null || geo.lng == null) return null;
+    const fromNearest = nearestStations(index, geo.lng, geo.lat, 1)[0];
+    if (!fromNearest) return null;
+    const origin: TripEndpoint = {
+      ...fromNearest,
+      displayName: "Current location",
+      address: {
+        id: "current-location",
+        name: "Current location",
+        context: "",
+        lng: geo.lng,
+        lat: geo.lat,
+      },
+    };
+    // Same expansion the directions-mode planner uses so we don't lock
+    // onto a single nearest station and miss a faster alternate.
+    const fromStopIds = Array.from(
+      new Set(
+        nearestStationsWithin(index, geo.lng, geo.lat, NEAR_RADIUS_M).flatMap(
+          (s) => s.stopIds,
+        ),
+      ),
+    );
+    const toStopIds = topSearchDestination.address
+      ? Array.from(
+          new Set(
+            nearestStationsWithin(
+              index,
+              topSearchDestination.address.lng,
+              topSearchDestination.address.lat,
+              NEAR_RADIUS_M,
+            ).flatMap((s) => s.stopIds),
+          ),
+        )
+      : topSearchDestination.stopIds;
+    const raw = planTrips(lines, index, fromStopIds, toStopIds, {
+      maxResults: 12,
+    });
+    const ranked = rankPlansByTime(raw, {
+      arrivalsByStation,
+      nowSec: now / 1000,
+      walkFromAnchor: { lng: geo.lng, lat: geo.lat },
+      walkToAnchor: topSearchDestination.address
+        ? {
+            lng: topSearchDestination.address.lng,
+            lat: topSearchDestination.address.lat,
+          }
+        : undefined,
+      stationsByComplexId,
+    });
+    if (ranked.length === 0) return null;
+    const plan = ranked[0];
+    const board = stationsByComplexId.get(plan.legs[0].boardComplexId);
+    const alight = stationsByComplexId.get(
+      plan.legs[plan.legs.length - 1].alightComplexId,
+    );
+    const walkFromMeters =
+      origin.address && board
+        ? haversineMeters(
+            { lat: origin.address.lat, lng: origin.address.lng },
+            { lat: board.lat, lng: board.lng },
+          )
+        : undefined;
+    const walkToMeters =
+      topSearchDestination.address && alight
+        ? haversineMeters(
+            {
+              lat: topSearchDestination.address.lat,
+              lng: topSearchDestination.address.lng,
+            },
+            { lat: alight.lat, lng: alight.lng },
+          )
+        : undefined;
+    return {
+      plan,
+      origin,
+      destination: topSearchDestination,
+      walkFromMeters,
+      walkToMeters: walkToMeters && walkToMeters > 0 ? walkToMeters : undefined,
+    };
+  }, [
+    topSearchDestination,
+    lines,
+    index,
+    arrivalsByStation,
+    now,
+    stationsByComplexId,
+    geo.lat,
+    geo.lng,
+  ]);
+
+  // Tap on the fastest-route preview: jump straight into the expanded
+  // A→Z detail view. Mirrors the state moves a normal "tap a result →
+  // tap a plan" sequence would make, just collapsed into one tap so
+  // the rider doesn't have to re-pick what we just showed them.
+  const openTopSearchDetail = () => {
+    if (!topSearchFastest) return;
+    const { plan, origin, destination } = topSearchFastest;
+    if (destination.address) {
+      addRecentPlace({
+        id: destination.address.id,
+        name: destination.address.name,
+        context: destination.address.context,
+        lng: destination.address.lng,
+        lat: destination.address.lat,
+      });
+    } else {
+      addRecentStation(destination.stopId, destination.name);
+    }
+    setMode("directions");
+    setQuery("");
+    setPlannerQuery("");
+    setSearchPlaceResults([]);
+    setTripFrom(origin);
+    setTripTo(destination);
+    setActiveField(null);
+    setExpandedPlan(plan);
+    onTripSelect?.({
+      plan,
+      walkFrom: origin.address
+        ? {
+            lng: origin.address.lng,
+            lat: origin.address.lat,
+            name: origin.address.name,
+          }
+        : undefined,
+      walkTo: destination.address
+        ? {
+            lng: destination.address.lng,
+            lat: destination.address.lat,
+            name: destination.address.name,
+          }
+        : undefined,
+    });
+    setDetent("half");
+  };
+
   // Unified "directions to here from current location" handoff used
   // by every result row in Search mode. The compass on a station, the
   // tap on a place — both end here. Origin defaults to the rider's
@@ -639,8 +804,15 @@ export default function SearchSheet({
   // sheet AND wipe the rider's in-progress search (mode reset, From/To
   // cleared) which is destructive. The X button remains the explicit
   // dismiss; drag only cycles between half and full detents.
+  //
+  // The half-detent visible portion shrinks when viewing the A→Z
+  // route detail — at that point the rider mostly cares about seeing
+  // the rendered route on the map, so a 60dvh panel covers more of
+  // the trip than they want. Drop to ~38dvh (matching NearbyPanel) so
+  // the map dominates while detail steps are still glanceable.
+  const halfVisibleDvh = expandedPlan ? 38 : 60;
   const { detent, sheetStyle, handlers, onHandleTap, setDetent } = useSheetDrag({
-    halfRestingY: "calc(100dvh - var(--panel-top-rest) - 60dvh)",
+    halfRestingY: `calc(100dvh - var(--panel-top-rest) - ${halfVisibleDvh}dvh)`,
     open,
     onDismiss: onClose,
     dismissOnDrag: false,
@@ -891,12 +1063,13 @@ export default function SearchSheet({
       {/* ── Mode-specific scroll content ──────────────────────────── */}
       <div
         className="flex-1 overflow-y-auto ios-scroll"
-        // At half detent the sheet's bottom 28dvh is below viewport.
-        // Pad enough to keep the last item reachable by scrolling
-        // without dragging the sheet up. See NearbyPanel for the full
-        // rationale.
+        // At half detent the sheet's hidden portion lives below
+        // viewport. Pad enough that the last item is reachable by
+        // scrolling without first dragging the sheet up. The padding
+        // grows when expanded route detail is showing because the
+        // half-detent shrinks (more sheet hangs below viewport).
         style={{
-          paddingBottom: "calc(28dvh + 1rem + env(safe-area-inset-bottom))",
+          paddingBottom: `calc(${88 - halfVisibleDvh}dvh + 1rem + env(safe-area-inset-bottom))`,
         }}
         // Mirror iOS native "scroll to dismiss keyboard": as soon as
         // the rider drags the results, blur the focused input so the
@@ -1067,6 +1240,45 @@ export default function SearchSheet({
             </div>
           ) : (
             <div>
+              {/* Fastest-route preview — auto-computed for whatever
+                  ranks first in the current results. Tapping jumps
+                  straight into the A→Z detail view and renders the
+                  route on the map; the rider doesn't have to first
+                  pick the destination then pick the plan. Skipped in
+                  anchor-pick mode and when geo isn't available. */}
+              {topSearchFastest && (
+                <div className="px-3 pt-3">
+                  <div className="px-2 pb-1.5 text-[10px] font-semibold text-amber-300/80 uppercase tracking-wider">
+                    Fastest route to {topSearchFastest.destination.displayName ?? topSearchFastest.destination.name}
+                  </div>
+                  <div
+                    className="rounded-2xl bg-gradient-to-br from-amber-500/10 via-amber-500/[0.04] to-transparent ring-1 ring-amber-400/20 p-1"
+                    style={{
+                      boxShadow:
+                        "inset 0 1px 0 rgba(255,255,255,0.10), 0 8px 24px -12px rgba(0,0,0,0.4)",
+                    }}
+                  >
+                    <TripPlanRow
+                      plan={topSearchFastest.plan}
+                      origin={topSearchFastest.origin}
+                      routeColors={routeColors}
+                      stationsByComplexId={stationsByComplexId}
+                      arrivals={
+                        arrivalsByStation.get(
+                          topSearchFastest.plan.legs[0].boardComplexId,
+                        ) ?? []
+                      }
+                      now={now}
+                      isPrimary
+                      onSelect={openTopSearchDetail}
+                      walkFromMeters={topSearchFastest.walkFromMeters}
+                      walkFromName={topSearchFastest.origin.address?.name}
+                      walkToMeters={topSearchFastest.walkToMeters}
+                      walkToName={topSearchFastest.destination.address?.name}
+                    />
+                  </div>
+                </div>
+              )}
               {searchResults && searchResults.length > 0 && (
                 <>
                   <div className="px-4 pt-3 pb-1.5 text-[10px] font-semibold text-gray-500 uppercase tracking-wider">

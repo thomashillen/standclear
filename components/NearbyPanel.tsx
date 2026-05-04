@@ -682,6 +682,13 @@ export default function NearbyPanel({
     },
   });
 
+  // Tracks the start of a content-area touch so an upward drag at
+  // half detent expands the sheet (iOS bottom-sheet pattern). We
+  // remember scrollTop at touchstart to make sure we only intercept
+  // pulls that started at the top of the list — partway-down drags
+  // continue scrolling content as expected.
+  const contentDragRef = useRef<{ startY: number; startScrollTop: number } | null>(null);
+
   // Restore the rider's last-used detent on first open. Initial
   // useState in useSheetDrag stays at "half" (SSR-safe), then this
   // post-mount effect promotes to "full" if that's what was saved.
@@ -778,10 +785,23 @@ export default function NearbyPanel({
         style={{
           paddingBottom: "calc(50dvh + 1rem + env(safe-area-inset-bottom))",
         }}
-        // Match SearchSheet: scrolling the list dismisses any
-        // focused on-screen keyboard so the rider can see the full
-        // results. touchmove (not scroll) so taps don't trigger.
-        onTouchMove={() => {
+        onTouchStart={(e) => {
+          // Track the start of a content-area swipe so we can promote
+          // an upward drag at half detent into an expand-to-full,
+          // mirroring iOS bottom-sheet behavior. Only the first touch
+          // counts; multi-touch (pinch) is ignored.
+          if (detent !== "half") {
+            contentDragRef.current = null;
+            return;
+          }
+          contentDragRef.current = {
+            startY: e.touches[0].clientY,
+            startScrollTop: e.currentTarget.scrollTop,
+          };
+        }}
+        onTouchMove={(e) => {
+          // Match SearchSheet: scrolling the list dismisses any focused
+          // on-screen keyboard so the rider can see the full results.
           const el = document.activeElement;
           if (
             el instanceof HTMLElement &&
@@ -789,6 +809,22 @@ export default function NearbyPanel({
           ) {
             el.blur();
           }
+          // iOS bottom-sheet pattern: if the rider pulls up from the
+          // top of the content, expand the panel to full instead of
+          // (or in addition to) scrolling. Tiny threshold so a tap-
+          // wobble doesn't trigger, but anything meaningful pulls up.
+          if (detent !== "half" || !contentDragRef.current) return;
+          const dy = e.touches[0].clientY - contentDragRef.current.startY;
+          if (dy < -12 && contentDragRef.current.startScrollTop <= 0) {
+            setDetent("full");
+            contentDragRef.current = null;
+          }
+        }}
+        onTouchEnd={() => {
+          contentDragRef.current = null;
+        }}
+        onTouchCancel={() => {
+          contentDragRef.current = null;
         }}
       >
         {/* Out-of-service-area banner. When the rider's location
