@@ -388,7 +388,7 @@ export default function StationPanel({ stopId, onClose, onSelectLine }: Props) {
   const now = useNow(true);
 
   const { detent, sheetStyle, handlers, onHandleTap } = useSheetDrag({
-    halfRestingY: "calc(88dvh - 55dvh)",
+    halfRestingY: "calc(100dvh - var(--panel-top-rest) - 55dvh)",
     open: true,
     onDismiss: onClose,
   });

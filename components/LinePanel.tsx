@@ -343,7 +343,7 @@ export default function LinePanel({ lineId, focusStopId, onClose, onStationOpen 
   // sheet DOM is always `full` tall — detent switches just animate a
   // translateY. Tap the handle to toggle; swipe down from half to dismiss.
   const { detent, sheetStyle, handlers, onHandleTap } = useSheetDrag({
-    halfRestingY: "calc(88dvh - 50dvh)",
+    halfRestingY: "calc(100dvh - var(--panel-top-rest) - 50dvh)",
     open: true,
     onDismiss: onClose,
   });

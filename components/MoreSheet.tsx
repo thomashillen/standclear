@@ -317,14 +317,14 @@ function AboutDialog({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="ios-glass border-white/[0.08] text-white rounded-t-[28px] sm:rounded-[22px] max-h-[85dvh] sm:max-h-[80dvh] overflow-hidden flex flex-col pb-[env(safe-area-inset-bottom)] sm:pb-6 shadow-[0_20px_60px_-10px_rgba(0,0,0,0.6)]">
-        <DialogHeader className="flex-shrink-0">
+        <DialogHeader className="flex-shrink-0 text-left pr-12">
           <DialogTitle className="text-white text-xl font-black tracking-tight flex items-center gap-2">
             <span className="text-[26px]" aria-hidden>
               🚇
             </span>
             StandClear
           </DialogTitle>
-          <DialogDescription className="text-gray-400">
+          <DialogDescription className="text-gray-400 text-left">
             Live, real-time NYC subway in your pocket.
           </DialogDescription>
         </DialogHeader>

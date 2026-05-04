@@ -363,13 +363,11 @@ export default function SubwayMap() {
   };
 
   // True when any of the z-20 bottom-sheet panels is rendered (Nearby,
-  // Station, Line, Search, More). Drives both MapView's camera-padding
-  // offset and the conditional render of the floating "Route shown"
-  // pill — that pill sits at the top of the map at safe-top + 3.75rem
-  // and would otherwise visually overlap the panel's drag-handle /
-  // title row, which sits just below it at panel-top-rest. Excludes
-  // Radix-Dialog modals (LiveTrainsPopup, AlertsDialog, AboutDialog)
-  // — those render at z-50 and naturally cover the pill.
+  // Station, Line, Search, More). Drives MapView's camera-padding
+  // offset. The Route-shown pill stays visible when a panel is open
+  // — instead, the panel-top-rest is bumped down so the pill clears
+  // the panel header (see the inline --panel-top-rest override
+  // below).
   const panelOpen =
     (nearbyOpen && !stationStopId) ||
     !!stationStopId ||
@@ -378,7 +376,20 @@ export default function SubwayMap() {
     moreOpen;
 
   return (
-    <div className="relative flex flex-col h-full bg-gray-950 text-white">
+    <div
+      className="relative flex flex-col h-full bg-gray-950 text-white"
+      style={{
+        // When a route is plotted, drop panels by 2rem so the
+        // Route-shown pill at safe-top + 3.75rem (h-9 ≈ 2.25rem) sits
+        // cleanly in the gap above the panel's drag handle. Without
+        // this bump the pill would overlap the panel header — and
+        // hiding the pill while a panel is open removed the only
+        // way to clear an active route mid-panel-session.
+        ["--panel-top-rest" as string]: selectedTripSelection
+          ? "calc(max(var(--safe-top), 0.5rem) + 6rem)"
+          : "calc(max(var(--safe-top), 0.5rem) + 4rem)",
+      }}
+    >
       {/* ── Map fills the full viewport ── */}
       <div className="relative flex flex-1 min-h-0">
         <MapView
@@ -608,7 +619,7 @@ export default function SubwayMap() {
           way out of directions mode without hunting for the X in a
           covered sheet. iOS-26 styling: glass pill, route-color dots
           for visual anchor, small X cap for the dismiss action. */}
-      {selectedTripSelection && !panelOpen && (
+      {selectedTripSelection && (
         <div
           className="absolute inset-x-0 z-30 flex justify-center px-3 pointer-events-none"
           style={{

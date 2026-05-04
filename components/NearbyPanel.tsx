@@ -665,7 +665,12 @@ export default function NearbyPanel({
   // first paint. Returning riders who explicitly pulled the sheet to
   // full have that preference restored from localStorage just below.
   const { detent, sheetStyle, handlers, onHandleTap, setDetent } = useSheetDrag({
-    halfRestingY: "calc(88dvh - 38dvh)",
+    // Panel height is now (100dvh - var(--panel-top-rest)) since we
+    // switched from a fixed h-[88dvh] to a top-anchored layout. The
+    // half-detent translation = panel_height - desired_visible, so
+    // it now follows the var so the visible strip stays at ~38dvh
+    // regardless of safe-area or whether a Route-shown pill is up.
+    halfRestingY: "calc(100dvh - var(--panel-top-rest) - 38dvh)",
     open,
     onDismiss: onClose,
     onDetentChange: (d) => {

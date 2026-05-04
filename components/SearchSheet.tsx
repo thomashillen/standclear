@@ -640,7 +640,7 @@ export default function SearchSheet({
   // cleared) which is destructive. The X button remains the explicit
   // dismiss; drag only cycles between half and full detents.
   const { detent, sheetStyle, handlers, onHandleTap, setDetent } = useSheetDrag({
-    halfRestingY: "calc(88dvh - 60dvh)",
+    halfRestingY: "calc(100dvh - var(--panel-top-rest) - 60dvh)",
     open,
     onDismiss: onClose,
     dismissOnDrag: false,
