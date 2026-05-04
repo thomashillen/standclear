@@ -1145,19 +1145,15 @@ export default function SearchSheet({
                     (() => {
                       const h = endpointToTrip(home);
                       if (!h) return null;
-                      const label =
-                        home.kind === "address" ? home.name : h.name;
                       return (
                         <button
                           type="button"
                           onClick={() => startDirectionsTo(h)}
-                          className="press flex items-center gap-1.5 h-8 px-3 rounded-full bg-emerald-300/10 hover:bg-emerald-300/15 ring-1 ring-emerald-300/30 text-emerald-100 text-[12px] font-semibold touch-manipulation min-w-0"
+                          aria-label="Directions to Home"
+                          className="press flex items-center gap-1.5 h-8 px-3 rounded-full bg-emerald-300/10 hover:bg-emerald-300/15 ring-1 ring-emerald-300/30 text-emerald-100 text-[12px] font-semibold touch-manipulation"
                         >
                           <Home className="w-3.5 h-3.5 flex-shrink-0" />
-                          <span className="truncate">Home</span>
-                          <span className="text-emerald-200/60 truncate min-w-0">
-                            {label}
-                          </span>
+                          Home
                         </button>
                       );
                     })()}
@@ -1165,19 +1161,15 @@ export default function SearchSheet({
                     (() => {
                       const w = endpointToTrip(work);
                       if (!w) return null;
-                      const label =
-                        work.kind === "address" ? work.name : w.name;
                       return (
                         <button
                           type="button"
                           onClick={() => startDirectionsTo(w)}
-                          className="press flex items-center gap-1.5 h-8 px-3 rounded-full bg-sky-300/10 hover:bg-sky-300/15 ring-1 ring-sky-300/30 text-sky-100 text-[12px] font-semibold touch-manipulation min-w-0"
+                          aria-label="Directions to Work"
+                          className="press flex items-center gap-1.5 h-8 px-3 rounded-full bg-sky-300/10 hover:bg-sky-300/15 ring-1 ring-sky-300/30 text-sky-100 text-[12px] font-semibold touch-manipulation"
                         >
                           <Briefcase className="w-3.5 h-3.5 flex-shrink-0" />
-                          <span className="truncate">Work</span>
-                          <span className="text-sky-200/60 truncate min-w-0">
-                            {label}
-                          </span>
+                          Work
                         </button>
                       );
                     })()}
