@@ -2,7 +2,7 @@
 
 import dynamic from "next/dynamic";
 import { useEffect, useMemo, useState } from "react";
-import { MapPin, MoreHorizontal, Search, TrainFront, X } from "lucide-react";
+import { MapPin, MoreHorizontal, Search, TrainFront } from "lucide-react";
 import { useLines } from "@/lib/subwayData";
 import { useTrains } from "@/lib/useTrains";
 import { legGeometry, type TripPlan } from "@/lib/commuteRouting";
@@ -379,15 +379,12 @@ export default function SubwayMap() {
     <div
       className="relative flex flex-col h-full bg-gray-950 text-white"
       style={{
-        // When a route is plotted, drop panels by 2rem so the
-        // Route-shown pill at safe-top + 3.75rem (h-9 ≈ 2.25rem) sits
-        // cleanly in the gap above the panel's drag handle. Without
-        // this bump the pill would overlap the panel header — and
-        // hiding the pill while a panel is open removed the only
-        // way to clear an active route mid-panel-session.
-        ["--panel-top-rest" as string]: selectedTripSelection
-          ? "calc(max(var(--safe-top), 0.5rem) + 6rem)"
-          : "calc(max(var(--safe-top), 0.5rem) + 4rem)",
+        // Panel top resting edge — shared CSS variable consumed by
+        // every bottom-sheet panel so they all start at the same
+        // distance from the top of the screen, clearing the floating
+        // control row (h-11 ≈ 2.75rem) plus safe-area and a small gap.
+        ["--panel-top-rest" as string]:
+          "calc(max(var(--safe-top), 0.5rem) + 4rem)",
       }}
     >
       {/* ── Map fills the full viewport ── */}
@@ -610,56 +607,6 @@ export default function SubwayMap() {
         </button>
       </div>
 
-      {/* ── Floating "Clear route" chip ──
-          Persistent dismiss affordance whenever a trip overlay is
-          active. Positioned just below the floating header so it
-          floats over the map but doesn't compete with the controls.
-          Visible from any panel state — Search, Nearby, Line, Station,
-          or no panel at all — so the rider always has an explicit
-          way out of directions mode without hunting for the X in a
-          covered sheet. iOS-26 styling: glass pill, route-color dots
-          for visual anchor, small X cap for the dismiss action. */}
-      {selectedTripSelection && (
-        <div
-          className="absolute inset-x-0 z-30 flex justify-center px-3 pointer-events-none"
-          style={{
-            top: "calc(max(var(--safe-top), 0.5rem) + 3.75rem)",
-          }}
-        >
-          <button
-            onClick={() => setSelectedTripSelection(null)}
-            aria-label="Clear route from map"
-            className="pointer-events-auto press inline-flex items-center gap-2 h-9 pl-2.5 pr-1.5 rounded-full ios-glass border border-white/[0.12] shadow-[0_8px_24px_rgba(0,0,0,0.5)] text-gray-100 touch-manipulation"
-          >
-            <span className="flex items-center -space-x-1">
-              {selectedTripSelection.plan.legs.slice(0, 3).map((leg, i) => {
-                const line = lines
-                  ? Object.values(lines).find((l) => l.routeId === leg.routeId)
-                  : null;
-                const color = line?.color ?? "#6b7280";
-                return (
-                  <span
-                    key={i}
-                    className="nyc-bullet flex items-center justify-center w-5 h-5 rounded-full text-[10px] text-white border border-black/30"
-                    style={{ backgroundColor: color }}
-                  >
-                    {leg.routeId}
-                  </span>
-                );
-              })}
-            </span>
-            <span className="text-[12px] font-medium tracking-tight">
-              Route shown
-            </span>
-            <span
-              className="flex items-center justify-center w-6 h-6 rounded-full bg-white/[0.10] ml-0.5"
-              aria-hidden
-            >
-              <X className="w-3.5 h-3.5" />
-            </span>
-          </button>
-        </div>
-      )}
     </div>
   );
 }
