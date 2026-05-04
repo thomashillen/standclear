@@ -35,8 +35,10 @@ import {
   type StationEntry,
 } from "@/lib/stopsIndex";
 import {
-  makeDebouncedGeocoder,
+  makeDebouncedSuggester,
+  retrievePlace,
   type Place,
+  type Suggestion,
 } from "@/lib/geocoding";
 import {
   RouteBullet,
@@ -204,7 +206,7 @@ export default function SearchSheet({
   // address into the same search bar and see both kinds of results
   // mixed — Apple Maps' single-search pattern.
   const [query, setQuery] = useState("");
-  const [searchPlaceResults, setSearchPlaceResults] = useState<Place[]>([]);
+  const [searchPlaceResults, setSearchPlaceResults] = useState<Suggestion[]>([]);
 
   // Directions-mode state. Endpoint type is a station-with-optional-
   // address-metadata so the field can show an address label while
@@ -217,7 +219,7 @@ export default function SearchSheet({
   // doesn't auto-focus and pop the keyboard before plans render.
   const [activeField, setActiveField] = useState<"from" | "to" | null>("from");
   const [plannerQuery, setPlannerQuery] = useState("");
-  const [plannerPlaceResults, setPlannerPlaceResults] = useState<Place[]>([]);
+  const [plannerPlaceResults, setPlannerPlaceResults] = useState<Suggestion[]>([]);
 
   // Read-only geo (no permission prompt) for proximity-biased
   // geocoding. The NearbyPanel mounts useGeolocation on its open
@@ -462,11 +464,11 @@ export default function SearchSheet({
     return searchStations(index, q, 30);
   }, [mode, plannerQuery, index]);
 
-  // Debounced geocoder so an autocomplete that fires on every
+  // Debounced suggester so an autocomplete that fires on every
   // keystroke doesn't slam the Mapbox API. One instance per mount;
   // useMemo with empty deps so the same closure persists across
   // renders.
-  const debouncedGeocoder = useMemo(() => makeDebouncedGeocoder(250), []);
+  const debouncedSuggester = useMemo(() => makeDebouncedSuggester(250), []);
 
   // Kick the geocoder when the planner query changes. The result
   // arrives async via setPlannerPlaceResults.
@@ -480,14 +482,14 @@ export default function SearchSheet({
       setPlannerPlaceResults([]);
       return;
     }
-    debouncedGeocoder(
+    debouncedSuggester(
       q,
       geo.lat != null && geo.lng != null
         ? { proximity: { lng: geo.lng, lat: geo.lat }, limit: 10 }
         : { limit: 10 },
       setPlannerPlaceResults,
     );
-  }, [mode, plannerQuery, debouncedGeocoder, geo.lat, geo.lng]);
+  }, [mode, plannerQuery, debouncedSuggester, geo.lat, geo.lng]);
 
   // Same idea for Search mode: as the rider types into the top-level
   // search bar, fire the debounced geocoder so addresses, neighborhoods,
@@ -504,49 +506,31 @@ export default function SearchSheet({
       setSearchPlaceResults([]);
       return;
     }
-    debouncedGeocoder(
+    debouncedSuggester(
       q,
       geo.lat != null && geo.lng != null
         ? { proximity: { lng: geo.lng, lat: geo.lat }, limit: 10 }
         : { limit: 10 },
       setSearchPlaceResults,
     );
-  }, [mode, query, debouncedGeocoder, geo.lat, geo.lng]);
+  }, [mode, query, debouncedSuggester, geo.lat, geo.lng]);
 
-  // Resolve each place to the nearest station so the trip planner
-  // (which routes between StationEntries) has a real subway endpoint
-  // to work with. Recomputes only when the place set or the index
-  // changes, which is rare relative to render cadence.
-  const placeRows = useMemo(
-    () =>
-      plannerPlaceResults
-        .map((place) => ({
-          place,
-          nearest: nearestStations(index, place.lng, place.lat, 1)[0] ?? null,
-        }))
-        .filter(
-          (r): r is { place: Place; nearest: StationEntry & { meters: number } } =>
-            r.nearest !== null,
-        ),
-    [plannerPlaceResults, index],
-  );
-
-  // Same derivation for Search mode places: each Mapbox hit pinned to
-  // its nearest station so a "directions to here" tap can route the
-  // rider through the subway from a real platform endpoint.
-  const searchPlaceRows = useMemo(
-    () =>
-      searchPlaceResults
-        .map((place) => ({
-          place,
-          nearest: nearestStations(index, place.lng, place.lat, 1)[0] ?? null,
-        }))
-        .filter(
-          (r): r is { place: Place; nearest: StationEntry & { meters: number } } =>
-            r.nearest !== null,
-        ),
-    [searchPlaceResults, index],
-  );
+  // Resolve a Suggestion to a Place + nearest station. Called on tap
+  // (not on every keystroke) — `/retrieve` is what fills in the
+  // coordinates the suggest endpoint deliberately omits.
+  const resolveSuggestion = async (
+    suggestion: Suggestion,
+  ): Promise<{ place: Place; nearest: StationEntry & { meters: number } } | null> => {
+    try {
+      const place = await retrievePlace(suggestion);
+      if (!place) return null;
+      const nearest = nearestStations(index, place.lng, place.lat, 1)[0];
+      if (!nearest) return null;
+      return { place, nearest };
+    } catch {
+      return null;
+    }
+  };
 
   // Unified "directions to here from current location" handoff used
   // by every result row in Search mode. The compass on a station, the
@@ -915,7 +899,7 @@ export default function SearchSheet({
         }}
       >
         {mode === "search" ? (
-          searchResults === null && searchPlaceRows.length === 0 ? (
+          searchResults === null && searchPlaceResults.length === 0 ? (
             // Empty + idle state. When the rider has both Home and
             // Work anchored we surface a quick-action card to plan
             // that commute right now — covers the most common
@@ -1061,7 +1045,7 @@ export default function SearchSheet({
               )}
             </div>
           ) : (searchResults?.length ?? 0) === 0 &&
-            searchPlaceRows.length === 0 ? (
+            searchPlaceResults.length === 0 ? (
             <div className="px-6 py-10 text-center text-sm text-gray-500">
               No stations or places match &ldquo;{query}&rdquo;
             </div>
@@ -1104,66 +1088,57 @@ export default function SearchSheet({
                   ))}
                 </>
               )}
-              {searchPlaceRows.length > 0 && (
+              {searchPlaceResults.length > 0 && (
                 <>
                   <div className="px-4 pt-3 pb-1.5 text-[10px] font-semibold text-gray-500 uppercase tracking-wider">
                     Places
                   </div>
-                  {searchPlaceRows.map(({ place, nearest }) => {
-                    const destination: TripEndpoint = {
-                      ...nearest,
-                      displayName: place.name,
-                      address: place,
-                    };
-                    return (
-                      <div
-                        key={`search-place-${place.id}`}
-                        className="flex items-start gap-2 px-4 py-3 border-b border-white/5 hover:bg-white/[0.04]"
+                  {searchPlaceResults.map((suggestion) => (
+                    <div
+                      key={`search-suggestion-${suggestion.mapboxId}`}
+                      className="flex items-start gap-2 px-4 py-3 border-b border-white/5 hover:bg-white/[0.04]"
+                    >
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          const resolved = await resolveSuggestion(suggestion);
+                          if (!resolved) return;
+                          const { place, nearest } = resolved;
+                          // Anchor-pick mode: pin this address and
+                          // close. No directions side-trip.
+                          if (anchorPickMode) {
+                            assignAnchorAddress(anchorPickMode, {
+                              name: place.name,
+                              lng: place.lng,
+                              lat: place.lat,
+                            });
+                            onAnchorPicked?.();
+                            return;
+                          }
+                          startDirectionsTo({
+                            ...nearest,
+                            displayName: place.name,
+                            address: place,
+                          });
+                        }}
+                        className="press flex-1 min-w-0 text-left flex items-start gap-3 touch-manipulation"
                       >
-                        <button
-                          type="button"
-                          onClick={() => {
-                            // Anchor-pick mode: pin this address and
-                            // close. No directions side-trip.
-                            if (anchorPickMode) {
-                              assignAnchorAddress(anchorPickMode, {
-                                name: place.name,
-                                lng: place.lng,
-                                lat: place.lat,
-                              });
-                              onAnchorPicked?.();
-                              return;
-                            }
-                            startDirectionsTo(destination);
-                          }}
-                          className="press flex-1 min-w-0 text-left flex items-start gap-3 touch-manipulation"
-                        >
-                          <span className="w-7 h-7 rounded-full bg-white/[0.08] border border-white/[0.10] flex items-center justify-center flex-shrink-0 mt-0.5">
-                            <MapPin className="w-3.5 h-3.5 text-gray-300" />
-                          </span>
-                          <div className="flex-1 min-w-0">
-                            <p className="text-sm font-semibold text-gray-100 leading-tight truncate">
-                              {place.name}
+                        <span className="w-7 h-7 rounded-full bg-white/[0.08] border border-white/[0.10] flex items-center justify-center flex-shrink-0 mt-0.5">
+                          <MapPin className="w-3.5 h-3.5 text-gray-300" />
+                        </span>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-semibold text-gray-100 leading-tight truncate">
+                            {suggestion.name}
+                          </p>
+                          {suggestion.context && (
+                            <p className="text-[11px] text-gray-500 leading-tight truncate">
+                              {suggestion.context}
                             </p>
-                            {place.context && (
-                              <p className="text-[11px] text-gray-500 leading-tight truncate">
-                                {place.context}
-                              </p>
-                            )}
-                            <p className="text-[11px] text-gray-400 mt-1 truncate">
-                              Nearest: {nearest.name}
-                              {nearest.meters !== undefined &&
-                                ` · ${
-                                  nearest.meters < 1000
-                                    ? `${Math.round(nearest.meters)} m`
-                                    : `${(nearest.meters / 1000).toFixed(1)} km`
-                                } walk`}
-                            </p>
-                          </div>
-                        </button>
-                      </div>
-                    );
-                  })}
+                          )}
+                        </div>
+                      </button>
+                    </div>
+                  ))}
                 </>
               )}
             </div>
@@ -1177,7 +1152,7 @@ export default function SearchSheet({
               </span>
               .
             </div>
-          ) : plannerSearchResults.length === 0 && placeRows.length === 0 ? (
+          ) : plannerSearchResults.length === 0 && plannerPlaceResults.length === 0 ? (
             <div className="px-6 py-10 text-center text-sm text-gray-500">
               No stations or places match &ldquo;{plannerQuery}&rdquo;
             </div>
@@ -1224,23 +1199,27 @@ export default function SearchSheet({
                 </>
               )}
               {/* Places — addresses, neighborhoods, POIs from Mapbox
-                  geocoding. Each row shows a pin icon, the place
-                  name, the neighborhood/borough context, and the
-                  nearest station (which the routing engine will use
-                  as the actual subway endpoint). */}
-              {placeRows.length > 0 && (
+                  Search Box `/suggest`. Coordinates aren't included in
+                  the suggestion payload; tapping triggers a `/retrieve`
+                  call that resolves coords and the routing engine's
+                  station endpoint. */}
+              {plannerPlaceResults.length > 0 && (
                 <>
                   <div className="px-4 pt-3 pb-1.5 text-[10px] font-semibold text-gray-500 uppercase tracking-wider">
                     Places
                   </div>
-                  {placeRows.map(({ place, nearest }) => (
+                  {plannerPlaceResults.map((suggestion) => (
                     <div
-                      key={`pick-place-${place.id}`}
+                      key={`pick-suggestion-${suggestion.mapboxId}`}
                       className="flex items-start gap-2 px-4 py-3 border-b border-white/5 hover:bg-white/[0.04]"
                     >
                       <button
                         type="button"
-                        onClick={() => pickPlannerPlace(place, nearest)}
+                        onClick={async () => {
+                          const resolved = await resolveSuggestion(suggestion);
+                          if (!resolved) return;
+                          pickPlannerPlace(resolved.place, resolved.nearest);
+                        }}
                         className="press flex-1 min-w-0 text-left flex items-start gap-3 touch-manipulation"
                       >
                         <span className="w-7 h-7 rounded-full bg-white/[0.08] border border-white/[0.10] flex items-center justify-center flex-shrink-0 mt-0.5">
@@ -1248,22 +1227,13 @@ export default function SearchSheet({
                         </span>
                         <div className="flex-1 min-w-0">
                           <p className="text-sm font-semibold text-gray-100 leading-tight truncate">
-                            {place.name}
+                            {suggestion.name}
                           </p>
-                          {place.context && (
+                          {suggestion.context && (
                             <p className="text-[11px] text-gray-500 leading-tight truncate">
-                              {place.context}
+                              {suggestion.context}
                             </p>
                           )}
-                          <p className="text-[11px] text-gray-400 mt-1 truncate">
-                            Nearest: {nearest.name}
-                            {nearest.meters !== undefined &&
-                              ` · ${
-                                nearest.meters < 1000
-                                  ? `${Math.round(nearest.meters)} m`
-                                  : `${(nearest.meters / 1000).toFixed(1)} km`
-                              } walk`}
-                          </p>
                         </div>
                       </button>
                     </div>
