@@ -618,7 +618,24 @@ export default function SubwayMap() {
             iOS convention that "settings / overflow actions" live at
             the trailing edge. */}
         <button
-          onClick={() => setMoreOpen(true)}
+          onClick={() => {
+            // Close any other panel that's currently covering the
+            // map slot — More is mutually exclusive with Search /
+            // NearbyPanel / LinePanel / StationPanel, same as the
+            // other floating-button entry points. In particular,
+            // when the rider is mid-anchor-pick (MoreSheet opened
+            // SearchSheet to grab a Home/Work address), tapping
+            // the dots again should bounce back to More instead
+            // of leaving the search panel layered behind it.
+            setSearchOpen(false);
+            setNearbyOpen(false);
+            setSelectedLine(null);
+            setFocusStopId(undefined);
+            setStationStopId(null);
+            setSearchAnchorPick(null);
+            setSearchPresetTrip(null);
+            setMoreOpen(true);
+          }}
           aria-label="More options"
           aria-pressed={moreOpen}
           className="pointer-events-auto press flex items-center justify-center w-11 h-11 rounded-full touch-manipulation flex-shrink-0 transition-colors border shadow-[0_6px_20px_rgba(0,0,0,0.45)] ios-glass text-gray-100 border-white/[0.10]"

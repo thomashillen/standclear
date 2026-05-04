@@ -1087,47 +1087,51 @@ export default function SearchSheet({
             // Work anchored we surface a quick-action card to plan
             // that commute right now — covers the most common
             // "Directions from scratch" entry point now that the
-            // segmented control is gone.
+            // segmented control is gone. Suppressed in anchor-pick
+            // mode: the rider is choosing a Home/Work pin, not
+            // navigating, so a "Quick commute Home → Work" card
+            // here is irrelevant noise (and would conflict with
+            // what they're trying to do — set one of those anchors).
             <div className="px-3 py-3 space-y-3">
-              {(() => {
-                const h = endpointToTrip(home);
-                const w = endpointToTrip(work);
-                if (!h || !w) return null;
-                return (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setMode("directions");
-                      setQuery("");
-                      setSearchPlaceResults([]);
-                      setTripFrom(h);
-                      setTripTo(w);
-                      setActiveField(null);
-                    }}
-                    className="press w-full flex items-center gap-3 p-3 rounded-2xl bg-white/[0.05] hover:bg-white/[0.08] border border-white/[0.08] touch-manipulation text-left"
-                  >
-                    <span className="flex items-center justify-center w-9 h-9 rounded-full bg-emerald-300/15 text-emerald-200 ring-1 ring-emerald-300/30">
-                      <Compass className="w-4 h-4" />
-                    </span>
-                    <span className="flex-1 min-w-0">
-                      <span className="block text-[11px] uppercase tracking-wider font-semibold text-gray-400">
-                        Quick commute
+              {!anchorPickMode &&
+                (() => {
+                  const h = endpointToTrip(home);
+                  const w = endpointToTrip(work);
+                  if (!h || !w) return null;
+                  return (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setMode("directions");
+                        setQuery("");
+                        setSearchPlaceResults([]);
+                        setTripFrom(h);
+                        setTripTo(w);
+                        setActiveField(null);
+                      }}
+                      className="press w-full flex items-center gap-3 p-3 rounded-2xl bg-white/[0.05] hover:bg-white/[0.08] border border-white/[0.08] touch-manipulation text-left"
+                    >
+                      <span className="flex items-center justify-center w-9 h-9 rounded-full bg-emerald-300/15 text-emerald-200 ring-1 ring-emerald-300/30">
+                        <Compass className="w-4 h-4" />
                       </span>
-                      <span className="block text-[14px] font-semibold text-gray-100 truncate">
-                        Home → Work
+                      <span className="flex-1 min-w-0">
+                        <span className="block text-[11px] uppercase tracking-wider font-semibold text-gray-400">
+                          Quick commute
+                        </span>
+                        <span className="block text-[14px] font-semibold text-gray-100 truncate">
+                          Home → Work
+                        </span>
+                        <span className="block text-[11px] text-gray-500 truncate">
+                          {(home?.kind === "address" ? home.name : h.name)}{" "}
+                          →{" "}
+                          {(work?.kind === "address" ? work.name : w.name)}
+                        </span>
                       </span>
-                      <span className="block text-[11px] text-gray-500 truncate">
-                        {(home?.kind === "address" ? home.name : h.name)}{" "}
-                        →{" "}
-                        {(work?.kind === "address" ? work.name : w.name)}
-                      </span>
-                    </span>
-                  </button>
-                );
-              })()}
+                    </button>
+                  );
+                })()}
               <p className="px-3 pt-1 text-center text-[12px] text-gray-500">
-                Search for a station, address, restaurant, or anywhere
-                in NYC.
+                Search for a station, address, or place.
               </p>
 
               {/* Recent searches — last 10 places the rider tapped
