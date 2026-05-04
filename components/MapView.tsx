@@ -346,43 +346,9 @@ export default function MapView({ selectedLine, stationStopId, onLineSelect, onS
   const lines = useLines();
   const geo = useGeolocationState();
 
-  // Debug overlay for diagnosing train motion on deployed builds where
-  // devtools aren't available (e.g. iOS Safari). Toggled by adding
-  // ?debug=trains to the URL. Written every frame by the rAF tick into
-  // a ref (cheap), then snapshotted into state at 2 Hz for rendering so
-  // React isn't re-rendering 30 times a second.
-  const debugInitial = {
-    enabled: false,
-    fps: 0,
-    dataAgeMs: 0,
-    nTrains: 0,
-    nMoving: 0,
-    sampleId: "",
-    sampleVelocity: 0,
-    sampleBaseProgress: 0,
-    samplePredicted: 0,
-    sampleDispDelta: 0,
-    sampleSegment: "",
-  };
-  const debugRef = useRef({ ...debugInitial });
-  const [debugVisible, setDebugVisible] = useState(false);
-  const [debugSnap, setDebugSnap] = useState(debugInitial);
 
   useEffect(() => { selectedLineRef.current = selectedLine; }, [selectedLine]);
   useEffect(() => { dataRef.current = data; }, [data]);
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const on = new URLSearchParams(window.location.search).get("debug") === "trains";
-    setDebugVisible(on);
-    debugRef.current.enabled = on;
-  }, []);
-
-  useEffect(() => {
-    if (!debugVisible) return;
-    const id = setInterval(() => setDebugSnap({ ...debugRef.current }), 500);
-    return () => clearInterval(id);
-  }, [debugVisible]);
 
   useEffect(() => {
     const token = process.env.NEXT_PUBLIC_MAPBOX_TOKEN;
@@ -1132,30 +1098,13 @@ export default function MapView({ selectedLine, stationStopId, onLineSelect, onS
       return (a + d * t + 360) % 360;
     };
 
-    const tickStamps: number[] = [];
     const tick = (now: number) => {
       frame = requestAnimationFrame(tick);
       if (now - lastTickTime < TICK_MS) return;
       lastTickTime = now;
 
-      if (debugRef.current.enabled) {
-        tickStamps.push(now);
-        while (tickStamps.length && tickStamps[0] < now - 1000) tickStamps.shift();
-        debugRef.current.fps = tickStamps.length;
-      }
-
       const d = dataRef.current;
-      if (!d) {
-        if (debugRef.current.enabled) {
-          debugRef.current.dataAgeMs = -1;
-          debugRef.current.nTrains = 0;
-        }
-        return;
-      }
-      if (debugRef.current.enabled) {
-        debugRef.current.dataAgeMs = Date.now() - d.generatedAt;
-        debugRef.current.nTrains = d.trains.length;
-      }
+      if (!d) return;
 
       // Re-bucket only when the upstream data object changes (every 8s poll).
       const newPoll = d !== lastData;
@@ -1186,10 +1135,6 @@ export default function MapView({ selectedLine, stationStopId, onLineSelect, onS
       };
       const computed: Computed[] = [];
       const seen = new Set<string>();
-      if (debugRef.current.enabled) {
-        debugRef.current.nMoving = 0;
-        debugRef.current.sampleId = "";
-      }
       for (const line of Object.values(lines)) {
         const trains = trainsByRoute.get(line.routeId);
         if (!trains) continue;
@@ -1248,29 +1193,8 @@ export default function MapView({ selectedLine, stationStopId, onLineSelect, onS
           // Lerp display toward predicted. In steady state the per-frame
           // delta is ~velocity × TICK_MS, so this is a small, invisible
           // correction rather than a visible catch-up glide.
-          const preLng = state.lng;
-          const preLat = state.lat;
           state.lng += (target.lng - state.lng) * LERP;
           state.lat += (target.lat - state.lat) * LERP;
-          if (debugRef.current.enabled) {
-            const moved = Math.hypot(state.lng - preLng, state.lat - preLat);
-            if (moved > 1e-7) debugRef.current.nMoving++;
-            // Sample the first IN_TRANSIT_TO train we see this frame —
-            // STOPPED_AT trains are dwelling and won't tell us anything.
-            if (
-              !debugRef.current.sampleId &&
-              t.status !== "STOPPED_AT" &&
-              state.prevStopId !== state.nextStopId
-            ) {
-              debugRef.current.sampleId = t.id;
-              debugRef.current.sampleVelocity = state.velocity;
-              debugRef.current.sampleBaseProgress = state.baseProgress;
-              debugRef.current.samplePredicted = predictedProgress;
-              debugRef.current.sampleDispDelta =
-                Math.hypot(target.lng - preLng, target.lat - preLat) * 111320;
-              debugRef.current.sampleSegment = `${state.prevStopId}→${state.nextStopId}`;
-            }
-          }
           state.bearing = lerpAngle(state.bearing, target.bearing, LERP);
           seen.add(t.id);
 
@@ -1954,33 +1878,5 @@ export default function MapView({ selectedLine, stationStopId, onLineSelect, onS
     );
   }
 
-  return (
-    <>
-      <div ref={containerRef} className="flex-1 w-full h-full" />
-      {debugVisible && (
-        <div className="pointer-events-none fixed top-2 left-2 z-[9999] max-w-[80vw] rounded-md bg-black/80 px-2.5 py-2 font-mono text-[11px] leading-tight text-green-300 shadow-lg">
-          <div className="text-yellow-300 font-bold mb-1">trains debug</div>
-          <div>fps: {debugSnap.fps}</div>
-          <div>
-            data age: {debugSnap.dataAgeMs < 0 ? "—" : `${debugSnap.dataAgeMs}ms`}
-          </div>
-          <div>trains: {debugSnap.nTrains}</div>
-          <div>moving this frame: {debugSnap.nMoving}</div>
-          <div className="mt-1 text-cyan-300">sample (in-transit):</div>
-          {debugSnap.sampleId ? (
-            <>
-              <div>id: {debugSnap.sampleId.slice(-12)}</div>
-              <div>seg: {debugSnap.sampleSegment}</div>
-              <div>v (frac/s): {debugSnap.sampleVelocity.toFixed(5)}</div>
-              <div>baseProg: {debugSnap.sampleBaseProgress.toFixed(3)}</div>
-              <div>predProg: {debugSnap.samplePredicted.toFixed(3)}</div>
-              <div>tgt-disp: {debugSnap.sampleDispDelta.toFixed(2)}m</div>
-            </>
-          ) : (
-            <div className="text-red-300">none in transit</div>
-          )}
-        </div>
-      )}
-    </>
-  );
+  return <div ref={containerRef} className="flex-1 w-full h-full" />;
 }
