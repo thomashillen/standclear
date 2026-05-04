@@ -49,6 +49,13 @@ interface MapViewProps {
     to: { lng: number; lat: number };
     coords?: [number, number][];
   } | null;
+  /** True when the SearchSheet is showing a single plan's detail
+   *  view (panel collapses to ~38dvh) vs the plan-list view (~60dvh).
+   *  Drives a tighter bottom padding when fitting the trip's
+   *  bounds — the plan list covers more of the screen and needs
+   *  more room reserved at the bottom or the route gets cropped
+   *  behind the panel. */
+  tripDetailExpanded?: boolean;
 }
 
 /** Lightweight DTO between SubwayMap (which holds the user's chosen
@@ -406,7 +413,7 @@ function makeTrainGlowIcon(): ImageData {
   return ctx.getImageData(0, 0, W, H);
 }
 
-export default function MapView({ selectedLine, stationStopId, onLineSelect, onStationOpen, flyToUserSignal, flyToDefaultSignal, panelOpen, selectedTrip, focusedLegIndex, walkOnlyOverlay }: MapViewProps) {
+export default function MapView({ selectedLine, stationStopId, onLineSelect, onStationOpen, flyToUserSignal, flyToDefaultSignal, panelOpen, selectedTrip, focusedLegIndex, walkOnlyOverlay, tripDetailExpanded }: MapViewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<MapboxMap | null>(null);
   const [mapLoaded, setMapLoaded] = useState(false);
@@ -2235,15 +2242,20 @@ export default function MapView({ selectedLine, stationStopId, onLineSelect, onS
       Number.isFinite(maxLat)
     ) {
       const isMobile = window.matchMedia("(max-width: 639px)").matches;
-      // When a trip is selected the SearchSheet/NearbyPanel sits at the
-      // half-detent showing ~38dvh of content — its top edge lands at
-      // ~62dvh from the top of the viewport, meaning only the top 62%
-      // of the map is visible. Setting bottom padding to ~38% of the
-      // viewport height keeps route endpoints clear of the panel with a
-      // small buffer. Top padding clears the floating control row
-      // (~4rem from top on mobile, plus a ~2.75rem control bar).
+      // The SearchSheet sits at one of two heights when a trip is
+      // selected:
+      //   • ≈38dvh in route-detail mode (rider opened a plan's
+      //     A→Z timeline)
+      //   • ≈60dvh in plan-list mode (rider hasn't picked a plan
+      //     yet; auto-preselect renders the first plan but the sheet
+      //     keeps the full list visible above)
+      // The visible map area is the inverse of the panel height.
+      // Padding the bottom of fitBounds by that height keeps the
+      // trip from being cropped behind the panel. The `+ 24` buffer
+      // is breathing room above the panel's top edge.
+      const panelDvh = tripDetailExpanded ? 0.42 : 0.62;
       const bottomPad = isMobile
-        ? Math.round(window.innerHeight * 0.42) + 24
+        ? Math.round(window.innerHeight * panelDvh) + 24
         : 60;
       const rightPad = isMobile ? 40 : 360;
       map.fitBounds(
@@ -2258,7 +2270,7 @@ export default function MapView({ selectedLine, stationStopId, onLineSelect, onS
         },
       );
     }
-  }, [selectedTrip, mapLoaded, focusedLegIndex]);
+  }, [selectedTrip, mapLoaded, focusedLegIndex, tripDetailExpanded]);
 
   // ── Walk-only overlay ──────────────────────────────────────────────
   // When the SearchSheet decides walking is faster than subway, it

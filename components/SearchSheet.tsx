@@ -125,6 +125,14 @@ interface Props {
         }
       | null,
   ) => void;
+  /** Fires when the rider opens / closes a specific plan's detail
+   *  view (the A→Z timeline). The parent uses this to tell MapView
+   *  whether the SearchSheet is currently in the larger plan-list
+   *  state (panel ≈60dvh) or the smaller detail state (≈38dvh) so
+   *  the trip's camera fit can leave the right amount of room
+   *  below. Without this signal the route's south end can hide
+   *  behind the taller plan-list panel. */
+  onExpandedPlanChange?: (expanded: boolean) => void;
 }
 
 // ─── SearchSheet ─────────────────────────────────────────────────────
@@ -181,6 +189,7 @@ export default function SearchSheet({
   focusedLegIndex = null,
   onFocusLeg,
   onWalkOnlyChange,
+  onExpandedPlanChange,
 }: Props) {
   const lines = useLines();
   const data = useTrains();
@@ -579,6 +588,16 @@ export default function SearchSheet({
       onWalkOnlyChange(null);
     };
   }, [walkIsBest, tripFrom, tripTo, walkOnlyRoute, onWalkOnlyChange]);
+
+  // Mirror the expandedPlan flag up to the parent so MapView can
+  // pad its trip-fit camera differently based on which detent the
+  // sheet is in (plan list ≈60dvh vs detail ≈38dvh).
+  useEffect(() => {
+    onExpandedPlanChange?.(!!expandedPlan);
+    return () => {
+      onExpandedPlanChange?.(false);
+    };
+  }, [expandedPlan, onExpandedPlanChange]);
 
   // Auto-select the fastest plan whenever a fresh ranked list arrives
   // and nothing is currently selected. The rider almost always wants
@@ -1120,7 +1139,7 @@ export default function SearchSheet({
             )}
           </div>
         </div>
-      ) : (
+      ) : expandedPlan ? null : (
         <div className="px-3 pb-2.5 flex-shrink-0 border-b border-white/[0.06]">
           {/* Inline search: the active field IS the input. Tapping
               an inactive field activates it, focuses an embedded
@@ -1129,7 +1148,15 @@ export default function SearchSheet({
               When the endpoint is an address (TripEndpoint with a
               displayName), shadow `name` with displayName so the
               field shows "123 Main St" instead of the underlying
-              station's name. */}
+              station's name.
+
+              Suppressed when the rider is inside a specific route's
+              detail view: the previous screen already showed From/To
+              prominently and TripPlanDetail re-states them as the
+              "Walk to <board>" / "Walk to <destination>" rows, so
+              keeping the editable fields here just steals vertical
+              space from the timeline. The header back button is the
+              way back to the list (where the fields live). */}
           <div className="relative flex gap-2">
             <div className="flex-1 min-w-0 space-y-1.5">
               <PlannerField

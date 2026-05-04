@@ -119,6 +119,12 @@ export default function SubwayMap() {
     to: { lng: number; lat: number };
     coords?: [number, number][];
   } | null>(null);
+  // Whether the SearchSheet is currently inside a plan's detail view
+  // (panel ≈38dvh) vs the plan-list view (panel ≈60dvh). MapView uses
+  // it to pick the right bottom padding when fitting the trip — so a
+  // route's southern end doesn't hide behind the taller plan-list
+  // panel.
+  const [tripDetailExpanded, setTripDetailExpanded] = useState(false);
   // Fly-to-user signal — increments each time the user taps Near-me so
   // MapView can fly the camera to their location (waiting for geo if it
   // isn't available yet). Counter, not a boolean, so successive taps
@@ -412,6 +418,7 @@ export default function SubwayMap() {
           selectedTrip={selectedTrip}
           focusedLegIndex={focusedLegIndex}
           walkOnlyOverlay={walkOnlyOverlay}
+          tripDetailExpanded={tripDetailExpanded}
         />
         {selectedLine && !nearbyOpen && !stationStopId && (
           <LinePanel
@@ -484,6 +491,7 @@ export default function SubwayMap() {
           focusedLegIndex={focusedLegIndex}
           onFocusLeg={setFocusedLegIndex}
           onWalkOnlyChange={setWalkOnlyOverlay}
+          onExpandedPlanChange={setTripDetailExpanded}
         />
       </div>
 
