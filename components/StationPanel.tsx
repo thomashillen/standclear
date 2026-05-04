@@ -15,6 +15,15 @@ interface Props {
   onSelectLine: (routeId: string) => void;
 }
 
+// Arrival rows we synthesize for trains physically AT (or very recently at)
+// the platform carry `live: true`. Their `eta` is set to the server's data
+// timestamp at synthesis time and does NOT auto-refresh between polls — so
+// they must be exempt from the time-expiry filter that drops feed-supplied
+// arrivals once their eta is more than ~5 s in the past. The lifetime of a
+// live arrival is governed by the STOPPED_AT memo's grace window, not by
+// its eta.
+type LiveArrival = Arrival & { live?: boolean };
+
 // Live countdown for the station detail rows. Seconds in the final
 // minute (urgency window), rounded minutes above that. The string
 // re-renders every tick of the parent's now-clock.
@@ -279,8 +288,8 @@ export default function StationPanel({ stopId, onClose, onSelectLine }: Props) {
   }, [data]);
 
   const { north, south } = useMemo(() => {
-    const n: Arrival[] = [];
-    const s: Arrival[] = [];
+    const n: LiveArrival[] = [];
+    const s: LiveArrival[] = [];
     if (!data || !stationIds) return { north: n, south: s };
     const nowSec = data.generatedAt / 1000;
     const CUTOFF = 45 * 60;
@@ -301,12 +310,13 @@ export default function StationPanel({ stopId, onClose, onSelectLine }: Props) {
       if (t.status !== "STOPPED_AT") continue;
       if (!stationIds.has(t.prevStopId)) continue;
       considered.add(t.id);
-      const arr: Arrival = {
+      const arr: LiveArrival = {
         routeId: t.routeId,
         stopId: t.prevStopId,
         direction: t.direction,
         eta: nowSec,
         tripId: t.id,
+        live: true,
       };
       seen.add(`${t.id}|${t.prevStopId}`);
       if (arr.direction === "N") n.push(arr);
@@ -320,12 +330,13 @@ export default function StationPanel({ stopId, onClose, onSelectLine }: Props) {
       if (!stationIds.has(entry.stopId)) continue;
       if (nowMs - entry.lastSeenMs > STOPPED_AT_GRACE_MS) continue;
       const t = entry.train;
-      const arr: Arrival = {
+      const arr: LiveArrival = {
         routeId: t.routeId,
         stopId: entry.stopId,
         direction: t.direction,
         eta: nowSec,
         tripId,
+        live: true,
       };
       seen.add(`${tripId}|${entry.stopId}`);
       if (arr.direction === "N") n.push(arr);
@@ -615,7 +626,7 @@ function DirectionSection({
 }: {
   label: string;
   icon: React.ReactNode;
-  arrivals: Arrival[];
+  arrivals: LiveArrival[];
   now: number;
   routeInfo: Map<string, { id: string; color: string; textColor: "white" | "black" }>;
   terminusByRoute: Map<string, { N: string; S: string }>;
@@ -626,8 +637,15 @@ function DirectionSection({
 
   // Drop arrivals whose eta has already passed (5s grace for trains
   // pulling in). Re-runs each tick of `now` so departed trains drop
-  // out the moment they leave, not when the feed next polls.
-  const visible = arrivals.filter((a) => a.eta - now / 1000 > -5);
+  // out the moment they leave, not when the feed next polls. Live
+  // arrivals (synthesized from STOPPED_AT/recently-STOPPED_AT) are
+  // exempt: their eta is frozen at the data's generatedAt and would
+  // otherwise drop out between polls even though the train is still
+  // physically at the platform. Their lifetime is bounded by the
+  // STOPPED_AT memo's grace window upstream.
+  const visible = arrivals.filter(
+    (a) => a.live || a.eta - now / 1000 > -5,
+  );
   const shown = expanded
     ? visible
     : visible.slice(0, DEFAULT_ARRIVALS_PER_DIRECTION);
