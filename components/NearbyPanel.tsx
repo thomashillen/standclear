@@ -709,6 +709,18 @@ export default function NearbyPanel({
         style={{
           paddingBottom: "calc(28dvh + 1rem + env(safe-area-inset-bottom))",
         }}
+        // Match SearchSheet: scrolling the list dismisses any
+        // focused on-screen keyboard so the rider can see the full
+        // results. touchmove (not scroll) so taps don't trigger.
+        onTouchMove={() => {
+          const el = document.activeElement;
+          if (
+            el instanceof HTMLElement &&
+            (el.tagName === "INPUT" || el.tagName === "TEXTAREA")
+          ) {
+            el.blur();
+          }
+        }}
       >
         {/* Hero card: when both Home and Work are set, show next
             departures in the rider's likely commute direction. */}
