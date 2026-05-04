@@ -115,6 +115,11 @@ export default function SubwayMap() {
   // isn't available yet). Counter, not a boolean, so successive taps
   // each register as fresh requests rather than no-ops.
   const [flyToUserSignal, setFlyToUserSignal] = useState(0);
+  // Counter the Near-me panel bumps when an out-of-NYC rider taps
+  // "Preview the map". Treated identically to flyToUserSignal but
+  // routes to a different camera move (canonical Manhattan overview
+  // instead of the rider's geolocation).
+  const [flyToDefaultSignal, setFlyToDefaultSignal] = useState(0);
   const data = useTrains();
   const lines = useLines();
 
@@ -367,6 +372,7 @@ export default function SubwayMap() {
           onLineSelect={handleLineSelect}
           onStationOpen={handleStationOpen}
           flyToUserSignal={flyToUserSignal}
+          flyToDefaultSignal={flyToDefaultSignal}
           // Camera padding for fly-to-user when a panel is covering
           // part of the screen, so the user's location lands in the
           // visible map area rather than behind the panel.
@@ -404,6 +410,10 @@ export default function SubwayMap() {
           onTripSelect={handleTripSelect}
           selectedTripKey={selectedTripKey}
           onSeeAllRoutes={handleSeeAllRoutes}
+          onPreviewMap={() => {
+            setNearbyOpen(false);
+            setFlyToDefaultSignal((s) => s + 1);
+          }}
         />
         <MoreSheet
           open={moreOpen}

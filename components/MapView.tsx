@@ -17,6 +17,11 @@ interface MapViewProps {
    *  arrived yet, the fly stays pending and triggers as soon as a
    *  position is available. */
   flyToUserSignal?: number;
+  /** Increments when the rider asks for a "Preview the map" reset
+   *  (e.g. they're outside NYC and the Near-me panel is useless).
+   *  The map flies to the canonical Manhattan overview that the map
+   *  initializes with. */
+  flyToDefaultSignal?: number;
   /** Whether any covering panel (NearbyPanel, LinePanel, StationPanel)
    *  is currently rendered. When true, fly-to-user applies camera
    *  padding so the user's location lands in the *visible* portion of
@@ -329,7 +334,7 @@ function makeTrainIcon(color: string): ImageData {
   return ctx.getImageData(0, 0, W, H);
 }
 
-export default function MapView({ selectedLine, stationStopId, onLineSelect, onStationOpen, flyToUserSignal, panelOpen, selectedTrip, focusedLegIndex }: MapViewProps) {
+export default function MapView({ selectedLine, stationStopId, onLineSelect, onStationOpen, flyToUserSignal, flyToDefaultSignal, panelOpen, selectedTrip, focusedLegIndex }: MapViewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<MapboxMap | null>(null);
   const [mapLoaded, setMapLoaded] = useState(false);
@@ -1388,6 +1393,24 @@ export default function MapView({ selectedLine, stationStopId, onLineSelect, onS
     lastFlySignalRef.current = sig;
     setPendingFly(true);
   }, [flyToUserSignal]);
+
+  // Reset-to-Manhattan fly. Driven by flyToDefaultSignal — the Near-me
+  // panel bumps it when an out-of-NYC rider taps "Preview the map" so
+  // the camera lands somewhere useful regardless of where the user
+  // happens to be. Mirrors the map's initial center/zoom so the
+  // viewport returns to the same canonical frame the page first paints.
+  const lastDefaultSignalRef = useRef(0);
+  useEffect(() => {
+    const sig = flyToDefaultSignal ?? 0;
+    if (sig === 0 || sig === lastDefaultSignalRef.current) return;
+    lastDefaultSignalRef.current = sig;
+    if (!mapLoaded || !mapRef.current) return;
+    mapRef.current.flyTo({
+      center: [-73.9857, 40.7484],
+      zoom: 11,
+      duration: 900,
+    });
+  }, [flyToDefaultSignal, mapLoaded]);
   useEffect(() => {
     if (!pendingFly) return;
     if (!mapLoaded || !mapRef.current) return;
