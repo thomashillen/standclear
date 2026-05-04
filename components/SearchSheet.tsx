@@ -640,7 +640,7 @@ export default function SearchSheet({
   // cleared) which is destructive. The X button remains the explicit
   // dismiss; drag only cycles between half and full detents.
   const { detent, sheetStyle, handlers, onHandleTap, setDetent } = useSheetDrag({
-    halfRestingY: "calc(88dvh - 60dvh)",
+    halfRestingY: "calc(100dvh - var(--panel-top-rest) - 60dvh)",
     open,
     onDismiss: onClose,
     dismissOnDrag: false,
@@ -669,7 +669,7 @@ export default function SearchSheet({
     <div
       className="
         absolute z-20 overflow-hidden flex flex-col
-        inset-x-0 bottom-0 h-[88dvh] rounded-t-[28px] border-t border-white/[0.08]
+        inset-x-0 bottom-0 top-[var(--panel-top-rest)] rounded-t-[28px] border-t border-white/[0.08]
         sm:inset-auto sm:right-3 sm:top-3 sm:bottom-3 sm:w-[340px] sm:h-auto sm:rounded-[22px] sm:border sm:border-white/[0.08]
         ios-glass
         shadow-[0_20px_60px_-10px_rgba(0,0,0,0.6)]
@@ -677,24 +677,27 @@ export default function SearchSheet({
       "
       style={sheetStyle}
     >
-      {/* Combined handle + title row. Same conventions as NearbyPanel
-          so the two sheets feel like siblings. */}
+      {/* Drag handle — separate flow row above the title row so it
+          gets a proper tap target (h-7 = 28px) for the tap-to-toggle
+          gesture. Visual rhythm matches NearbyPanel / StationPanel /
+          LinePanel. */}
+      <button
+        type="button"
+        className="sm:hidden flex items-start justify-center h-7 pt-1.5 flex-shrink-0 touch-none w-full"
+        onClick={onHandleTap}
+        aria-label={detent === "half" ? "Expand panel" : "Collapse panel"}
+      >
+        <div className="w-9 h-[5px] rounded-full bg-white/25" />
+      </button>
+
+      {/* Title row — drag-zone for the panel. */}
       <div
-        className="relative flex items-center justify-between px-4 pt-3.5 pb-1.5 flex-shrink-0 sm:cursor-auto cursor-grab active:cursor-grabbing touch-none sm:pt-2"
+        className="relative flex items-center justify-between px-4 pt-1.5 pb-2 flex-shrink-0 sm:cursor-auto cursor-grab active:cursor-grabbing touch-none sm:pt-2"
         onPointerDown={handlers.onPointerDown}
         onPointerMove={handlers.onPointerMove}
         onPointerUp={handlers.onPointerUp}
         onPointerCancel={handlers.onPointerCancel}
       >
-        <button
-          type="button"
-          className="sm:hidden absolute top-1.5 left-1/2 -translate-x-1/2 w-9 h-[5px] rounded-full bg-white/30 hover:bg-white/50 touch-manipulation"
-          onClick={(e) => {
-            e.stopPropagation();
-            onHandleTap();
-          }}
-          aria-label={detent === "half" ? "Expand panel" : "Collapse panel"}
-        />
         <div className="flex items-center gap-2 text-white min-w-0">
           {mode === "directions" && (
             // Back-to-search arrow. The segmented control is gone

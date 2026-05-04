@@ -343,7 +343,7 @@ export default function LinePanel({ lineId, focusStopId, onClose, onStationOpen 
   // sheet DOM is always `full` tall — detent switches just animate a
   // translateY. Tap the handle to toggle; swipe down from half to dismiss.
   const { detent, sheetStyle, handlers, onHandleTap } = useSheetDrag({
-    halfRestingY: "calc(88dvh - 50dvh)",
+    halfRestingY: "calc(100dvh - var(--panel-top-rest) - 50dvh)",
     open: true,
     onDismiss: onClose,
   });
@@ -396,7 +396,7 @@ export default function LinePanel({ lineId, focusStopId, onClose, onStationOpen 
     <div
       className="
         absolute z-20 overflow-hidden flex flex-col
-        inset-x-0 bottom-0 h-[88dvh] rounded-t-[28px] border-t border-white/[0.08]
+        inset-x-0 bottom-0 top-[var(--panel-top-rest)] rounded-t-[28px] border-t border-white/[0.08]
         sm:inset-auto sm:right-3 sm:top-3 sm:bottom-3 sm:w-[340px] sm:h-auto sm:rounded-[22px] sm:border sm:border-white/[0.08]
         ios-glass
         shadow-[0_20px_60px_-10px_rgba(0,0,0,0.6)]
@@ -410,7 +410,7 @@ export default function LinePanel({ lineId, focusStopId, onClose, onStationOpen 
           gesture, not just the 5px pill. */}
       <button
         type="button"
-        className="sm:hidden flex items-center justify-center h-5 pt-1.5 flex-shrink-0 touch-none w-full"
+        className="sm:hidden flex items-start justify-center h-7 pt-1.5 flex-shrink-0 touch-none w-full"
         onClick={onHandleTap}
         aria-label={detent === "half" ? "Expand panel" : "Collapse panel"}
       >

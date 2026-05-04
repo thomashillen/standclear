@@ -192,12 +192,13 @@ export function AlertsDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="bg-gray-900/95 backdrop-blur-xl border-white/10 text-white rounded-t-[28px] sm:rounded-3xl max-h-[85dvh] sm:max-h-[80dvh] overflow-hidden flex flex-col pb-[env(safe-area-inset-bottom)] sm:pb-6">
-        <DialogHeader>
-          <DialogTitle className="text-white text-xl font-black tracking-tight">
+      <DialogContent className="ios-glass border-white/[0.08] text-white rounded-t-[28px] sm:rounded-[22px] max-h-[85dvh] sm:max-h-[80dvh] overflow-hidden flex flex-col pb-[env(safe-area-inset-bottom)] sm:pb-6 shadow-[0_20px_60px_-10px_rgba(0,0,0,0.6)]">
+        <DialogHeader className="text-left pr-12">
+          <DialogTitle className="text-white text-xl font-black tracking-tight flex items-center gap-2 leading-none">
+            <Bell className="w-[18px] h-[18px]" />
             Service alerts
           </DialogTitle>
-          <DialogDescription className="text-gray-400">
+          <DialogDescription className="text-gray-400 text-left">
             {!data
               ? "Loading…"
               : totalCount === 0
@@ -211,7 +212,22 @@ export function AlertsDialog({
         </DialogHeader>
 
         <div className="flex-1 overflow-y-auto ios-scroll -mx-2 px-2">
-          {totalCount === 0 ? (
+          {!data ? (
+            // Loading skeleton — three pulsing card placeholders so
+            // the body keeps its rough shape on a slow first paint.
+            // Without this branch the body would render the
+            // "All clear" empty state while the title still says
+            // "Loading…", since totalCount falls back to 0 when
+            // data is null.
+            <div className="space-y-2 pb-2 pt-1" aria-hidden>
+              {[0, 1, 2].map((i) => (
+                <div
+                  key={i}
+                  className="h-[60px] rounded-xl bg-white/[0.04] animate-pulse"
+                />
+              ))}
+            </div>
+          ) : totalCount === 0 ? (
             <div className="flex flex-col items-center justify-center py-10 text-center">
               <CheckCircle2 className="w-10 h-10 text-emerald-400/80 mb-3" />
               <p className="text-sm text-gray-200 font-medium">
@@ -356,12 +372,13 @@ export default function AlertsButton() {
           )}
         </button>
       </DialogTrigger>
-      <DialogContent className="bg-gray-900/95 backdrop-blur-xl border-white/10 text-white rounded-t-[28px] sm:rounded-3xl max-h-[85dvh] sm:max-h-[80dvh] overflow-hidden flex flex-col pb-[env(safe-area-inset-bottom)] sm:pb-6">
-        <DialogHeader>
-          <DialogTitle className="text-white text-xl font-black tracking-tight">
+      <DialogContent className="ios-glass border-white/[0.08] text-white rounded-t-[28px] sm:rounded-[22px] max-h-[85dvh] sm:max-h-[80dvh] overflow-hidden flex flex-col pb-[env(safe-area-inset-bottom)] sm:pb-6 shadow-[0_20px_60px_-10px_rgba(0,0,0,0.6)]">
+        <DialogHeader className="text-left pr-12">
+          <DialogTitle className="text-white text-xl font-black tracking-tight flex items-center gap-2 leading-none">
+            <Bell className="w-[18px] h-[18px]" />
             Service alerts
           </DialogTitle>
-          <DialogDescription className="text-gray-400">
+          <DialogDescription className="text-gray-400 text-left">
             {!data
               ? "Loading…"
               : totalCount === 0
@@ -375,7 +392,22 @@ export default function AlertsButton() {
         </DialogHeader>
 
         <div className="flex-1 overflow-y-auto ios-scroll -mx-2 px-2">
-          {totalCount === 0 ? (
+          {!data ? (
+            // Loading skeleton — three pulsing card placeholders so
+            // the body keeps its rough shape on a slow first paint.
+            // Without this branch the body would render the
+            // "All clear" empty state while the title still says
+            // "Loading…", since totalCount falls back to 0 when
+            // data is null.
+            <div className="space-y-2 pb-2 pt-1" aria-hidden>
+              {[0, 1, 2].map((i) => (
+                <div
+                  key={i}
+                  className="h-[60px] rounded-xl bg-white/[0.04] animate-pulse"
+                />
+              ))}
+            </div>
+          ) : totalCount === 0 ? (
             <div className="flex flex-col items-center justify-center py-10 text-center">
               <CheckCircle2 className="w-10 h-10 text-emerald-400/80 mb-3" />
               <p className="text-sm text-gray-200 font-medium">

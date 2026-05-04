@@ -362,8 +362,34 @@ export default function SubwayMap() {
     setFocusedLegIndex(null);
   };
 
+  // True when any of the z-20 bottom-sheet panels is rendered (Nearby,
+  // Station, Line, Search, More). Drives MapView's camera-padding
+  // offset. The Route-shown pill stays visible when a panel is open
+  // — instead, the panel-top-rest is bumped down so the pill clears
+  // the panel header (see the inline --panel-top-rest override
+  // below).
+  const panelOpen =
+    (nearbyOpen && !stationStopId) ||
+    !!stationStopId ||
+    (!!selectedLine && !nearbyOpen && !stationStopId) ||
+    searchOpen ||
+    moreOpen;
+
   return (
-    <div className="relative flex flex-col h-full bg-gray-950 text-white">
+    <div
+      className="relative flex flex-col h-full bg-gray-950 text-white"
+      style={{
+        // When a route is plotted, drop panels by 2rem so the
+        // Route-shown pill at safe-top + 3.75rem (h-9 ≈ 2.25rem) sits
+        // cleanly in the gap above the panel's drag handle. Without
+        // this bump the pill would overlap the panel header — and
+        // hiding the pill while a panel is open removed the only
+        // way to clear an active route mid-panel-session.
+        ["--panel-top-rest" as string]: selectedTripSelection
+          ? "calc(max(var(--safe-top), 0.5rem) + 6rem)"
+          : "calc(max(var(--safe-top), 0.5rem) + 4rem)",
+      }}
+    >
       {/* ── Map fills the full viewport ── */}
       <div className="relative flex flex-1 min-h-0">
         <MapView
@@ -376,12 +402,7 @@ export default function SubwayMap() {
           // Camera padding for fly-to-user when a panel is covering
           // part of the screen, so the user's location lands in the
           // visible map area rather than behind the panel.
-          panelOpen={
-            (nearbyOpen && !stationStopId) ||
-            !!stationStopId ||
-            (!!selectedLine && !nearbyOpen && !stationStopId) ||
-            searchOpen
-          }
+          panelOpen={panelOpen}
           selectedTrip={selectedTrip}
           focusedLegIndex={focusedLegIndex}
         />

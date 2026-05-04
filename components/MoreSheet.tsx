@@ -15,9 +15,11 @@ import {
   Footprints,
   Compass,
   Sparkles,
+  MoreHorizontal,
 } from "lucide-react";
 import { useAlerts } from "@/lib/useAlerts";
 import { useCommute } from "@/lib/useFavorites";
+import { useSheetDrag } from "@/lib/useSheetDrag";
 import {
   Dialog,
   DialogContent,
@@ -29,17 +31,18 @@ import { AlertsDialog } from "./AlertsButton";
 
 // ─── MoreSheet ───────────────────────────────────────────────────────
 // Secondary-actions menu reachable from a "More" button in the floating
-// header. Currently surfaces:
+// header. Surfaces:
 //
 //   • Service alerts (with severity-tinted icon + count badge)
 //   • Home / Work commute anchors (current value, tap to edit)
 //   • Clear commute (destructive — only when at least one anchor set)
+//   • About StandClear
 //
-// Designed as a stacking surface — when the rider taps "Service alerts"
-// or one of the anchor rows we close THIS dialog and open the next
-// (alerts dialog or SearchSheet). Single-dialog-at-a-time keeps the
-// material stack predictable on small phones where layered modals
-// quickly become disorienting.
+// Rendered as a bottom-sheet panel — same chrome (ios-glass material,
+// drag handle, drag-to-dismiss, X close button, mobile-bottom /
+// desktop-side layout) as NearbyPanel / StationPanel / LinePanel /
+// SearchSheet so the system reads as one design language. Settings and
+// nav share the same panel grammar; only the contents differ.
 
 interface Props {
   open: boolean;
@@ -85,173 +88,210 @@ export default function MoreSheet({ open, onClose, onSetHome, onSetWork }: Props
   const workLabel = endpointLabel(work);
   const hasAnyAnchor = !!(home || work);
 
+  // Drag-to-dismiss only — no half/full detents (the menu is short
+  // enough that a fixed full-height sheet works). Both rests sit at
+  // 0px so the tap-to-toggle is a visual no-op while drag-down past
+  // the dismiss threshold still fires onClose.
+  const { sheetStyle, handlers, onHandleTap } = useSheetDrag({
+    halfRestingY: "0px",
+    open,
+    onDismiss: onClose,
+  });
+
+  // Note: don't early-return null when !open. AlertsDialog and
+  // AboutDialog render as siblings of the panel below, and the
+  // "Service alerts" / "About" rows close MoreSheet *and* open the
+  // sibling dialog in the same handler. If we returned null on close,
+  // those dialogs would unmount before they could mount-with-open=true,
+  // which would manifest as "tapping the alerts row does nothing."
+  // The panel div itself is gated by `open &&` instead.
+
   return (
     <>
-      <Dialog open={open} onOpenChange={(o) => (!o ? onClose() : undefined)}>
-        <DialogContent className="bg-gray-900/95 backdrop-blur-xl border-white/10 text-white rounded-t-[28px] sm:rounded-3xl max-h-[85dvh] sm:max-h-[80dvh] overflow-hidden flex flex-col p-0 pb-[env(safe-area-inset-bottom)] sm:pb-0">
-          <DialogHeader className="px-5 pt-5 pb-3 flex-shrink-0">
-            <DialogTitle className="text-white text-xl font-black tracking-tight">
-              More
-            </DialogTitle>
-          </DialogHeader>
+      {open && (
+      <div
+        className="
+          absolute z-20 overflow-hidden flex flex-col
+          inset-x-0 bottom-0 top-[var(--panel-top-rest)] rounded-t-[28px] border-t border-white/[0.08]
+          sm:inset-auto sm:right-3 sm:top-3 sm:bottom-3 sm:w-[340px] sm:h-auto sm:rounded-[22px] sm:border sm:border-white/[0.08]
+          ios-glass
+          shadow-[0_20px_60px_-10px_rgba(0,0,0,0.6)]
+          pb-[env(safe-area-inset-bottom)]
+        "
+        style={sheetStyle}
+      >
+        <button
+          type="button"
+          className="sm:hidden flex items-start justify-center h-7 pt-1.5 flex-shrink-0 touch-none w-full"
+          onClick={onHandleTap}
+          aria-label="Drag to dismiss"
+        >
+          <div className="w-9 h-[5px] rounded-full bg-white/25" />
+        </button>
 
-          <div className="flex-1 overflow-y-auto ios-scroll px-3 pb-4 space-y-4">
-            {/* ─── Service alerts ─── */}
-            <section>
-              <h3 className="px-2 pb-1.5 text-[10px] font-semibold uppercase tracking-wider text-gray-500">
-                System
-              </h3>
-              <button
-                type="button"
-                onClick={() => {
-                  // Close the More menu first, then open the alerts
-                  // dialog. The brief gap (one render frame) avoids
-                  // shadcn's overlay double-stacking.
-                  onClose();
-                  setAlertsOpen(true);
-                }}
-                className="press w-full flex items-center gap-3 px-3 py-3 rounded-2xl bg-white/[0.04] hover:bg-white/[0.08] touch-manipulation"
-              >
-                <span
-                  className={`flex items-center justify-center w-9 h-9 rounded-full flex-shrink-0 ${
-                    tone === "severe"
-                      ? "bg-rose-500/20 text-rose-200 ring-1 ring-rose-500/40"
-                      : tone === "warning"
-                        ? "bg-amber-500/20 text-amber-200 ring-1 ring-amber-500/40"
-                        : tone === "info"
-                          ? "bg-sky-500/15 text-sky-200 ring-1 ring-sky-500/30"
-                          : "bg-white/[0.08] text-gray-300"
-                  }`}
-                >
-                  {hasSevere ? (
-                    <BellRing className="w-4 h-4" />
-                  ) : (
-                    <Bell className="w-4 h-4" />
-                  )}
-                </span>
-                <span className="flex-1 min-w-0 text-left">
-                  <span className="block text-[14px] font-semibold text-gray-100">
-                    Service alerts
-                  </span>
-                  <span
-                    className={`block text-[11px] truncate ${
-                      tone === "severe"
-                        ? "text-rose-300"
-                        : tone === "warning"
-                          ? "text-amber-300"
-                          : "text-gray-400"
-                    }`}
-                  >
-                    {!data
-                      ? "Loading…"
-                      : totalAlerts === 0
-                        ? "All clear across the system"
-                        : `${totalAlerts} active alert${
-                            totalAlerts === 1 ? "" : "s"
-                          }`}
-                  </span>
-                </span>
-                <ChevronRight className="w-4 h-4 text-gray-500 flex-shrink-0" />
-              </button>
-            </section>
-
-            {/* ─── Commute anchors ─── */}
-            <section>
-              <h3 className="px-2 pb-1.5 text-[10px] font-semibold uppercase tracking-wider text-gray-500">
-                Commute
-              </h3>
-              <div className="space-y-1.5">
-                <AnchorRow
-                  icon={<Home className="w-4 h-4" />}
-                  label="Home"
-                  value={homeLabel}
-                  emptyHint="Add home address"
-                  accent="emerald"
-                  onTap={() => {
-                    onClose();
-                    onSetHome();
-                  }}
-                />
-                <AnchorRow
-                  icon={<Briefcase className="w-4 h-4" />}
-                  label="Work"
-                  value={workLabel}
-                  emptyHint="Add work address"
-                  accent="sky"
-                  onTap={() => {
-                    onClose();
-                    onSetWork();
-                  }}
-                />
-                {hasAnyAnchor && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setAnchor("home", null);
-                      setAnchor("work", null);
-                    }}
-                    className="press w-full flex items-center gap-3 px-3 py-2.5 rounded-2xl text-rose-300 hover:bg-rose-500/10 touch-manipulation"
-                  >
-                    <span className="flex items-center justify-center w-9 h-9 rounded-full bg-rose-500/15 ring-1 ring-rose-500/30 flex-shrink-0">
-                      <Trash2 className="w-4 h-4" />
-                    </span>
-                    <span className="text-[13px] font-semibold">
-                      Clear commute
-                    </span>
-                  </button>
-                )}
-                <p className="px-3 pt-1 text-[11px] text-gray-500 leading-snug">
-                  Pin an address — the planner uses every nearby station
-                  as a candidate so your route stays fastest from
-                  whichever direction you&apos;re coming from.
-                </p>
-              </div>
-            </section>
-
-            {/* ─── About ─── */}
-            <section>
-              <h3 className="px-2 pb-1.5 text-[10px] font-semibold uppercase tracking-wider text-gray-500">
-                About
-              </h3>
-              <button
-                type="button"
-                onClick={() => {
-                  onClose();
-                  setAboutOpen(true);
-                }}
-                className="press w-full flex items-center gap-3 px-3 py-3 rounded-2xl bg-white/[0.04] hover:bg-white/[0.08] touch-manipulation"
-              >
-                <span className="flex items-center justify-center w-9 h-9 rounded-full bg-white/[0.08] text-gray-300 flex-shrink-0">
-                  <Info className="w-4 h-4" />
-                </span>
-                <span className="flex-1 min-w-0 text-left">
-                  <span className="block text-[14px] font-semibold text-gray-100">
-                    About StandClear
-                  </span>
-                  <span className="block text-[12px] text-gray-400 truncate">
-                    What this app does, where the data comes from
-                  </span>
-                </span>
-                <ChevronRight className="w-4 h-4 text-gray-500 flex-shrink-0" />
-              </button>
-            </section>
+        <div
+          className="flex items-center justify-between px-4 pt-1.5 pb-2.5 flex-shrink-0 sm:cursor-auto cursor-grab active:cursor-grabbing touch-none sm:pt-4 sm:pb-3"
+          onPointerDown={handlers.onPointerDown}
+          onPointerMove={handlers.onPointerMove}
+          onPointerUp={handlers.onPointerUp}
+          onPointerCancel={handlers.onPointerCancel}
+        >
+          <div className="flex items-center gap-2 text-white">
+            <MoreHorizontal className="w-[17px] h-[17px]" />
+            <span className="font-black text-[16px] tracking-tight">More</span>
           </div>
+          <button
+            onClick={onClose}
+            className="press text-white opacity-85 hover:opacity-100 w-9 h-9 -mr-1 flex items-center justify-center rounded-full bg-white/[0.08] hover:bg-white/[0.12] touch-manipulation"
+            aria-label="Close panel"
+          >
+            <X className="w-[16px] h-[16px]" strokeWidth={2.5} />
+          </button>
+        </div>
 
-          {/* Mobile-only close affordance — DialogContent's built-in X
-              sits in the corner; this big bottom button is more
-              thumb-friendly. */}
-          <div className="px-4 pb-4 pt-1 flex-shrink-0 sm:hidden">
+        <div className="flex-1 overflow-y-auto ios-scroll px-3 pb-4 space-y-4">
+          {/* ─── Service alerts ─── */}
+          <section>
+            <h3 className="px-2 pb-1.5 text-[10px] font-semibold uppercase tracking-wider text-gray-500">
+              System
+            </h3>
             <button
               type="button"
-              onClick={onClose}
-              className="press w-full h-11 rounded-2xl bg-white/[0.08] hover:bg-white/[0.14] text-[14px] font-semibold text-gray-100 inline-flex items-center justify-center gap-1.5 touch-manipulation"
+              onClick={() => {
+                // Close the More menu first, then open the alerts
+                // dialog. The brief gap (one render frame) avoids
+                // shadcn's overlay double-stacking.
+                onClose();
+                setAlertsOpen(true);
+              }}
+              className="press w-full flex items-center gap-3 px-3 py-3 rounded-2xl bg-white/[0.04] hover:bg-white/[0.08] touch-manipulation"
             >
-              <X className="w-4 h-4" />
-              Close
+              <span
+                className={`flex items-center justify-center w-9 h-9 rounded-full flex-shrink-0 ${
+                  tone === "severe"
+                    ? "bg-rose-500/20 text-rose-200 ring-1 ring-rose-500/40"
+                    : tone === "warning"
+                      ? "bg-amber-500/20 text-amber-200 ring-1 ring-amber-500/40"
+                      : tone === "info"
+                        ? "bg-sky-500/15 text-sky-200 ring-1 ring-sky-500/30"
+                        : "bg-white/[0.08] text-gray-300"
+                }`}
+              >
+                {hasSevere ? (
+                  <BellRing className="w-4 h-4" />
+                ) : (
+                  <Bell className="w-4 h-4" />
+                )}
+              </span>
+              <span className="flex-1 min-w-0 text-left">
+                <span className="block text-[14px] font-semibold text-gray-100">
+                  Service alerts
+                </span>
+                <span
+                  className={`block text-[11px] truncate ${
+                    tone === "severe"
+                      ? "text-rose-300"
+                      : tone === "warning"
+                        ? "text-amber-300"
+                        : "text-gray-400"
+                  }`}
+                >
+                  {!data
+                    ? "Loading…"
+                    : totalAlerts === 0
+                      ? "All clear across the system"
+                      : `${totalAlerts} active alert${
+                          totalAlerts === 1 ? "" : "s"
+                        }`}
+                </span>
+              </span>
+              <ChevronRight className="w-4 h-4 text-gray-500 flex-shrink-0" />
             </button>
-          </div>
-        </DialogContent>
-      </Dialog>
+          </section>
+
+          {/* ─── Commute anchors ─── */}
+          <section>
+            <h3 className="px-2 pb-1.5 text-[10px] font-semibold uppercase tracking-wider text-gray-500">
+              Commute
+            </h3>
+            <div className="space-y-1.5">
+              <AnchorRow
+                icon={<Home className="w-4 h-4" />}
+                label="Home"
+                value={homeLabel}
+                emptyHint="Add home address"
+                accent="emerald"
+                onTap={() => {
+                  onClose();
+                  onSetHome();
+                }}
+              />
+              <AnchorRow
+                icon={<Briefcase className="w-4 h-4" />}
+                label="Work"
+                value={workLabel}
+                emptyHint="Add work address"
+                accent="sky"
+                onTap={() => {
+                  onClose();
+                  onSetWork();
+                }}
+              />
+              {hasAnyAnchor && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAnchor("home", null);
+                    setAnchor("work", null);
+                  }}
+                  className="press w-full flex items-center gap-3 px-3 py-2.5 rounded-2xl text-rose-300 hover:bg-rose-500/10 touch-manipulation"
+                >
+                  <span className="flex items-center justify-center w-9 h-9 rounded-full bg-rose-500/15 ring-1 ring-rose-500/30 flex-shrink-0">
+                    <Trash2 className="w-4 h-4" />
+                  </span>
+                  <span className="text-[13px] font-semibold">
+                    Clear commute
+                  </span>
+                </button>
+              )}
+              <p className="px-3 pt-1 text-[11px] text-gray-500 leading-snug">
+                Pin an address — the planner uses every nearby station
+                as a candidate so your route stays fastest from
+                whichever direction you&apos;re coming from.
+              </p>
+            </div>
+          </section>
+
+          {/* ─── About ─── */}
+          <section>
+            <h3 className="px-2 pb-1.5 text-[10px] font-semibold uppercase tracking-wider text-gray-500">
+              About
+            </h3>
+            <button
+              type="button"
+              onClick={() => {
+                onClose();
+                setAboutOpen(true);
+              }}
+              className="press w-full flex items-center gap-3 px-3 py-3 rounded-2xl bg-white/[0.04] hover:bg-white/[0.08] touch-manipulation"
+            >
+              <span className="flex items-center justify-center w-9 h-9 rounded-full bg-white/[0.08] text-gray-300 flex-shrink-0">
+                <Info className="w-4 h-4" />
+              </span>
+              <span className="flex-1 min-w-0 text-left">
+                <span className="block text-[14px] font-semibold text-gray-100">
+                  About StandClear
+                </span>
+                <span className="block text-[12px] text-gray-400 truncate">
+                  What this app does, where the data comes from
+                </span>
+              </span>
+              <ChevronRight className="w-4 h-4 text-gray-500 flex-shrink-0" />
+            </button>
+          </section>
+        </div>
+      </div>
+      )}
 
       <AlertsDialog open={alertsOpen} onOpenChange={setAlertsOpen} />
       <AboutDialog open={aboutOpen} onOpenChange={setAboutOpen} />
@@ -263,7 +303,10 @@ export default function MoreSheet({ open, onClose, onSetHome, onSetWork }: Props
 // Project info + feature highlights + data attribution. Opened from
 // MoreSheet's About row. Lives in MoreSheet (not its own file) since
 // it's a one-screen sibling and the content is closely tied to the
-// More menu's hierarchy.
+// More menu's hierarchy. Kept as a Radix Dialog (vs the bottom-sheet
+// pattern MoreSheet now uses) — content is read-only and doesn't need
+// a drag-to-dismiss gesture; a centered modal with the auto-X close
+// is the simpler match for "tap row → see info → dismiss."
 function AboutDialog({
   open,
   onOpenChange,
@@ -273,15 +316,15 @@ function AboutDialog({
 }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="bg-gray-900/95 backdrop-blur-xl border-white/10 text-white rounded-t-[28px] sm:rounded-3xl max-h-[85dvh] sm:max-h-[80dvh] overflow-hidden flex flex-col pb-[env(safe-area-inset-bottom)] sm:pb-6">
-        <DialogHeader className="flex-shrink-0">
+      <DialogContent className="ios-glass border-white/[0.08] text-white rounded-t-[28px] sm:rounded-[22px] max-h-[85dvh] sm:max-h-[80dvh] overflow-hidden flex flex-col pb-[env(safe-area-inset-bottom)] sm:pb-6 shadow-[0_20px_60px_-10px_rgba(0,0,0,0.6)]">
+        <DialogHeader className="flex-shrink-0 text-left pr-12">
           <DialogTitle className="text-white text-xl font-black tracking-tight flex items-center gap-2">
             <span className="text-[26px]" aria-hidden>
               🚇
             </span>
             StandClear
           </DialogTitle>
-          <DialogDescription className="text-gray-400">
+          <DialogDescription className="text-gray-400 text-left">
             Live, real-time NYC subway in your pocket.
           </DialogDescription>
         </DialogHeader>
