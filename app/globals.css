@@ -216,6 +216,16 @@
     @apply border-border;
     -webkit-tap-highlight-color: transparent;
   }
+  /* Suppress the browser's default blue focus outline when focus
+     wasn't reached via keyboard. iOS Safari leaves a tapped button
+     in :focus after the tap, which surfaced as a stray blue ring
+     around alert cards / station rows / line bullets after they
+     were activated. Components that want a focus indicator add a
+     focus-visible: utility explicitly (e.g. the dialog close
+     button); everything else stays clean on touch. */
+  :focus:not(:focus-visible) {
+    outline: none;
+  }
   html, body {
     /* `100dvh` tracks the visible viewport in iOS Safari as the address bar
        grows/shrinks. Falls back to `100vh` where unsupported. */
