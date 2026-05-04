@@ -12,16 +12,18 @@ import {
   Home,
   Briefcase,
   RefreshCw,
+  Footprints,
 } from "lucide-react";
 import { useLines } from "@/lib/subwayData";
 import { useTrains, refreshTrains, type Arrival } from "@/lib/useTrains";
-import type { WalkingRoute } from "@/lib/walkingDirections";
+import { fetchWalkingRoute, type WalkingRoute } from "@/lib/walkingDirections";
 import { useFavorites, useCommute, type CommuteEndpoint } from "@/lib/useFavorites";
 import { useGeolocationState } from "@/lib/useGeolocation";
 import { useNow } from "@/lib/useNow";
 import { useRecentSearches } from "@/lib/useRecentSearches";
 import { useSheetDrag } from "@/lib/useSheetDrag";
 import {
+  estimateTripTimeSec,
   planTrips,
   rankPlansByTime,
   type TripPlan,
@@ -32,6 +34,7 @@ import {
   nearestStations,
   nearestStationsWithin,
   searchStations,
+  walkMinutes,
   type StationEntry,
 } from "@/lib/stopsIndex";
 import {
@@ -109,6 +112,27 @@ interface Props {
    *  means "frame the whole trip". */
   focusedLegIndex?: number | null;
   onFocusLeg?: (i: number | null) => void;
+  /** Walking-faster overlay for the map. Set to a from/to pair (and
+   *  optional resolved coords) when the rider's trip is shorter on
+   *  foot than any subway plan; null clears it. The parent forwards
+   *  it to MapView so the dashed pedestrian line renders. */
+  onWalkOnlyChange?: (
+    overlay:
+      | {
+          from: { lng: number; lat: number };
+          to: { lng: number; lat: number };
+          coords?: [number, number][];
+        }
+      | null,
+  ) => void;
+  /** Fires when the rider opens / closes a specific plan's detail
+   *  view (the A→Z timeline). The parent uses this to tell MapView
+   *  whether the SearchSheet is currently in the larger plan-list
+   *  state (panel ≈60dvh) or the smaller detail state (≈38dvh) so
+   *  the trip's camera fit can leave the right amount of room
+   *  below. Without this signal the route's south end can hide
+   *  behind the taller plan-list panel. */
+  onExpandedPlanChange?: (expanded: boolean) => void;
 }
 
 // ─── SearchSheet ─────────────────────────────────────────────────────
@@ -164,6 +188,8 @@ export default function SearchSheet({
   walkToRoute = null,
   focusedLegIndex = null,
   onFocusLeg,
+  onWalkOnlyChange,
+  onExpandedPlanChange,
 }: Props) {
   const lines = useLines();
   const data = useTrains();
@@ -456,6 +482,146 @@ export default function SearchSheet({
     stationsByComplexId,
   ]);
 
+  // ── Walk-vs-subway: when the destination is close enough that
+  // walking the whole way is at least as fast as the best subway
+  // plan, surface walking as the primary recommendation. Subway
+  // plans get hidden so a 2-block trip doesn't pretend the L train
+  // is the answer. Distance is haversine; time uses the same
+  // pedestrian model as the rest of the app (walkMinutes), so it's
+  // directly comparable to the per-plan walk legs we already show.
+  const directWalk = useMemo(() => {
+    if (mode !== "directions" || !tripFrom || !tripTo) return null;
+    const meters = haversineMeters(
+      { lat: tripFrom.lat, lng: tripFrom.lng },
+      { lat: tripTo.lat, lng: tripTo.lng },
+    );
+    return { meters, min: walkMinutes(meters) };
+  }, [mode, tripFrom, tripTo]);
+
+  // Fastest subway plan total time (minutes), using the same
+  // estimator that ranks the plan list. Null when there are no
+  // plans — the walk comparison treats that as "subway loses by
+  // default."
+  const fastestPlanMin = useMemo(() => {
+    if (tripPlans.length === 0) return null;
+    const sec = estimateTripTimeSec(tripPlans[0], {
+      arrivalsByStation,
+      nowSec: now / 1000,
+      walkFromAnchor: tripFrom?.address
+        ? { lng: tripFrom.address.lng, lat: tripFrom.address.lat }
+        : undefined,
+      walkToAnchor: tripTo?.address
+        ? { lng: tripTo.address.lng, lat: tripTo.address.lat }
+        : undefined,
+      stationsByComplexId,
+    });
+    return Math.max(1, Math.round(sec / 60));
+  }, [tripPlans, arrivalsByStation, now, tripFrom, tripTo, stationsByComplexId]);
+
+  // Walking wins when we have a direct walk estimate AND it's no
+  // longer than the fastest subway plan. We also surface walking
+  // when there are zero subway plans but the walk is reasonable
+  // (under ~45 min) — otherwise a same-borough cross-river trip
+  // with no direct subway would suggest a 2-hour walk, which isn't
+  // useful. The 45-min ceiling is a soft "actually walkable"
+  // threshold rather than a hard cap on what we display.
+  const walkIsBest =
+    directWalk !== null &&
+    (fastestPlanMin === null
+      ? directWalk.min <= 45
+      : directWalk.min <= fastestPlanMin);
+
+  // Resolved street-following walking route for the walk-only
+  // recommendation. Fetched eagerly when walking wins so the dashed
+  // line shows up on the map at the same time as the card — no
+  // tap-to-expand required. Reset on endpoint change.
+  const [walkOnlyRoute, setWalkOnlyRoute] = useState<WalkingRoute | null>(null);
+
+  useEffect(() => {
+    setWalkOnlyRoute(null);
+  }, [tripFrom, tripTo]);
+
+  useEffect(() => {
+    if (!walkIsBest || !tripFrom || !tripTo) return;
+    if (walkOnlyRoute) return;
+    const ctrl = new AbortController();
+    fetchWalkingRoute(
+      { lng: tripFrom.lng, lat: tripFrom.lat },
+      { lng: tripTo.lng, lat: tripTo.lat },
+      { signal: ctrl.signal },
+    )
+      .then((r) => {
+        if (ctrl.signal.aborted) return;
+        setWalkOnlyRoute(r);
+      })
+      .catch(() => {});
+    return () => ctrl.abort();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [walkIsBest, tripFrom, tripTo]);
+
+  // Push the walking-faster overlay up to the parent so MapView can
+  // render the pedestrian line. Use the resolved street geometry when
+  // available; otherwise the from/to pair anchors a crow-flies
+  // fallback rendered by MapView. Clear when walking is no longer the
+  // pick (e.g. rider switched destinations to one with subway, or the
+  // sheet leaves directions mode).
+  useEffect(() => {
+    if (!onWalkOnlyChange) return;
+    if (walkIsBest && tripFrom && tripTo) {
+      onWalkOnlyChange({
+        from: { lng: tripFrom.lng, lat: tripFrom.lat },
+        to: { lng: tripTo.lng, lat: tripTo.lat },
+        coords: walkOnlyRoute?.coordinates,
+      });
+    } else {
+      onWalkOnlyChange(null);
+    }
+    return () => {
+      onWalkOnlyChange(null);
+    };
+  }, [walkIsBest, tripFrom, tripTo, walkOnlyRoute, onWalkOnlyChange]);
+
+  // Mirror the expandedPlan flag up to the parent so MapView can
+  // pad its trip-fit camera differently based on which detent the
+  // sheet is in (plan list ≈60dvh vs detail ≈38dvh).
+  useEffect(() => {
+    onExpandedPlanChange?.(!!expandedPlan);
+    return () => {
+      onExpandedPlanChange?.(false);
+    };
+  }, [expandedPlan, onExpandedPlanChange]);
+
+  // Auto-select the fastest plan whenever a fresh ranked list arrives
+  // and nothing is currently selected. The rider almost always wants
+  // to see the top result on the map without an extra tap, and the
+  // ranked plans are sorted by total time — so tripPlans[0] is the
+  // pick. We deliberately don't override a selection the rider has
+  // already made (e.g. tapped the second-fastest); that selection
+  // sticks until the trip pair changes (which clears tripPlans and
+  // brings us back through this effect with no selection).
+  useEffect(() => {
+    if (mode !== "directions") return;
+    if (!onTripSelect || selectedTripKey || tripPlans.length === 0) return;
+    const plan = tripPlans[0];
+    onTripSelect({
+      plan,
+      walkFrom: tripFrom?.address
+        ? {
+            lng: tripFrom.address.lng,
+            lat: tripFrom.address.lat,
+            name: tripFrom.address.name,
+          }
+        : undefined,
+      walkTo: tripTo?.address
+        ? {
+            lng: tripTo.address.lng,
+            lat: tripTo.address.lat,
+            name: tripTo.address.name,
+          }
+        : undefined,
+    });
+  }, [mode, tripPlans, selectedTripKey, onTripSelect, tripFrom, tripTo]);
+
   // ── Picker results (when a directions field needs filling).
   const plannerSearchResults = useMemo<StationEntry[] | null>(() => {
     if (mode !== "directions") return null;
@@ -530,171 +696,6 @@ export default function SearchSheet({
     } catch {
       return null;
     }
-  };
-
-  // ── Fastest-route preview for the top search hit.
-  // As the rider types, surface the fastest plan from current location
-  // to whatever ranks first in the results. Stations win over places
-  // when both match — a transit app should privilege subway hits.
-  // Skipped in anchor-pick mode (the rider is choosing a Home/Work
-  // pin, not navigating) and when we have no geolocation to route
-  // from.
-  const topSearchDestination = useMemo<TripEndpoint | null>(() => {
-    if (mode !== "search") return null;
-    if (anchorPickMode) return null;
-    if (searchResults && searchResults.length > 0) {
-      return searchResults[0] as TripEndpoint;
-    }
-    if (searchPlaceRows.length > 0) {
-      const { place, nearest } = searchPlaceRows[0];
-      return { ...nearest, displayName: place.name, address: place };
-    }
-    return null;
-  }, [mode, anchorPickMode, searchResults, searchPlaceRows]);
-
-  const topSearchFastest = useMemo<{
-    plan: TripPlan;
-    origin: TripEndpoint;
-    destination: TripEndpoint;
-    walkFromMeters?: number;
-    walkToMeters?: number;
-  } | null>(() => {
-    if (!topSearchDestination || !lines) return null;
-    if (geo.lat == null || geo.lng == null) return null;
-    const fromNearest = nearestStations(index, geo.lng, geo.lat, 1)[0];
-    if (!fromNearest) return null;
-    const origin: TripEndpoint = {
-      ...fromNearest,
-      displayName: "Current location",
-      address: {
-        id: "current-location",
-        name: "Current location",
-        context: "",
-        lng: geo.lng,
-        lat: geo.lat,
-      },
-    };
-    // Same expansion the directions-mode planner uses so we don't lock
-    // onto a single nearest station and miss a faster alternate.
-    const fromStopIds = Array.from(
-      new Set(
-        nearestStationsWithin(index, geo.lng, geo.lat, NEAR_RADIUS_M).flatMap(
-          (s) => s.stopIds,
-        ),
-      ),
-    );
-    const toStopIds = topSearchDestination.address
-      ? Array.from(
-          new Set(
-            nearestStationsWithin(
-              index,
-              topSearchDestination.address.lng,
-              topSearchDestination.address.lat,
-              NEAR_RADIUS_M,
-            ).flatMap((s) => s.stopIds),
-          ),
-        )
-      : topSearchDestination.stopIds;
-    const raw = planTrips(lines, index, fromStopIds, toStopIds, {
-      maxResults: 12,
-    });
-    const ranked = rankPlansByTime(raw, {
-      arrivalsByStation,
-      nowSec: now / 1000,
-      walkFromAnchor: { lng: geo.lng, lat: geo.lat },
-      walkToAnchor: topSearchDestination.address
-        ? {
-            lng: topSearchDestination.address.lng,
-            lat: topSearchDestination.address.lat,
-          }
-        : undefined,
-      stationsByComplexId,
-    });
-    if (ranked.length === 0) return null;
-    const plan = ranked[0];
-    const board = stationsByComplexId.get(plan.legs[0].boardComplexId);
-    const alight = stationsByComplexId.get(
-      plan.legs[plan.legs.length - 1].alightComplexId,
-    );
-    const walkFromMeters =
-      origin.address && board
-        ? haversineMeters(
-            { lat: origin.address.lat, lng: origin.address.lng },
-            { lat: board.lat, lng: board.lng },
-          )
-        : undefined;
-    const walkToMeters =
-      topSearchDestination.address && alight
-        ? haversineMeters(
-            {
-              lat: topSearchDestination.address.lat,
-              lng: topSearchDestination.address.lng,
-            },
-            { lat: alight.lat, lng: alight.lng },
-          )
-        : undefined;
-    return {
-      plan,
-      origin,
-      destination: topSearchDestination,
-      walkFromMeters,
-      walkToMeters: walkToMeters && walkToMeters > 0 ? walkToMeters : undefined,
-    };
-  }, [
-    topSearchDestination,
-    lines,
-    index,
-    arrivalsByStation,
-    now,
-    stationsByComplexId,
-    geo.lat,
-    geo.lng,
-  ]);
-
-  // Tap on the fastest-route preview: jump straight into the expanded
-  // A→Z detail view. Mirrors the state moves a normal "tap a result →
-  // tap a plan" sequence would make, just collapsed into one tap so
-  // the rider doesn't have to re-pick what we just showed them.
-  const openTopSearchDetail = () => {
-    if (!topSearchFastest) return;
-    const { plan, origin, destination } = topSearchFastest;
-    if (destination.address) {
-      addRecentPlace({
-        id: destination.address.id,
-        name: destination.address.name,
-        context: destination.address.context,
-        lng: destination.address.lng,
-        lat: destination.address.lat,
-      });
-    } else {
-      addRecentStation(destination.stopId, destination.name);
-    }
-    setMode("directions");
-    setQuery("");
-    setPlannerQuery("");
-    setSearchPlaceResults([]);
-    setTripFrom(origin);
-    setTripTo(destination);
-    setActiveField(null);
-    setExpandedPlan(plan);
-    onTripSelect?.({
-      plan,
-      walkFrom: origin.address
-        ? {
-            lng: origin.address.lng,
-            lat: origin.address.lat,
-            name: origin.address.name,
-          }
-        : undefined,
-      walkTo: destination.address
-        ? {
-            lng: destination.address.lng,
-            lat: destination.address.lat,
-            name: destination.address.name,
-          }
-        : undefined,
-    });
-    setDetent("half");
   };
 
   // Unified "directions to here from current location" handoff used
@@ -826,7 +827,7 @@ export default function SearchSheet({
       className="
         absolute z-20 overflow-hidden flex flex-col
         inset-x-0 bottom-0 top-[var(--panel-top-rest)] rounded-t-[28px] border-t border-white/[0.08]
-        sm:inset-auto sm:right-3 sm:top-3 sm:bottom-3 sm:w-[340px] sm:h-auto sm:rounded-[22px] sm:border sm:border-white/[0.08]
+        sm:inset-auto sm:right-3 sm:top-[var(--panel-top-rest)] sm:bottom-3 sm:w-[340px] sm:h-auto sm:rounded-[22px] sm:border sm:border-white/[0.08]
         ios-glass
         shadow-[0_20px_60px_-10px_rgba(0,0,0,0.6)]
         pb-[env(safe-area-inset-bottom)]
@@ -875,6 +876,7 @@ export default function SearchSheet({
                 // a single tap that wipes everything.
                 if (expandedPlan) {
                   setExpandedPlan(null);
+                  onFocusLeg?.(null);
                   return;
                 }
                 setMode("search");
@@ -943,7 +945,7 @@ export default function SearchSheet({
             )}
           </div>
         </div>
-      ) : (
+      ) : expandedPlan ? null : (
         <div className="px-3 pb-2.5 flex-shrink-0 border-b border-white/[0.06]">
           {/* Inline search: the active field IS the input. Tapping
               an inactive field activates it, focuses an embedded
@@ -952,7 +954,15 @@ export default function SearchSheet({
               When the endpoint is an address (TripEndpoint with a
               displayName), shadow `name` with displayName so the
               field shows "123 Main St" instead of the underlying
-              station's name. */}
+              station's name.
+
+              Suppressed when the rider is inside a specific route's
+              detail view: the previous screen already showed From/To
+              prominently and TripPlanDetail re-states them as the
+              "Walk to <board>" / "Walk to <destination>" rows, so
+              keeping the editable fields here just steals vertical
+              space from the timeline. The header back button is the
+              way back to the list (where the fields live). */}
           <div className="relative flex gap-2">
             <div className="flex-1 min-w-0 space-y-1.5">
               <PlannerField
@@ -1077,48 +1087,94 @@ export default function SearchSheet({
             // Work anchored we surface a quick-action card to plan
             // that commute right now — covers the most common
             // "Directions from scratch" entry point now that the
-            // segmented control is gone.
+            // segmented control is gone. Suppressed in anchor-pick
+            // mode: the rider is choosing a Home/Work pin, not
+            // navigating, so a "Quick commute Home → Work" card
+            // here is irrelevant noise (and would conflict with
+            // what they're trying to do — set one of those anchors).
             <div className="px-3 py-3 space-y-3">
-              {(() => {
-                const h = endpointToTrip(home);
-                const w = endpointToTrip(work);
-                if (!h || !w) return null;
-                return (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setMode("directions");
-                      setQuery("");
-                      setSearchPlaceResults([]);
-                      setTripFrom(h);
-                      setTripTo(w);
-                      setActiveField(null);
-                    }}
-                    className="press w-full flex items-center gap-3 p-3 rounded-2xl bg-white/[0.05] hover:bg-white/[0.08] border border-white/[0.08] touch-manipulation text-left"
-                  >
-                    <span className="flex items-center justify-center w-9 h-9 rounded-full bg-emerald-300/15 text-emerald-200 ring-1 ring-emerald-300/30">
-                      <Compass className="w-4 h-4" />
-                    </span>
-                    <span className="flex-1 min-w-0">
-                      <span className="block text-[11px] uppercase tracking-wider font-semibold text-gray-400">
-                        Quick commute
+              {!anchorPickMode &&
+                (() => {
+                  const h = endpointToTrip(home);
+                  const w = endpointToTrip(work);
+                  if (!h || !w) return null;
+                  return (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setMode("directions");
+                        setQuery("");
+                        setSearchPlaceResults([]);
+                        setTripFrom(h);
+                        setTripTo(w);
+                        setActiveField(null);
+                      }}
+                      className="press w-full flex items-center gap-3 p-3 rounded-2xl bg-white/[0.05] hover:bg-white/[0.08] border border-white/[0.08] touch-manipulation text-left"
+                    >
+                      <span className="flex items-center justify-center w-9 h-9 rounded-full bg-emerald-300/15 text-emerald-200 ring-1 ring-emerald-300/30">
+                        <Compass className="w-4 h-4" />
                       </span>
-                      <span className="block text-[14px] font-semibold text-gray-100 truncate">
-                        Home → Work
+                      <span className="flex-1 min-w-0">
+                        <span className="block text-[11px] uppercase tracking-wider font-semibold text-gray-400">
+                          Quick commute
+                        </span>
+                        <span className="block text-[14px] font-semibold text-gray-100 truncate">
+                          Home → Work
+                        </span>
+                        <span className="block text-[11px] text-gray-500 truncate">
+                          {(home?.kind === "address" ? home.name : h.name)}{" "}
+                          →{" "}
+                          {(work?.kind === "address" ? work.name : w.name)}
+                        </span>
                       </span>
-                      <span className="block text-[11px] text-gray-500 truncate">
-                        {(home?.kind === "address" ? home.name : h.name)}{" "}
-                        →{" "}
-                        {(work?.kind === "address" ? work.name : w.name)}
-                      </span>
-                    </span>
-                  </button>
-                );
-              })()}
-              <p className="px-3 pt-1 text-center text-[12px] text-gray-500">
-                Search for a station, address, restaurant, or anywhere
-                in NYC.
-              </p>
+                    </button>
+                  );
+                })()}
+
+              {/* Saved-anchor shortcut chips — one tap to start
+                  directions to Home / Work from current location.
+                  Replaces the prior "Search for a station, address,
+                  or place." helper text: when the rider has actually
+                  pinned an anchor, surfacing those anchors as
+                  one-tap targets is more useful than a generic
+                  prompt. Suppressed in anchor-pick mode (the rider
+                  is mid-set, not navigating). */}
+              {!anchorPickMode && (home || work) && (
+                <div className="flex items-center gap-2 px-1">
+                  {home &&
+                    (() => {
+                      const h = endpointToTrip(home);
+                      if (!h) return null;
+                      return (
+                        <button
+                          type="button"
+                          onClick={() => startDirectionsTo(h)}
+                          aria-label="Directions to Home"
+                          className="press flex items-center gap-1.5 h-8 px-3 rounded-full bg-emerald-300/10 hover:bg-emerald-300/15 ring-1 ring-emerald-300/30 text-emerald-100 text-[12px] font-semibold touch-manipulation"
+                        >
+                          <Home className="w-3.5 h-3.5 flex-shrink-0" />
+                          Home
+                        </button>
+                      );
+                    })()}
+                  {work &&
+                    (() => {
+                      const w = endpointToTrip(work);
+                      if (!w) return null;
+                      return (
+                        <button
+                          type="button"
+                          onClick={() => startDirectionsTo(w)}
+                          aria-label="Directions to Work"
+                          className="press flex items-center gap-1.5 h-8 px-3 rounded-full bg-sky-300/10 hover:bg-sky-300/15 ring-1 ring-sky-300/30 text-sky-100 text-[12px] font-semibold touch-manipulation"
+                        >
+                          <Briefcase className="w-3.5 h-3.5 flex-shrink-0" />
+                          Work
+                        </button>
+                      );
+                    })()}
+                </div>
+              )}
 
               {/* Recent searches — last 10 places the rider tapped
                   on. Each row replays the same "directions to here"
@@ -1224,45 +1280,6 @@ export default function SearchSheet({
             </div>
           ) : (
             <div>
-              {/* Fastest-route preview — auto-computed for whatever
-                  ranks first in the current results. Tapping jumps
-                  straight into the A→Z detail view and renders the
-                  route on the map; the rider doesn't have to first
-                  pick the destination then pick the plan. Skipped in
-                  anchor-pick mode and when geo isn't available. */}
-              {topSearchFastest && (
-                <div className="px-3 pt-3">
-                  <div className="px-2 pb-1.5 text-[10px] font-semibold text-amber-300/80 uppercase tracking-wider">
-                    Fastest route to {topSearchFastest.destination.displayName ?? topSearchFastest.destination.name}
-                  </div>
-                  <div
-                    className="rounded-2xl bg-gradient-to-br from-amber-500/10 via-amber-500/[0.04] to-transparent ring-1 ring-amber-400/20 p-1"
-                    style={{
-                      boxShadow:
-                        "inset 0 1px 0 rgba(255,255,255,0.10), 0 8px 24px -12px rgba(0,0,0,0.4)",
-                    }}
-                  >
-                    <TripPlanRow
-                      plan={topSearchFastest.plan}
-                      origin={topSearchFastest.origin}
-                      routeColors={routeColors}
-                      stationsByComplexId={stationsByComplexId}
-                      arrivals={
-                        arrivalsByStation.get(
-                          topSearchFastest.plan.legs[0].boardComplexId,
-                        ) ?? []
-                      }
-                      now={now}
-                      isPrimary
-                      onSelect={openTopSearchDetail}
-                      walkFromMeters={topSearchFastest.walkFromMeters}
-                      walkFromName={topSearchFastest.origin.address?.name}
-                      walkToMeters={topSearchFastest.walkToMeters}
-                      walkToName={topSearchFastest.destination.address?.name}
-                    />
-                  </div>
-                </div>
-              )}
               {searchResults && searchResults.length > 0 && (
                 <>
                   <div className="px-4 pt-3 pb-1.5 text-[10px] font-semibold text-gray-500 uppercase tracking-wider">
@@ -1503,13 +1520,39 @@ export default function SearchSheet({
                   now={now}
                   focusedLegIndex={focusedLegIndex}
                   onFocusLeg={onFocusLeg}
-                  onBack={() => {
-                    setExpandedPlan(null);
-                    onFocusLeg?.(null);
-                  }}
                 />
               );
             })()
+          ) : walkIsBest && directWalk ? (
+            <div className="px-3 pt-3 pb-8">
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-gray-500 mb-2 px-1">
+                No subway route found
+              </p>
+              <div className="rounded-2xl bg-emerald-300/10 ring-1 ring-emerald-300/30 px-4 py-3">
+                <div className="flex items-center gap-3">
+                  <div className="flex-shrink-0 w-9 h-9 rounded-full bg-emerald-300/20 text-emerald-200 flex items-center justify-center">
+                    <Footprints className="w-[18px] h-[18px]" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-[13px] font-semibold text-gray-100">
+                      Walking is faster
+                    </p>
+                    <p className="text-[12px] text-gray-300 tabular-nums">
+                      {directWalk.min} min ·{" "}
+                      {directWalk.meters >= 1000
+                        ? `${(directWalk.meters / 1000).toFixed(1)} km`
+                        : `${Math.round(directWalk.meters)} m`}
+                      {fastestPlanMin !== null
+                        ? ` · subway ${fastestPlanMin} min`
+                        : ""}
+                    </p>
+                  </div>
+                </div>
+              </div>
+              <p className="text-[11px] text-gray-500 mt-3 px-1">
+                The walking route is highlighted on the map.
+              </p>
+            </div>
           ) : tripPlans.length === 0 ? (
             <div className="px-6 py-10 text-center">
               <Compass className="w-10 h-10 mx-auto mb-3 text-gray-600" />

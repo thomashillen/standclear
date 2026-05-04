@@ -1,10 +1,10 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { ArrowUp, ArrowDown, Star, X, Home, Briefcase } from "lucide-react";
+import { ArrowUp, ArrowDown, Star, X } from "lucide-react";
 import { useLines } from "@/lib/subwayData";
 import { useTrains, type Arrival, type Train } from "@/lib/useTrains";
-import { useFavorites, useCommute } from "@/lib/useFavorites";
+import { useFavorites } from "@/lib/useFavorites";
 import { useNow } from "@/lib/useNow";
 import { buildStationIndex } from "@/lib/stopsIndex";
 import { useSheetDrag } from "@/lib/useSheetDrag";
@@ -14,6 +14,15 @@ interface Props {
   onClose: () => void;
   onSelectLine: (routeId: string) => void;
 }
+
+// Arrival rows we synthesize for trains physically AT (or very recently at)
+// the platform carry `live: true`. Their `eta` is set to the server's data
+// timestamp at synthesis time and does NOT auto-refresh between polls — so
+// they must be exempt from the time-expiry filter that drops feed-supplied
+// arrivals once their eta is more than ~5 s in the past. The lifetime of a
+// live arrival is governed by the STOPPED_AT memo's grace window, not by
+// its eta.
+type LiveArrival = Arrival & { live?: boolean };
 
 // Live countdown for the station detail rows. Seconds in the final
 // minute (urgency window), rounded minutes above that. The string
@@ -177,7 +186,6 @@ export default function StationPanel({ stopId, onClose, onSelectLine }: Props) {
   const lines = useLines();
   const data = useTrains();
   const { has, toggle } = useFavorites();
-  const commute = useCommute();
 
   const index = useMemo(() => (lines ? buildStationIndex(lines) : []), [lines]);
   // A tapped stopId may be any platform in a complex (e.g. tapping the
@@ -279,8 +287,8 @@ export default function StationPanel({ stopId, onClose, onSelectLine }: Props) {
   }, [data]);
 
   const { north, south } = useMemo(() => {
-    const n: Arrival[] = [];
-    const s: Arrival[] = [];
+    const n: LiveArrival[] = [];
+    const s: LiveArrival[] = [];
     if (!data || !stationIds) return { north: n, south: s };
     const nowSec = data.generatedAt / 1000;
     const CUTOFF = 45 * 60;
@@ -301,12 +309,13 @@ export default function StationPanel({ stopId, onClose, onSelectLine }: Props) {
       if (t.status !== "STOPPED_AT") continue;
       if (!stationIds.has(t.prevStopId)) continue;
       considered.add(t.id);
-      const arr: Arrival = {
+      const arr: LiveArrival = {
         routeId: t.routeId,
         stopId: t.prevStopId,
         direction: t.direction,
         eta: nowSec,
         tripId: t.id,
+        live: true,
       };
       seen.add(`${t.id}|${t.prevStopId}`);
       if (arr.direction === "N") n.push(arr);
@@ -320,12 +329,13 @@ export default function StationPanel({ stopId, onClose, onSelectLine }: Props) {
       if (!stationIds.has(entry.stopId)) continue;
       if (nowMs - entry.lastSeenMs > STOPPED_AT_GRACE_MS) continue;
       const t = entry.train;
-      const arr: Arrival = {
+      const arr: LiveArrival = {
         routeId: t.routeId,
         stopId: entry.stopId,
         direction: t.direction,
         eta: nowSec,
         tripId,
+        live: true,
       };
       seen.add(`${tripId}|${entry.stopId}`);
       if (arr.direction === "N") n.push(arr);
@@ -405,7 +415,7 @@ export default function StationPanel({ stopId, onClose, onSelectLine }: Props) {
       className="
         absolute z-20 overflow-hidden flex flex-col
         inset-x-0 bottom-0 top-[var(--panel-top-rest)] rounded-t-[28px] border-t border-white/[0.08]
-        sm:inset-auto sm:right-3 sm:top-3 sm:bottom-3 sm:w-[340px] sm:h-auto sm:rounded-[22px] sm:border sm:border-white/[0.08]
+        sm:inset-auto sm:right-3 sm:top-[var(--panel-top-rest)] sm:bottom-3 sm:w-[340px] sm:h-auto sm:rounded-[22px] sm:border sm:border-white/[0.08]
         ios-glass
         shadow-[0_20px_60px_-10px_rgba(0,0,0,0.6)]
         pb-[env(safe-area-inset-bottom)]
@@ -459,56 +469,23 @@ export default function StationPanel({ stopId, onClose, onSelectLine }: Props) {
           </button>
         </div>
 
-        {/* Save / Home / Work — three toggleable anchor chips. Tapping
-            an active chip clears that anchor; tapping an inactive one
-            sets it (Home and Work are mutually exclusive). */}
+        {/* Save chip — toggles this station as a favorite, surfacing
+            it in the Nearby panel's "favorites" section. The two
+            commute anchors (Home / Work) used to live here too, but
+            they were a parallel path to the same setting that More →
+            Commute already owns; consolidating in a single place
+            avoids the rider hitting "Set Home" from a station and
+            then having no obvious place to remove or change it from.
+            Home/Work setup now lives only in the More menu. */}
         <div className="flex items-center gap-2 flex-wrap">
           <AnchorChip
-            label="Save"
+            label={isFav ? "Saved" : "Save"}
             icon={<Star className={`w-[15px] h-[15px] ${isFav ? "fill-amber-300 text-amber-300" : ""}`} />}
             active={isFav}
             activeRing="ring-amber-300/40"
             activeBg="bg-amber-300/15 text-amber-100"
             onClick={() => toggle(favId)}
             aria-label={isFav ? "Remove from favorites" : "Add to favorites"}
-          />
-          <AnchorChip
-            label="Home"
-            icon={
-              <Home
-                className={`w-[15px] h-[15px] ${
-                  commute.isHome(favId) ? "fill-emerald-300 text-emerald-300" : ""
-                }`}
-              />
-            }
-            active={commute.isHome(favId)}
-            activeRing="ring-emerald-300/40"
-            activeBg="bg-emerald-300/15 text-emerald-100"
-            onClick={() =>
-              commute.isHome(favId)
-                ? commute.setAnchor("home", null)
-                : commute.assignAnchor("home", favId)
-            }
-            aria-label={commute.isHome(favId) ? "Unset as Home" : "Set as Home"}
-          />
-          <AnchorChip
-            label="Work"
-            icon={
-              <Briefcase
-                className={`w-[15px] h-[15px] ${
-                  commute.isWork(favId) ? "fill-sky-300 text-sky-300" : ""
-                }`}
-              />
-            }
-            active={commute.isWork(favId)}
-            activeRing="ring-sky-300/40"
-            activeBg="bg-sky-300/15 text-sky-100"
-            onClick={() =>
-              commute.isWork(favId)
-                ? commute.setAnchor("work", null)
-                : commute.assignAnchor("work", favId)
-            }
-            aria-label={commute.isWork(favId) ? "Unset as Work" : "Set as Work"}
           />
         </div>
       </div>
@@ -615,7 +592,7 @@ function DirectionSection({
 }: {
   label: string;
   icon: React.ReactNode;
-  arrivals: Arrival[];
+  arrivals: LiveArrival[];
   now: number;
   routeInfo: Map<string, { id: string; color: string; textColor: "white" | "black" }>;
   terminusByRoute: Map<string, { N: string; S: string }>;
@@ -626,8 +603,15 @@ function DirectionSection({
 
   // Drop arrivals whose eta has already passed (5s grace for trains
   // pulling in). Re-runs each tick of `now` so departed trains drop
-  // out the moment they leave, not when the feed next polls.
-  const visible = arrivals.filter((a) => a.eta - now / 1000 > -5);
+  // out the moment they leave, not when the feed next polls. Live
+  // arrivals (synthesized from STOPPED_AT/recently-STOPPED_AT) are
+  // exempt: their eta is frozen at the data's generatedAt and would
+  // otherwise drop out between polls even though the train is still
+  // physically at the platform. Their lifetime is bounded by the
+  // STOPPED_AT memo's grace window upstream.
+  const visible = arrivals.filter(
+    (a) => a.live || a.eta - now / 1000 > -5,
+  );
   const shown = expanded
     ? visible
     : visible.slice(0, DEFAULT_ARRIVALS_PER_DIRECTION);

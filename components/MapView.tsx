@@ -38,6 +38,24 @@ interface MapViewProps {
    *  expanded route detail zoom into a specific subway leg when the
    *  rider taps it. */
   focusedLegIndex?: number | null;
+  /** Stand-alone walking overlay used when the SearchSheet decides
+   *  walking is faster than any subway plan for this trip. Renders
+   *  as the same dashed pedestrian line the trip overlay uses,
+   *  independent of `selectedTrip`, with a camera fit to its bounds.
+   *  Coords come from Mapbox Directions when available; otherwise
+   *  the from/to endpoints anchor a crow-flies fallback. */
+  walkOnlyOverlay?: {
+    from: { lng: number; lat: number };
+    to: { lng: number; lat: number };
+    coords?: [number, number][];
+  } | null;
+  /** True when the SearchSheet is showing a single plan's detail
+   *  view (panel collapses to ~38dvh) vs the plan-list view (~60dvh).
+   *  Drives a tighter bottom padding when fitting the trip's
+   *  bounds — the plan list covers more of the screen and needs
+   *  more room reserved at the bottom or the route gets cropped
+   *  behind the panel. */
+  tripDetailExpanded?: boolean;
 }
 
 /** Lightweight DTO between SubwayMap (which holds the user's chosen
@@ -334,7 +352,68 @@ function makeTrainIcon(color: string): ImageData {
   return ctx.getImageData(0, 0, W, H);
 }
 
-export default function MapView({ selectedLine, stationStopId, onLineSelect, onStationOpen, flyToUserSignal, flyToDefaultSignal, panelOpen, selectedTrip, focusedLegIndex }: MapViewProps) {
+// Glow outline that hugs the train capsule shape, used to highlight
+// trains inbound to the currently-open station. White, since the
+// per-route color comes through from the train icon stacked on top.
+// The bitmap is larger than the train icon to leave room for the soft
+// halo to extend outward without clipping.
+const TRAIN_GLOW_W = 110;
+const TRAIN_GLOW_H = 60;
+
+function makeTrainGlowIcon(): ImageData {
+  const W = TRAIN_GLOW_W;
+  const H = TRAIN_GLOW_H;
+  const c = document.createElement("canvas");
+  c.width = W;
+  c.height = H;
+  const ctx = c.getContext("2d")!;
+
+  const bodyX = (W - BODY_W) / 2;
+  const bodyY = (H - BODY_H) / 2;
+  const bodyR = 6;
+  const bodyRight = bodyX + BODY_W;
+
+  const bodyPath = () => {
+    ctx.beginPath();
+    ctx.moveTo(bodyX + bodyR, bodyY);
+    ctx.lineTo(bodyRight - bodyR, bodyY);
+    ctx.arcTo(bodyRight, bodyY, bodyRight, bodyY + bodyR, bodyR);
+    ctx.lineTo(bodyRight, bodyY + BODY_H - bodyR);
+    ctx.arcTo(bodyRight, bodyY + BODY_H, bodyRight - bodyR, bodyY + BODY_H, bodyR);
+    ctx.lineTo(bodyX + bodyR, bodyY + BODY_H);
+    ctx.arcTo(bodyX, bodyY + BODY_H, bodyX, bodyY + BODY_H - bodyR, bodyR);
+    ctx.lineTo(bodyX, bodyY + bodyR);
+    ctx.arcTo(bodyX, bodyY, bodyX + bodyR, bodyY, bodyR);
+    ctx.closePath();
+  };
+
+  // Stack three blurred strokes around the capsule silhouette so the
+  // halo falls off smoothly: a wide soft outer glow, a mid layer, and
+  // a crisp inner ring sitting right on the capsule edge.
+  ctx.lineJoin = "round";
+  ctx.lineCap = "round";
+  ctx.shadowColor = "rgba(255, 255, 255, 1)";
+  ctx.strokeStyle = "rgba(255, 255, 255, 0.95)";
+
+  ctx.shadowBlur = 14;
+  ctx.lineWidth = 4;
+  bodyPath();
+  ctx.stroke();
+
+  ctx.shadowBlur = 8;
+  ctx.lineWidth = 3;
+  bodyPath();
+  ctx.stroke();
+
+  ctx.shadowBlur = 3;
+  ctx.lineWidth = 2;
+  bodyPath();
+  ctx.stroke();
+
+  return ctx.getImageData(0, 0, W, H);
+}
+
+export default function MapView({ selectedLine, stationStopId, onLineSelect, onStationOpen, flyToUserSignal, flyToDefaultSignal, panelOpen, selectedTrip, focusedLegIndex, walkOnlyOverlay, tripDetailExpanded }: MapViewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<MapboxMap | null>(null);
   const [mapLoaded, setMapLoaded] = useState(false);
@@ -342,6 +421,12 @@ export default function MapView({ selectedLine, stationStopId, onLineSelect, onS
   const selectedLineRef = useRef(selectedLine);
   const onStationOpenRef = useRef(onStationOpen);
   useEffect(() => { onStationOpenRef.current = onStationOpen; }, [onStationOpen]);
+
+  // Mirror stationStopId in a ref so the rAF tick (which captures `lines`
+  // at effect creation time) can read the CURRENT open station each frame
+  // without stale-closure issues.
+  const stationStopIdRef = useRef(stationStopId);
+  useEffect(() => { stationStopIdRef.current = stationStopId; }, [stationStopId]);
   // Set by the map line-click handler; read + cleared by the selection
   // effect so a click-initiated selection zooms to the nearest stop rather
   // than to the default downtown frame.
@@ -464,6 +549,25 @@ export default function MapView({ selectedLine, stationStopId, onLineSelect, onS
           data: { type: "FeatureCollection", features: [] },
         });
 
+        // Stand-alone walking route, rendered when SearchSheet decides
+        // walking is faster than any subway plan. Independent of
+        // selectedTrip so it doesn't get clobbered by the trip-walks
+        // source-update effect, and styled with the same dashed
+        // pedestrian look as the trip's start/end walk legs.
+        map.addSource("walk-only", {
+          type: "geojson",
+          data: { type: "FeatureCollection", features: [] },
+        });
+
+        // Pulse rings + ETA labels for trains inbound to the currently-open
+        // station. Populated every rAF frame so the animation runs smoothly.
+        // Each feature carries pulseRadius, pulseOpacity, etaText, and
+        // labelColor as properties; the layers below read them directly.
+        map.addSource("station-incoming-rings", {
+          type: "geojson",
+          data: { type: "FeatureCollection", features: [] },
+        });
+
         // One pre-baked RGBA icon per route, registered as "train-<routeId>".
         // Colors + outlines are painted into the bitmap — no SDF, no halo
         // shader, so the outline stays crisp under Mapbox's downsampling at
@@ -479,6 +583,17 @@ export default function MapView({ selectedLine, stationStopId, onLineSelect, onS
               { pixelRatio: 2 },
             );
           }
+        }
+
+        // Single shared white glow icon, sized to wrap the train capsule
+        // and used to highlight trains inbound to the open station.
+        if (!map.hasImage("train-glow")) {
+          const glow = makeTrainGlowIcon();
+          map.addImage(
+            "train-glow",
+            { width: glow.width, height: glow.height, data: glow.data },
+            { pixelRatio: 2 },
+          );
         }
 
         map.addLayer({
@@ -578,6 +693,43 @@ export default function MapView({ selectedLine, stationStopId, onLineSelect, onS
           },
         });
 
+        // Stand-alone walking-route halo + dashed line, mirroring the
+        // trip-walks styling so a walking-faster recommendation reads
+        // visually identical to the dashed walks at the start/end of a
+        // subway plan — same affordance, same meaning.
+        map.addLayer({
+          id: "walk-only-halo",
+          type: "line",
+          source: "walk-only",
+          layout: { "line-cap": "round", "line-join": "round" },
+          paint: {
+            "line-color": "#000000",
+            "line-opacity": 0.45,
+            "line-width": [
+              "interpolate", ["linear"], ["zoom"],
+              10, 4,
+              14, 8,
+            ],
+            "line-blur": 1.5,
+          },
+        });
+        map.addLayer({
+          id: "walk-only",
+          type: "line",
+          source: "walk-only",
+          layout: { "line-cap": "round", "line-join": "round" },
+          paint: {
+            "line-color": "#ffffff",
+            "line-opacity": 0.95,
+            "line-width": [
+              "interpolate", ["linear"], ["zoom"],
+              10, 2,
+              14, 4,
+            ],
+            "line-dasharray": [0.1, 1.6],
+          },
+        });
+
         // Bright thick polyline per leg in the leg's route color, with
         // a soft white halo underneath so the segment pops on the
         // dimmed line network. Placed above subway-stops so the
@@ -653,13 +805,42 @@ export default function MapView({ selectedLine, stationStopId, onLineSelect, onS
           type: "symbol",
           source: "subway-trip-stations",
           layout: {
-            "text-field": ["get", "name"],
+            // Origin and destination labels would just repeat what the
+            // route-details panel already shows ("From: Current location",
+            // "To: Times Square") and they tend to sit right on top of
+            // the board/alight station labels when the walk is short —
+            // suppress them on the map so only the subway-station names
+            // (board / transfer / alight) render.
+            "text-field": [
+              "case",
+              [
+                "any",
+                ["==", ["get", "kind"], "origin"],
+                ["==", ["get", "kind"], "destination"],
+              ],
+              "",
+              ["get", "name"],
+            ],
             "text-font": ["DIN Pro Bold", "Open Sans Bold", "Arial Unicode MS Bold"],
             "text-size": 12,
             "text-offset": [0, 1.2],
             "text-anchor": "top",
-            "text-allow-overlap": true,
-            "text-ignore-placement": true,
+            // Let Mapbox's collision detection drop overlapping labels
+            // (transfer + alight stations are often the same complex,
+            // e.g. Times Sq-42 St and Grand Central-42 St). The sort
+            // key below picks which label wins — the rider needs to
+            // see where to get OFF more than where to transfer, so
+            // alight ranks first.
+            "text-allow-overlap": false,
+            "text-ignore-placement": false,
+            "symbol-sort-key": [
+              "match",
+              ["get", "kind"],
+              "alight", 0,
+              "board", 1,
+              "transfer", 2,
+              3,
+            ],
           },
           paint: {
             "text-color": "#ffffff",
@@ -820,6 +1001,68 @@ export default function MapView({ selectedLine, stationStopId, onLineSelect, onS
             "text-halo-color": "#0f172a",
             "text-halo-width": 2.2,
             "text-halo-blur": 0.2,
+          },
+        });
+
+        // ── Incoming-train glow outline ──
+        // White glow capsule rendered UNDER the train icon so the route-
+        // colored body reads clearly on top with a soft halo wrapping its
+        // silhouette. icon-size and icon-opacity pulse ~0.9 Hz via per-frame
+        // property updates (see rAF tick below). Imminent trains (< 90 s)
+        // get a brighter, slightly larger glow so the urgency is obvious
+        // at a glance. A symbol layer above adds the ETA text just above
+        // each capsule — amber when imminent, near-white otherwise
+        // (mirrors the panel style).
+        map.addLayer({
+          id: "station-incoming-rings",
+          type: "symbol",
+          source: "station-incoming-rings",
+          layout: {
+            "icon-image": "train-glow",
+            // Mirror the train layer's per-zoom size curve and multiply each
+            // stop output by the per-feature pulse factor so the glow tracks
+            // the train's apparent size at every zoom and breathes with the
+            // pulse phase. Mapbox requires ["zoom"] to be the direct input
+            // of a top-level interpolate/step, so the multiplication has to
+            // live inside each stop output rather than wrapping the whole
+            // expression.
+            "icon-size": [
+              "interpolate", ["linear"], ["zoom"],
+              10, ["*", 0.29, ["get", "pulseSize"]],
+              11.5, ["*", 0.50, ["get", "pulseSize"]],
+              13, ["*", 0.74, ["get", "pulseSize"]],
+              14, ["*", 1.03, ["get", "pulseSize"]],
+            ],
+            "icon-rotate": capsuleRotate,
+            "icon-rotation-alignment": "map",
+            "icon-pitch-alignment": "map",
+            "icon-allow-overlap": true,
+            "icon-ignore-placement": true,
+          },
+          paint: {
+            "icon-opacity": ["get", "pulseOpacity"],
+          },
+        }, "subway-trains-icon"); // stays below the train body
+
+        map.addLayer({
+          id: "station-incoming-labels",
+          type: "symbol",
+          source: "station-incoming-rings",
+          layout: {
+            "text-field": ["get", "etaText"],
+            "text-font": ["DIN Pro Bold", "Open Sans Bold", "Arial Unicode MS Bold"],
+            "text-size": 11,
+            // Place the label above the capsule, outside the ring.
+            "text-offset": [0, -2.2],
+            "text-anchor": "bottom",
+            "text-allow-overlap": true,
+            "text-ignore-placement": true,
+          },
+          paint: {
+            "text-color": ["get", "labelColor"],
+            "text-halo-color": "#0a0a0a",
+            "text-halo-width": 2,
+            "text-halo-blur": 0.3,
           },
         });
 
@@ -1045,6 +1288,11 @@ export default function MapView({ selectedLine, stationStopId, onLineSelect, onS
   useEffect(() => {
     if (!mapLoaded || !mapRef.current || !lines) return;
     const map = mapRef.current;
+
+    // Build the station index once per `lines` version. Used by the ring
+    // animation to resolve which platform stop IDs belong to the open station
+    // complex (so arrivals at any of its platforms count as "incoming here").
+    const stationIndex = buildStationIndex(lines);
 
     const TICK_MS = 33;
     // Per-frame lerp factor for the displayed position. With accurate
@@ -1358,6 +1606,100 @@ export default function MapView({ selectedLine, stationStopId, onLineSelect, onS
       }
       const src = map.getSource("subway-trains");
       src?.setData({ type: "FeatureCollection", features });
+
+      // ── Incoming-train pulse rings ──────────────────────────────────────
+      // When a StationPanel is open, find which trains are headed to that
+      // station and animate a glowing ring beneath each one. The ring's
+      // radius and opacity oscillate ~0.9 Hz so it reads as "live" even
+      // when trains aren't visibly moving; the ETA text above each capsule
+      // lets riders see at a glance which one to run for.
+      const ringStation = stationStopIdRef.current;
+      const ringSrc = map.getSource("station-incoming-rings");
+
+      if (ringStation && ringSrc && d) {
+        const station = stationIndex.find((s) => s.stopIds.includes(ringStation));
+        const stationIds = station ? new Set(station.stopIds) : null;
+
+        if (stationIds) {
+          const nowSec = nowMs / 1000;
+          // Horizon: only show arrivals within the next 10 minutes. Beyond
+          // that the ETA is noisy and the ring would clutter the whole line.
+          const HORIZON_SEC = 600;
+
+          // Build tripId → earliest ETA at this station from the arrivals
+          // list. We keep the earliest per trip because a complex with
+          // multiple platforms may have the same trip listed twice.
+          const incomingEtas = new Map<string, number>();
+          for (const a of d.arrivals) {
+            if (!stationIds.has(a.stopId)) continue;
+            const etaSec = a.eta - nowSec;
+            if (etaSec < -30 || etaSec > HORIZON_SEC) continue;
+            const prev = incomingEtas.get(a.tripId);
+            if (prev === undefined || etaSec < prev) incomingEtas.set(a.tripId, etaSec);
+          }
+          // Trains currently STOPPED_AT a platform here aren't in the
+          // arrivals list (that arrival already happened from the feed's
+          // perspective), but they ARE still physically present and very
+          // much worth highlighting.
+          for (const t of d.trains) {
+            if (t.status !== "STOPPED_AT") continue;
+            if (!stationIds.has(t.prevStopId)) continue;
+            if (!incomingEtas.has(t.id)) incomingEtas.set(t.id, 0);
+          }
+
+          // Phase: 0→1→0 at ~0.9 Hz — roughly "one breath" per second.
+          const phase = (Math.sin((nowMs / 700) * Math.PI * 2) + 1) / 2;
+
+          const ringFeatures: GeoJSON.Feature[] = [];
+          for (const f of features) {
+            const tripId = f.properties?.id as string | undefined;
+            if (!tripId) continue;
+            const etaSec = incomingEtas.get(tripId);
+            if (etaSec === undefined) continue;
+
+            // Urgency threshold: < 90 s (mirrors the panel's amber rule).
+            const isImminent = etaSec < 90;
+
+            // ETA label text — same formatting as fmtEta in StationPanel.
+            let etaText: string;
+            if (etaSec <= 5) etaText = "Now";
+            else if (etaSec < 60) etaText = `${Math.round(etaSec)}s`;
+            else etaText = `${Math.round(etaSec / 60)} min`;
+
+            // Amber when imminent, near-white otherwise — matches the
+            // arrival row color in the panel so the language is consistent.
+            const labelColor = isImminent ? "#fbbf24" : "#f9fafb";
+
+            // Glow pulse: a subtle "breathing" of the outline. Imminent
+            // trains get a brighter, slightly larger halo to scream "this
+            // is the one." pulseSize multiplies the train's per-zoom icon
+            // size so the glow tracks the capsule at every zoom.
+            const baseSize = isImminent ? 1.10 : 1.00;
+            const sizeRange = isImminent ? 0.18 : 0.12;
+            const baseOpacity = isImminent ? 0.70 : 0.50;
+            const opacityRange = isImminent ? 0.25 : 0.18;
+
+            ringFeatures.push({
+              type: "Feature" as const,
+              properties: {
+                bearing: f.properties?.bearing ?? 90,
+                pulseSize: baseSize + sizeRange * phase,
+                pulseOpacity: baseOpacity + opacityRange * phase,
+                etaText,
+                labelColor,
+              },
+              geometry: f.geometry as GeoJSON.Geometry,
+            });
+          }
+
+          ringSrc.setData({ type: "FeatureCollection", features: ringFeatures });
+        } else {
+          ringSrc.setData({ type: "FeatureCollection", features: [] });
+        }
+      } else if (ringSrc) {
+        // No station open — clear the rings immediately.
+        ringSrc.setData({ type: "FeatureCollection", features: [] });
+      }
     };
     frame = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(frame);
@@ -1900,15 +2242,20 @@ export default function MapView({ selectedLine, stationStopId, onLineSelect, onS
       Number.isFinite(maxLat)
     ) {
       const isMobile = window.matchMedia("(max-width: 639px)").matches;
-      // When a trip is selected the SearchSheet/NearbyPanel sits at the
-      // half-detent showing ~38dvh of content — its top edge lands at
-      // ~62dvh from the top of the viewport, meaning only the top 62%
-      // of the map is visible. Setting bottom padding to ~38% of the
-      // viewport height keeps route endpoints clear of the panel with a
-      // small buffer. Top padding clears the floating control row
-      // (~4rem from top on mobile, plus a ~2.75rem control bar).
+      // The SearchSheet sits at one of two heights when a trip is
+      // selected:
+      //   • ≈38dvh in route-detail mode (rider opened a plan's
+      //     A→Z timeline)
+      //   • ≈60dvh in plan-list mode (rider hasn't picked a plan
+      //     yet; auto-preselect renders the first plan but the sheet
+      //     keeps the full list visible above)
+      // The visible map area is the inverse of the panel height.
+      // Padding the bottom of fitBounds by that height keeps the
+      // trip from being cropped behind the panel. The `+ 24` buffer
+      // is breathing room above the panel's top edge.
+      const panelDvh = tripDetailExpanded ? 0.42 : 0.62;
       const bottomPad = isMobile
-        ? Math.round(window.innerHeight * 0.42) + 24
+        ? Math.round(window.innerHeight * panelDvh) + 24
         : 60;
       const rightPad = isMobile ? 40 : 360;
       map.fitBounds(
@@ -1923,7 +2270,90 @@ export default function MapView({ selectedLine, stationStopId, onLineSelect, onS
         },
       );
     }
-  }, [selectedTrip, mapLoaded, focusedLegIndex]);
+  }, [selectedTrip, mapLoaded, focusedLegIndex, tripDetailExpanded]);
+
+  // ── Walk-only overlay ──────────────────────────────────────────────
+  // When the SearchSheet decides walking is faster than subway, it
+  // hands us a from/to pair (and ideally a street-following coordinate
+  // path). Push it into the dedicated walk-only source so the dashed
+  // pedestrian line appears immediately, and fit the camera to the
+  // walk's bounds — but only when there's no subway trip selected
+  // (the trip overlay's own fit takes precedence so the rider sees
+  // their chosen route framed).
+  useEffect(() => {
+    if (!mapLoaded || !mapRef.current) return;
+    const map = mapRef.current;
+    const src = map.getSource("walk-only") as
+      | { setData: (d: unknown) => void }
+      | undefined;
+    if (!src) return;
+
+    if (!walkOnlyOverlay) {
+      src.setData({ type: "FeatureCollection", features: [] });
+      return;
+    }
+
+    const coords =
+      walkOnlyOverlay.coords && walkOnlyOverlay.coords.length >= 2
+        ? walkOnlyOverlay.coords
+        : [
+            [walkOnlyOverlay.from.lng, walkOnlyOverlay.from.lat] as [
+              number,
+              number,
+            ],
+            [walkOnlyOverlay.to.lng, walkOnlyOverlay.to.lat] as [
+              number,
+              number,
+            ],
+          ];
+    src.setData({
+      type: "FeatureCollection",
+      features: [
+        {
+          type: "Feature",
+          properties: { kind: "walk-only" },
+          geometry: { type: "LineString", coordinates: coords },
+        },
+      ],
+    });
+
+    if (selectedTrip && selectedTrip.legs.length > 0) return;
+
+    let minLng = Infinity,
+      minLat = Infinity,
+      maxLng = -Infinity,
+      maxLat = -Infinity;
+    for (const [lng, lat] of coords) {
+      if (lng < minLng) minLng = lng;
+      if (lng > maxLng) maxLng = lng;
+      if (lat < minLat) minLat = lat;
+      if (lat > maxLat) maxLat = lat;
+    }
+    if (
+      !Number.isFinite(minLng) ||
+      !Number.isFinite(maxLng) ||
+      !Number.isFinite(minLat) ||
+      !Number.isFinite(maxLat)
+    ) {
+      return;
+    }
+    const isMobile = window.matchMedia("(max-width: 639px)").matches;
+    const bottomPad = isMobile
+      ? Math.round(window.innerHeight * 0.42) + 24
+      : 60;
+    const rightPad = isMobile ? 40 : 360;
+    map.fitBounds(
+      [
+        [minLng, minLat],
+        [maxLng, maxLat],
+      ],
+      {
+        padding: { top: 100, right: rightPad, bottom: bottomPad, left: 40 },
+        duration: 800,
+        maxZoom: 16,
+      },
+    );
+  }, [walkOnlyOverlay, mapLoaded, selectedTrip]);
 
   if (noToken) {
     return (

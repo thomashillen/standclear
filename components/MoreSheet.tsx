@@ -7,7 +7,6 @@ import {
   Home,
   Briefcase,
   ChevronRight,
-  Trash2,
   Info,
   X,
   Train,
@@ -34,8 +33,8 @@ import { AlertsDialog } from "./AlertsButton";
 // header. Surfaces:
 //
 //   • Service alerts (with severity-tinted icon + count badge)
-//   • Home / Work commute anchors (current value, tap to edit)
-//   • Clear commute (destructive — only when at least one anchor set)
+//   • Home / Work commute anchors (current value, tap to edit, X to
+//     clear that anchor specifically)
 //   • About StandClear
 //
 // Rendered as a bottom-sheet panel — same chrome (ios-glass material,
@@ -86,7 +85,6 @@ export default function MoreSheet({ open, onClose, onSetHome, onSetWork }: Props
 
   const homeLabel = endpointLabel(home);
   const workLabel = endpointLabel(work);
-  const hasAnyAnchor = !!(home || work);
 
   // Drag-to-dismiss only — no half/full detents (the menu is short
   // enough that a fixed full-height sheet works). Both rests sit at
@@ -225,6 +223,9 @@ export default function MoreSheet({ open, onClose, onSetHome, onSetWork }: Props
                   onClose();
                   onSetHome();
                 }}
+                onClear={
+                  home ? () => setAnchor("home", null) : undefined
+                }
               />
               <AnchorRow
                 icon={<Briefcase className="w-4 h-4" />}
@@ -236,24 +237,10 @@ export default function MoreSheet({ open, onClose, onSetHome, onSetWork }: Props
                   onClose();
                   onSetWork();
                 }}
+                onClear={
+                  work ? () => setAnchor("work", null) : undefined
+                }
               />
-              {hasAnyAnchor && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setAnchor("home", null);
-                    setAnchor("work", null);
-                  }}
-                  className="press w-full flex items-center gap-3 px-3 py-2.5 rounded-2xl text-rose-300 hover:bg-rose-500/10 touch-manipulation"
-                >
-                  <span className="flex items-center justify-center w-9 h-9 rounded-full bg-rose-500/15 ring-1 ring-rose-500/30 flex-shrink-0">
-                    <Trash2 className="w-4 h-4" />
-                  </span>
-                  <span className="text-[13px] font-semibold">
-                    Clear commute
-                  </span>
-                </button>
-              )}
               <p className="px-3 pt-1 text-[11px] text-gray-500 leading-snug">
                 Pin an address — the planner uses every nearby station
                 as a candidate so your route stays fastest from
@@ -477,6 +464,7 @@ function AnchorRow({
   emptyHint,
   accent,
   onTap,
+  onClear,
 }: {
   icon: React.ReactNode;
   label: string;
@@ -484,6 +472,12 @@ function AnchorRow({
   emptyHint: string;
   accent: "emerald" | "sky";
   onTap: () => void;
+  /** Optional remove handler. When provided AND `value` is set, the
+   *  row renders a small X button that clears just this anchor (the
+   *  whole-row tap still routes the rider to SearchSheet to re-set
+   *  it). Lets the rider drop one anchor without nuking both — Clear
+   *  Commute as a single button conflated those. */
+  onClear?: () => void;
 }) {
   const isSet = value !== null;
   const accentBg =
@@ -491,29 +485,49 @@ function AnchorRow({
       ? "bg-emerald-500/15 text-emerald-200 ring-1 ring-emerald-500/30"
       : "bg-sky-500/15 text-sky-200 ring-1 ring-sky-500/30";
   return (
-    <button
-      type="button"
-      onClick={onTap}
-      className="press w-full flex items-center gap-3 px-3 py-3 rounded-2xl bg-white/[0.04] hover:bg-white/[0.08] touch-manipulation"
-    >
-      <span
-        className={`flex items-center justify-center w-9 h-9 rounded-full flex-shrink-0 ${accentBg}`}
+    <div className="relative flex items-stretch w-full rounded-2xl bg-white/[0.04] hover:bg-white/[0.08] touch-manipulation overflow-hidden">
+      <button
+        type="button"
+        onClick={onTap}
+        className="press flex-1 flex items-center gap-3 px-3 py-3 text-left min-w-0"
       >
-        {icon}
-      </span>
-      <span className="flex-1 min-w-0 text-left">
-        <span className="block text-[14px] font-semibold text-gray-100">
-          {label}
-        </span>
         <span
-          className={`block text-[12px] truncate ${
-            isSet ? "text-gray-300" : "text-gray-500"
-          }`}
+          className={`flex items-center justify-center w-9 h-9 rounded-full flex-shrink-0 ${accentBg}`}
         >
-          {value ?? emptyHint}
+          {icon}
         </span>
-      </span>
-      <ChevronRight className="w-4 h-4 text-gray-500 flex-shrink-0" />
-    </button>
+        <span className="flex-1 min-w-0">
+          <span className="block text-[14px] font-semibold text-gray-100">
+            {label}
+          </span>
+          <span
+            className={`block text-[12px] truncate ${
+              isSet ? "text-gray-300" : "text-gray-500"
+            }`}
+          >
+            {value ?? emptyHint}
+          </span>
+        </span>
+        {!isSet && (
+          <ChevronRight className="w-4 h-4 text-gray-500 flex-shrink-0" />
+        )}
+      </button>
+      {isSet && onClear && (
+        <button
+          type="button"
+          onClick={(e) => {
+            // Don't fall through to the row's onTap — clearing and
+            // immediately re-opening the search to set the same
+            // anchor would surprise the rider.
+            e.stopPropagation();
+            onClear();
+          }}
+          aria-label={`Remove ${label}`}
+          className="press flex items-center justify-center w-11 mr-1 my-1 rounded-xl text-gray-400 hover:text-rose-300 hover:bg-rose-500/10 flex-shrink-0 touch-manipulation"
+        >
+          <X className="w-4 h-4" strokeWidth={2.5} />
+        </button>
+      )}
+    </div>
   );
 }

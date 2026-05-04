@@ -9,7 +9,6 @@ import {
   Home,
   Briefcase,
   ArrowRight,
-  ArrowLeft,
   ChevronRight,
   Compass,
   Footprints,
@@ -574,7 +573,11 @@ export function TripPlanRow({
             />
           )}
           <span className="text-[13px] tabular-nums text-gray-100 leading-snug">
-            <span className="text-gray-500">in </span>
+            {/* "Next:" prefix instead of "in" — with the route bullet
+                immediately to the left, "[4] in 4m · 11m · 19m" parsed
+                as "the 4 train in 4m" before the eye reached the dot
+                separator. "Next:" makes the list reading unambiguous. */}
+            <span className="text-gray-500">Next: </span>
             {upcoming.map((a, i) => (
               <span key={`${a.tripId}-${i}`}>
                 {i > 0 && <span className="text-gray-600"> · </span>}
@@ -755,7 +758,6 @@ interface TripPlanDetailProps {
   /** Toggle map focus on a specific leg. Tap the same leg again to
    *  return to the whole-trip frame. */
   onFocusLeg?: (i: number | null) => void;
-  onBack: () => void;
 }
 
 export function TripPlanDetail({
@@ -771,7 +773,6 @@ export function TripPlanDetail({
   now,
   focusedLegIndex,
   onFocusLeg,
-  onBack,
 }: TripPlanDetailProps) {
   const board = stationsByComplexId.get(plan.legs[0].boardComplexId);
   const alight = stationsByComplexId.get(
@@ -829,18 +830,12 @@ export function TripPlanDetail({
 
   return (
     <div className="px-3 pb-6">
-      {/* Header — back button + total trip time. The unexpanded plan
-          row already showed the bullets, so we surface the most
-          decision-useful number (total minutes) here instead. */}
+      {/* Header — total trip time. The unexpanded plan row already
+          showed the bullets, so we surface the most decision-useful
+          number (total minutes) here. The panel's outer header
+          already provides a back button, so we don't duplicate one
+          here — two adjacent back arrows read as ambiguous. */}
       <div className="flex items-center gap-3 mb-4">
-        <button
-          type="button"
-          onClick={onBack}
-          aria-label="Back to route options"
-          className="press flex-shrink-0 inline-flex items-center justify-center w-9 h-9 rounded-full bg-white/[0.08] hover:bg-white/[0.14] text-gray-100 touch-manipulation"
-        >
-          <ArrowLeft className="w-4 h-4" />
-        </button>
         <div className="flex items-baseline gap-1.5 min-w-0">
           <span className="text-[22px] font-bold tabular-nums text-gray-100 leading-none">
             {totalMin}
@@ -896,6 +891,15 @@ export function TripPlanDetail({
           const legAlight = stationsByComplexId.get(leg.alightComplexId);
           const isLastLeg = i === plan.legs.length - 1;
           const isFocused = focusedLegIndex === i;
+          // Ride duration mirrors the estimator's per-leg model:
+          // stops × 90 s. Surfaced as the row's meta so the rider
+          // sees how long the actual subway segment takes — the
+          // walking and total are already shown elsewhere, but a
+          // 25-min total split as "3 walk / 18 train / 4 walk"
+          // tells a different story than "3 / 8 / 4" at the same
+          // total. Floor of 1 min so a one-stop hop doesn't
+          // collapse to "0".
+          const rideMin = Math.max(1, Math.round((leg.stopCount * 90) / 60));
           return (
             <TimelineRow
               key={`detail-leg-${i}`}
@@ -921,6 +925,7 @@ export function TripPlanDetail({
                   </span>
                 </>
               }
+              meta={`${rideMin} min`}
               subtitle={
                 isFocused
                   ? "Tap again to see whole trip"

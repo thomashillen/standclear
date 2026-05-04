@@ -9,6 +9,7 @@ import {
   Briefcase,
   ArrowLeftRight,
   ArrowRight,
+  ChevronRight,
 } from "lucide-react";
 import { useLines } from "@/lib/subwayData";
 import { useTrains, type Arrival } from "@/lib/useTrains";
@@ -79,6 +80,10 @@ interface Props {
    *  fly the camera back to a Manhattan overview so a non-NYC visitor
    *  sees the system map instead of an empty list. */
   onPreviewMap?: () => void;
+  /** Open the More menu — used by the empty-state "set up your
+   *  commute" card so a first-run rider has a one-tap path to the
+   *  Home / Work setup that lives in More. */
+  onOpenMore?: () => void;
 }
 
 /**
@@ -425,6 +430,7 @@ export default function NearbyPanel({
   selectedTripKey,
   onSeeAllRoutes,
   onPreviewMap,
+  onOpenMore,
 }: Props) {
   const geo = useGeolocation(open);
   const lines = useLines();
@@ -729,7 +735,7 @@ export default function NearbyPanel({
       className="
         absolute z-20 overflow-hidden flex flex-col
         inset-x-0 bottom-0 top-[var(--panel-top-rest)] rounded-t-[28px] border-t border-white/[0.08]
-        sm:inset-auto sm:right-3 sm:top-3 sm:bottom-3 sm:w-[340px] sm:h-auto sm:rounded-[22px] sm:border sm:border-white/[0.08]
+        sm:inset-auto sm:right-3 sm:top-[var(--panel-top-rest)] sm:bottom-3 sm:w-[340px] sm:h-auto sm:rounded-[22px] sm:border sm:border-white/[0.08]
         ios-glass
         shadow-[0_20px_60px_-10px_rgba(0,0,0,0.6)]
         pb-[env(safe-area-inset-bottom)]
@@ -893,22 +899,32 @@ export default function NearbyPanel({
         )}
 
         {/* First-run hint: shown only when neither anchor is set, the
-            user has location, and no other empty state is visible. */}
+            user has location, and no other empty state is visible.
+            Tapping the card opens MoreSheet — Home / Work setup
+            lives there now (the per-station "Set Home" chips are
+            gone), so the rider has exactly one place to reach for
+            this setting and we don't need to teach two paths. */}
         {!home && !work && geo.lng != null && !farFromNYC && (
-          <div className="mx-4 mt-3 mb-1 rounded-2xl border border-white/[0.06] bg-white/[0.04] px-3.5 py-2.5">
-            <p className="text-[12px] text-gray-300 leading-snug">
-              <span className="font-semibold text-gray-100">Pin your commute.</span>{" "}
-              Tap any station and choose{" "}
-              <span className="inline-flex items-center gap-1 px-1.5 py-px rounded-full bg-emerald-300/15 text-emerald-200 text-[10px] font-bold align-baseline">
-                <Home className="w-2.5 h-2.5" /> Home
-              </span>{" "}
-              or{" "}
-              <span className="inline-flex items-center gap-1 px-1.5 py-px rounded-full bg-sky-300/15 text-sky-200 text-[10px] font-bold align-baseline">
-                <Briefcase className="w-2.5 h-2.5" /> Work
-              </span>{" "}
-              to keep it one tap away.
-            </p>
-          </div>
+          <button
+            type="button"
+            onClick={onOpenMore}
+            disabled={!onOpenMore}
+            className="press mx-4 mt-3 mb-1 w-[calc(100%-2rem)] flex items-center gap-3 rounded-2xl border border-white/[0.06] bg-white/[0.04] hover:bg-white/[0.07] px-3.5 py-2.5 text-left touch-manipulation disabled:cursor-default disabled:hover:bg-white/[0.04]"
+          >
+            <span className="flex items-center justify-center w-9 h-9 rounded-full bg-emerald-300/15 text-emerald-200 ring-1 ring-emerald-300/30 flex-shrink-0">
+              <Home className="w-4 h-4" />
+            </span>
+            <span className="flex-1 min-w-0">
+              <span className="block text-[13px] font-semibold text-gray-100">
+                Set up your commute
+              </span>
+              <span className="block text-[11px] text-gray-400 leading-snug">
+                Pin a Home and Work address in More to surface a
+                one-tap commute card here.
+              </span>
+            </span>
+            <ChevronRight className="w-4 h-4 text-gray-500 flex-shrink-0" />
+          </button>
         )}
 
         {favStations.length > 0 && (

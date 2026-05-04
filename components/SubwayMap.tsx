@@ -110,6 +110,21 @@ export default function SubwayMap() {
   // expanded view renders the per-step instructions.
   const [walkFromRoute, setWalkFromRoute] = useState<WalkingRoute | null>(null);
   const [walkToRoute, setWalkToRoute] = useState<WalkingRoute | null>(null);
+  // Stand-alone walking-faster overlay. Set by SearchSheet when the
+  // direct walk between the two endpoints is at least as fast as any
+  // subway plan — MapView renders a dashed walking line on its own
+  // (no subway-trip rendering) and fits the camera to the walk.
+  const [walkOnlyOverlay, setWalkOnlyOverlay] = useState<{
+    from: { lng: number; lat: number };
+    to: { lng: number; lat: number };
+    coords?: [number, number][];
+  } | null>(null);
+  // Whether the SearchSheet is currently inside a plan's detail view
+  // (panel ≈38dvh) vs the plan-list view (panel ≈60dvh). MapView uses
+  // it to pick the right bottom padding when fitting the trip — so a
+  // route's southern end doesn't hide behind the taller plan-list
+  // panel.
+  const [tripDetailExpanded, setTripDetailExpanded] = useState(false);
   // Fly-to-user signal — increments each time the user taps Near-me so
   // MapView can fly the camera to their location (waiting for geo if it
   // isn't available yet). Counter, not a boolean, so successive taps
@@ -402,6 +417,8 @@ export default function SubwayMap() {
           panelOpen={panelOpen}
           selectedTrip={selectedTrip}
           focusedLegIndex={focusedLegIndex}
+          walkOnlyOverlay={walkOnlyOverlay}
+          tripDetailExpanded={tripDetailExpanded}
         />
         {selectedLine && !nearbyOpen && !stationStopId && (
           <LinePanel
@@ -431,6 +448,10 @@ export default function SubwayMap() {
           onPreviewMap={() => {
             setNearbyOpen(false);
             setFlyToDefaultSignal((s) => s + 1);
+          }}
+          onOpenMore={() => {
+            setNearbyOpen(false);
+            setMoreOpen(true);
           }}
         />
         <MoreSheet
@@ -464,6 +485,7 @@ export default function SubwayMap() {
             setFocusedLegIndex(null);
             setSearchAnchorPick(null);
             setSearchPresetTrip(null);
+            setWalkOnlyOverlay(null);
           }}
           onStationOpen={handleStationOpen}
           onTripSelect={handleTripSelect}
@@ -472,6 +494,8 @@ export default function SubwayMap() {
           walkToRoute={walkToRoute}
           focusedLegIndex={focusedLegIndex}
           onFocusLeg={setFocusedLegIndex}
+          onWalkOnlyChange={setWalkOnlyOverlay}
+          onExpandedPlanChange={setTripDetailExpanded}
         />
       </div>
 
@@ -598,7 +622,24 @@ export default function SubwayMap() {
             iOS convention that "settings / overflow actions" live at
             the trailing edge. */}
         <button
-          onClick={() => setMoreOpen(true)}
+          onClick={() => {
+            // Close any other panel that's currently covering the
+            // map slot — More is mutually exclusive with Search /
+            // NearbyPanel / LinePanel / StationPanel, same as the
+            // other floating-button entry points. In particular,
+            // when the rider is mid-anchor-pick (MoreSheet opened
+            // SearchSheet to grab a Home/Work address), tapping
+            // the dots again should bounce back to More instead
+            // of leaving the search panel layered behind it.
+            setSearchOpen(false);
+            setNearbyOpen(false);
+            setSelectedLine(null);
+            setFocusStopId(undefined);
+            setStationStopId(null);
+            setSearchAnchorPick(null);
+            setSearchPresetTrip(null);
+            setMoreOpen(true);
+          }}
           aria-label="More options"
           aria-pressed={moreOpen}
           className="pointer-events-auto press flex items-center justify-center w-11 h-11 rounded-full touch-manipulation flex-shrink-0 transition-colors border shadow-[0_6px_20px_rgba(0,0,0,0.45)] ios-glass text-gray-100 border-white/[0.10]"
