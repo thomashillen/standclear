@@ -1900,15 +1900,15 @@ export default function MapView({ selectedLine, stationStopId, onLineSelect, onS
       Number.isFinite(maxLat)
     ) {
       const isMobile = window.matchMedia("(max-width: 639px)").matches;
-      // Half-detent sheet covers the bottom ~60% of the viewport
-      // (sheet is 88dvh tall, translated down 28dvh, so its top edge
-      // sits at 40% from the top). Bottom padding has to exceed that
-      // coverage or the route's southern edge ends up clipped under
-      // the panel. 65% leaves a small visible buffer above the sheet
-      // edge so the rider sees the full route, not just the parts
-      // not covered by chrome.
+      // When a trip is selected the SearchSheet/NearbyPanel sits at the
+      // half-detent showing ~38dvh of content — its top edge lands at
+      // ~62dvh from the top of the viewport, meaning only the top 62%
+      // of the map is visible. Setting bottom padding to ~38% of the
+      // viewport height keeps route endpoints clear of the panel with a
+      // small buffer. Top padding clears the floating control row
+      // (~4rem from top on mobile, plus a ~2.75rem control bar).
       const bottomPad = isMobile
-        ? Math.round(window.innerHeight * 0.65) + 24
+        ? Math.round(window.innerHeight * 0.42) + 24
         : 60;
       const rightPad = isMobile ? 40 : 360;
       map.fitBounds(
@@ -1917,7 +1917,7 @@ export default function MapView({ selectedLine, stationStopId, onLineSelect, onS
           [maxLng, maxLat],
         ],
         {
-          padding: { top: 80, right: rightPad, bottom: bottomPad, left: 40 },
+          padding: { top: 100, right: rightPad, bottom: bottomPad, left: 40 },
           duration: 800,
           maxZoom: 14,
         },
