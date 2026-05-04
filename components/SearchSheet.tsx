@@ -233,14 +233,6 @@ export default function SearchSheet({
   // mixed — Apple Maps' single-search pattern.
   const [query, setQuery] = useState("");
   const [searchPlaceResults, setSearchPlaceResults] = useState<Suggestion[]>([]);
-  // The top-ranked place suggestion, resolved to a { place, nearest } pair so
-  // `topSearchDestination` can offer a route preview to an address hit. Async
-  // because /retrieve (which adds coordinates) is a separate round-trip from
-  // the /suggest call that populates searchPlaceResults.
-  const [resolvedSearchPlace, setResolvedSearchPlace] = useState<{
-    place: Place;
-    nearest: StationEntry & { meters: number };
-  } | null>(null);
 
   // Directions-mode state. Endpoint type is a station-with-optional-
   // address-metadata so the field can show an address label while
@@ -689,27 +681,6 @@ export default function SearchSheet({
     );
   }, [mode, query, debouncedSuggester, geo.lat, geo.lng]);
 
-  // Keep resolvedSearchPlace in sync with the top search-mode place result.
-  // Fires whenever searchPlaceResults changes so a fresh /retrieve round-trip
-  // runs for the new top hit; the AbortController cancels any in-flight fetch
-  // when results change mid-debounce so we never overwrite a newer result
-  // with a stale one.
-  useEffect(() => {
-    setResolvedSearchPlace(null);
-    if (mode !== "search" || searchPlaceResults.length === 0) return;
-    let cancelled = false;
-    (async () => {
-      try {
-        const place = await retrievePlace(searchPlaceResults[0]);
-        if (cancelled || !place) return;
-        const nearest = nearestStations(index, place.lng, place.lat, 1)[0];
-        if (!nearest || cancelled) return;
-        setResolvedSearchPlace({ place, nearest });
-      } catch { /* ignore — network errors just leave the preview absent */ }
-    })();
-    return () => { cancelled = true; };
-  }, [mode, searchPlaceResults, index]);
-
   // Resolve a Suggestion to a Place + nearest station. Called on tap
   // (not on every keystroke) — `/retrieve` is what fills in the
   // coordinates the suggest endpoint deliberately omits.
@@ -725,171 +696,6 @@ export default function SearchSheet({
     } catch {
       return null;
     }
-  };
-
-  // ── Fastest-route preview for the top search hit.
-  // As the rider types, surface the fastest plan from current location
-  // to whatever ranks first in the results. Stations win over places
-  // when both match — a transit app should privilege subway hits.
-  // Skipped in anchor-pick mode (the rider is choosing a Home/Work
-  // pin, not navigating) and when we have no geolocation to route
-  // from.
-  const topSearchDestination = useMemo<TripEndpoint | null>(() => {
-    if (mode !== "search") return null;
-    if (anchorPickMode) return null;
-    if (searchResults && searchResults.length > 0) {
-      return searchResults[0] as TripEndpoint;
-    }
-    if (resolvedSearchPlace) {
-      const { place, nearest } = resolvedSearchPlace;
-      return { ...nearest, displayName: place.name, address: place };
-    }
-    return null;
-  }, [mode, anchorPickMode, searchResults, resolvedSearchPlace]);
-
-  const topSearchFastest = useMemo<{
-    plan: TripPlan;
-    origin: TripEndpoint;
-    destination: TripEndpoint;
-    walkFromMeters?: number;
-    walkToMeters?: number;
-  } | null>(() => {
-    if (!topSearchDestination || !lines) return null;
-    if (geo.lat == null || geo.lng == null) return null;
-    const fromNearest = nearestStations(index, geo.lng, geo.lat, 1)[0];
-    if (!fromNearest) return null;
-    const origin: TripEndpoint = {
-      ...fromNearest,
-      displayName: "Current location",
-      address: {
-        id: "current-location",
-        name: "Current location",
-        context: "",
-        lng: geo.lng,
-        lat: geo.lat,
-      },
-    };
-    // Same expansion the directions-mode planner uses so we don't lock
-    // onto a single nearest station and miss a faster alternate.
-    const fromStopIds = Array.from(
-      new Set(
-        nearestStationsWithin(index, geo.lng, geo.lat, NEAR_RADIUS_M).flatMap(
-          (s) => s.stopIds,
-        ),
-      ),
-    );
-    const toStopIds = topSearchDestination.address
-      ? Array.from(
-          new Set(
-            nearestStationsWithin(
-              index,
-              topSearchDestination.address.lng,
-              topSearchDestination.address.lat,
-              NEAR_RADIUS_M,
-            ).flatMap((s) => s.stopIds),
-          ),
-        )
-      : topSearchDestination.stopIds;
-    const raw = planTrips(lines, index, fromStopIds, toStopIds, {
-      maxResults: 12,
-    });
-    const ranked = rankPlansByTime(raw, {
-      arrivalsByStation,
-      nowSec: now / 1000,
-      walkFromAnchor: { lng: geo.lng, lat: geo.lat },
-      walkToAnchor: topSearchDestination.address
-        ? {
-            lng: topSearchDestination.address.lng,
-            lat: topSearchDestination.address.lat,
-          }
-        : undefined,
-      stationsByComplexId,
-    });
-    if (ranked.length === 0) return null;
-    const plan = ranked[0];
-    const board = stationsByComplexId.get(plan.legs[0].boardComplexId);
-    const alight = stationsByComplexId.get(
-      plan.legs[plan.legs.length - 1].alightComplexId,
-    );
-    const walkFromMeters =
-      origin.address && board
-        ? haversineMeters(
-            { lat: origin.address.lat, lng: origin.address.lng },
-            { lat: board.lat, lng: board.lng },
-          )
-        : undefined;
-    const walkToMeters =
-      topSearchDestination.address && alight
-        ? haversineMeters(
-            {
-              lat: topSearchDestination.address.lat,
-              lng: topSearchDestination.address.lng,
-            },
-            { lat: alight.lat, lng: alight.lng },
-          )
-        : undefined;
-    return {
-      plan,
-      origin,
-      destination: topSearchDestination,
-      walkFromMeters,
-      walkToMeters: walkToMeters && walkToMeters > 0 ? walkToMeters : undefined,
-    };
-  }, [
-    topSearchDestination,
-    lines,
-    index,
-    arrivalsByStation,
-    now,
-    stationsByComplexId,
-    geo.lat,
-    geo.lng,
-  ]);
-
-  // Tap on the fastest-route preview: jump straight into the expanded
-  // A→Z detail view. Mirrors the state moves a normal "tap a result →
-  // tap a plan" sequence would make, just collapsed into one tap so
-  // the rider doesn't have to re-pick what we just showed them.
-  const openTopSearchDetail = () => {
-    if (!topSearchFastest) return;
-    const { plan, origin, destination } = topSearchFastest;
-    if (destination.address) {
-      addRecentPlace({
-        id: destination.address.id,
-        name: destination.address.name,
-        context: destination.address.context,
-        lng: destination.address.lng,
-        lat: destination.address.lat,
-      });
-    } else {
-      addRecentStation(destination.stopId, destination.name);
-    }
-    setMode("directions");
-    setQuery("");
-    setPlannerQuery("");
-    setSearchPlaceResults([]);
-    setTripFrom(origin);
-    setTripTo(destination);
-    setActiveField(null);
-    setExpandedPlan(plan);
-    onTripSelect?.({
-      plan,
-      walkFrom: origin.address
-        ? {
-            lng: origin.address.lng,
-            lat: origin.address.lat,
-            name: origin.address.name,
-          }
-        : undefined,
-      walkTo: destination.address
-        ? {
-            lng: destination.address.lng,
-            lat: destination.address.lat,
-            name: destination.address.name,
-          }
-        : undefined,
-    });
-    setDetent("half");
   };
 
   // Unified "directions to here from current location" handoff used
@@ -1428,45 +1234,6 @@ export default function SearchSheet({
             </div>
           ) : (
             <div>
-              {/* Fastest-route preview — auto-computed for whatever
-                  ranks first in the current results. Tapping jumps
-                  straight into the A→Z detail view and renders the
-                  route on the map; the rider doesn't have to first
-                  pick the destination then pick the plan. Skipped in
-                  anchor-pick mode and when geo isn't available. */}
-              {topSearchFastest && (
-                <div className="px-3 pt-3">
-                  <div className="px-2 pb-1.5 text-[10px] font-semibold text-amber-300/80 uppercase tracking-wider">
-                    Fastest route to {topSearchFastest.destination.displayName ?? topSearchFastest.destination.name}
-                  </div>
-                  <div
-                    className="rounded-2xl bg-gradient-to-br from-amber-500/10 via-amber-500/[0.04] to-transparent ring-1 ring-amber-400/20 p-1"
-                    style={{
-                      boxShadow:
-                        "inset 0 1px 0 rgba(255,255,255,0.10), 0 8px 24px -12px rgba(0,0,0,0.4)",
-                    }}
-                  >
-                    <TripPlanRow
-                      plan={topSearchFastest.plan}
-                      origin={topSearchFastest.origin}
-                      routeColors={routeColors}
-                      stationsByComplexId={stationsByComplexId}
-                      arrivals={
-                        arrivalsByStation.get(
-                          topSearchFastest.plan.legs[0].boardComplexId,
-                        ) ?? []
-                      }
-                      now={now}
-                      isPrimary
-                      onSelect={openTopSearchDetail}
-                      walkFromMeters={topSearchFastest.walkFromMeters}
-                      walkFromName={topSearchFastest.origin.address?.name}
-                      walkToMeters={topSearchFastest.walkToMeters}
-                      walkToName={topSearchFastest.destination.address?.name}
-                    />
-                  </div>
-                </div>
-              )}
               {searchResults && searchResults.length > 0 && (
                 <>
                   <div className="px-4 pt-3 pb-1.5 text-[10px] font-semibold text-gray-500 uppercase tracking-wider">
