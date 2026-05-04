@@ -207,6 +207,14 @@ export default function SearchSheet({
   // mixed — Apple Maps' single-search pattern.
   const [query, setQuery] = useState("");
   const [searchPlaceResults, setSearchPlaceResults] = useState<Suggestion[]>([]);
+  // The top-ranked place suggestion, resolved to a { place, nearest } pair so
+  // `topSearchDestination` can offer a route preview to an address hit. Async
+  // because /retrieve (which adds coordinates) is a separate round-trip from
+  // the /suggest call that populates searchPlaceResults.
+  const [resolvedSearchPlace, setResolvedSearchPlace] = useState<{
+    place: Place;
+    nearest: StationEntry & { meters: number };
+  } | null>(null);
 
   // Directions-mode state. Endpoint type is a station-with-optional-
   // address-metadata so the field can show an address label while
@@ -515,6 +523,27 @@ export default function SearchSheet({
     );
   }, [mode, query, debouncedSuggester, geo.lat, geo.lng]);
 
+  // Keep resolvedSearchPlace in sync with the top search-mode place result.
+  // Fires whenever searchPlaceResults changes so a fresh /retrieve round-trip
+  // runs for the new top hit; the AbortController cancels any in-flight fetch
+  // when results change mid-debounce so we never overwrite a newer result
+  // with a stale one.
+  useEffect(() => {
+    setResolvedSearchPlace(null);
+    if (mode !== "search" || searchPlaceResults.length === 0) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const place = await retrievePlace(searchPlaceResults[0]);
+        if (cancelled || !place) return;
+        const nearest = nearestStations(index, place.lng, place.lat, 1)[0];
+        if (!nearest || cancelled) return;
+        setResolvedSearchPlace({ place, nearest });
+      } catch { /* ignore — network errors just leave the preview absent */ }
+    })();
+    return () => { cancelled = true; };
+  }, [mode, searchPlaceResults, index]);
+
   // Resolve a Suggestion to a Place + nearest station. Called on tap
   // (not on every keystroke) — `/retrieve` is what fills in the
   // coordinates the suggest endpoint deliberately omits.
@@ -545,12 +574,12 @@ export default function SearchSheet({
     if (searchResults && searchResults.length > 0) {
       return searchResults[0] as TripEndpoint;
     }
-    if (searchPlaceRows.length > 0) {
-      const { place, nearest } = searchPlaceRows[0];
+    if (resolvedSearchPlace) {
+      const { place, nearest } = resolvedSearchPlace;
       return { ...nearest, displayName: place.name, address: place };
     }
     return null;
-  }, [mode, anchorPickMode, searchResults, searchPlaceRows]);
+  }, [mode, anchorPickMode, searchResults, resolvedSearchPlace]);
 
   const topSearchFastest = useMemo<{
     plan: TripPlan;
@@ -826,7 +855,7 @@ export default function SearchSheet({
       className="
         absolute z-20 overflow-hidden flex flex-col
         inset-x-0 bottom-0 top-[var(--panel-top-rest)] rounded-t-[28px] border-t border-white/[0.08]
-        sm:inset-auto sm:right-3 sm:top-3 sm:bottom-3 sm:w-[340px] sm:h-auto sm:rounded-[22px] sm:border sm:border-white/[0.08]
+        sm:inset-auto sm:right-3 sm:top-[var(--panel-top-rest)] sm:bottom-3 sm:w-[340px] sm:h-auto sm:rounded-[22px] sm:border sm:border-white/[0.08]
         ios-glass
         shadow-[0_20px_60px_-10px_rgba(0,0,0,0.6)]
         pb-[env(safe-area-inset-bottom)]

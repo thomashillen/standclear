@@ -342,6 +342,12 @@ export default function MapView({ selectedLine, stationStopId, onLineSelect, onS
   const selectedLineRef = useRef(selectedLine);
   const onStationOpenRef = useRef(onStationOpen);
   useEffect(() => { onStationOpenRef.current = onStationOpen; }, [onStationOpen]);
+
+  // Mirror stationStopId in a ref so the rAF tick (which captures `lines`
+  // at effect creation time) can read the CURRENT open station each frame
+  // without stale-closure issues.
+  const stationStopIdRef = useRef(stationStopId);
+  useEffect(() => { stationStopIdRef.current = stationStopId; }, [stationStopId]);
   // Set by the map line-click handler; read + cleared by the selection
   // effect so a click-initiated selection zooms to the nearest stop rather
   // than to the default downtown frame.
@@ -460,6 +466,15 @@ export default function MapView({ selectedLine, stationStopId, onLineSelect, onS
         // destination address. Empty FC when the trip's endpoints are
         // already stations (no walk to draw).
         map.addSource("subway-trip-walks", {
+          type: "geojson",
+          data: { type: "FeatureCollection", features: [] },
+        });
+
+        // Pulse rings + ETA labels for trains inbound to the currently-open
+        // station. Populated every rAF frame so the animation runs smoothly.
+        // Each feature carries pulseRadius, pulseOpacity, etaText, and
+        // labelColor as properties; the layers below read them directly.
+        map.addSource("station-incoming-rings", {
           type: "geojson",
           data: { type: "FeatureCollection", features: [] },
         });
@@ -823,6 +838,47 @@ export default function MapView({ selectedLine, stationStopId, onLineSelect, onS
           },
         });
 
+        // ── Incoming-train pulse rings ──
+        // White ring rendered UNDER the train capsule so the icon reads
+        // clearly on top. Radius and opacity pulse ~0.9 Hz via per-frame
+        // property updates (see rAF tick below). Imminent trains (< 90 s)
+        // get a larger, brighter ring so the urgency is obvious at a glance.
+        // A symbol layer above adds the ETA text just above each capsule —
+        // amber when imminent, near-white otherwise (mirrors the panel style).
+        map.addLayer({
+          id: "station-incoming-rings",
+          type: "circle",
+          source: "station-incoming-rings",
+          paint: {
+            "circle-color": "#ffffff",
+            "circle-opacity": ["get", "pulseOpacity"],
+            "circle-radius": ["get", "pulseRadius"],
+            "circle-stroke-width": 0,
+          },
+        }, "subway-trains-icon"); // stays below the train body
+
+        map.addLayer({
+          id: "station-incoming-labels",
+          type: "symbol",
+          source: "station-incoming-rings",
+          layout: {
+            "text-field": ["get", "etaText"],
+            "text-font": ["DIN Pro Bold", "Open Sans Bold", "Arial Unicode MS Bold"],
+            "text-size": 11,
+            // Place the label above the capsule, outside the ring.
+            "text-offset": [0, -2.2],
+            "text-anchor": "bottom",
+            "text-allow-overlap": true,
+            "text-ignore-placement": true,
+          },
+          paint: {
+            "text-color": ["get", "labelColor"],
+            "text-halo-color": "#0a0a0a",
+            "text-halo-width": 2,
+            "text-halo-blur": 0.3,
+          },
+        });
+
         // User-location dot: soft blue halo + opaque core with a white
         // ring. iOS-style "you are here" marker — sits above trains so
         // the user can find themselves on a busy map.
@@ -1045,6 +1101,11 @@ export default function MapView({ selectedLine, stationStopId, onLineSelect, onS
   useEffect(() => {
     if (!mapLoaded || !mapRef.current || !lines) return;
     const map = mapRef.current;
+
+    // Build the station index once per `lines` version. Used by the ring
+    // animation to resolve which platform stop IDs belong to the open station
+    // complex (so arrivals at any of its platforms count as "incoming here").
+    const stationIndex = buildStationIndex(lines);
 
     const TICK_MS = 33;
     // Per-frame lerp factor for the displayed position. With accurate
@@ -1358,6 +1419,97 @@ export default function MapView({ selectedLine, stationStopId, onLineSelect, onS
       }
       const src = map.getSource("subway-trains");
       src?.setData({ type: "FeatureCollection", features });
+
+      // ── Incoming-train pulse rings ──────────────────────────────────────
+      // When a StationPanel is open, find which trains are headed to that
+      // station and animate a glowing ring beneath each one. The ring's
+      // radius and opacity oscillate ~0.9 Hz so it reads as "live" even
+      // when trains aren't visibly moving; the ETA text above each capsule
+      // lets riders see at a glance which one to run for.
+      const ringStation = stationStopIdRef.current;
+      const ringSrc = map.getSource("station-incoming-rings");
+
+      if (ringStation && ringSrc && d) {
+        const station = stationIndex.find((s) => s.stopIds.includes(ringStation));
+        const stationIds = station ? new Set(station.stopIds) : null;
+
+        if (stationIds) {
+          const nowSec = nowMs / 1000;
+          // Horizon: only show arrivals within the next 10 minutes. Beyond
+          // that the ETA is noisy and the ring would clutter the whole line.
+          const HORIZON_SEC = 600;
+
+          // Build tripId → earliest ETA at this station from the arrivals
+          // list. We keep the earliest per trip because a complex with
+          // multiple platforms may have the same trip listed twice.
+          const incomingEtas = new Map<string, number>();
+          for (const a of d.arrivals) {
+            if (!stationIds.has(a.stopId)) continue;
+            const etaSec = a.eta - nowSec;
+            if (etaSec < -30 || etaSec > HORIZON_SEC) continue;
+            const prev = incomingEtas.get(a.tripId);
+            if (prev === undefined || etaSec < prev) incomingEtas.set(a.tripId, etaSec);
+          }
+          // Trains currently STOPPED_AT a platform here aren't in the
+          // arrivals list (that arrival already happened from the feed's
+          // perspective), but they ARE still physically present and very
+          // much worth highlighting.
+          for (const t of d.trains) {
+            if (t.status !== "STOPPED_AT") continue;
+            if (!stationIds.has(t.prevStopId)) continue;
+            if (!incomingEtas.has(t.id)) incomingEtas.set(t.id, 0);
+          }
+
+          // Phase: 0→1→0 at ~0.9 Hz — roughly "one breath" per second.
+          const phase = (Math.sin((nowMs / 700) * Math.PI * 2) + 1) / 2;
+
+          const ringFeatures: GeoJSON.Feature[] = [];
+          for (const f of features) {
+            const tripId = f.properties?.id as string | undefined;
+            if (!tripId) continue;
+            const etaSec = incomingEtas.get(tripId);
+            if (etaSec === undefined) continue;
+
+            // Urgency threshold: < 90 s (mirrors the panel's amber rule).
+            const isImminent = etaSec < 90;
+
+            // ETA label text — same formatting as fmtEta in StationPanel.
+            let etaText: string;
+            if (etaSec <= 5) etaText = "Now";
+            else if (etaSec < 60) etaText = `${Math.round(etaSec)}s`;
+            else etaText = `${Math.round(etaSec / 60)} min`;
+
+            // Amber when imminent, near-white otherwise — matches the
+            // arrival row color in the panel so the language is consistent.
+            const labelColor = isImminent ? "#fbbf24" : "#f9fafb";
+
+            // Ring geometry: base radius + pulse range. Imminent trains get
+            // a bigger, brighter ring to scream "this is the one."
+            const baseRadius = isImminent ? 18 : 13;
+            const pulseRange = isImminent ? 8 : 5;
+            const baseOpacity = isImminent ? 0.60 : 0.38;
+            const opacityRange = isImminent ? 0.25 : 0.18;
+
+            ringFeatures.push({
+              type: "Feature" as const,
+              properties: {
+                pulseRadius: baseRadius + pulseRange * phase,
+                pulseOpacity: baseOpacity + opacityRange * phase,
+                etaText,
+                labelColor,
+              },
+              geometry: f.geometry as GeoJSON.Geometry,
+            });
+          }
+
+          ringSrc.setData({ type: "FeatureCollection", features: ringFeatures });
+        } else {
+          ringSrc.setData({ type: "FeatureCollection", features: [] });
+        }
+      } else if (ringSrc) {
+        // No station open — clear the rings immediately.
+        ringSrc.setData({ type: "FeatureCollection", features: [] });
+      }
     };
     frame = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(frame);
