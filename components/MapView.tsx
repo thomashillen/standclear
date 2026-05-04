@@ -1955,10 +1955,10 @@ export default function MapView({ selectedLine, stationStopId, onLineSelect, onS
   }
 
   return (
-    <div className="flex-1 w-full h-full relative">
-      <div ref={containerRef} className="absolute inset-0" />
+    <>
+      <div ref={containerRef} className="flex-1 w-full h-full" />
       {debugVisible && (
-        <div className="pointer-events-none absolute top-2 left-2 z-50 max-w-[80vw] rounded-md bg-black/80 px-2.5 py-2 font-mono text-[11px] leading-tight text-green-300 shadow-lg">
+        <div className="pointer-events-none fixed top-2 left-2 z-[9999] max-w-[80vw] rounded-md bg-black/80 px-2.5 py-2 font-mono text-[11px] leading-tight text-green-300 shadow-lg">
           <div className="text-yellow-300 font-bold mb-1">trains debug</div>
           <div>fps: {debugSnap.fps}</div>
           <div>
@@ -1981,6 +1981,6 @@ export default function MapView({ selectedLine, stationStopId, onLineSelect, onS
           )}
         </div>
       )}
-    </div>
+    </>
   );
 }
