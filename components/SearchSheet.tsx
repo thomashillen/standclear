@@ -12,16 +12,18 @@ import {
   Home,
   Briefcase,
   RefreshCw,
+  Footprints,
 } from "lucide-react";
 import { useLines } from "@/lib/subwayData";
 import { useTrains, refreshTrains, type Arrival } from "@/lib/useTrains";
-import type { WalkingRoute } from "@/lib/walkingDirections";
+import { fetchWalkingRoute, type WalkingRoute } from "@/lib/walkingDirections";
 import { useFavorites, useCommute, type CommuteEndpoint } from "@/lib/useFavorites";
 import { useGeolocationState } from "@/lib/useGeolocation";
 import { useNow } from "@/lib/useNow";
 import { useRecentSearches } from "@/lib/useRecentSearches";
 import { useSheetDrag } from "@/lib/useSheetDrag";
 import {
+  estimateTripTimeSec,
   planTrips,
   rankPlansByTime,
   type TripPlan,
@@ -32,6 +34,7 @@ import {
   nearestStations,
   nearestStationsWithin,
   searchStations,
+  walkMinutes,
   type StationEntry,
 } from "@/lib/stopsIndex";
 import {
@@ -463,6 +466,99 @@ export default function SearchSheet({
     now,
     stationsByComplexId,
   ]);
+
+  // ── Walk-vs-subway: when the destination is close enough that
+  // walking the whole way is at least as fast as the best subway
+  // plan, surface walking as the primary recommendation. Subway
+  // plans get hidden so a 2-block trip doesn't pretend the L train
+  // is the answer. Distance is haversine; time uses the same
+  // pedestrian model as the rest of the app (walkMinutes), so it's
+  // directly comparable to the per-plan walk legs we already show.
+  const directWalk = useMemo(() => {
+    if (mode !== "directions" || !tripFrom || !tripTo) return null;
+    const meters = haversineMeters(
+      { lat: tripFrom.lat, lng: tripFrom.lng },
+      { lat: tripTo.lat, lng: tripTo.lng },
+    );
+    return { meters, min: walkMinutes(meters) };
+  }, [mode, tripFrom, tripTo]);
+
+  // Fastest subway plan total time (minutes), using the same
+  // estimator that ranks the plan list. Null when there are no
+  // plans — the walk comparison treats that as "subway loses by
+  // default."
+  const fastestPlanMin = useMemo(() => {
+    if (tripPlans.length === 0) return null;
+    const sec = estimateTripTimeSec(tripPlans[0], {
+      arrivalsByStation,
+      nowSec: now / 1000,
+      walkFromAnchor: tripFrom?.address
+        ? { lng: tripFrom.address.lng, lat: tripFrom.address.lat }
+        : undefined,
+      walkToAnchor: tripTo?.address
+        ? { lng: tripTo.address.lng, lat: tripTo.address.lat }
+        : undefined,
+      stationsByComplexId,
+    });
+    return Math.max(1, Math.round(sec / 60));
+  }, [tripPlans, arrivalsByStation, now, tripFrom, tripTo, stationsByComplexId]);
+
+  // Walking wins when we have a direct walk estimate AND it's no
+  // longer than the fastest subway plan. We also surface walking
+  // when there are zero subway plans but the walk is reasonable
+  // (under ~45 min) — otherwise a same-borough cross-river trip
+  // with no direct subway would suggest a 2-hour walk, which isn't
+  // useful. The 45-min ceiling is a soft "actually walkable"
+  // threshold rather than a hard cap on what we display.
+  const walkIsBest =
+    directWalk !== null &&
+    (fastestPlanMin === null
+      ? directWalk.min <= 45
+      : directWalk.min <= fastestPlanMin);
+
+  // Lazily-fetched street-following walking route for the walk-only
+  // recommendation. Only loaded when the rider expands the card,
+  // so we don't burn a Mapbox Directions request on every trip
+  // pair the planner considers.
+  const [walkOnlyRoute, setWalkOnlyRoute] = useState<WalkingRoute | null>(null);
+  const [walkOnlyExpanded, setWalkOnlyExpanded] = useState(false);
+  const [walkOnlyLoading, setWalkOnlyLoading] = useState(false);
+
+  // Reset the walk-only state whenever the endpoints change so a
+  // new trip pair gets a fresh fetch instead of showing stale steps.
+  useEffect(() => {
+    setWalkOnlyRoute(null);
+    setWalkOnlyExpanded(false);
+    setWalkOnlyLoading(false);
+  }, [tripFrom, tripTo]);
+
+  useEffect(() => {
+    if (!walkOnlyExpanded || !walkIsBest || !tripFrom || !tripTo) return;
+    // Skip the fetch when we already have a result for this pair —
+    // the reset-on-endpoint-change effect above clears walkOnlyRoute
+    // when tripFrom / tripTo flip, so a non-null route here is
+    // current. Guard via an inline read so walkOnlyRoute doesn't
+    // need to be a dep (which would cause the effect to re-fire on
+    // every fetch and abort the in-flight request mid-flight).
+    if (walkOnlyRoute) return;
+    const ctrl = new AbortController();
+    setWalkOnlyLoading(true);
+    fetchWalkingRoute(
+      { lng: tripFrom.lng, lat: tripFrom.lat },
+      { lng: tripTo.lng, lat: tripTo.lat },
+      { signal: ctrl.signal },
+    )
+      .then((r) => {
+        if (ctrl.signal.aborted) return;
+        setWalkOnlyRoute(r);
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (!ctrl.signal.aborted) setWalkOnlyLoading(false);
+      });
+    return () => ctrl.abort();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [walkOnlyExpanded, walkIsBest, tripFrom, tripTo]);
 
   // ── Picker results (when a directions field needs filling).
   const plannerSearchResults = useMemo<StationEntry[] | null>(() => {
@@ -1536,6 +1632,85 @@ export default function SearchSheet({
                 />
               );
             })()
+          ) : walkIsBest && directWalk ? (
+            <div className="px-3 pt-3 pb-8">
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-gray-500 mb-2 px-1">
+                No subway route found
+              </p>
+              <button
+                type="button"
+                onClick={() => setWalkOnlyExpanded((x) => !x)}
+                className="press w-full text-left rounded-2xl bg-emerald-300/10 ring-1 ring-emerald-300/30 px-4 py-3 hover:bg-emerald-300/15 touch-manipulation"
+                aria-expanded={walkOnlyExpanded}
+              >
+                <div className="flex items-center gap-3">
+                  <div className="flex-shrink-0 w-9 h-9 rounded-full bg-emerald-300/20 text-emerald-200 flex items-center justify-center">
+                    <Footprints className="w-[18px] h-[18px]" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-[13px] font-semibold text-gray-100">
+                      Walking is faster
+                    </p>
+                    <p className="text-[12px] text-gray-300 tabular-nums">
+                      {directWalk.min} min ·{" "}
+                      {directWalk.meters >= 1000
+                        ? `${(directWalk.meters / 1000).toFixed(1)} km`
+                        : `${Math.round(directWalk.meters)} m`}
+                      {fastestPlanMin !== null
+                        ? ` · subway ${fastestPlanMin} min`
+                        : ""}
+                    </p>
+                  </div>
+                  <ChevronRight
+                    className={`w-4 h-4 text-gray-500 flex-shrink-0 transition-transform ${
+                      walkOnlyExpanded ? "rotate-90" : ""
+                    }`}
+                  />
+                </div>
+              </button>
+              {walkOnlyExpanded && (
+                <div className="mt-3 px-1">
+                  {walkOnlyLoading && !walkOnlyRoute && (
+                    <p className="text-[12px] text-gray-500">
+                      Loading walking directions…
+                    </p>
+                  )}
+                  {walkOnlyRoute && walkOnlyRoute.steps.length > 0 && (
+                    <ol className="space-y-2.5">
+                      {walkOnlyRoute.steps.map((step, i) => (
+                        <li
+                          key={`walk-step-${i}`}
+                          className="flex items-start gap-3"
+                        >
+                          <span className="mt-0.5 inline-flex items-center justify-center w-5 h-5 rounded-full bg-white/[0.08] text-[10px] tabular-nums text-gray-300 flex-shrink-0">
+                            {i + 1}
+                          </span>
+                          <div className="min-w-0 flex-1">
+                            <p className="text-[13px] text-gray-100 leading-snug">
+                              {step.instruction}
+                            </p>
+                            {step.distance > 0 && (
+                              <p className="text-[11px] text-gray-500 tabular-nums">
+                                {step.distance >= 1000
+                                  ? `${(step.distance / 1000).toFixed(1)} km`
+                                  : `${Math.round(step.distance)} m`}
+                              </p>
+                            )}
+                          </div>
+                        </li>
+                      ))}
+                    </ol>
+                  )}
+                  {!walkOnlyLoading && !walkOnlyRoute && (
+                    <p className="text-[12px] text-gray-500">
+                      Couldn&apos;t load step-by-step directions. The straight-line
+                      walk is about{" "}
+                      <span className="tabular-nums">{directWalk.min} min</span>.
+                    </p>
+                  )}
+                </div>
+              )}
+            </div>
           ) : tripPlans.length === 0 ? (
             <div className="px-6 py-10 text-center">
               <Compass className="w-10 h-10 mx-auto mb-3 text-gray-600" />
