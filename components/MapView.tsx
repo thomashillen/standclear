@@ -709,6 +709,21 @@ export default function MapView({ selectedLine, stationStopId, onLineSelect, onS
             "icon-allow-overlap": true,
             "icon-ignore-placement": true,
           },
+          paint: {
+            // Fade train capsules in as the rider zooms into a
+            // neighborhood. At the default cold-start zoom (~11) the
+            // map shows 300+ trains across the whole system — visually
+            // overwhelming and the route letters are unreadable that
+            // small anyway. By z=12.5 the icons are fully visible.
+            // Runtime selection logic in the line-selection effect
+            // wraps this expression so dimming-by-corridor still works.
+            "icon-opacity": [
+              "interpolate", ["linear"], ["zoom"],
+              10.5, 0,
+              11.5, 0.55,
+              12.5, 1,
+            ],
+          },
         });
         map.addLayer({
           id: "subway-trains-text",
@@ -1549,8 +1564,37 @@ export default function MapView({ selectedLine, stationStopId, onLineSelect, onS
       "circle-stroke-opacity",
       inCorridor ? ["case", inCorridor, 1, 0.1] : STOP_OPACITY_BY_ZOOM,
     );
-    map.setPaintProperty("subway-trains-icon", "icon-opacity", matchSel(1, 0, 1));
-    map.setPaintProperty("subway-trains-text", "text-opacity", matchSel(1, 0, 1));
+    // Train icon/text opacity must stay zoom-faded (so cold-start at
+    // z≈11 isn't a wall of capsules) AND respect line-selection
+    // dimming. Per the comment above, `zoom` has to live at the top of
+    // an interpolate, so we push the selection `case` into each stop's
+    // value rather than wrapping the whole interpolate.
+    const trainIconOpacity = inCorridor
+      ? [
+          "interpolate", ["linear"], ["zoom"],
+          10.5, 0,
+          11.5, ["case", inCorridor, 0.55, 0],
+          12.5, ["case", inCorridor, 1, 0],
+        ]
+      : [
+          "interpolate", ["linear"], ["zoom"],
+          10.5, 0,
+          11.5, 0.55,
+          12.5, 1,
+        ];
+    const trainTextOpacity = inCorridor
+      ? [
+          "interpolate", ["linear"], ["zoom"],
+          11.5, 0,
+          12.5, ["case", inCorridor, 1, 0],
+        ]
+      : [
+          "interpolate", ["linear"], ["zoom"],
+          11.5, 0,
+          12.5, 1,
+        ];
+    map.setPaintProperty("subway-trains-icon", "icon-opacity", trainIconOpacity);
+    map.setPaintProperty("subway-trains-text", "text-opacity", trainTextOpacity);
 
     if (sel) {
       import("mapbox-gl").then((mapboxgl) => {

@@ -5,6 +5,7 @@ import {
   Search,
   X,
   Compass,
+  ChevronRight,
   ArrowLeftRight,
   ArrowLeft,
   MapPin,
@@ -761,7 +762,7 @@ export default function SearchSheet({
               type="search"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search stations, places, addresses"
+              placeholder="Where are you going?"
               aria-label="Search NYC"
               // 16px font-size prevents iOS Safari from auto-zooming
               // on focus. Below that threshold Safari zooms the page
@@ -1003,7 +1004,7 @@ export default function SearchSheet({
                                 Subway station
                               </span>
                             </span>
-                            <Compass className="w-4 h-4 text-gray-500 flex-shrink-0" />
+                            <ChevronRight className="w-4 h-4 text-gray-500 flex-shrink-0" />
                           </button>
                         );
                       }

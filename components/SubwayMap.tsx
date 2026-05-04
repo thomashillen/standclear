@@ -2,7 +2,7 @@
 
 import dynamic from "next/dynamic";
 import { useEffect, useMemo, useState } from "react";
-import { MapPin, MoreHorizontal, Search, X } from "lucide-react";
+import { MapPin, MoreHorizontal, Search, TrainFront, X } from "lucide-react";
 import { useLines } from "@/lib/subwayData";
 import { useTrains } from "@/lib/useTrains";
 import { legGeometry, type TripPlan } from "@/lib/commuteRouting";
@@ -533,6 +533,10 @@ export default function SubwayMap() {
               <span className="absolute inset-0 rounded-full bg-emerald-400 animate-ping opacity-60" />
             )}
           </span>
+          {/* Train glyph next to the count so a first-time visitor
+              reads "live trains" rather than just an unlabeled number.
+              Subtle gray so the pulsing dot stays the visual anchor. */}
+          <TrainFront className="w-3 h-3 text-gray-400 flex-shrink-0" />
           <span className="text-[12px] font-bold tabular-nums text-gray-100 leading-none">
             {data ? totalTrains : "…"}
           </span>
