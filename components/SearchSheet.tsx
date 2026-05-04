@@ -1130,9 +1130,59 @@ export default function SearchSheet({
                     </button>
                   );
                 })()}
-              <p className="px-3 pt-1 text-center text-[12px] text-gray-500">
-                Search for a station, address, or place.
-              </p>
+
+              {/* Saved-anchor shortcut chips — one tap to start
+                  directions to Home / Work from current location.
+                  Replaces the prior "Search for a station, address,
+                  or place." helper text: when the rider has actually
+                  pinned an anchor, surfacing those anchors as
+                  one-tap targets is more useful than a generic
+                  prompt. Suppressed in anchor-pick mode (the rider
+                  is mid-set, not navigating). */}
+              {!anchorPickMode && (home || work) && (
+                <div className="flex items-center gap-2 px-1">
+                  {home &&
+                    (() => {
+                      const h = endpointToTrip(home);
+                      if (!h) return null;
+                      const label =
+                        home.kind === "address" ? home.name : h.name;
+                      return (
+                        <button
+                          type="button"
+                          onClick={() => startDirectionsTo(h)}
+                          className="press flex items-center gap-1.5 h-8 px-3 rounded-full bg-emerald-300/10 hover:bg-emerald-300/15 ring-1 ring-emerald-300/30 text-emerald-100 text-[12px] font-semibold touch-manipulation min-w-0"
+                        >
+                          <Home className="w-3.5 h-3.5 flex-shrink-0" />
+                          <span className="truncate">Home</span>
+                          <span className="text-emerald-200/60 truncate min-w-0">
+                            {label}
+                          </span>
+                        </button>
+                      );
+                    })()}
+                  {work &&
+                    (() => {
+                      const w = endpointToTrip(work);
+                      if (!w) return null;
+                      const label =
+                        work.kind === "address" ? work.name : w.name;
+                      return (
+                        <button
+                          type="button"
+                          onClick={() => startDirectionsTo(w)}
+                          className="press flex items-center gap-1.5 h-8 px-3 rounded-full bg-sky-300/10 hover:bg-sky-300/15 ring-1 ring-sky-300/30 text-sky-100 text-[12px] font-semibold touch-manipulation min-w-0"
+                        >
+                          <Briefcase className="w-3.5 h-3.5 flex-shrink-0" />
+                          <span className="truncate">Work</span>
+                          <span className="text-sky-200/60 truncate min-w-0">
+                            {label}
+                          </span>
+                        </button>
+                      );
+                    })()}
+                </div>
+              )}
 
               {/* Recent searches — last 10 places the rider tapped
                   on. Each row replays the same "directions to here"

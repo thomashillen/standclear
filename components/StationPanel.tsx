@@ -1,10 +1,10 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { ArrowUp, ArrowDown, Star, X, Home, Briefcase } from "lucide-react";
+import { ArrowUp, ArrowDown, Star, X } from "lucide-react";
 import { useLines } from "@/lib/subwayData";
 import { useTrains, type Arrival, type Train } from "@/lib/useTrains";
-import { useFavorites, useCommute } from "@/lib/useFavorites";
+import { useFavorites } from "@/lib/useFavorites";
 import { useNow } from "@/lib/useNow";
 import { buildStationIndex } from "@/lib/stopsIndex";
 import { useSheetDrag } from "@/lib/useSheetDrag";
@@ -186,7 +186,6 @@ export default function StationPanel({ stopId, onClose, onSelectLine }: Props) {
   const lines = useLines();
   const data = useTrains();
   const { has, toggle } = useFavorites();
-  const commute = useCommute();
 
   const index = useMemo(() => (lines ? buildStationIndex(lines) : []), [lines]);
   // A tapped stopId may be any platform in a complex (e.g. tapping the
@@ -470,13 +469,14 @@ export default function StationPanel({ stopId, onClose, onSelectLine }: Props) {
           </button>
         </div>
 
-        {/* Save / Home / Work — three toggleable anchor chips. Tapping
-            an active chip clears that anchor; tapping an inactive one
-            sets it (Home and Work are mutually exclusive). Labels flip
-            between command form ("Set Home") when inactive and state
-            form ("Home") when this station is the current anchor, so
-            the chip reads as either an action to take or a fact about
-            this station — never as an ambiguous static label. */}
+        {/* Save chip — toggles this station as a favorite, surfacing
+            it in the Nearby panel's "favorites" section. The two
+            commute anchors (Home / Work) used to live here too, but
+            they were a parallel path to the same setting that More →
+            Commute already owns; consolidating in a single place
+            avoids the rider hitting "Set Home" from a station and
+            then having no obvious place to remove or change it from.
+            Home/Work setup now lives only in the More menu. */}
         <div className="flex items-center gap-2 flex-wrap">
           <AnchorChip
             label={isFav ? "Saved" : "Save"}
@@ -486,44 +486,6 @@ export default function StationPanel({ stopId, onClose, onSelectLine }: Props) {
             activeBg="bg-amber-300/15 text-amber-100"
             onClick={() => toggle(favId)}
             aria-label={isFav ? "Remove from favorites" : "Add to favorites"}
-          />
-          <AnchorChip
-            label={commute.isHome(favId) ? "Home" : "Set Home"}
-            icon={
-              <Home
-                className={`w-[15px] h-[15px] ${
-                  commute.isHome(favId) ? "fill-emerald-300 text-emerald-300" : ""
-                }`}
-              />
-            }
-            active={commute.isHome(favId)}
-            activeRing="ring-emerald-300/40"
-            activeBg="bg-emerald-300/15 text-emerald-100"
-            onClick={() =>
-              commute.isHome(favId)
-                ? commute.setAnchor("home", null)
-                : commute.assignAnchor("home", favId)
-            }
-            aria-label={commute.isHome(favId) ? "Unset as Home" : "Set as Home"}
-          />
-          <AnchorChip
-            label={commute.isWork(favId) ? "Work" : "Set Work"}
-            icon={
-              <Briefcase
-                className={`w-[15px] h-[15px] ${
-                  commute.isWork(favId) ? "fill-sky-300 text-sky-300" : ""
-                }`}
-              />
-            }
-            active={commute.isWork(favId)}
-            activeRing="ring-sky-300/40"
-            activeBg="bg-sky-300/15 text-sky-100"
-            onClick={() =>
-              commute.isWork(favId)
-                ? commute.setAnchor("work", null)
-                : commute.assignAnchor("work", favId)
-            }
-            aria-label={commute.isWork(favId) ? "Unset as Work" : "Set as Work"}
           />
         </div>
       </div>

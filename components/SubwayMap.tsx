@@ -449,6 +449,10 @@ export default function SubwayMap() {
             setNearbyOpen(false);
             setFlyToDefaultSignal((s) => s + 1);
           }}
+          onOpenMore={() => {
+            setNearbyOpen(false);
+            setMoreOpen(true);
+          }}
         />
         <MoreSheet
           open={moreOpen}
