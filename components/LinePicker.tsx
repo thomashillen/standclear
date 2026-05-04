@@ -165,20 +165,6 @@ export default function LinePicker({ lines, selectedLine, onSelect }: LinePicker
             </div>
 
             <div className="px-3 pt-1 pb-4 sm:px-4 sm:pt-1 sm:pb-4">
-              <button
-                onClick={() => pick(null)}
-                className={`press
-                  w-full mb-3 h-9 rounded-xl text-[13px] font-semibold transition-colors touch-manipulation
-                  ${
-                    !selectedLine
-                      ? "bg-white text-gray-950 shadow-[0_2px_10px_rgba(255,255,255,0.15)]"
-                      : "bg-white/[0.06] text-white hover:bg-white/[0.10] border border-white/[0.06]"
-                  }
-                `}
-              >
-                All lines
-              </button>
-
               <div className="grid grid-cols-7 sm:grid-cols-8 gap-2">
                 {ORDERED_LINES.map((id) => {
                   const line = lines?.[id];
@@ -187,7 +173,12 @@ export default function LinePicker({ lines, selectedLine, onSelect }: LinePicker
                   return (
                     <button
                       key={id}
-                      onClick={() => pick(id)}
+                      // Tap a non-selected bullet to filter to that
+                      // line. Tap the already-selected bullet to clear
+                      // the filter (back to all lines) — mirrors the
+                      // iOS Maps tap-pin-to-deselect grammar.
+                      onClick={() => pick(active ? null : id)}
+                      aria-pressed={active}
                       className={`
                         nyc-bullet aspect-square rounded-full text-[17px] leading-none flex items-center justify-center touch-manipulation
                         transition-transform duration-150
@@ -199,7 +190,11 @@ export default function LinePicker({ lines, selectedLine, onSelect }: LinePicker
                         }
                       `}
                       style={{ backgroundColor: line.color, color: line.textColor }}
-                      aria-label={`${line.id} — ${line.name}`}
+                      aria-label={
+                        active
+                          ? `${line.id} — ${line.name}, selected. Tap to show all lines.`
+                          : `${line.id} — ${line.name}`
+                      }
                     >
                       {line.id}
                     </button>
