@@ -112,6 +112,19 @@ interface Props {
    *  means "frame the whole trip". */
   focusedLegIndex?: number | null;
   onFocusLeg?: (i: number | null) => void;
+  /** Walking-faster overlay for the map. Set to a from/to pair (and
+   *  optional resolved coords) when the rider's trip is shorter on
+   *  foot than any subway plan; null clears it. The parent forwards
+   *  it to MapView so the dashed pedestrian line renders. */
+  onWalkOnlyChange?: (
+    overlay:
+      | {
+          from: { lng: number; lat: number };
+          to: { lng: number; lat: number };
+          coords?: [number, number][];
+        }
+      | null,
+  ) => void;
 }
 
 // ─── SearchSheet ─────────────────────────────────────────────────────
@@ -167,6 +180,7 @@ export default function SearchSheet({
   walkToRoute = null,
   focusedLegIndex = null,
   onFocusLeg,
+  onWalkOnlyChange,
 }: Props) {
   const lines = useLines();
   const data = useTrains();
@@ -516,33 +530,20 @@ export default function SearchSheet({
       ? directWalk.min <= 45
       : directWalk.min <= fastestPlanMin);
 
-  // Lazily-fetched street-following walking route for the walk-only
-  // recommendation. Only loaded when the rider expands the card,
-  // so we don't burn a Mapbox Directions request on every trip
-  // pair the planner considers.
+  // Resolved street-following walking route for the walk-only
+  // recommendation. Fetched eagerly when walking wins so the dashed
+  // line shows up on the map at the same time as the card — no
+  // tap-to-expand required. Reset on endpoint change.
   const [walkOnlyRoute, setWalkOnlyRoute] = useState<WalkingRoute | null>(null);
-  const [walkOnlyExpanded, setWalkOnlyExpanded] = useState(false);
-  const [walkOnlyLoading, setWalkOnlyLoading] = useState(false);
 
-  // Reset the walk-only state whenever the endpoints change so a
-  // new trip pair gets a fresh fetch instead of showing stale steps.
   useEffect(() => {
     setWalkOnlyRoute(null);
-    setWalkOnlyExpanded(false);
-    setWalkOnlyLoading(false);
   }, [tripFrom, tripTo]);
 
   useEffect(() => {
-    if (!walkOnlyExpanded || !walkIsBest || !tripFrom || !tripTo) return;
-    // Skip the fetch when we already have a result for this pair —
-    // the reset-on-endpoint-change effect above clears walkOnlyRoute
-    // when tripFrom / tripTo flip, so a non-null route here is
-    // current. Guard via an inline read so walkOnlyRoute doesn't
-    // need to be a dep (which would cause the effect to re-fire on
-    // every fetch and abort the in-flight request mid-flight).
+    if (!walkIsBest || !tripFrom || !tripTo) return;
     if (walkOnlyRoute) return;
     const ctrl = new AbortController();
-    setWalkOnlyLoading(true);
     fetchWalkingRoute(
       { lng: tripFrom.lng, lat: tripFrom.lat },
       { lng: tripTo.lng, lat: tripTo.lat },
@@ -552,13 +553,63 @@ export default function SearchSheet({
         if (ctrl.signal.aborted) return;
         setWalkOnlyRoute(r);
       })
-      .catch(() => {})
-      .finally(() => {
-        if (!ctrl.signal.aborted) setWalkOnlyLoading(false);
-      });
+      .catch(() => {});
     return () => ctrl.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [walkOnlyExpanded, walkIsBest, tripFrom, tripTo]);
+  }, [walkIsBest, tripFrom, tripTo]);
+
+  // Push the walking-faster overlay up to the parent so MapView can
+  // render the pedestrian line. Use the resolved street geometry when
+  // available; otherwise the from/to pair anchors a crow-flies
+  // fallback rendered by MapView. Clear when walking is no longer the
+  // pick (e.g. rider switched destinations to one with subway, or the
+  // sheet leaves directions mode).
+  useEffect(() => {
+    if (!onWalkOnlyChange) return;
+    if (walkIsBest && tripFrom && tripTo) {
+      onWalkOnlyChange({
+        from: { lng: tripFrom.lng, lat: tripFrom.lat },
+        to: { lng: tripTo.lng, lat: tripTo.lat },
+        coords: walkOnlyRoute?.coordinates,
+      });
+    } else {
+      onWalkOnlyChange(null);
+    }
+    return () => {
+      onWalkOnlyChange(null);
+    };
+  }, [walkIsBest, tripFrom, tripTo, walkOnlyRoute, onWalkOnlyChange]);
+
+  // Auto-select the fastest plan whenever a fresh ranked list arrives
+  // and nothing is currently selected. The rider almost always wants
+  // to see the top result on the map without an extra tap, and the
+  // ranked plans are sorted by total time — so tripPlans[0] is the
+  // pick. We deliberately don't override a selection the rider has
+  // already made (e.g. tapped the second-fastest); that selection
+  // sticks until the trip pair changes (which clears tripPlans and
+  // brings us back through this effect with no selection).
+  useEffect(() => {
+    if (mode !== "directions") return;
+    if (!onTripSelect || selectedTripKey || tripPlans.length === 0) return;
+    const plan = tripPlans[0];
+    onTripSelect({
+      plan,
+      walkFrom: tripFrom?.address
+        ? {
+            lng: tripFrom.address.lng,
+            lat: tripFrom.address.lat,
+            name: tripFrom.address.name,
+          }
+        : undefined,
+      walkTo: tripTo?.address
+        ? {
+            lng: tripTo.address.lng,
+            lat: tripTo.address.lat,
+            name: tripTo.address.name,
+          }
+        : undefined,
+    });
+  }, [mode, tripPlans, selectedTripKey, onTripSelect, tripFrom, tripTo]);
 
   // ── Picker results (when a directions field needs filling).
   const plannerSearchResults = useMemo<StationEntry[] | null>(() => {
@@ -1637,12 +1688,7 @@ export default function SearchSheet({
               <p className="text-[10px] font-semibold uppercase tracking-wider text-gray-500 mb-2 px-1">
                 No subway route found
               </p>
-              <button
-                type="button"
-                onClick={() => setWalkOnlyExpanded((x) => !x)}
-                className="press w-full text-left rounded-2xl bg-emerald-300/10 ring-1 ring-emerald-300/30 px-4 py-3 hover:bg-emerald-300/15 touch-manipulation"
-                aria-expanded={walkOnlyExpanded}
-              >
+              <div className="rounded-2xl bg-emerald-300/10 ring-1 ring-emerald-300/30 px-4 py-3">
                 <div className="flex items-center gap-3">
                   <div className="flex-shrink-0 w-9 h-9 rounded-full bg-emerald-300/20 text-emerald-200 flex items-center justify-center">
                     <Footprints className="w-[18px] h-[18px]" />
@@ -1661,55 +1707,11 @@ export default function SearchSheet({
                         : ""}
                     </p>
                   </div>
-                  <ChevronRight
-                    className={`w-4 h-4 text-gray-500 flex-shrink-0 transition-transform ${
-                      walkOnlyExpanded ? "rotate-90" : ""
-                    }`}
-                  />
                 </div>
-              </button>
-              {walkOnlyExpanded && (
-                <div className="mt-3 px-1">
-                  {walkOnlyLoading && !walkOnlyRoute && (
-                    <p className="text-[12px] text-gray-500">
-                      Loading walking directions…
-                    </p>
-                  )}
-                  {walkOnlyRoute && walkOnlyRoute.steps.length > 0 && (
-                    <ol className="space-y-2.5">
-                      {walkOnlyRoute.steps.map((step, i) => (
-                        <li
-                          key={`walk-step-${i}`}
-                          className="flex items-start gap-3"
-                        >
-                          <span className="mt-0.5 inline-flex items-center justify-center w-5 h-5 rounded-full bg-white/[0.08] text-[10px] tabular-nums text-gray-300 flex-shrink-0">
-                            {i + 1}
-                          </span>
-                          <div className="min-w-0 flex-1">
-                            <p className="text-[13px] text-gray-100 leading-snug">
-                              {step.instruction}
-                            </p>
-                            {step.distance > 0 && (
-                              <p className="text-[11px] text-gray-500 tabular-nums">
-                                {step.distance >= 1000
-                                  ? `${(step.distance / 1000).toFixed(1)} km`
-                                  : `${Math.round(step.distance)} m`}
-                              </p>
-                            )}
-                          </div>
-                        </li>
-                      ))}
-                    </ol>
-                  )}
-                  {!walkOnlyLoading && !walkOnlyRoute && (
-                    <p className="text-[12px] text-gray-500">
-                      Couldn&apos;t load step-by-step directions. The straight-line
-                      walk is about{" "}
-                      <span className="tabular-nums">{directWalk.min} min</span>.
-                    </p>
-                  )}
-                </div>
-              )}
+              </div>
+              <p className="text-[11px] text-gray-500 mt-3 px-1">
+                The walking route is highlighted on the map.
+              </p>
             </div>
           ) : tripPlans.length === 0 ? (
             <div className="px-6 py-10 text-center">

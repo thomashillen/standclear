@@ -38,6 +38,17 @@ interface MapViewProps {
    *  expanded route detail zoom into a specific subway leg when the
    *  rider taps it. */
   focusedLegIndex?: number | null;
+  /** Stand-alone walking overlay used when the SearchSheet decides
+   *  walking is faster than any subway plan for this trip. Renders
+   *  as the same dashed pedestrian line the trip overlay uses,
+   *  independent of `selectedTrip`, with a camera fit to its bounds.
+   *  Coords come from Mapbox Directions when available; otherwise
+   *  the from/to endpoints anchor a crow-flies fallback. */
+  walkOnlyOverlay?: {
+    from: { lng: number; lat: number };
+    to: { lng: number; lat: number };
+    coords?: [number, number][];
+  } | null;
 }
 
 /** Lightweight DTO between SubwayMap (which holds the user's chosen
@@ -395,7 +406,7 @@ function makeTrainGlowIcon(): ImageData {
   return ctx.getImageData(0, 0, W, H);
 }
 
-export default function MapView({ selectedLine, stationStopId, onLineSelect, onStationOpen, flyToUserSignal, flyToDefaultSignal, panelOpen, selectedTrip, focusedLegIndex }: MapViewProps) {
+export default function MapView({ selectedLine, stationStopId, onLineSelect, onStationOpen, flyToUserSignal, flyToDefaultSignal, panelOpen, selectedTrip, focusedLegIndex, walkOnlyOverlay }: MapViewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<MapboxMap | null>(null);
   const [mapLoaded, setMapLoaded] = useState(false);
@@ -531,6 +542,16 @@ export default function MapView({ selectedLine, stationStopId, onLineSelect, onS
           data: { type: "FeatureCollection", features: [] },
         });
 
+        // Stand-alone walking route, rendered when SearchSheet decides
+        // walking is faster than any subway plan. Independent of
+        // selectedTrip so it doesn't get clobbered by the trip-walks
+        // source-update effect, and styled with the same dashed
+        // pedestrian look as the trip's start/end walk legs.
+        map.addSource("walk-only", {
+          type: "geojson",
+          data: { type: "FeatureCollection", features: [] },
+        });
+
         // Pulse rings + ETA labels for trains inbound to the currently-open
         // station. Populated every rAF frame so the animation runs smoothly.
         // Each feature carries pulseRadius, pulseOpacity, etaText, and
@@ -661,6 +682,43 @@ export default function MapView({ selectedLine, stationStopId, onLineSelect, onS
             ],
             // Mapbox scales the dasharray by line-width, so these
             // values give roughly square dot-gap pairs at every zoom.
+            "line-dasharray": [0.1, 1.6],
+          },
+        });
+
+        // Stand-alone walking-route halo + dashed line, mirroring the
+        // trip-walks styling so a walking-faster recommendation reads
+        // visually identical to the dashed walks at the start/end of a
+        // subway plan — same affordance, same meaning.
+        map.addLayer({
+          id: "walk-only-halo",
+          type: "line",
+          source: "walk-only",
+          layout: { "line-cap": "round", "line-join": "round" },
+          paint: {
+            "line-color": "#000000",
+            "line-opacity": 0.45,
+            "line-width": [
+              "interpolate", ["linear"], ["zoom"],
+              10, 4,
+              14, 8,
+            ],
+            "line-blur": 1.5,
+          },
+        });
+        map.addLayer({
+          id: "walk-only",
+          type: "line",
+          source: "walk-only",
+          layout: { "line-cap": "round", "line-join": "round" },
+          paint: {
+            "line-color": "#ffffff",
+            "line-opacity": 0.95,
+            "line-width": [
+              "interpolate", ["linear"], ["zoom"],
+              10, 2,
+              14, 4,
+            ],
             "line-dasharray": [0.1, 1.6],
           },
         });
@@ -2201,6 +2259,89 @@ export default function MapView({ selectedLine, stationStopId, onLineSelect, onS
       );
     }
   }, [selectedTrip, mapLoaded, focusedLegIndex]);
+
+  // ── Walk-only overlay ──────────────────────────────────────────────
+  // When the SearchSheet decides walking is faster than subway, it
+  // hands us a from/to pair (and ideally a street-following coordinate
+  // path). Push it into the dedicated walk-only source so the dashed
+  // pedestrian line appears immediately, and fit the camera to the
+  // walk's bounds — but only when there's no subway trip selected
+  // (the trip overlay's own fit takes precedence so the rider sees
+  // their chosen route framed).
+  useEffect(() => {
+    if (!mapLoaded || !mapRef.current) return;
+    const map = mapRef.current;
+    const src = map.getSource("walk-only") as
+      | { setData: (d: unknown) => void }
+      | undefined;
+    if (!src) return;
+
+    if (!walkOnlyOverlay) {
+      src.setData({ type: "FeatureCollection", features: [] });
+      return;
+    }
+
+    const coords =
+      walkOnlyOverlay.coords && walkOnlyOverlay.coords.length >= 2
+        ? walkOnlyOverlay.coords
+        : [
+            [walkOnlyOverlay.from.lng, walkOnlyOverlay.from.lat] as [
+              number,
+              number,
+            ],
+            [walkOnlyOverlay.to.lng, walkOnlyOverlay.to.lat] as [
+              number,
+              number,
+            ],
+          ];
+    src.setData({
+      type: "FeatureCollection",
+      features: [
+        {
+          type: "Feature",
+          properties: { kind: "walk-only" },
+          geometry: { type: "LineString", coordinates: coords },
+        },
+      ],
+    });
+
+    if (selectedTrip && selectedTrip.legs.length > 0) return;
+
+    let minLng = Infinity,
+      minLat = Infinity,
+      maxLng = -Infinity,
+      maxLat = -Infinity;
+    for (const [lng, lat] of coords) {
+      if (lng < minLng) minLng = lng;
+      if (lng > maxLng) maxLng = lng;
+      if (lat < minLat) minLat = lat;
+      if (lat > maxLat) maxLat = lat;
+    }
+    if (
+      !Number.isFinite(minLng) ||
+      !Number.isFinite(maxLng) ||
+      !Number.isFinite(minLat) ||
+      !Number.isFinite(maxLat)
+    ) {
+      return;
+    }
+    const isMobile = window.matchMedia("(max-width: 639px)").matches;
+    const bottomPad = isMobile
+      ? Math.round(window.innerHeight * 0.42) + 24
+      : 60;
+    const rightPad = isMobile ? 40 : 360;
+    map.fitBounds(
+      [
+        [minLng, minLat],
+        [maxLng, maxLat],
+      ],
+      {
+        padding: { top: 100, right: rightPad, bottom: bottomPad, left: 40 },
+        duration: 800,
+        maxZoom: 16,
+      },
+    );
+  }, [walkOnlyOverlay, mapLoaded, selectedTrip]);
 
   if (noToken) {
     return (

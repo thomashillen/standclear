@@ -891,6 +891,15 @@ export function TripPlanDetail({
           const legAlight = stationsByComplexId.get(leg.alightComplexId);
           const isLastLeg = i === plan.legs.length - 1;
           const isFocused = focusedLegIndex === i;
+          // Ride duration mirrors the estimator's per-leg model:
+          // stops × 90 s. Surfaced as the row's meta so the rider
+          // sees how long the actual subway segment takes — the
+          // walking and total are already shown elsewhere, but a
+          // 25-min total split as "3 walk / 18 train / 4 walk"
+          // tells a different story than "3 / 8 / 4" at the same
+          // total. Floor of 1 min so a one-stop hop doesn't
+          // collapse to "0".
+          const rideMin = Math.max(1, Math.round((leg.stopCount * 90) / 60));
           return (
             <TimelineRow
               key={`detail-leg-${i}`}
@@ -916,6 +925,7 @@ export function TripPlanDetail({
                   </span>
                 </>
               }
+              meta={`${rideMin} min`}
               subtitle={
                 isFocused
                   ? "Tap again to see whole trip"

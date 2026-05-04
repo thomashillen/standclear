@@ -110,6 +110,15 @@ export default function SubwayMap() {
   // expanded view renders the per-step instructions.
   const [walkFromRoute, setWalkFromRoute] = useState<WalkingRoute | null>(null);
   const [walkToRoute, setWalkToRoute] = useState<WalkingRoute | null>(null);
+  // Stand-alone walking-faster overlay. Set by SearchSheet when the
+  // direct walk between the two endpoints is at least as fast as any
+  // subway plan — MapView renders a dashed walking line on its own
+  // (no subway-trip rendering) and fits the camera to the walk.
+  const [walkOnlyOverlay, setWalkOnlyOverlay] = useState<{
+    from: { lng: number; lat: number };
+    to: { lng: number; lat: number };
+    coords?: [number, number][];
+  } | null>(null);
   // Fly-to-user signal — increments each time the user taps Near-me so
   // MapView can fly the camera to their location (waiting for geo if it
   // isn't available yet). Counter, not a boolean, so successive taps
@@ -402,6 +411,7 @@ export default function SubwayMap() {
           panelOpen={panelOpen}
           selectedTrip={selectedTrip}
           focusedLegIndex={focusedLegIndex}
+          walkOnlyOverlay={walkOnlyOverlay}
         />
         {selectedLine && !nearbyOpen && !stationStopId && (
           <LinePanel
@@ -464,6 +474,7 @@ export default function SubwayMap() {
             setFocusedLegIndex(null);
             setSearchAnchorPick(null);
             setSearchPresetTrip(null);
+            setWalkOnlyOverlay(null);
           }}
           onStationOpen={handleStationOpen}
           onTripSelect={handleTripSelect}
@@ -472,6 +483,7 @@ export default function SubwayMap() {
           walkToRoute={walkToRoute}
           focusedLegIndex={focusedLegIndex}
           onFocusLeg={setFocusedLegIndex}
+          onWalkOnlyChange={setWalkOnlyOverlay}
         />
       </div>
 
