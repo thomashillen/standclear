@@ -925,13 +925,19 @@ export default function MapView({ selectedLine, stationStopId, onLineSelect, onS
           source: "station-incoming-rings",
           layout: {
             "icon-image": "train-glow",
-            // Multiply the train layer's zoom-driven base size by a per-
-            // feature pulse factor so the glow tracks the train's apparent
-            // size at every zoom and breathes with the pulse phase.
+            // Mirror the train layer's per-zoom size curve and multiply each
+            // stop output by the per-feature pulse factor so the glow tracks
+            // the train's apparent size at every zoom and breathes with the
+            // pulse phase. Mapbox requires ["zoom"] to be the direct input
+            // of a top-level interpolate/step, so the multiplication has to
+            // live inside each stop output rather than wrapping the whole
+            // expression.
             "icon-size": [
-              "*",
-              iconSizeByZoom,
-              ["get", "pulseSize"],
+              "interpolate", ["linear"], ["zoom"],
+              10, ["*", 0.29, ["get", "pulseSize"]],
+              11.5, ["*", 0.50, ["get", "pulseSize"]],
+              13, ["*", 0.74, ["get", "pulseSize"]],
+              14, ["*", 1.03, ["get", "pulseSize"]],
             ],
             "icon-rotate": capsuleRotate,
             "icon-rotation-alignment": "map",
