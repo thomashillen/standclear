@@ -334,6 +334,67 @@ function makeTrainIcon(color: string): ImageData {
   return ctx.getImageData(0, 0, W, H);
 }
 
+// Glow outline that hugs the train capsule shape, used to highlight
+// trains inbound to the currently-open station. White, since the
+// per-route color comes through from the train icon stacked on top.
+// The bitmap is larger than the train icon to leave room for the soft
+// halo to extend outward without clipping.
+const TRAIN_GLOW_W = 110;
+const TRAIN_GLOW_H = 60;
+
+function makeTrainGlowIcon(): ImageData {
+  const W = TRAIN_GLOW_W;
+  const H = TRAIN_GLOW_H;
+  const c = document.createElement("canvas");
+  c.width = W;
+  c.height = H;
+  const ctx = c.getContext("2d")!;
+
+  const bodyX = (W - BODY_W) / 2;
+  const bodyY = (H - BODY_H) / 2;
+  const bodyR = 6;
+  const bodyRight = bodyX + BODY_W;
+
+  const bodyPath = () => {
+    ctx.beginPath();
+    ctx.moveTo(bodyX + bodyR, bodyY);
+    ctx.lineTo(bodyRight - bodyR, bodyY);
+    ctx.arcTo(bodyRight, bodyY, bodyRight, bodyY + bodyR, bodyR);
+    ctx.lineTo(bodyRight, bodyY + BODY_H - bodyR);
+    ctx.arcTo(bodyRight, bodyY + BODY_H, bodyRight - bodyR, bodyY + BODY_H, bodyR);
+    ctx.lineTo(bodyX + bodyR, bodyY + BODY_H);
+    ctx.arcTo(bodyX, bodyY + BODY_H, bodyX, bodyY + BODY_H - bodyR, bodyR);
+    ctx.lineTo(bodyX, bodyY + bodyR);
+    ctx.arcTo(bodyX, bodyY, bodyX + bodyR, bodyY, bodyR);
+    ctx.closePath();
+  };
+
+  // Stack three blurred strokes around the capsule silhouette so the
+  // halo falls off smoothly: a wide soft outer glow, a mid layer, and
+  // a crisp inner ring sitting right on the capsule edge.
+  ctx.lineJoin = "round";
+  ctx.lineCap = "round";
+  ctx.shadowColor = "rgba(255, 255, 255, 1)";
+  ctx.strokeStyle = "rgba(255, 255, 255, 0.95)";
+
+  ctx.shadowBlur = 14;
+  ctx.lineWidth = 4;
+  bodyPath();
+  ctx.stroke();
+
+  ctx.shadowBlur = 8;
+  ctx.lineWidth = 3;
+  bodyPath();
+  ctx.stroke();
+
+  ctx.shadowBlur = 3;
+  ctx.lineWidth = 2;
+  bodyPath();
+  ctx.stroke();
+
+  return ctx.getImageData(0, 0, W, H);
+}
+
 export default function MapView({ selectedLine, stationStopId, onLineSelect, onStationOpen, flyToUserSignal, flyToDefaultSignal, panelOpen, selectedTrip, focusedLegIndex }: MapViewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<MapboxMap | null>(null);
@@ -494,6 +555,17 @@ export default function MapView({ selectedLine, stationStopId, onLineSelect, onS
               { pixelRatio: 2 },
             );
           }
+        }
+
+        // Single shared white glow icon, sized to wrap the train capsule
+        // and used to highlight trains inbound to the open station.
+        if (!map.hasImage("train-glow")) {
+          const glow = makeTrainGlowIcon();
+          map.addImage(
+            "train-glow",
+            { width: glow.width, height: glow.height, data: glow.data },
+            { pixelRatio: 2 },
+          );
         }
 
         map.addLayer({
@@ -838,22 +910,37 @@ export default function MapView({ selectedLine, stationStopId, onLineSelect, onS
           },
         });
 
-        // ── Incoming-train pulse rings ──
-        // White ring rendered UNDER the train capsule so the icon reads
-        // clearly on top. Radius and opacity pulse ~0.9 Hz via per-frame
+        // ── Incoming-train glow outline ──
+        // White glow capsule rendered UNDER the train icon so the route-
+        // colored body reads clearly on top with a soft halo wrapping its
+        // silhouette. icon-size and icon-opacity pulse ~0.9 Hz via per-frame
         // property updates (see rAF tick below). Imminent trains (< 90 s)
-        // get a larger, brighter ring so the urgency is obvious at a glance.
-        // A symbol layer above adds the ETA text just above each capsule —
-        // amber when imminent, near-white otherwise (mirrors the panel style).
+        // get a brighter, slightly larger glow so the urgency is obvious
+        // at a glance. A symbol layer above adds the ETA text just above
+        // each capsule — amber when imminent, near-white otherwise
+        // (mirrors the panel style).
         map.addLayer({
           id: "station-incoming-rings",
-          type: "circle",
+          type: "symbol",
           source: "station-incoming-rings",
+          layout: {
+            "icon-image": "train-glow",
+            // Multiply the train layer's zoom-driven base size by a per-
+            // feature pulse factor so the glow tracks the train's apparent
+            // size at every zoom and breathes with the pulse phase.
+            "icon-size": [
+              "*",
+              iconSizeByZoom,
+              ["get", "pulseSize"],
+            ],
+            "icon-rotate": capsuleRotate,
+            "icon-rotation-alignment": "map",
+            "icon-pitch-alignment": "map",
+            "icon-allow-overlap": true,
+            "icon-ignore-placement": true,
+          },
           paint: {
-            "circle-color": "#ffffff",
-            "circle-opacity": ["get", "pulseOpacity"],
-            "circle-radius": ["get", "pulseRadius"],
-            "circle-stroke-width": 0,
+            "icon-opacity": ["get", "pulseOpacity"],
           },
         }, "subway-trains-icon"); // stays below the train body
 
@@ -1483,17 +1570,20 @@ export default function MapView({ selectedLine, stationStopId, onLineSelect, onS
             // arrival row color in the panel so the language is consistent.
             const labelColor = isImminent ? "#fbbf24" : "#f9fafb";
 
-            // Ring geometry: base radius + pulse range. Imminent trains get
-            // a bigger, brighter ring to scream "this is the one."
-            const baseRadius = isImminent ? 18 : 13;
-            const pulseRange = isImminent ? 8 : 5;
-            const baseOpacity = isImminent ? 0.60 : 0.38;
+            // Glow pulse: a subtle "breathing" of the outline. Imminent
+            // trains get a brighter, slightly larger halo to scream "this
+            // is the one." pulseSize multiplies the train's per-zoom icon
+            // size so the glow tracks the capsule at every zoom.
+            const baseSize = isImminent ? 1.10 : 1.00;
+            const sizeRange = isImminent ? 0.18 : 0.12;
+            const baseOpacity = isImminent ? 0.70 : 0.50;
             const opacityRange = isImminent ? 0.25 : 0.18;
 
             ringFeatures.push({
               type: "Feature" as const,
               properties: {
-                pulseRadius: baseRadius + pulseRange * phase,
+                bearing: f.properties?.bearing ?? 90,
+                pulseSize: baseSize + sizeRange * phase,
                 pulseOpacity: baseOpacity + opacityRange * phase,
                 etaText,
                 labelColor,
