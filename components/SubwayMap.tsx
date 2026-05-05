@@ -296,6 +296,11 @@ export default function SubwayMap() {
       setFocusStopId(undefined);
       setStationStopId(null);
       setMoreOpen(false);
+      // Drop any trip overlay sourced from the panel we just
+      // displaced (e.g. a commute route NearbyPanel had highlighted) —
+      // entering a fresh search is a new context and the rider
+      // expects the map to start clean.
+      clearTripOverlay();
     } else {
       // Closing via the header button — drop the trip overlay so a
       // dashed walking path or highlighted route doesn't outlive the
@@ -350,6 +355,13 @@ export default function SubwayMap() {
       // Drop any active trip overlay too. Near-me is "what's around
       // me right now"; a leftover highlighted route + walking legs
       // would make the panel and the map disagree about context.
+      clearTripOverlay();
+    } else {
+      // Toggling Near-me off via the floating button is also an
+      // exit from the commute-route context the panel may have
+      // shown — clear the overlay so the map returns to the
+      // default all-trains view rather than stranding a
+      // highlighted route with no panel to back it.
       clearTripOverlay();
     }
     // Bump the signal both for open AND re-tap-while-open. Tapping
@@ -576,17 +588,28 @@ export default function SubwayMap() {
         )}
         <NearbyPanel
           open={nearbyOpen && !stationStopId && !searchOpen}
-          onClose={() => setNearbyOpen(false)}
+          onClose={() => {
+            setNearbyOpen(false);
+            // The commute-route overlay belongs to NearbyPanel; the
+            // X / backdrop dismissal is "exit this context", so the
+            // overlay has to go too. Without this, a highlighted
+            // route + dashed walk legs persisted on the map after
+            // the panel animated away — same bug SearchSheet's
+            // onClose already handles for its own overlays.
+            clearTripOverlay();
+          }}
           onStationOpen={handleStationOpen}
           onTripSelect={handleTripSelect}
           selectedTripKey={selectedTripKey}
           onSeeAllRoutes={handleSeeAllRoutes}
           onPreviewMap={() => {
             setNearbyOpen(false);
+            clearTripOverlay();
             setFlyToDefaultSignal((s) => s + 1);
           }}
           onOpenMore={() => {
             setNearbyOpen(false);
+            clearTripOverlay();
             setMoreOpen(true);
           }}
         />
@@ -796,6 +819,11 @@ export default function SubwayMap() {
             setStationStopId(null);
             setSearchAnchorPick(null);
             setSearchPresetTrip(null);
+            // Drop any trip overlay from the panel being displaced
+            // — same rationale as the other floating-button entry
+            // points: opening More is a context switch, and a
+            // leftover commute route would contradict the panel.
+            clearTripOverlay();
             setMoreOpen(true);
           }}
           aria-label="More options"
