@@ -126,6 +126,7 @@ type MapboxMap = {
   setPaintProperty: (id: string, prop: string, val: MapboxExpression) => void;
   fitBounds: (bounds: unknown, opts: unknown) => void;
   remove: () => void;
+  stop: () => void;
   getCanvas: () => HTMLCanvasElement;
   on: (event: string, ...args: unknown[]) => void;
   off: (event: string, ...args: unknown[]) => void;
@@ -1389,13 +1390,33 @@ export default function MapView({ selectedLine, stationStopId, onLineSelect, onS
       });
       // Any explicit camera gesture from the rider — drag, pinch,
       // double-tap zoom — releases the lock. easeTo from inside the
-      // tick doesn't fire dragstart, so this only catches user input.
-      const release = () => onFollowTrainRef.current?.(null);
+      // tick doesn't fire dragstart, so these only catch user input.
+      //
+      // The release order matters:
+      //   1. Clear `followedTrainIdRef.current` SYNCHRONOUSLY so the
+      //      next rAF tick doesn't fire another `map.easeTo` toward
+      //      the train (the React state update routed through
+      //      `onFollowTrain` is async — the ref update via the
+      //      mirroring useEffect lands a frame later, which is too
+      //      slow to stop the recenter loop from fighting the drag).
+      //   2. `map.stop()` halts whatever easeTo the previous tick
+      //      had in flight (250 ms duration), so the camera doesn't
+      //      keep gliding toward the train under the user's finger.
+      //   3. `onFollowTrain(null)` propagates the state change up so
+      //      the capsule unmounts, the pitch unwinds, and the listener
+      //      cleanup runs.
+      const release = () => {
+        followedTrainIdRef.current = null;
+        map.stop();
+        onFollowTrainRef.current?.(null);
+      };
       map.on("dragstart", release);
       map.on("rotatestart", release);
+      map.on("pitchstart", release);
       return () => {
         map.off("dragstart", release);
         map.off("rotatestart", release);
+        map.off("pitchstart", release);
       };
     } else {
       // Exit — restore flat top-down view. Shorter ease than the
