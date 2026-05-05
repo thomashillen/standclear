@@ -5,6 +5,7 @@ import { AlertTriangle, Info, ChevronDown, X } from "lucide-react";
 import { useLines, CORRIDOR } from "@/lib/subwayData";
 import { useTrains, type Arrival } from "@/lib/useTrains";
 import { useAlerts, alertsForRoutes, type ServiceAlert } from "@/lib/useAlerts";
+import { useNow } from "@/lib/useNow";
 import { useSheetDrag } from "@/lib/useSheetDrag";
 
 interface LinePanelProps {
@@ -234,9 +235,10 @@ function AlertItem({ alert }: { alert: ServiceAlert }) {
 // live arrivals off-screen on a 50dvh bottom sheet. The summary bar shows
 // count + top severity so riders can decide whether it's worth expanding;
 // a line switch always recollapses.
-function AlertsSection({ alerts, lineId }: { alerts: ServiceAlert[]; lineId: string }) {
+// Parent passes `key={lineId}` so a line switch remounts this section,
+// resetting the disclosure to collapsed without a setState-in-effect.
+function AlertsSection({ alerts }: { alerts: ServiceAlert[] }) {
   const [open, setOpen] = useState(false);
-  useEffect(() => setOpen(false), [lineId]);
 
   // Highest-severity alert drives the summary-bar color so riders can
   // tell at a glance whether the corridor has a suspension vs. a routine
@@ -287,7 +289,11 @@ export default function LinePanel({ lineId, focusStopId, onClose, onStationOpen 
   const line = lines?.[lineId];
   const data = useTrains();
   const alertsData = useAlerts();
-  const now = data?.generatedAt ?? Date.now();
+  // Tick once per second so ETAs and the staleness banner update on
+  // their own without waiting for the next /api/trains poll. Reading
+  // Date.now() in render directly trips React 19's purity rule.
+  const wallNow = useNow();
+  const now = data?.generatedAt ?? wallNow;
   const routeId = line?.routeId;
 
   // Map selection highlights every route on the shared trunk (e.g. 1/2/3
@@ -390,7 +396,7 @@ export default function LinePanel({ lineId, focusStopId, onClose, onStationOpen 
 
   const numStops = line.stops.length;
   const textClass = line.textColor === "black" ? "text-black" : "text-white";
-  const stale = data ? Date.now() - data.generatedAt > 30_000 : false;
+  const stale = data ? wallNow - data.generatedAt > 30_000 : false;
 
   return (
     <div
@@ -451,7 +457,7 @@ export default function LinePanel({ lineId, focusStopId, onClose, onStationOpen 
       </div>
 
       {corridorAlerts.length > 0 && (
-        <AlertsSection alerts={corridorAlerts} lineId={lineId} />
+        <AlertsSection key={lineId} alerts={corridorAlerts} />
       )}
 
       <div

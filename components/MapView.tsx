@@ -458,7 +458,10 @@ export default function MapView({ selectedLine, stationStopId, onLineSelect, onS
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<MapboxMap | null>(null);
   const [mapLoaded, setMapLoaded] = useState(false);
-  const [noToken, setNoToken] = useState(false);
+  // Mapbox token is a build-time public env var, so its presence never
+  // changes at runtime — derive the no-token banner directly during
+  // render instead of toggling state inside the init effect.
+  const noToken = !process.env.NEXT_PUBLIC_MAPBOX_TOKEN;
   const selectedLineRef = useRef(selectedLine);
   const onStationOpenRef = useRef(onStationOpen);
   useEffect(() => { onStationOpenRef.current = onStationOpen; }, [onStationOpen]);
@@ -490,7 +493,7 @@ export default function MapView({ selectedLine, stationStopId, onLineSelect, onS
 
   useEffect(() => {
     const token = process.env.NEXT_PUBLIC_MAPBOX_TOKEN;
-    if (!token) { setNoToken(true); return; }
+    if (!token) return;
     if (!containerRef.current) return;
     if (!lines) return;
 
@@ -2049,6 +2052,10 @@ export default function MapView({ selectedLine, stationStopId, onLineSelect, onS
       duration: 1100,
       padding,
     });
+    // pendingFly is a one-shot trigger consumed here. Resetting it
+    // immediately is the point — the lint cascade-renders warning
+    // doesn't apply to a self-clearing flag this size.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setPendingFly(false);
   }, [pendingFly, mapLoaded, geo.lat, geo.lng]);
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useSyncExternalStore } from "react";
 import type { Place } from "./geocoding";
 
 // ─── Recent searches ────────────────────────────────────────────────
@@ -81,6 +81,32 @@ function save(items: RecentSearch[]) {
 // Module-level cache so multiple components reading recents don't
 // each round-trip to localStorage. Updated on every mutation.
 let cache: RecentSearch[] | null = null;
+const subscribers = new Set<() => void>();
+// Stable empty list for SSR / pre-hydration. A fresh `[]` each call
+// would fail useSyncExternalStore's reference check.
+const SERVER_SNAPSHOT: RecentSearch[] = [];
+
+function subscribe(cb: () => void): () => void {
+  subscribers.add(cb);
+  return () => {
+    subscribers.delete(cb);
+  };
+}
+
+function getSnapshot(): RecentSearch[] {
+  if (cache === null) cache = load();
+  return cache;
+}
+
+function getServerSnapshot(): RecentSearch[] {
+  return SERVER_SNAPSHOT;
+}
+
+function commit(next: RecentSearch[]) {
+  cache = next;
+  save(next);
+  subscribers.forEach((cb) => cb());
+}
 
 export function useRecentSearches(): {
   recents: RecentSearch[];
@@ -89,19 +115,14 @@ export function useRecentSearches(): {
   removeRecent: (key: string) => void;
   clear: () => void;
 } {
-  const [recents, setRecents] = useState<RecentSearch[]>([]);
-
-  // Hydrate from storage after mount to avoid SSR/client mismatch.
-  // Same lazy pattern useFavorites uses.
-  useEffect(() => {
-    if (cache === null) cache = load();
-    setRecents(cache);
-  }, []);
+  const recents = useSyncExternalStore(
+    subscribe,
+    getSnapshot,
+    getServerSnapshot,
+  );
 
   const update = useCallback((next: RecentSearch[]) => {
-    cache = next;
-    setRecents(next);
-    save(next);
+    commit(next);
   }, []);
 
   // Add a station pick. Dedupe by stopId — repeat picks bubble to

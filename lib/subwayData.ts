@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useSyncExternalStore } from "react";
 
 export interface Stop {
   id: string;
@@ -28,7 +28,7 @@ export type Lines = Record<string, SubwayLine>;
 // commit history for the 65GB tsserver incident.
 let cache: Lines | null = null;
 let loadPromise: Promise<Lines> | null = null;
-const subscribers = new Set<(lines: Lines) => void>();
+const subscribers = new Set<() => void>();
 
 function loadLines(): Promise<Lines> {
   if (cache) return Promise.resolve(cache);
@@ -40,7 +40,7 @@ function loadLines(): Promise<Lines> {
       })
       .then((j) => {
         cache = j.lines;
-        subscribers.forEach((cb) => cb(cache!));
+        subscribers.forEach((cb) => cb());
         return cache;
       })
       .catch((err) => {
@@ -52,17 +52,24 @@ function loadLines(): Promise<Lines> {
   return loadPromise;
 }
 
+function subscribe(cb: () => void): () => void {
+  subscribers.add(cb);
+  if (!cache) loadLines().catch(() => {});
+  return () => {
+    subscribers.delete(cb);
+  };
+}
+
+function getSnapshot(): Lines | null {
+  return cache;
+}
+
+function getServerSnapshot(): Lines | null {
+  return null;
+}
+
 export function useLines(): Lines | null {
-  const [lines, setLines] = useState<Lines | null>(cache);
-
-  useEffect(() => {
-    if (cache) { setLines(cache); return; }
-    subscribers.add(setLines);
-    loadLines().catch(() => {});
-    return () => { subscribers.delete(setLines); };
-  }, []);
-
-  return lines;
+  return useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
 }
 
 // Order matches the official MTA "Lines" panel: numbered (IRT), 8 Av (ACE),

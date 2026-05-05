@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useSyncExternalStore } from "react";
 import type { AlertsResponse, ServiceAlert } from "@/app/api/alerts/route";
 
 export type { ServiceAlert };
@@ -42,7 +42,7 @@ function persistToStorage(data: AlertsResponse) {
     // ignore
   }
 }
-const subscribers = new Set<(d: AlertsResponse) => void>();
+const subscribers = new Set<() => void>();
 let intervalId: ReturnType<typeof setInterval> | null = null;
 
 async function refresh() {
@@ -54,7 +54,7 @@ async function refresh() {
       const data = (await res.json()) as AlertsResponse;
       cache = { data, promise: null };
       persistToStorage(data);
-      subscribers.forEach((cb) => cb(data));
+      subscribers.forEach((cb) => cb());
     } catch (err) {
       console.warn("Failed to fetch /api/alerts", err);
       cache.promise = null;
@@ -94,25 +94,31 @@ function bindVisibility() {
   });
 }
 
-export function useAlerts(): AlertsResponse | null {
-  // Same SSR-safety pattern as useTrains: initial render must match
-  // the server (null) to avoid hydration mismatch. Hydration from
-  // localStorage happens in the effect below, post-render.
-  const [data, setData] = useState<AlertsResponse | null>(cache.data);
-
-  useEffect(() => {
+function subscribe(cb: () => void): () => void {
+  if (subscribers.size === 0) {
     hydrateFromStorage();
-    if (cache.data) setData(cache.data);
-    subscribers.add(setData);
     bindVisibility();
     startPolling();
-    return () => {
-      subscribers.delete(setData);
-      stopPolling();
-    };
-  }, []);
+  }
+  subscribers.add(cb);
+  return () => {
+    subscribers.delete(cb);
+    stopPolling();
+  };
+}
 
-  return data;
+function getSnapshot(): AlertsResponse | null {
+  return cache.data;
+}
+
+// Server snapshot is `null` to match the SSR contract — see useTrains
+// for the hydration-mismatch reasoning.
+function getServerSnapshot(): AlertsResponse | null {
+  return null;
+}
+
+export function useAlerts(): AlertsResponse | null {
+  return useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
 }
 
 // Filter active alerts to those affecting any of the given routeIds. Used by

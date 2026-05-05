@@ -359,7 +359,11 @@ export default function SubwayMap() {
   };
 
   const totalTrains = data?.trains.length ?? 0;
-  const stale = data ? Date.now() - data.generatedAt > 60_000 : false;
+  // Slow tick (10s) just for the stale banner — reading Date.now() in
+  // render trips React 19's purity rule, and the existing follow-mode
+  // useNow above is gated on followedTrainId so it can't be reused.
+  const staleTick = useNow(true, 10_000);
+  const stale = data ? staleTick - data.generatedAt > 60_000 : false;
 
   // Stable identifier for the selected plan, also passed to SearchSheet
   // so its TripPlanRow can show the right selected highlight without
@@ -377,10 +381,14 @@ export default function SubwayMap() {
   // Reset cached walk routes whenever the underlying selection
   // (or its endpoints) changes — otherwise a switch from plan A to
   // plan B would briefly render plan A's resolved walk path against
-  // plan B's stations.
+  // plan B's stations. Deriving from props in render would race the
+  // async fetch that populates these states; clearing in an effect
+  // keyed on the endpoints is the cleanest correct shape.
   useEffect(() => {
+    /* eslint-disable react-hooks/set-state-in-effect */
     setWalkFromRoute(null);
     setWalkToRoute(null);
+    /* eslint-enable react-hooks/set-state-in-effect */
   }, [
     selectedTripSelection?.walkFrom?.lng,
     selectedTripSelection?.walkFrom?.lat,

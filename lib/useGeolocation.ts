@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useSyncExternalStore } from "react";
 
 export type GeoStatus =
   | "idle"        // nothing requested yet
@@ -32,14 +32,14 @@ const initial: GeoState = {
   updatedAt: null,
 };
 
-const subscribers = new Set<(s: GeoState) => void>();
+const subscribers = new Set<() => void>();
 let current: GeoState = initial;
 let watchId: number | null = null;
 let fastFixRequested = false;
 
 function publish(patch: Partial<GeoState>) {
   current = { ...current, ...patch, updatedAt: Date.now() };
-  subscribers.forEach((cb) => cb(current));
+  subscribers.forEach((cb) => cb());
 }
 
 function applyPosition(pos: GeolocationPosition) {
@@ -132,20 +132,31 @@ export function requestGeolocation() {
   startWatch();
 }
 
-// Subscribe to the shared geo stream. Pass `active=false` to unsubscribe
-// without tearing down the watch for other subscribers.
-export function useGeolocation(active: boolean): GeoState & { request: () => void } {
-  const [state, setState] = useState<GeoState>(current);
+function subscribe(cb: () => void): () => void {
+  subscribers.add(cb);
+  return () => {
+    subscribers.delete(cb);
+    if (subscribers.size === 0) stopWatch();
+  };
+}
 
+function getSnapshot(): GeoState {
+  return current;
+}
+
+// Subscribe to the shared geo stream. Pass `active=true` to start the
+// watch (and trigger the permission prompt on first call across the
+// whole app); `active=false` keeps reading the shared state without
+// starting a new watch — useful when a component wants to react to
+// someone else's geo subscription without prompting itself.
+export function useGeolocation(active: boolean): GeoState & { request: () => void } {
+  const state = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
+  // Watch lifecycle is gated on `active`. The subscribe path attaches
+  // notification only; the prompt + watchPosition call lives here so
+  // useGeolocation(false) and useGeolocationState() never spin up a
+  // watch on their own.
   useEffect(() => {
-    if (!active) return;
-    subscribers.add(setState);
-    setState(current);
-    startWatch();
-    return () => {
-      subscribers.delete(setState);
-      if (subscribers.size === 0) stopWatch();
-    };
+    if (active) startWatch();
   }, [active]);
 
   const request = useCallback(() => requestGeolocation(), []);
@@ -158,14 +169,5 @@ export function useGeolocation(active: boolean): GeoState & { request: () => voi
 // position whenever someone else has opted in via useGeolocation(true)
 // — the map doesn't prompt, but it lights up once Near Me has.
 export function useGeolocationState(): GeoState {
-  const [state, setState] = useState<GeoState>(current);
-  useEffect(() => {
-    subscribers.add(setState);
-    setState(current);
-    return () => {
-      subscribers.delete(setState);
-      if (subscribers.size === 0) stopWatch();
-    };
-  }, []);
-  return state;
+  return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
 }
