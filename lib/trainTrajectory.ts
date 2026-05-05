@@ -154,6 +154,29 @@ export function bearingDeg(
   return ((Math.atan2(dLng, dLat) * 180) / Math.PI + 360) % 360;
 }
 
+// Deterministic stagger in [0, maxMs) keyed off the trainId. Used to
+// break up the feed-batching effect where multiple trains the GTFS-RT
+// feed updates in the same poll all visually transition at the same
+// instant — at a real stack platform (e.g. 4/5/6 N-bound at Union Sq)
+// trains leave 5–15 seconds apart, but our 8s poll captures their
+// status changes together. Hashing the trainId restores some of that
+// spacing without inventing data we don't have.
+//
+// FNV-1a-style mix; trainIds are short MTA strings (e.g. "1#NQR234")
+// so a 32-bit hash collides rarely enough at our scale. Same trainId
+// always returns the same stagger — important so a train doesn't
+// jitter its own departure time across re-builds within a single
+// dwell.
+export function trainIdStaggerMs(trainId: string, maxMs: number): number {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < trainId.length; i++) {
+    h ^= trainId.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  h = (h ^ (h >>> 16)) >>> 0;
+  return h % maxMs;
+}
+
 /**
  * Build a time-keyed trajectory for one train, paced by the feed's
  * reported `status` so the visualization follows reality rather than
@@ -219,10 +242,6 @@ export function buildTrajectory(
       ? prevArc
       : prevArc + (nextArc - prevArc) * train.progress;
 
-  const waypoints: Waypoint[] = [
-    { arcLength: currentArc, time: generatedAtMs },
-  ];
-
   // Find the predicted ETA at the *next* stop only. ETA is in seconds
   // (see app/api/trains/route.ts: toSec → unix seconds); we convert
   // at the boundary so all internal time arithmetic is in ms.
@@ -230,11 +249,11 @@ export function buildTrajectory(
     .filter((a) => a.stopId === next.id && a.eta * 1000 > generatedAtMs)
     .sort((a, b) => a.eta - b.eta);
 
+  let endArc: number;
+  let endTime: number;
   if (nextStopArrivals.length > 0) {
-    waypoints.push({
-      arcLength: nextArc,
-      time: nextStopArrivals[0].eta * 1000,
-    });
+    endArc = nextArc;
+    endTime = nextStopArrivals[0].eta * 1000;
   } else if (prev.shapeIdx !== next.shapeIdx) {
     // No ETA available for the next stop (last leg of a trip, or
     // arrivals payload missing this entry). Fall back to typical
@@ -242,13 +261,54 @@ export function buildTrajectory(
     // marker still creeps forward instead of freezing mid-segment.
     const TYPICAL_TRAVEL_SEC = 60;
     const remaining = 1 - train.progress;
-    waypoints.push({
-      arcLength: nextArc,
-      time: generatedAtMs + remaining * TYPICAL_TRAVEL_SEC * 1000,
-    });
+    endArc = nextArc;
+    endTime = generatedAtMs + remaining * TYPICAL_TRAVEL_SEC * 1000;
+  } else {
+    // prev === next on an in-motion status — degenerate but safe;
+    // park the marker at the stop with no forward motion.
+    return {
+      trainId: train.id,
+      routeId: train.routeId,
+      waypoints: [{ arcLength: prevArc, time: generatedAtMs }],
+    };
   }
 
-  return { trainId: train.id, routeId: train.routeId, waypoints };
+  // Stagger the apparent departure for trains that look like they
+  // just left a platform. Without this, a stack platform (4/5/6 at
+  // Union Sq) where the feed batch-updates several trains from
+  // STOPPED_AT to IN_TRANSIT_TO on the same 8s poll has them all
+  // leave the platform in unison — visually unrealistic. The
+  // staggered window ends at the next-stop ETA so the journey
+  // duration shrinks proportionally rather than the train arriving
+  // late, keeping the visualization in agreement with the MTA's
+  // prediction at the destination.
+  const justDeparted =
+    train.status === "IN_TRANSIT_TO" &&
+    train.progress < 0.2 &&
+    prev.shapeIdx !== next.shapeIdx;
+  if (justDeparted) {
+    const stagger = trainIdStaggerMs(train.id, 4000);
+    if (stagger > 0 && generatedAtMs + stagger < endTime) {
+      return {
+        trainId: train.id,
+        routeId: train.routeId,
+        waypoints: [
+          { arcLength: prevArc, time: generatedAtMs },
+          { arcLength: prevArc, time: generatedAtMs + stagger },
+          { arcLength: endArc, time: endTime },
+        ],
+      };
+    }
+  }
+
+  return {
+    trainId: train.id,
+    routeId: train.routeId,
+    waypoints: [
+      { arcLength: currentArc, time: generatedAtMs },
+      { arcLength: endArc, time: endTime },
+    ],
+  };
 }
 
 /**

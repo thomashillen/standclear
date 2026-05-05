@@ -7,6 +7,7 @@ import {
   computeShapeMetrics,
   positionAt,
   shapePositionAtArc,
+  trainIdStaggerMs,
 } from "./trainTrajectory";
 
 // 5 evenly spaced points heading due south. Stops sit on shape
@@ -52,6 +53,28 @@ function arrival(over: Partial<Arrival> & Pick<Arrival, "stopId" | "eta">): Arri
     eta: over.eta,
   };
 }
+
+describe("trainIdStaggerMs", () => {
+  it("returns a value in [0, max)", () => {
+    for (let i = 0; i < 50; i++) {
+      const v = trainIdStaggerMs(`trip-${i}`, 4000);
+      expect(v).toBeGreaterThanOrEqual(0);
+      expect(v).toBeLessThan(4000);
+    }
+  });
+
+  it("is deterministic — same id always returns the same value", () => {
+    const id = "1#NQR234";
+    expect(trainIdStaggerMs(id, 4000)).toBe(trainIdStaggerMs(id, 4000));
+  });
+
+  it("spreads ids across the range (different ids → different values, mostly)", () => {
+    const samples = new Set<number>();
+    for (let i = 0; i < 30; i++) samples.add(trainIdStaggerMs(`t-${i}`, 4000));
+    // Hash collisions are possible but most should be distinct.
+    expect(samples.size).toBeGreaterThan(20);
+  });
+});
 
 describe("computeShapeMetrics", () => {
   it("cum length is 0 at index 0 and total at the last index", () => {
@@ -156,11 +179,14 @@ describe("buildTrajectory", () => {
   });
 
   it("IN_TRANSIT_TO appends only the next stop's ETA, not further-future stops", () => {
+    // progress 0.5 keeps the train past the stagger threshold so this
+    // case exercises the plain 2-waypoint shape rather than the dwell
+    // form (covered by its own test below).
     const traj = buildTrajectory(
       train({
         prevStopId: "A",
         nextStopId: "B",
-        progress: 0,
+        progress: 0.5,
         status: "IN_TRANSIT_TO",
       }),
       [
@@ -181,7 +207,7 @@ describe("buildTrajectory", () => {
       train({
         prevStopId: "A",
         nextStopId: "B",
-        progress: 0,
+        progress: 0.5,
         status: "IN_TRANSIT_TO",
       }),
       [arrival({ stopId: "B", eta: NOW_SEC - 30 })],
@@ -191,7 +217,8 @@ describe("buildTrajectory", () => {
     )!;
     expect(traj.waypoints).toHaveLength(2);
     expect(traj.waypoints[1].arcLength).toBeCloseTo(metrics.cumLength[2], 9);
-    expect(traj.waypoints[1].time).toBe(NOW_MS + 60_000);
+    // Default 60s journey scaled by remaining progress (0.5 → 30 s).
+    expect(traj.waypoints[1].time).toBe(NOW_MS + 30_000);
   });
 
   it("synthesizes a fallback waypoint when no next-stop ETA exists", () => {
@@ -199,7 +226,7 @@ describe("buildTrajectory", () => {
       train({
         prevStopId: "A",
         nextStopId: "B",
-        progress: 0,
+        progress: 0.5,
         status: "IN_TRANSIT_TO",
       }),
       [],
@@ -209,8 +236,88 @@ describe("buildTrajectory", () => {
     )!;
     expect(traj.waypoints).toHaveLength(2);
     expect(traj.waypoints[1].arcLength).toBeCloseTo(metrics.cumLength[2], 9);
-    // Default 60s remaining at progress 0.
-    expect(traj.waypoints[1].time).toBe(NOW_MS + 60_000);
+    // Default 60s journey scaled by remaining progress (0.5 → 30 s).
+    expect(traj.waypoints[1].time).toBe(NOW_MS + 30_000);
+  });
+
+  it("inserts a stagger dwell so two just-departed trains don't share an instant", () => {
+    // Two trains that the feed batch-updated from STOPPED_AT to
+    // IN_TRANSIT_TO on the same poll. Without the per-id stagger
+    // they'd both anchor at platform A at the same instant; the
+    // stagger pushes one's apparent departure 0–4 s past the other's
+    // so they leave the stack at different times.
+    const eta = NOW_SEC + 60;
+    const t1 = buildTrajectory(
+      train({
+        id: "trip-aaa",
+        prevStopId: "A",
+        nextStopId: "B",
+        progress: 0.05,
+        status: "IN_TRANSIT_TO",
+      }),
+      [arrival({ tripId: "trip-aaa", stopId: "B", eta })],
+      line,
+      metrics,
+      NOW_MS,
+    )!;
+    const t2 = buildTrajectory(
+      train({
+        id: "trip-zzz",
+        prevStopId: "A",
+        nextStopId: "B",
+        progress: 0.05,
+        status: "IN_TRANSIT_TO",
+      }),
+      [arrival({ tripId: "trip-zzz", stopId: "B", eta })],
+      line,
+      metrics,
+      NOW_MS,
+    )!;
+    // Both trajectories should have a 3-waypoint shape: dwell, then
+    // glide to next stop. The dwell duration differs by trainId.
+    expect(t1.waypoints).toHaveLength(3);
+    expect(t2.waypoints).toHaveLength(3);
+    expect(t1.waypoints[1].time).not.toBe(t2.waypoints[1].time);
+    // Both end at the same MTA-predicted next-stop ETA — stagger
+    // shrinks the journey, not the predicted destination time.
+    expect(t1.waypoints[2].time).toBe(eta * 1000);
+    expect(t2.waypoints[2].time).toBe(eta * 1000);
+  });
+
+  it("the stagger is bounded by the next-stop ETA (never inserts a dwell that would push past arrival)", () => {
+    // Imminent ETA — the stagger window would overshoot the next
+    // stop, so we bail out and use the plain 2-waypoint trajectory.
+    const eta = NOW_SEC + 1;
+    const traj = buildTrajectory(
+      train({
+        id: "trip-aaa",
+        prevStopId: "A",
+        nextStopId: "B",
+        progress: 0.05,
+        status: "IN_TRANSIT_TO",
+      }),
+      [arrival({ tripId: "trip-aaa", stopId: "B", eta })],
+      line,
+      metrics,
+      NOW_MS,
+    )!;
+    expect(traj.waypoints).toHaveLength(2);
+  });
+
+  it("doesn't stagger trains already mid-segment (progress > threshold)", () => {
+    const traj = buildTrajectory(
+      train({
+        prevStopId: "A",
+        nextStopId: "B",
+        progress: 0.5,
+        status: "IN_TRANSIT_TO",
+      }),
+      [arrival({ stopId: "B", eta: NOW_SEC + 60 })],
+      line,
+      metrics,
+      NOW_MS,
+    )!;
+    expect(traj.waypoints).toHaveLength(2);
   });
 
   it("ignores a future-stop ETA that doesn't match the train's next stop", () => {
@@ -222,7 +329,7 @@ describe("buildTrajectory", () => {
       train({
         prevStopId: "A",
         nextStopId: "B",
-        progress: 0,
+        progress: 0.5,
         status: "IN_TRANSIT_TO",
       }),
       [arrival({ stopId: "C", eta: NOW_SEC + 90 })],
@@ -232,7 +339,7 @@ describe("buildTrajectory", () => {
     )!;
     expect(traj.waypoints).toHaveLength(2);
     expect(traj.waypoints[1].arcLength).toBeCloseTo(metrics.cumLength[2], 9);
-    expect(traj.waypoints[1].time).toBe(NOW_MS + 60_000);
+    expect(traj.waypoints[1].time).toBe(NOW_MS + 30_000);
   });
 });
 
@@ -267,17 +374,25 @@ describe("positionAt", () => {
   });
 
   it("interpolates linearly in time between two waypoints", () => {
-    // A → B over 60 s. Halfway through, the train should be at the
-    // midpoint between A (lat 40.80) and B (lat 40.76) → lat 40.78.
+    // Train at the A→B midpoint heading to B in 60 s. Halfway through
+    // the trajectory, it should sit at lat 40.77 — midpoint of the
+    // remaining segment from 40.78 (current) to 40.76 (B). progress
+    // 0.5 keeps it past the stagger threshold so the trajectory is
+    // the simple 2-waypoint form.
     const traj = buildTrajectory(
-      train({ prevStopId: "A", nextStopId: "B", progress: 0 }),
+      train({
+        prevStopId: "A",
+        nextStopId: "B",
+        progress: 0.5,
+        status: "IN_TRANSIT_TO",
+      }),
       [arrival({ stopId: "B", eta: NOW_SEC + 60 })],
       line,
       metrics,
       NOW_MS,
     )!;
     const p = positionAt(traj, line, metrics, NOW_MS + 30_000)!;
-    expect(p.lat).toBeCloseTo(40.78, 4);
+    expect(p.lat).toBeCloseTo(40.77, 4);
   });
 
   it("STOPPED_AT trajectories don't drift forward over time (no rubber-band)", () => {
