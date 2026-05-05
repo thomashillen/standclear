@@ -32,6 +32,27 @@ import SearchSheet from "./SearchSheet";
 import StationPanel from "./StationPanel";
 import type { SelectedTrip } from "./MapView";
 
+// Convert "#abcdef" → "171 205 239" so the value can be plugged into
+// `rgb(var(--glass-tint) / α)`. Tolerates 3- and 6-digit hex; returns
+// null on anything unparseable so callers can leave the tint at its
+// neutral default rather than rendering a random color.
+function hexToRgbTriplet(hex: string): string | null {
+  const h = hex.startsWith("#") ? hex.slice(1) : hex;
+  const expanded =
+    h.length === 3
+      ? h
+          .split("")
+          .map((c) => c + c)
+          .join("")
+      : h;
+  if (expanded.length !== 6) return null;
+  const r = parseInt(expanded.slice(0, 2), 16);
+  const g = parseInt(expanded.slice(2, 4), 16);
+  const b = parseInt(expanded.slice(4, 6), 16);
+  if (Number.isNaN(r) || Number.isNaN(g) || Number.isNaN(b)) return null;
+  return `${r} ${g} ${b}`;
+}
+
 const MapView = dynamic(() => import("./MapView"), {
   ssr: false,
   loading: () => (
@@ -137,6 +158,28 @@ export default function SubwayMap() {
   const [flyToDefaultSignal, setFlyToDefaultSignal] = useState(0);
   const data = useTrains();
   const lines = useLines();
+
+  // Drive the global liquid-glass tint from the currently selected
+  // line. Every `.ios-glass` surface picks up `--glass-tint` /
+  // `--glass-tint-strength` automatically, so when the rider focuses
+  // a line every floating button, sheet, and modal subtly washes
+  // toward that line's color — a non-modal way to confirm the
+  // selection. Cleared when nothing is selected so the chrome
+  // returns to neutral.
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    const root = document.documentElement;
+    const line = selectedLine && lines ? lines[selectedLine] : null;
+    if (!line) {
+      root.style.setProperty("--glass-tint-strength", "0");
+      return;
+    }
+    const rgb = hexToRgbTriplet(line.color);
+    if (rgb) {
+      root.style.setProperty("--glass-tint", rgb);
+      root.style.setProperty("--glass-tint-strength", "1");
+    }
+  }, [selectedLine, lines]);
 
   const handleLineSelect = (line: string | null, stopId?: string) => {
     setSelectedLine(line);
@@ -514,7 +557,7 @@ export default function SubwayMap() {
         {/* Logo — small floating tile, hidden on mobile to give the
             line picker more room. Identity cue only, not navigation. */}
         <div
-          className="pointer-events-auto hidden sm:flex items-center justify-center w-11 h-11 rounded-full ios-glass border border-white/[0.10] shadow-[0_6px_20px_rgba(0,0,0,0.45)] text-[22px] flex-shrink-0 select-none"
+          className="pointer-events-auto hidden sm:flex items-center justify-center w-11 h-11 rounded-full ios-glass ios-glass--header border border-white/[0.10] shadow-[0_6px_20px_rgba(0,0,0,0.45)] text-[22px] flex-shrink-0 select-none"
           aria-label="StandClear"
         >
           🚇
@@ -556,7 +599,7 @@ export default function SubwayMap() {
                 ? "Stale — last refresh more than a minute ago"
                 : `${totalTrains} trains live`
           }
-          className="pointer-events-auto press flex items-center gap-1.5 h-9 px-2.5 flex-shrink-0 rounded-full ios-glass border border-white/[0.10] shadow-[0_6px_20px_rgba(0,0,0,0.45)] touch-manipulation"
+          className="pointer-events-auto press flex items-center gap-1.5 h-9 px-2.5 flex-shrink-0 rounded-full ios-glass ios-glass--header border border-white/[0.10] shadow-[0_6px_20px_rgba(0,0,0,0.45)] touch-manipulation"
         >
           <span className="relative flex w-2 h-2">
             <span
@@ -594,7 +637,7 @@ export default function SubwayMap() {
           className={`pointer-events-auto press flex items-center justify-center w-11 h-11 rounded-full touch-manipulation flex-shrink-0 transition-colors border shadow-[0_6px_20px_rgba(0,0,0,0.45)] ${
             searchOpen
               ? "bg-white text-gray-950 border-white/30 shadow-[0_6px_20px_rgba(255,255,255,0.20)]"
-              : "ios-glass text-gray-100 border-white/[0.10]"
+              : "ios-glass ios-glass--header text-gray-100 border-white/[0.10]"
           }`}
         >
           <Search className="w-[18px] h-[18px]" />
@@ -611,7 +654,7 @@ export default function SubwayMap() {
           className={`pointer-events-auto press flex items-center justify-center w-11 h-11 rounded-full touch-manipulation flex-shrink-0 transition-colors border shadow-[0_6px_20px_rgba(0,0,0,0.45)] ${
             nearbyOpen
               ? "bg-white text-gray-950 border-white/30 shadow-[0_6px_20px_rgba(255,255,255,0.20)]"
-              : "ios-glass text-gray-100 border-white/[0.10]"
+              : "ios-glass ios-glass--header text-gray-100 border-white/[0.10]"
           }`}
         >
           <MapPin className="w-[18px] h-[18px]" />
@@ -642,7 +685,7 @@ export default function SubwayMap() {
           }}
           aria-label="More options"
           aria-pressed={moreOpen}
-          className="pointer-events-auto press flex items-center justify-center w-11 h-11 rounded-full touch-manipulation flex-shrink-0 transition-colors border shadow-[0_6px_20px_rgba(0,0,0,0.45)] ios-glass text-gray-100 border-white/[0.10]"
+          className="pointer-events-auto press flex items-center justify-center w-11 h-11 rounded-full touch-manipulation flex-shrink-0 transition-colors border shadow-[0_6px_20px_rgba(0,0,0,0.45)] ios-glass ios-glass--header text-gray-100 border-white/[0.10]"
         >
           <MoreHorizontal className="w-[18px] h-[18px]" />
         </button>

@@ -397,7 +397,7 @@ export default function StationPanel({ stopId, onClose, onSelectLine }: Props) {
   // sheet's lifetime — no extra gating needed.
   const now = useNow(true);
 
-  const { detent, sheetStyle, handlers, onHandleTap } = useSheetDrag({
+  const { detent, sheetStyle, handlers, onHandleTap, isDragging } = useSheetDrag({
     halfRestingY: "calc(100dvh - var(--panel-top-rest) - 55dvh)",
     open: true,
     onDismiss: onClose,
@@ -416,11 +416,12 @@ export default function StationPanel({ stopId, onClose, onSelectLine }: Props) {
         absolute z-20 overflow-hidden flex flex-col
         inset-x-0 bottom-0 top-[var(--panel-top-rest)] rounded-t-[28px] border-t border-white/[0.08]
         sm:inset-auto sm:right-3 sm:top-[var(--panel-top-rest)] sm:bottom-3 sm:w-[340px] sm:h-auto sm:rounded-[22px] sm:border sm:border-white/[0.08]
-        ios-glass
+        ios-glass ios-glass--sheet
         shadow-[0_20px_60px_-10px_rgba(0,0,0,0.6)]
         pb-[env(safe-area-inset-bottom)]
       "
       style={sheetStyle}
+      data-glass-active={isDragging || undefined}
     >
       <button
         type="button"

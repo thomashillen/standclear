@@ -3,6 +3,7 @@ import { Inter } from "next/font/google";
 import { Analytics } from "@vercel/analytics/next";
 import "./globals.css";
 import RegisterSW from "@/components/RegisterSW";
+import { GlassTilt } from "@/components/GlassTilt";
 
 const inter = Inter({ subsets: ["latin"] });
 
@@ -43,6 +44,7 @@ export default function RootLayout({
         style={{ height: "100dvh" }}
       >
         {children}
+        <GlassTilt />
         <RegisterSW />
         <Analytics />
       </body>

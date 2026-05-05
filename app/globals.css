@@ -88,6 +88,29 @@
 
   --ease-ios: cubic-bezier(0.32, 0.72, 0, 1);
   --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+
+  /* Liquid Glass identity tokens.
+     Updated by <GlassTilt /> based on device orientation (iOS/Android)
+     or pointer position (desktop / no-permission iOS). The numbers are
+     percentages on a -50 → +50 axis so they can be plugged directly
+     into a radial-gradient origin without further math. The specular
+     highlight on each .ios-glass surface tracks these values. */
+  --glass-tilt-x: 0%;
+  --glass-tilt-y: 0%;
+
+  /* RGB triplet for dynamic glass tint (selected line color, etc).
+     Applied as `rgb(var(--glass-tint) / α)` so any surface that opts
+     in can pick up the ambient hue without a per-route class. Default
+     is a neutral cool white that disappears at low alpha. */
+  --glass-tint: 240 245 255;
+  --glass-tint-strength: 0;
+
+  /* `--glass-active` brightens a surface's inset highlight + specular
+     while it is being dragged or scrolled, so the glass appears to
+     "catch the light" as the rider interacts with it. Set on a
+     surface via `data-glass-active="true"` (CSS rule below toggles
+     this variable). 0 = at rest, 1 = active. */
+  --glass-active: 0;
 }
 
 /* iOS installed as a home-screen PWA (status-bar-translucent) can briefly
@@ -138,16 +161,104 @@
 
 /* Liquid Glass — translucent surface with vendor-prefixed backdrop filter.
    Tailwind v4 emits the standard `backdrop-filter` but not the WebKit
-   prefix older iOS Safari still needs, so we apply both here. iOS-26
-   tuning: slightly higher saturate + blur than vanilla iOS Safari for
-   the "vibrant frosted" look the redesigned system materials use,
-   plus a thin 1px white inner highlight along the top edge so the
-   glass reads as a slightly raised surface, not a flat tint. */
+   prefix older iOS Safari still needs, so we apply both here.
+
+   iOS-26 identity layers:
+     1. Backdrop filter (blur + saturate) for the frosted base.
+     2. ::before — tilt-reactive specular highlight that follows
+        `--glass-tilt-x/y`. mix-blend screen so it brightens whatever
+        sits behind without tinting the surface beige.
+     3. ::after — directional tint glow driven by `--glass-tint` /
+        `--glass-tint-strength`. A surface inherits the global tint
+        (set when a line is selected) unless it overrides locally.
+     4. Inset highlight + outline ring — both brighten in lockstep
+        with `--glass-active` so a surface "catches light" during a
+        drag or scroll interaction.
+
+   Every property here is parameterized so the three depth tiers
+   (`.ios-glass--header`, default sheet, `.ios-glass--modal`) can
+   override blur / saturate / opacity / specular intensity without
+   re-declaring the layer system. */
 @utility ios-glass {
-  background-color: rgba(10, 10, 12, 0.6);
-  -webkit-backdrop-filter: saturate(180%) blur(32px);
-  backdrop-filter: saturate(180%) blur(32px);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  position: relative;
+  isolation: isolate;
+  background-color: rgb(10 10 12 / var(--glass-bg-alpha, 0.6));
+  -webkit-backdrop-filter: saturate(var(--glass-saturate, 180%)) blur(var(--glass-blur, 32px));
+  backdrop-filter: saturate(var(--glass-saturate, 180%)) blur(var(--glass-blur, 32px));
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / calc(0.08 + 0.14 * var(--glass-active, 0))),
+    inset 0 -1px 0 rgb(255 255 255 / calc(0.02 + 0.04 * var(--glass-active, 0))),
+    0 0 0 0.5px rgb(255 255 255 / calc(0.04 + 0.06 * var(--glass-active, 0)));
+  transition: box-shadow 220ms var(--ease-ios), background-color 220ms var(--ease-ios);
+}
+
+/* Specular highlight — tracks device tilt or pointer position. The
+   gradient origin shifts ±50% horizontally and 0–40% vertically so
+   the glint stays in the upper hemisphere of the surface (like real
+   glass under overhead light). z-index: -1 keeps it behind the
+   surface's own children without needing rules on every descendant
+   thanks to `isolation: isolate` on the parent. */
+.ios-glass::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  border-radius: inherit;
+  z-index: -1;
+  background: radial-gradient(
+    140% 110% at calc(50% + var(--glass-tilt-x) * 0.6) calc(0% + (var(--glass-tilt-y) + 50%) * 0.5),
+    rgb(255 255 255 / calc(0.16 * var(--glass-specular, 1) + 0.10 * var(--glass-active, 0))) 0%,
+    rgb(255 255 255 / calc(0.05 * var(--glass-specular, 1))) 35%,
+    transparent 65%
+  );
+  mix-blend-mode: screen;
+}
+
+/* Tint glow — applied behind content. Pulls the surface toward the
+   ambient line color when --glass-tint-strength > 0. Concentrated at
+   the top edge so it reads as colored light catching the surface,
+   not a flat color wash. */
+.ios-glass::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  border-radius: inherit;
+  z-index: -1;
+  background: linear-gradient(
+    180deg,
+    rgb(var(--glass-tint) / calc(0.18 * var(--glass-tint-strength))) 0%,
+    rgb(var(--glass-tint) / calc(0.06 * var(--glass-tint-strength))) 40%,
+    rgb(var(--glass-tint) / 0) 80%
+  );
+  transition: background 320ms var(--ease-ios);
+}
+
+/* Toggled by JS (sheet drag, scroll). Promoting via attribute keeps
+   the visual state declarative — components only flip a boolean. */
+.ios-glass[data-glass-active="true"] {
+  --glass-active: 1;
+}
+
+/* Depth tiers — three thicknesses of glass. Order matches their
+   typical stacking on screen (header above sheet above modal). */
+@utility ios-glass--header {
+  --glass-blur: 22px;
+  --glass-saturate: 160%;
+  --glass-bg-alpha: 0.42;
+  --glass-specular: 0.7;
+}
+@utility ios-glass--sheet {
+  --glass-blur: 32px;
+  --glass-saturate: 180%;
+  --glass-bg-alpha: 0.6;
+  --glass-specular: 1;
+}
+@utility ios-glass--modal {
+  --glass-blur: 44px;
+  --glass-saturate: 200%;
+  --glass-bg-alpha: 0.72;
+  --glass-specular: 1.15;
 }
 
 /* Authentic NYC subway bullet typography. The MTA standard (Vignelli,
@@ -204,10 +315,56 @@
   transform: scale(0.96);
 }
 
-/* Fallback when backdrop-filter is unsupported: solid-ish dark. */
+/* Fallback when backdrop-filter is unsupported: solid-ish dark.
+   Pseudo-element layers stay (they're cheap) but the underlying
+   alpha is bumped opaque so content remains legible without a blur. */
 @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
   .ios-glass {
     background-color: rgba(10, 10, 12, 0.92);
+  }
+}
+
+/* Concentric corner radius convention. A glass surface declares its
+   outer radius via `--surface-radius`; nested elements at a known
+   inset can compute a matching inner radius using
+   `calc(var(--surface-radius) - <inset>)`. We expose the convention
+   here rather than hard-coding numbers per component so the radii
+   stay in lockstep when a surface's outer corner changes. */
+.ios-glass--sheet {
+  --surface-radius: 28px;
+}
+@media (min-width: 640px) {
+  .ios-glass--sheet {
+    --surface-radius: 22px;
+  }
+}
+.ios-glass--header {
+  --surface-radius: 9999px;
+}
+.ios-glass--modal {
+  --surface-radius: 28px;
+}
+@media (min-width: 640px) {
+  .ios-glass--modal {
+    --surface-radius: 22px;
+  }
+}
+
+/* Reduced motion: keep tilt static and skip the active-state
+   transition so brightness changes don't animate. The pseudo-elements
+   stay (they're not animations, just static gradients) but the
+   highlight no longer chases the device's pose. */
+@media (prefers-reduced-motion: reduce) {
+  .ios-glass {
+    transition: none !important;
+  }
+  .ios-glass::before {
+    background: radial-gradient(
+      140% 110% at 50% 0%,
+      rgb(255 255 255 / calc(0.12 * var(--glass-specular, 1))) 0%,
+      rgb(255 255 255 / 0.04) 35%,
+      transparent 65%
+    );
   }
 }
 

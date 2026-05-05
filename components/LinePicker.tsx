@@ -170,7 +170,7 @@ export default function LinePicker({ lines, selectedLine, onSelect }: LinePicker
         />
         <DialogPrimitive.Content
           className="
-            fixed z-50 text-white ios-glass
+            fixed z-50 text-white ios-glass ios-glass--modal
             inset-x-0 bottom-0 rounded-t-[28px] border-t border-white/[0.08]
             pb-[env(safe-area-inset-bottom)]
             sm:inset-auto sm:left-1/2 sm:top-1/2 sm:-translate-x-1/2 sm:-translate-y-1/2 sm:rounded-[22px] sm:border sm:border-white/[0.08] sm:max-w-sm sm:w-full sm:pb-0
@@ -181,6 +181,7 @@ export default function LinePicker({ lines, selectedLine, onSelect }: LinePicker
             sm:data-[state=open]:zoom-in-95 sm:data-[state=closed]:zoom-out-95
             duration-200
           "
+          data-glass-active={isDragging || undefined}
         >
           <DialogPrimitive.Title className="sr-only">
             Choose a subway line

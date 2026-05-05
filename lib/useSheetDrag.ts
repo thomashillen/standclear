@@ -19,6 +19,11 @@ interface SheetDragResult {
   };
   // Optional handler to toggle detent on tap (without a drag).
   onHandleTap: () => void;
+  // True while a pointer drag is in flight. Surfaces wire this into
+  // `data-glass-active` on the panel root so the iOS-26 inset highlight
+  // brightens during the gesture — the surface "catches light" as the
+  // rider grabs it.
+  isDragging: boolean;
 }
 
 interface SheetDragOptions {
@@ -181,5 +186,5 @@ export function useSheetDrag({
       }
     : {};
 
-  return { detent, setDetent, sheetStyle, handlers, onHandleTap };
+  return { detent, setDetent, sheetStyle, handlers, onHandleTap, isDragging };
 }

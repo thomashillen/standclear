@@ -796,7 +796,7 @@ export default function SearchSheet({
   // the trip than they want. Drop to ~38dvh (matching NearbyPanel) so
   // the map dominates while detail steps are still glanceable.
   const halfVisibleDvh = expandedPlan ? 38 : 60;
-  const { detent, sheetStyle, handlers, onHandleTap, setDetent } = useSheetDrag({
+  const { detent, sheetStyle, handlers, onHandleTap, setDetent, isDragging } = useSheetDrag({
     halfRestingY: `calc(100dvh - var(--panel-top-rest) - ${halfVisibleDvh}dvh)`,
     open,
     onDismiss: onClose,
@@ -828,11 +828,12 @@ export default function SearchSheet({
         absolute z-20 overflow-hidden flex flex-col
         inset-x-0 bottom-0 top-[var(--panel-top-rest)] rounded-t-[28px] border-t border-white/[0.08]
         sm:inset-auto sm:right-3 sm:top-[var(--panel-top-rest)] sm:bottom-3 sm:w-[340px] sm:h-auto sm:rounded-[22px] sm:border sm:border-white/[0.08]
-        ios-glass
+        ios-glass ios-glass--sheet
         shadow-[0_20px_60px_-10px_rgba(0,0,0,0.6)]
         pb-[env(safe-area-inset-bottom)]
       "
       style={sheetStyle}
+      data-glass-active={isDragging || undefined}
     >
       {/* Drag handle — separate flow row above the title row so it
           gets a proper tap target (h-7 = 28px) for the tap-to-toggle

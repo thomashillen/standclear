@@ -670,7 +670,7 @@ export default function NearbyPanel({
   // station card or the Going-to card — leaving the map dominant on
   // first paint. Returning riders who explicitly pulled the sheet to
   // full have that preference restored from localStorage just below.
-  const { detent, sheetStyle, handlers, onHandleTap, setDetent } = useSheetDrag({
+  const { detent, sheetStyle, handlers, onHandleTap, setDetent, isDragging } = useSheetDrag({
     // Panel height is now (100dvh - var(--panel-top-rest)) since we
     // switched from a fixed h-[88dvh] to a top-anchored layout. The
     // half-detent translation = panel_height - desired_visible, so
@@ -736,11 +736,12 @@ export default function NearbyPanel({
         absolute z-20 overflow-hidden flex flex-col
         inset-x-0 bottom-0 top-[var(--panel-top-rest)] rounded-t-[28px] border-t border-white/[0.08]
         sm:inset-auto sm:right-3 sm:top-[var(--panel-top-rest)] sm:bottom-3 sm:w-[340px] sm:h-auto sm:rounded-[22px] sm:border sm:border-white/[0.08]
-        ios-glass
+        ios-glass ios-glass--sheet
         shadow-[0_20px_60px_-10px_rgba(0,0,0,0.6)]
         pb-[env(safe-area-inset-bottom)]
       "
       style={sheetStyle}
+      data-glass-active={isDragging || undefined}
     >
       {/* Drag handle — separate flow row above the title row so it
           gets a proper tap target (h-7 = 28px) for the tap-to-toggle
