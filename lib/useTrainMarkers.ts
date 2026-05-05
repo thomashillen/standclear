@@ -120,6 +120,24 @@ export function useTrainMarkers({
     // re-anchor jumps when a fresh poll's trajectory moves the predicted
     // position-at-now compared to the previous trajectory.
     const LERP = 0.12;
+    // Cap on how fast the marker can advance along the line shape per
+    // second of wall-clock time. Without this, the LERP closes ~50% of
+    // any gap in ~5 frames — which means a poll that suddenly reports
+    // a train 3 stations farther along (a long missing-data gap, or a
+    // STOPPED_AT-A → STOPPED_AT-D jump on a feed that updates only at
+    // station boundaries) would burst the marker through 3 stations
+    // in a fraction of a second. With the cap, the marker walks the
+    // track at a realistic-looking speed and may temporarily lag
+    // behind reality during catch-up — that visual debt is preferable
+    // to a teleport.
+    //
+    // 0.002 deg/s is roughly 8× a real subway's top speed at NYC's
+    // latitude (1° ≈ 95 km). That gives single-station catch-up in
+    // ~3.5 s and three-station catch-up in ~11 s — fast enough that
+    // sustained catch-up doesn't compound, slow enough that the
+    // motion clearly follows the rail rather than skipping across it.
+    const MAX_VISUAL_SPEED_DEG_PER_SEC = 0.002;
+    const MAX_ARC_STEP_PER_TICK = MAX_VISUAL_SPEED_DEG_PER_SEC * (TICK_MS / 1000);
 
     // Position-based stacking. Trains sit ON their line by default — no
     // perpendicular offset for a single train at a position. When two or
@@ -261,7 +279,14 @@ export function useTrainMarkers({
             traj.motionDir > 0
               ? Math.max(render.arcLength, ideal.arcLength)
               : Math.min(render.arcLength, ideal.arcLength);
-          render.arcLength += (targetArc - render.arcLength) * LERP;
+          // LERP for smooth deceleration into the target, then cap
+          // the per-frame step so big catch-up gaps don't burst the
+          // marker across multiple stations in a fraction of a
+          // second — see MAX_VISUAL_SPEED_DEG_PER_SEC above.
+          let step = (targetArc - render.arcLength) * LERP;
+          if (step > MAX_ARC_STEP_PER_TICK) step = MAX_ARC_STEP_PER_TICK;
+          else if (step < -MAX_ARC_STEP_PER_TICK) step = -MAX_ARC_STEP_PER_TICK;
+          render.arcLength += step;
           // Re-derive lng/lat/bearing from the LERPed arcLength so
           // the marker walks the actual line shape (curves and all)
           // instead of cutting chord paths through space.
