@@ -313,6 +313,16 @@ export default function SubwayMap() {
       setStationStopId(null);
       setSearchOpen(false);
       setMoreOpen(false);
+      // Drop any active trip overlay too. The previous behavior
+      // kept the highlighted route + walking legs on the map after
+      // the rider pulled up Near-me, which made the panel and the
+      // map disagree about what context the rider was in. Near-me
+      // is "what's around me right now", so clearing the trip puts
+      // the map back into all-trains mode that matches the panel.
+      setSelectedTripSelection(null);
+      setFocusedLegIndex(null);
+      setWalkOnlyOverlay(null);
+      setTripDetailExpanded(false);
     }
     // Bump the signal both for open AND re-tap-while-open. Tapping
     // Near-me when the panel is already open is "find me again",
@@ -608,15 +618,17 @@ export default function SubwayMap() {
           the map between buttons; each interactive child opts back in
           with pointer-events-auto. iOS-26-style frosted-glass tiles
           float independently rather than sharing a header bar — same
-          spatial grouping as Apple Maps' top-row controls. Hidden
-          while following a train so the cinematic frame isn't
-          fighting the line picker / live pulse / search controls
-          for screen real estate. */}
+          spatial grouping as Apple Maps' top-row controls.
+
+          Unmounted entirely while following a train so the cinematic
+          frame isn't fighting the line picker / live pulse / search
+          controls for screen real estate. The earlier `opacity-0 +
+          pointer-events-none` approach left ghost taps hitting the
+          invisible buttons because each child opts back into pointer
+          events with `pointer-events-auto`. */}
+      {!followedTrainId && (
       <div
-        className={`absolute inset-x-0 top-0 z-30 flex items-center gap-2 px-3 pointer-events-none transition-opacity duration-200 ${
-          followedTrainId ? "opacity-0 pointer-events-none" : "opacity-100"
-        }`}
-        aria-hidden={!!followedTrainId}
+        className="absolute inset-x-0 top-0 z-30 flex items-center gap-2 px-3 pointer-events-none transition-opacity duration-200 opacity-100"
         style={{
           paddingTop: "calc(max(var(--safe-top), 0.5rem) + 0.5rem)",
         }}
@@ -757,6 +769,7 @@ export default function SubwayMap() {
           <MoreHorizontal className="w-[18px] h-[18px]" />
         </button>
       </div>
+      )}
 
     </div>
   );
