@@ -1388,25 +1388,6 @@ export default function MapView({ selectedLine, stationStopId, onLineSelect, onS
         duration: 700,
         essential: true,
       });
-      // Any explicit camera gesture from the rider — drag, pinch,
-      // pitch, rotate — releases the lock. We listen on `move`
-      // gated by `originalEvent` instead of dragstart/rotatestart/
-      // pitchstart for two reasons:
-      //
-      //   1. dragstart only fires after a small movement threshold;
-      //      during that pre-threshold window the rAF tick is still
-      //      issuing recenter eases, which makes the drag feel dead
-      //      until the threshold trips. `move` fires from the very
-      //      first input frame, so the release happens instantly.
-      //   2. pitchstart and zoomstart fire from programmatic eases
-      //      too — including the entrance ease (pitch:50, zoom:15.5)
-      //      that THIS effect schedules immediately above. Binding
-      //      pitchstart here would self-fire on entry and exit follow
-      //      mode the same frame the rider activated it. `move` with
-      //      `originalEvent` is the only event Mapbox sets ONLY on
-      //      user-driven camera changes, so we can't accidentally
-      //      release ourselves.
-      //
       // The release order matters:
       //   1. Clear `followedTrainIdRef.current` SYNCHRONOUSLY so the
       //      next rAF tick doesn't fire another `map.easeTo` toward
@@ -1425,13 +1406,40 @@ export default function MapView({ selectedLine, stationStopId, onLineSelect, onS
         map.stop();
         onFollowTrainRef.current?.(null);
       };
-      const onMove = (e: unknown) => {
-        const ev = e as { originalEvent?: Event };
-        if (ev?.originalEvent) release();
+      // Bind to the canvas DOM directly rather than Mapbox's event
+      // system. The rAF tick is firing easeTo every ~33 ms during
+      // follow mode, so the camera is in a perpetual programmatic
+      // animation — user gestures end up competing with the
+      // recenter loop for control, and Mapbox-level events
+      // (dragstart, move with originalEvent, etc.) don't fire
+      // reliably under that pressure. touchstart/mousedown on the
+      // canvas fires the instant the rider's finger lands, with no
+      // dependency on Mapbox's animation state. Once release runs
+      // the ref is cleared synchronously, the in-flight ease is
+      // stopped, and the next rAF tick is a no-op — Mapbox's normal
+      // pan/pinch handlers take over from there.
+      //
+      // Tapping a train re-enters follow mode (the train layer's
+      // click handler runs on the same touch). Tapping the FollowCapsule
+      // X button doesn't reach the canvas (the capsule sits above
+      // the map in DOM order), so this doesn't conflict with the
+      // dedicated exit affordance.
+      const canvas = map.getCanvas();
+      const onTouchStart = () => release();
+      const onMouseDown = (e: MouseEvent) => {
+        if (e.button === 0) release();
       };
-      map.on("move", onMove);
+      canvas.addEventListener("touchstart", onTouchStart, { passive: true });
+      canvas.addEventListener("mousedown", onMouseDown);
+      // Also wire up wheel — desktop scroll-zoom doesn't go through
+      // mousedown, but it's a clear "I'm controlling the camera"
+      // signal worth releasing on.
+      const onWheel = () => release();
+      canvas.addEventListener("wheel", onWheel, { passive: true });
       return () => {
-        map.off("move", onMove);
+        canvas.removeEventListener("touchstart", onTouchStart);
+        canvas.removeEventListener("mousedown", onMouseDown);
+        canvas.removeEventListener("wheel", onWheel);
       };
     } else {
       // Exit — restore flat top-down view. Shorter ease than the
