@@ -186,6 +186,10 @@ export default function StationPanel({ stopId, onClose, onSelectLine }: Props) {
   const lines = useLines();
   const data = useTrains();
   const { has, toggle } = useFavorites();
+  // Live wall-clock so countdowns tick every second AND so the
+  // STOPPED_AT recency window can be evaluated during render without
+  // a bare Date.now() call (React 19 flags impure-during-render).
+  const now = useNow(true);
 
   const index = useMemo(() => (lines ? buildStationIndex(lines) : []), [lines]);
   // A tapped stopId may be any platform in a complex (e.g. tapping the
@@ -231,9 +235,13 @@ export default function StationPanel({ stopId, onClose, onSelectLine }: Props) {
     () => new Map(),
   );
 
-  // Update the memo on every fresh data tick.
+  // Update the memo on every fresh data tick. The lint rule warns
+  // about setState-in-effect, but this is a "data-keyed accumulator"
+  // — we genuinely need the prior tick's map carried forward, and
+  // a ref-based cache trips react-hooks/refs (no read-during-render).
   useEffect(() => {
     if (!data) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setStoppedAtMemo((prev) => {
       const next: StoppedAtMemo = new Map(prev);
       const nowMs = Date.now();
@@ -302,7 +310,7 @@ export default function StationPanel({ stopId, onClose, onSelectLine }: Props) {
     // The recency window (STOPPED_AT_GRACE_MS) absorbs feed status
     // oscillation that would otherwise flicker the row.
     const seen = new Set<string>();
-    const nowMs = Date.now();
+    const nowMs = now;
     const memo = stoppedAtMemo;
     const considered = new Set<string>();
     for (const t of data.trains) {
@@ -357,7 +365,9 @@ export default function StationPanel({ stopId, onClose, onSelectLine }: Props) {
     s.sort((x, y) => x.eta - y.eta);
 
     return { north: n, south: s };
-  }, [data, stationIds, stoppedAtMemo]);
+    // `now` drives the STOPPED_AT recency window — recompute on each
+    // tick so trains drop out of "Now" once the grace window expires.
+  }, [data, stationIds, stoppedAtMemo, now]);
 
   // For each route serving the station, figure out which terminus matches
   // each direction by checking which end of the stop list has a higher
@@ -391,11 +401,6 @@ export default function StationPanel({ stopId, onClose, onSelectLine }: Props) {
     }
     return m;
   }, [lines]);
-
-  // Live wall-clock so the countdown ticks every second. The component
-  // only mounts when a station is open, so the tick is bounded by the
-  // sheet's lifetime — no extra gating needed.
-  const now = useNow(true);
 
   const { detent, sheetStyle, handlers, contentHandlers, onHandleTap, isDragging } = useSheetDrag({
     halfRestingY: "calc(100dvh - var(--panel-top-rest) - 55dvh)",

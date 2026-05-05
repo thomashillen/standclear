@@ -1,6 +1,30 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
+
+// Shared subscription to the mobile-layout media query. Reads through
+// useSyncExternalStore so the value is always live (no setState-in-
+// effect cascade) and the SSR pass renders with the same `false` the
+// client uses during hydration — matching the server keeps the bottom
+// sheet's transform off until after hydration, when the real match
+// state is applied.
+const MOBILE_MQ = "(max-width: 639px)";
+
+function subscribeMobileMq(cb: () => void): () => void {
+  if (typeof window === "undefined") return () => {};
+  const mq = window.matchMedia(MOBILE_MQ);
+  mq.addEventListener("change", cb);
+  return () => mq.removeEventListener("change", cb);
+}
+
+function getMobileMqSnapshot(): boolean {
+  if (typeof window === "undefined") return false;
+  return window.matchMedia(MOBILE_MQ).matches;
+}
+
+function getMobileMqServerSnapshot(): boolean {
+  return false;
+}
 
 export type Detent = "half" | "full";
 
@@ -87,13 +111,17 @@ export function useSheetDrag({
 }: SheetDragOptions): SheetDragResult {
   const [detent, setDetentState] = useState<Detent>("half");
   const [dragY, setDragY] = useState(0);
-  // Start false so server and first client render agree. NearbyPanel is
-  // open by default and therefore rendered during SSR — reading matchMedia
-  // in the initializer would emit the transform only on the client and
-  // break hydration. The post-mount matchMedia effect bumps this to the
-  // correct value before paint in practice (useEffect flush is
-  // synchronous for the initial mount batch in React 18+).
-  const [isMobile, setIsMobile] = useState(false);
+  // Track viewport so we only emit the transform on the mobile bottom-sheet
+  // layout. Desktop (sm+) repositions the card as a fixed side panel where
+  // a translateY would shove it off-screen. The server snapshot returns
+  // false so SSR'd panels (NearbyPanel renders on the server) skip the
+  // transform during hydration — the live matchMedia value takes over
+  // immediately after.
+  const isMobile = useSyncExternalStore(
+    subscribeMobileMq,
+    getMobileMqSnapshot,
+    getMobileMqServerSnapshot,
+  );
   // Mirrors `dragStartY.current !== null`. Held in state so the render
   // path can read it without tripping react-hooks/refs (refs aren't
   // safe to read during render — only mutate from event handlers /
@@ -103,16 +131,23 @@ export function useSheetDrag({
   const dragStartY = useRef<number | null>(null);
   const dragMoved = useRef(false);
 
-  // Track viewport so we only emit the transform on the mobile bottom-sheet
-  // layout. Desktop (sm+) repositions the card as a fixed side panel where
-  // a translateY would shove it off-screen.
+  // Reset to half + clear drag state whenever the sheet closes so
+  // re-opening doesn't remember a stale position. Synchronizing to a
+  // prop change is exactly what an effect is for here — the React 19
+  // lint rule still complains about the synchronous setState, but the
+  // alternative ("track previous open in render") would mean writing
+  // to refs during render, which trips a stricter rule. Effect wins.
   useEffect(() => {
-    const mq = window.matchMedia("(max-width: 639px)");
-    setIsMobile(mq.matches);
-    const update = () => setIsMobile(mq.matches);
-    mq.addEventListener("change", update);
-    return () => mq.removeEventListener("change", update);
-  }, []);
+    if (!open) {
+      /* eslint-disable react-hooks/set-state-in-effect */
+      setDragY(0);
+      setDetentState("half");
+      dragStartY.current = null;
+      dragMoved.current = false;
+      setIsDragging(false);
+      /* eslint-enable react-hooks/set-state-in-effect */
+    }
+  }, [open]);
 
   const setDetent = useCallback(
     (d: Detent) => {
@@ -123,18 +158,6 @@ export function useSheetDrag({
     },
     [onDetentChange],
   );
-
-  // Reset to half + clear drag state whenever the sheet is closed so
-  // re-opening doesn't remember a stale position.
-  useEffect(() => {
-    if (!open) {
-      setDragY(0);
-      setDetentState("half");
-      dragStartY.current = null;
-      dragMoved.current = false;
-      setIsDragging(false);
-    }
-  }, [open]);
 
   const isDraggable = () =>
     typeof window !== "undefined" && window.matchMedia("(max-width: 639px)").matches;

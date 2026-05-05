@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useSyncExternalStore } from "react";
 import type { TrainsResponse, Train, Arrival } from "@/app/api/trains/route";
 import type { SubwayLine } from "./subwayData";
 
@@ -21,7 +21,7 @@ let cache: { data: TrainsResponse | null; ts: number; promise: Promise<void> | n
   ts: 0,
   promise: null,
 };
-const subscribers = new Set<(d: TrainsResponse) => void>();
+const subscribers = new Set<() => void>();
 let intervalId: ReturnType<typeof setInterval> | null = null;
 
 function hydrateFromStorage() {
@@ -71,7 +71,7 @@ async function refresh() {
       const data = dedupeResponse(raw);
       cache = { data, ts: Date.now(), promise: null };
       persistToStorage(data);
-      subscribers.forEach((cb) => cb(data));
+      subscribers.forEach((cb) => cb());
     } catch (err) {
       console.error("Failed to fetch /api/trains", err);
       cache.promise = null;
@@ -123,30 +123,37 @@ export function refreshTrains(): Promise<void> {
   return refresh();
 }
 
-export function useTrains(): TrainsResponse | null {
-  // Initial render must match the server (always null on first SSR
-  // pass) to avoid hydration mismatch — so we DON'T hydrate from
-  // localStorage in the lazy initializer. That ran on the client only
-  // and immediately produced a non-null value on the first client
-  // render, which never matches the server's null. Hydrating inside
-  // useEffect happens after the mismatch-checking render and updates
-  // state via the normal React path. Cold boot still feels instant
-  // because the effect runs in the same microtask as initial mount.
-  const [data, setData] = useState<TrainsResponse | null>(cache.data);
-
-  useEffect(() => {
+function subscribe(cb: () => void): () => void {
+  // First subscriber on a given runtime warms the in-memory cache from
+  // localStorage and arms the visibility/poll lifecycle. Subsequent
+  // subscribers just attach to the existing stream.
+  if (subscribers.size === 0) {
     hydrateFromStorage();
-    if (cache.data) setData(cache.data);
-    subscribers.add(setData);
     bindVisibility();
     startPolling();
-    return () => {
-      subscribers.delete(setData);
-      stopPolling();
-    };
-  }, []);
+  }
+  subscribers.add(cb);
+  return () => {
+    subscribers.delete(cb);
+    stopPolling();
+  };
+}
 
-  return data;
+function getSnapshot(): TrainsResponse | null {
+  return cache.data;
+}
+
+// Server snapshot must be `null` to match the client's first render.
+// `useSyncExternalStore` uses this for the SSR pass and for the
+// hydration tree, then swaps to the live snapshot — preserving the
+// "no in-memory data on first paint" contract that avoids hydration
+// mismatches on cold boot.
+function getServerSnapshot(): TrainsResponse | null {
+  return null;
+}
+
+export function useTrains(): TrainsResponse | null {
+  return useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
 }
 
 // Compass bearing (0=N, 90=E, 180=S, 270=W) from a→b, accounting for lat

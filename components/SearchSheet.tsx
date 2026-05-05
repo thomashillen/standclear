@@ -302,8 +302,12 @@ export default function SearchSheet({
   // hardcoded "search" — so opening via "See all routes" repeatedly
   // keeps landing in directions. Also clear From/To so a stale prior
   // trip doesn't show up the next time the rider opens directions.
+  // setState-in-effect is the right tool for resetting many slices
+  // off a single prop flip; the alternative (track-prev-prop in
+  // render) would mean writing 8 setState calls during render.
   useEffect(() => {
     if (!open) {
+      /* eslint-disable react-hooks/set-state-in-effect */
       setMode(initialMode);
       setQuery("");
       setPlannerQuery("");
@@ -312,6 +316,7 @@ export default function SearchSheet({
       setTripTo(null);
       setActiveField("from");
       setExpandedPlan(null);
+      /* eslint-enable react-hooks/set-state-in-effect */
     }
   }, [open, initialMode]);
 
@@ -320,9 +325,8 @@ export default function SearchSheet({
   // briefly closed and re-opened), sync the mode without waiting
   // for a close cycle.
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional one-way mode sync; depending on `open` would refire on every toggle.
     if (open) setMode(initialMode);
-    // Intentionally only depend on initialMode — we don't want this
-    // to fire every time the rider toggles modes manually.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialMode]);
 
@@ -363,6 +367,7 @@ export default function SearchSheet({
     if (tripFrom || tripTo) return;
     const h = endpointToTrip(home);
     const w = endpointToTrip(work);
+    /* eslint-disable react-hooks/set-state-in-effect */
     if (h) setTripFrom(h);
     if (w) setTripTo(w);
     // Land focus on whichever side is still empty so a single tap
@@ -370,6 +375,7 @@ export default function SearchSheet({
     // null when both pre-filled — plans render straight away rather
     // than popping the keyboard.
     setActiveField(!h ? "from" : !w ? "to" : null);
+    /* eslint-enable react-hooks/set-state-in-effect */
   }, [mode, home, work, endpointToTrip, tripFrom, tripTo, presetTrip]);
 
   // Apply presetTrip on open / preset-change. Runs whenever the
@@ -400,10 +406,12 @@ export default function SearchSheet({
     };
     const f = resolveEndpoint(presetTrip.from);
     const t = resolveEndpoint(presetTrip.to);
+    /* eslint-disable react-hooks/set-state-in-effect */
     if (f) setTripFrom(f);
     if (t) setTripTo(t);
     setActiveField(null);
     setMode("directions");
+    /* eslint-enable react-hooks/set-state-in-effect */
   }, [open, presetTrip, stationsByComplexId, index]);
 
   // ── Search-mode results.
@@ -549,6 +557,7 @@ export default function SearchSheet({
   const [walkOnlyRoute, setWalkOnlyRoute] = useState<WalkingRoute | null>(null);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- clearing the resolved walk route when endpoints change keeps stale geometry off the map until the new fetch lands.
     setWalkOnlyRoute(null);
   }, [tripFrom, tripTo]);
 
@@ -648,9 +657,12 @@ export default function SearchSheet({
   const debouncedSuggester = useMemo(() => makeDebouncedSuggester(250), []);
 
   // Kick the geocoder when the planner query changes. The result
-  // arrives async via setPlannerPlaceResults.
+  // arrives async via setPlannerPlaceResults. Debounced async search
+  // is a textbook effect; the synchronous reset clears stale results
+  // when the rider switches modes / clears the field.
   useEffect(() => {
     if (mode !== "directions") {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setPlannerPlaceResults([]);
       return;
     }
@@ -675,6 +687,7 @@ export default function SearchSheet({
   // collapse into a single API call.
   useEffect(() => {
     if (mode !== "search") {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setSearchPlaceResults([]);
       return;
     }

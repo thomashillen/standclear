@@ -496,6 +496,11 @@ export default function NearbyPanel({
   // without geolocation since "current location" is the origin.
   const [destAnchor, setDestAnchor] = useState<CommuteAnchor>("work");
   const destAnchorAutoPicked = useRef(false);
+  // One-shot auto-pick: as soon as we have geo + both anchors, commit
+  // the better-guess destination and lock it in (the ref guard makes
+  // this fire exactly once per mount). Deriving this in render would
+  // re-flip the choice every time geo updates, fighting the rider's
+  // manual swap — so the effect-then-lock is intentional.
   useEffect(() => {
     if (destAnchorAutoPicked.current) return;
     if (!home || !work) return;
@@ -519,6 +524,7 @@ export default function NearbyPanel({
       { lat: workRefLat, lng: workRefLng },
     );
     // Closer to Home → going to Work. Closer to Work → going Home.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setDestAnchor(dh < dw ? "work" : "home");
     destAnchorAutoPicked.current = true;
   }, [home, work, geo.lat, geo.lng, stationsByComplexId, index]);

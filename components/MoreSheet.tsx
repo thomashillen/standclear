@@ -88,9 +88,15 @@ export default function MoreSheet({ open, onClose, onSetHome, onSetWork }: Props
   const [tiltGated, setTiltGated] = useState(false);
   const [tiltGranted, setTiltGranted] = useState(false);
   const [tiltDenied, setTiltDenied] = useState(false);
+  // Re-read the GlassTilt module's localStorage flag every time the
+  // sheet opens — the rider may have granted/denied permission in the
+  // dialog since last open. setState-in-effect is the documented
+  // "subscribe to external system" pattern here.
   useEffect(() => {
+    /* eslint-disable react-hooks/set-state-in-effect */
     setTiltGated(isGlassTiltGated());
     setTiltGranted(isGlassTiltGranted());
+    /* eslint-enable react-hooks/set-state-in-effect */
   }, [open]);
 
   const totalAlerts = data?.alerts.length ?? 0;

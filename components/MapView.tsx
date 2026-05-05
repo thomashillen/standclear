@@ -1,10 +1,11 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { useLines, CORRIDOR, type Stop, type SubwayLine } from "@/lib/subwayData";
-import { useTrains, trainLatLng, type Train } from "@/lib/useTrains";
+import { useLines, CORRIDOR, type Stop } from "@/lib/subwayData";
+import { useTrains } from "@/lib/useTrains";
 import { useGeolocationState } from "@/lib/useGeolocation";
 import { buildStationIndex } from "@/lib/stopsIndex";
+import { useTrainMarkers } from "@/lib/useTrainMarkers";
 import "mapbox-gl/dist/mapbox-gl.css";
 
 interface MapViewProps {
@@ -125,6 +126,7 @@ type MapboxMap = {
   setPaintProperty: (id: string, prop: string, val: MapboxExpression) => void;
   fitBounds: (bounds: unknown, opts: unknown) => void;
   remove: () => void;
+  stop: () => void;
   getCanvas: () => HTMLCanvasElement;
   on: (event: string, ...args: unknown[]) => void;
   off: (event: string, ...args: unknown[]) => void;
@@ -458,7 +460,10 @@ export default function MapView({ selectedLine, stationStopId, onLineSelect, onS
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<MapboxMap | null>(null);
   const [mapLoaded, setMapLoaded] = useState(false);
-  const [noToken, setNoToken] = useState(false);
+  // Mapbox token is a build-time public env var, so its presence never
+  // changes at runtime — derive the no-token banner directly during
+  // render instead of toggling state inside the init effect.
+  const noToken = !process.env.NEXT_PUBLIC_MAPBOX_TOKEN;
   const selectedLineRef = useRef(selectedLine);
   const onStationOpenRef = useRef(onStationOpen);
   useEffect(() => { onStationOpenRef.current = onStationOpen; }, [onStationOpen]);
@@ -490,7 +495,7 @@ export default function MapView({ selectedLine, stationStopId, onLineSelect, onS
 
   useEffect(() => {
     const token = process.env.NEXT_PUBLIC_MAPBOX_TOKEN;
-    if (!token) { setNoToken(true); return; }
+    if (!token) return;
     if (!containerRef.current) return;
     if (!lines) return;
 
@@ -552,20 +557,6 @@ export default function MapView({ selectedLine, stationStopId, onLineSelect, onS
         map.addSource("subway-trains", {
           type: "geojson",
           data: { type: "FeatureCollection", features: [] },
-        });
-
-        // Motion trails — a per-train LineString of the last few seconds
-        // of positions. Sampled at TRAIL_SAMPLE_MS in the train animation
-        // tick and rendered as a low-opacity ribbon beneath each train so
-        // even a static map screenshot communicates "this thing is
-        // moving." `lineMetrics: true` is reserved here in case we later
-        // want to drive `line-gradient` for a head→tail fade; the current
-        // layer uses constant opacity, which is enough for the effect at
-        // typical zooms and avoids the per-feature gradient limitation.
-        map.addSource("subway-train-trails", {
-          type: "geojson",
-          data: { type: "FeatureCollection", features: [] },
-          lineMetrics: true,
         });
 
         // Single-point source for the user's current location. Driven by
@@ -937,39 +928,6 @@ export default function MapView({ selectedLine, stationStopId, onLineSelect, onS
           14, 1.03,
         ];
 
-        // Motion trails — added before the train-icon layer (stack order
-        // is insertion order), so each capsule paints on top of its own
-        // trail. Width and opacity ramp in with zoom: at city overview
-        // the trails would smear across the whole system, but as the
-        // rider zooms into a neighborhood each train picks up a subtle
-        // colored ribbon.
-        map.addLayer({
-          id: "subway-train-trails",
-          type: "line",
-          source: "subway-train-trails",
-          layout: {
-            "line-cap": "round",
-            "line-join": "round",
-          },
-          paint: {
-            "line-color": ["get", "color"],
-            "line-opacity": [
-              "interpolate", ["linear"], ["zoom"],
-              11, 0,
-              12, 0.18,
-              13, 0.35,
-              14.5, 0.45,
-            ],
-            "line-width": [
-              "interpolate", ["linear"], ["zoom"],
-              11, 1.5,
-              13, 3,
-              15, 4.5,
-            ],
-            "line-blur": 0.5,
-          },
-        });
-
         map.addLayer({
           id: "subway-trains-icon",
           type: "symbol",
@@ -1327,13 +1285,28 @@ export default function MapView({ selectedLine, stationStopId, onLineSelect, onS
         // a line from there, instead of being dropped into whichever
         // route's dot Mapbox happened to return first.
         map.on("click", "subway-stops-hit", (e: unknown) => {
-          showStopPopup(e);
           const ev = e as {
             features?: {
               geometry: GeoJSON.Point;
               properties?: { stopId?: string };
             }[];
+            point?: { x: number; y: number };
           };
+          // A train sitting STOPPED_AT a platform renders on top of the
+          // station dot; without this guard, tapping that train would
+          // fire BOTH this handler (open StationPanel) and the train
+          // handler (enter follow mode). Train marker wins — visually
+          // it's what the rider tapped, and the station is one tap
+          // away via the line-and-stop list inside the follow capsule.
+          if (ev.point) {
+            const trainHit = (map as unknown as {
+              queryRenderedFeatures: (p: unknown, o: unknown) => unknown[];
+            }).queryRenderedFeatures(ev.point, {
+              layers: ["subway-trains-icon"],
+            });
+            if (trainHit.length > 0) return;
+          }
+          showStopPopup(e);
           const feat = ev.features?.[0];
           const stopId = feat?.properties?.stopId;
           if (!stopId) return;
@@ -1381,530 +1354,20 @@ export default function MapView({ selectedLine, stationStopId, onLineSelect, onS
   // matches what the MTA feed is actually reporting. When a new poll
   // arrives we refresh the velocity estimate and reset the baseline; any
   // residual correction is lerped in so there's no visible catch-up jump.
-  useEffect(() => {
-    if (!mapLoaded || !mapRef.current || !lines) return;
-    const map = mapRef.current;
+  // The whole animation — train markers, follow-camera lock, and the
+  // open-station incoming-rings overlay — lives in this hook; see
+  // lib/useTrainMarkers.ts.
+  useTrainMarkers({
+    getMap: () => mapRef.current,
+    mapLoaded,
+    lines,
+    dataRef,
+    followedTrainIdRef,
+    onFollowTrainRef,
+    stationStopIdRef,
+  });
 
-    // Build the station index once per `lines` version. Used by the ring
-    // animation to resolve which platform stop IDs belong to the open station
-    // complex (so arrivals at any of its platforms count as "incoming here").
-    const stationIndex = buildStationIndex(lines);
-
-    const TICK_MS = 33;
-    // Per-frame lerp factor for the displayed position. With accurate
-    // per-train velocity, target ≈ display each frame, so the lerp only
-    // absorbs micro-corrections at poll boundaries.
-    const LERP = 0.08;
-    // Default segment traversal time in seconds, used before we've
-    // observed any motion for a train. NYC interstation average ~90s.
-    const DEFAULT_TRAVERSAL_SEC = 90;
-    // Upper clamp on observed velocity so a single noisy poll (e.g. a
-    // GTFS-RT snapshot that jumped the train forward) can't project it
-    // off the end of the segment on the next frame. 30s corresponds to
-    // the fastest plausible express hop.
-    const MIN_TRAVERSAL_SEC = 30;
-    const DEFAULT_VELOCITY = 1 / DEFAULT_TRAVERSAL_SEC;
-    const MAX_VELOCITY = 1 / MIN_TRAVERSAL_SEC;
-
-    // Position-based stacking. Trains sit ON their line by default — no
-    // perpendicular offset for a single train at a position. When two or
-    // more trains land within STACK_BUCKET_DEG of each other (which
-    // happens when a 4 / 5 / 6 are all stopped at Union Sq, or when
-    // express overtakes local at a shared platform), we fan them out
-    // perpendicular to travel direction so each is individually visible.
-    //
-    // The previous LANE_INDEX scheme always offset every train by its
-    // route's position within its CORRIDOR group, which produced a
-    // visible gap between e.g. an E train and its blue line even when
-    // no other lines were nearby. Position-based stacking only spends
-    // visual space when there's actually a collision to resolve.
-    const STACK_BUCKET_DEG = 0.0002; // ≈ 22 m at NYC latitude
-    const STACK_SPACING_PX = 14;
-
-    // Mirrors the iconSizeByZoom Mapbox expression so perpendicular
-    // stack offsets scale with rendered icon size — keeps the visual
-    // gap between stacked trains consistent at every zoom.
-    const iconScaleAtZoom = (z: number): number => {
-      if (z <= 10) return 0.29;
-      if (z <= 11.5) return 0.29 + ((z - 10) / 1.5) * 0.21;
-      if (z <= 13) return 0.50 + ((z - 11.5) / 1.5) * 0.24;
-      if (z <= 14) return 0.74 + (z - 13) * 0.29;
-      return 1.03;
-    };
-
-    let frame = 0;
-    let lastTickTime = 0;
-    let lastData: typeof dataRef.current = null;
-    let trainsByRoute: Map<string, Train[]> = new Map();
-
-    // Motion-trail history. We sample every TRAIL_SAMPLE_MS so a 6-second
-    // trail lands at ~24 vertices — plenty for a smooth ribbon, cheap
-    // enough to rebuild the entire FeatureCollection each tick. The
-    // sample-vs-tick split matters: ticking at 30fps would record 180
-    // points in 6 s, redundant for the visual effect and pricier to
-    // serialize into a GeoJSON LineString every frame.
-    const TRAIL_SAMPLE_MS = 250;
-    const TRAIL_MAX_AGE_MS = 6000;
-    const TRAIL_MIN_VERTICES = 2;
-    const trainTrails = new Map<
-      string,
-      {
-        // [lng, lat, capturedAtMs] tuples, oldest first.
-        points: [number, number, number][];
-        lastSampleMs: number;
-        color: string;
-      }
-    >();
-    // Per-train motion state. baseProgress/baseTime is the last point we
-    // trust from the server; velocity is learned from poll-to-poll deltas.
-    // prevStopId/nextStopId pin the segment — if the train crosses a stop,
-    // we snap (lerping across segments cuts a chord through the void off
-    // the tracks).
-    const trainState = new Map<
-      string,
-      {
-        baseProgress: number;
-        baseTime: number;
-        velocity: number;
-        lng: number;
-        lat: number;
-        bearing: number;
-        prevStopId: string;
-        nextStopId: string;
-      }
-    >();
-
-    // Lerp an angle along the shorter arc — naive linear lerp across the
-    // 0/360 boundary snaps 358°→2° the long way around, flashing a spin.
-    const lerpAngle = (a: number, b: number, t: number) => {
-      const d = ((b - a + 540) % 360) - 180;
-      return (a + d * t + 360) % 360;
-    };
-
-    const tick = (now: number) => {
-      frame = requestAnimationFrame(tick);
-      if (now - lastTickTime < TICK_MS) return;
-      lastTickTime = now;
-
-      const d = dataRef.current;
-      if (!d) return;
-
-      // Re-bucket only when the upstream data object changes (every 8s poll).
-      const newPoll = d !== lastData;
-      if (newPoll) {
-        lastData = d;
-        trainsByRoute = new Map();
-        for (const t of d.trains) {
-          const arr = trainsByRoute.get(t.routeId) || [];
-          arr.push(t);
-          trainsByRoute.set(t.routeId, arr);
-        }
-      }
-
-      const nowMs = Date.now();
-      const currentZoom = map.getZoom();
-      // Two-pass build: first compute every train's base position on the
-      // line (no perpendicular offset), then bucket-group by position and
-      // apply stacking offsets only where there's a collision. Single
-      // trains end up exactly on the line; stacks fan out perpendicular.
-      type Computed = {
-        trainId: string;
-        line: SubwayLine;
-        train: Train;
-        lng: number;
-        lat: number;
-        bearing: number;
-        direction: "N" | "S";
-      };
-      const computed: Computed[] = [];
-      const seen = new Set<string>();
-      for (const line of Object.values(lines)) {
-        const trains = trainsByRoute.get(line.routeId);
-        if (!trains) continue;
-        for (const t of trains) {
-          let state = trainState.get(t.id);
-          const segmentChanged =
-            state !== undefined &&
-            (state.prevStopId !== t.prevStopId ||
-              state.nextStopId !== t.nextStopId);
-
-          if (!state || segmentChanged) {
-            // New train or crossed into a new segment — snap to the raw
-            // position and start fresh. Velocity carries over so the next
-            // segment starts with a reasonable prediction instead of the
-            // generic 90s default.
-            const pos = trainLatLng(line, t);
-            if (!pos) continue;
-            state = {
-              baseProgress: t.progress,
-              baseTime: d.generatedAt,
-              velocity: state?.velocity ?? DEFAULT_VELOCITY,
-              lng: pos.lng,
-              lat: pos.lat,
-              bearing: pos.bearing,
-              prevStopId: t.prevStopId,
-              nextStopId: t.nextStopId,
-            };
-            trainState.set(t.id, state);
-          } else if (newPoll) {
-            // Same segment, fresh poll — learn the observed velocity from
-            // the actual progress delta. Zero or negative deltas (train
-            // holding at a signal, ETA recalculation walking progress
-            // back) decay velocity toward 0 via the LP filter, so we
-            // stop predicting forward motion the MTA feed isn't seeing.
-            const dtSec = (d.generatedAt - state.baseTime) / 1000;
-            if (dtSec > 0.5) {
-              const observed = (t.progress - state.baseProgress) / dtSec;
-              const clamped = Math.max(0, Math.min(MAX_VELOCITY, observed));
-              state.velocity = 0.5 * state.velocity + 0.5 * clamped;
-            }
-            state.baseProgress = t.progress;
-            state.baseTime = d.generatedAt;
-          }
-
-          // Predict progress as baseline + velocity × elapsed. This is what
-          // makes motion look continuous: every frame advances by a tiny
-          // fraction instead of sitting still until the next poll.
-          const elapsedSec = (nowMs - state.baseTime) / 1000;
-          const predictedProgress = Math.max(
-            0,
-            Math.min(1, state.baseProgress + state.velocity * elapsedSec),
-          );
-          const target = trainLatLng(line, { ...t, progress: predictedProgress });
-          if (!target) continue;
-
-          // Lerp display toward predicted. In steady state the per-frame
-          // delta is ~velocity × TICK_MS, so this is a small, invisible
-          // correction rather than a visible catch-up glide.
-          state.lng += (target.lng - state.lng) * LERP;
-          state.lat += (target.lat - state.lat) * LERP;
-          state.bearing = lerpAngle(state.bearing, target.bearing, LERP);
-          seen.add(t.id);
-
-          computed.push({
-            trainId: t.id,
-            line,
-            train: t,
-            lng: state.lng,
-            lat: state.lat,
-            bearing: state.bearing,
-            direction: t.direction,
-          });
-        }
-      }
-
-      // Bucket trains by rounded lat/lng. Anything within ~22m of each
-      // other lands in the same bucket. Same-direction trains at the
-      // same stop (4/5/6 at Union Sq), express-overtaking-local pairs
-      // at shared platforms, opposite-direction trains at the same
-      // station — all caught here. Solo trains stay alone in their
-      // bucket and don't get any offset.
-      const buckets = new Map<string, Computed[]>();
-      for (const c of computed) {
-        const key = `${Math.round(c.lng / STACK_BUCKET_DEG)},${Math.round(c.lat / STACK_BUCKET_DEG)}`;
-        const arr = buckets.get(key);
-        if (arr) arr.push(c);
-        else buckets.set(key, [c]);
-      }
-
-      // Stable ordering inside each bucket so trains don't shuffle
-      // between renders — sort by routeId, then trainId. Otherwise an
-      // 8-second feed re-poll could swap two trains' stack positions
-      // and produce a visible jump. Sort first so the dedup pass
-      // below picks a deterministic representative per group.
-      for (const arr of buckets.values()) {
-        if (arr.length > 1) {
-          arr.sort((a, b) => {
-            const r = a.line.routeId.localeCompare(b.line.routeId);
-            return r !== 0 ? r : a.trainId.localeCompare(b.trainId);
-          });
-        }
-      }
-
-      // Within each bucket, dedupe trains that share BOTH route AND
-      // direction. Riders don't care that there are 4 N-bound J
-      // trains stacked at Broad St (terminus layover queue) or 3
-      // N-bound 4 trains queued behind a delay — visually it's "the
-      // J is here, northbound." Keeping the first occurrence per
-      // (routeId, direction) is far simpler than the previous
-      // cluster + ×N badge logic, and naturally handles both cases.
-      // Cross-direction siblings (N-bound + S-bound 4) and cross-
-      // route siblings (4 + 5 sharing track at Lex) survive the
-      // dedup so the perpendicular fan-out below still splits them.
-      for (const [key, arr] of buckets) {
-        if (arr.length <= 1) continue;
-        const seen = new Set<string>();
-        const deduped: Computed[] = [];
-        for (const c of arr) {
-          const groupKey = `${c.line.routeId}-${c.direction}`;
-          if (seen.has(groupKey)) continue;
-          seen.add(groupKey);
-          deduped.push(c);
-        }
-        buckets.set(key, deduped);
-      }
-
-      // Cache zoom-dependent meters/pixel scaling once per tick.
-      const zoomScale = iconScaleAtZoom(currentZoom);
-
-      const features: GeoJSON.Feature[] = [];
-      for (const arr of buckets.values()) {
-        const n = arr.length;
-
-        // Track per-direction indices so each direction's sub-group fans
-        // out independently. The bucket's iteration order is already
-        // stabilized by the routeId+trainId sort above, so the indices
-        // assigned here are consistent across renders.
-        const dirCounts: Record<"N" | "S", number> = { N: 0, S: 0 };
-
-        for (let i = 0; i < n; i++) {
-          const c = arr[i];
-          let renderLng = c.lng;
-          let renderLat = c.lat;
-
-          if (n > 1) {
-            // Each train shifts perpendicular to its OWN bearing on the
-            // RIGHT side of travel direction. By NYC convention (and
-            // because trains drive on the right), uptown trains are on
-            // the east track and downtown on the west — and "right of
-            // travel" naturally encodes that:
-            //   • Northbound train: right = east (right of map)
-            //   • Southbound train: right = west (left of map)
-            // So a 2-train bucket with one N and one S splits cleanly
-            // to opposite sides without any direction-specific casing.
-            //
-            // Spacing is asymmetric between groups:
-            //   • The FIRST train in each direction sits at 0.5 lanes
-            //     off-center, so a single N + single S split cleanly
-            //     across the line.
-            //   • SAME-direction siblings are tightened to 0.55 of a
-            //     lane apart (vs. the 1.0 used for the cross-direction
-            //     gap). Trains on the same track aren't separated by
-            //     a track gap in real life — they're inches apart at
-            //     a platform — so collapsing them visually closer
-            //     reads better than fanning them out as if they were
-            //     on opposite sides.
-            const idxInDir = dirCounts[c.direction]++;
-            const SAME_SIDE_STEP = 0.55;
-            const stackOffset = 0.5 + idxInDir * SAME_SIDE_STEP;
-            const perpPx = stackOffset * STACK_SPACING_PX * zoomScale;
-            const latRad = (c.lat * Math.PI) / 180;
-            const mPerPx =
-              (156543.03392 * Math.cos(latRad)) / Math.pow(2, currentZoom);
-            const perpM = perpPx * mPerPx;
-            const perpRad = ((c.bearing + 90) * Math.PI) / 180;
-            renderLat += (perpM * Math.cos(perpRad)) / 111320;
-            renderLng +=
-              (perpM * Math.sin(perpRad)) / (111320 * Math.cos(latRad));
-          }
-
-          features.push({
-            type: "Feature",
-            properties: {
-              id: c.trainId,
-              direction: c.direction,
-              bearing: c.bearing,
-              routeId: c.line.routeId,
-              color: c.line.color,
-              letter: c.line.id,
-              textColor: c.line.textColor,
-            },
-            geometry: { type: "Point", coordinates: [renderLng, renderLat] },
-          });
-
-          // Sample this train's render position into its trail history
-          // at TRAIL_SAMPLE_MS cadence. Storing post-stack-offset
-          // coordinates means the trail lines up exactly with the icon
-          // even where multiple trains share a platform; sampling
-          // pre-offset would make trails shimmy across stack lanes as
-          // bucket membership shifts.
-          let trail = trainTrails.get(c.trainId);
-          if (!trail) {
-            trail = { points: [], lastSampleMs: 0, color: c.line.color };
-            trainTrails.set(c.trainId, trail);
-          }
-          if (nowMs - trail.lastSampleMs >= TRAIL_SAMPLE_MS) {
-            trail.points.push([renderLng, renderLat, nowMs]);
-            trail.lastSampleMs = nowMs;
-            // Drop expired tail points. Trails older than the max-age
-            // threshold are physically wherever the train was 6 s ago,
-            // which at typical subway speed is half a block back —
-            // beyond that the line just fights the icon for attention.
-            const cutoff = nowMs - TRAIL_MAX_AGE_MS;
-            while (trail.points.length > 0 && trail.points[0][2] < cutoff) {
-              trail.points.shift();
-            }
-          }
-          // Keep color in sync if the upstream `lines` data ever
-          // re-colors a route (rare, but cheap to keep correct).
-          trail.color = c.line.color;
-        }
-      }
-
-      // Drop state for trains that vanished (e.g. completed trip) so the
-      // map doesn't leak memory over long sessions. The trail map is
-      // pruned alongside so its entries don't outlive their owners.
-      if (seen.size !== trainState.size) {
-        for (const id of trainState.keys()) if (!seen.has(id)) trainState.delete(id);
-      }
-      if (seen.size !== trainTrails.size) {
-        for (const id of trainTrails.keys())
-          if (!seen.has(id)) trainTrails.delete(id);
-      }
-      const src = map.getSource("subway-trains");
-      src?.setData({ type: "FeatureCollection", features });
-
-      // ── Motion trails ──────────────────────────────────────────────────
-      // Build a fresh FeatureCollection of LineStrings, one per train
-      // that has at least TRAIL_MIN_VERTICES samples. Constructing
-      // every tick rather than diffing is fine — the array is small
-      // (≤ ~700 trains × ≤ 24 points) and Mapbox's setData handles
-      // the upload as a single buffer rebuild.
-      const trailFeatures: GeoJSON.Feature[] = [];
-      for (const [id, trail] of trainTrails) {
-        if (trail.points.length < TRAIL_MIN_VERTICES) continue;
-        trailFeatures.push({
-          type: "Feature",
-          properties: { id, color: trail.color },
-          geometry: {
-            type: "LineString",
-            coordinates: trail.points.map(([lng, lat]) => [lng, lat]),
-          },
-        });
-      }
-      const trailSrc = map.getSource("subway-train-trails");
-      trailSrc?.setData({
-        type: "FeatureCollection",
-        features: trailFeatures,
-      });
-
-      // ── Cinematic follow-my-train ──────────────────────────────────────
-      // While a follow lock is active, recenter the camera on the
-      // followed train every tick. We use the latest entry in its
-      // trail history (which we just appended above) so the camera
-      // tracks the same point the rider sees rendered. easeTo with a
-      // short 250ms duration smooths the per-tick jitter without
-      // lagging behind real motion. Pitch + zoom only get applied
-      // once at lock-on so subsequent ticks don't fight the rider's
-      // pinch-zoom — see the dragstart/zoomstart handlers below for
-      // exit behavior.
-      const followId = followedTrainIdRef.current;
-      if (followId) {
-        const trail = trainTrails.get(followId);
-        const head = trail?.points[trail.points.length - 1];
-        if (head) {
-          const [followLng, followLat] = head;
-          map.easeTo({
-            center: [followLng, followLat],
-            duration: 250,
-            essential: true,
-          });
-        } else {
-          // Train left the feed (completed trip / went out of service).
-          // Drop the lock so the rider isn't left staring at a frozen
-          // empty patch of map.
-          onFollowTrainRef.current?.(null);
-        }
-      }
-
-      // ── Incoming-train pulse rings ──────────────────────────────────────
-      // When a StationPanel is open, find which trains are headed to that
-      // station and animate a glowing ring beneath each one. The ring's
-      // radius and opacity oscillate ~0.9 Hz so it reads as "live" even
-      // when trains aren't visibly moving; the ETA text above each capsule
-      // lets riders see at a glance which one to run for.
-      const ringStation = stationStopIdRef.current;
-      const ringSrc = map.getSource("station-incoming-rings");
-
-      if (ringStation && ringSrc && d) {
-        const station = stationIndex.find((s) => s.stopIds.includes(ringStation));
-        const stationIds = station ? new Set(station.stopIds) : null;
-
-        if (stationIds) {
-          const nowSec = nowMs / 1000;
-          // Horizon: only show arrivals within the next 10 minutes. Beyond
-          // that the ETA is noisy and the ring would clutter the whole line.
-          const HORIZON_SEC = 600;
-
-          // Build tripId → earliest ETA at this station from the arrivals
-          // list. We keep the earliest per trip because a complex with
-          // multiple platforms may have the same trip listed twice.
-          const incomingEtas = new Map<string, number>();
-          for (const a of d.arrivals) {
-            if (!stationIds.has(a.stopId)) continue;
-            const etaSec = a.eta - nowSec;
-            if (etaSec < -30 || etaSec > HORIZON_SEC) continue;
-            const prev = incomingEtas.get(a.tripId);
-            if (prev === undefined || etaSec < prev) incomingEtas.set(a.tripId, etaSec);
-          }
-          // Trains currently STOPPED_AT a platform here aren't in the
-          // arrivals list (that arrival already happened from the feed's
-          // perspective), but they ARE still physically present and very
-          // much worth highlighting.
-          for (const t of d.trains) {
-            if (t.status !== "STOPPED_AT") continue;
-            if (!stationIds.has(t.prevStopId)) continue;
-            if (!incomingEtas.has(t.id)) incomingEtas.set(t.id, 0);
-          }
-
-          // Phase: 0→1→0 at ~0.9 Hz — roughly "one breath" per second.
-          const phase = (Math.sin((nowMs / 700) * Math.PI * 2) + 1) / 2;
-
-          const ringFeatures: GeoJSON.Feature[] = [];
-          for (const f of features) {
-            const tripId = f.properties?.id as string | undefined;
-            if (!tripId) continue;
-            const etaSec = incomingEtas.get(tripId);
-            if (etaSec === undefined) continue;
-
-            // Urgency threshold: < 90 s (mirrors the panel's amber rule).
-            const isImminent = etaSec < 90;
-
-            // ETA label text — same formatting as fmtEta in StationPanel.
-            let etaText: string;
-            if (etaSec <= 5) etaText = "Now";
-            else if (etaSec < 60) etaText = `${Math.round(etaSec)}s`;
-            else etaText = `${Math.round(etaSec / 60)} min`;
-
-            // Amber when imminent, near-white otherwise — matches the
-            // arrival row color in the panel so the language is consistent.
-            const labelColor = isImminent ? "#fbbf24" : "#f9fafb";
-
-            // Glow pulse: a subtle "breathing" of the outline. Imminent
-            // trains get a brighter, slightly larger halo to scream "this
-            // is the one." pulseSize multiplies the train's per-zoom icon
-            // size so the glow tracks the capsule at every zoom.
-            const baseSize = isImminent ? 1.10 : 1.00;
-            const sizeRange = isImminent ? 0.18 : 0.12;
-            const baseOpacity = isImminent ? 0.70 : 0.50;
-            const opacityRange = isImminent ? 0.25 : 0.18;
-
-            ringFeatures.push({
-              type: "Feature" as const,
-              properties: {
-                bearing: f.properties?.bearing ?? 90,
-                pulseSize: baseSize + sizeRange * phase,
-                pulseOpacity: baseOpacity + opacityRange * phase,
-                etaText,
-                labelColor,
-              },
-              geometry: f.geometry as GeoJSON.Geometry,
-            });
-          }
-
-          ringSrc.setData({ type: "FeatureCollection", features: ringFeatures });
-        } else {
-          ringSrc.setData({ type: "FeatureCollection", features: [] });
-        }
-      } else if (ringSrc) {
-        // No station open — clear the rings immediately.
-        ringSrc.setData({ type: "FeatureCollection", features: [] });
-      }
-    };
-    frame = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(frame);
-  }, [mapLoaded, lines]);
-
+  
   // ── Follow-my-train enter/exit animation + gesture release ──────────
   // Distinct from the per-tick recentering loop above: this effect
   // fires only on the *transition* into or out of follow mode, animating
@@ -1925,15 +1388,58 @@ export default function MapView({ selectedLine, stationStopId, onLineSelect, onS
         duration: 700,
         essential: true,
       });
-      // Any explicit camera gesture from the rider — drag, pinch,
-      // double-tap zoom — releases the lock. easeTo from inside the
-      // tick doesn't fire dragstart, so this only catches user input.
-      const release = () => onFollowTrainRef.current?.(null);
-      map.on("dragstart", release);
-      map.on("rotatestart", release);
+      // The release order matters:
+      //   1. Clear `followedTrainIdRef.current` SYNCHRONOUSLY so the
+      //      next rAF tick doesn't fire another `map.easeTo` toward
+      //      the train (the React state update routed through
+      //      `onFollowTrain` is async — the ref update via the
+      //      mirroring useEffect lands a frame later, which is too
+      //      slow to stop the recenter loop from fighting the drag).
+      //   2. `map.stop()` halts whatever easeTo the previous tick
+      //      had in flight (250 ms duration), so the camera doesn't
+      //      keep gliding toward the train under the user's finger.
+      //   3. `onFollowTrain(null)` propagates the state change up so
+      //      the capsule unmounts, the pitch unwinds, and the listener
+      //      cleanup runs.
+      const release = () => {
+        followedTrainIdRef.current = null;
+        map.stop();
+        onFollowTrainRef.current?.(null);
+      };
+      // Bind to the canvas DOM directly rather than Mapbox's event
+      // system. The rAF tick is firing easeTo every ~33 ms during
+      // follow mode, so the camera is in a perpetual programmatic
+      // animation — user gestures end up competing with the
+      // recenter loop for control, and Mapbox-level events
+      // (dragstart, move with originalEvent, etc.) don't fire
+      // reliably under that pressure. touchstart/mousedown on the
+      // canvas fires the instant the rider's finger lands, with no
+      // dependency on Mapbox's animation state. Once release runs
+      // the ref is cleared synchronously, the in-flight ease is
+      // stopped, and the next rAF tick is a no-op — Mapbox's normal
+      // pan/pinch handlers take over from there.
+      //
+      // Tapping a train re-enters follow mode (the train layer's
+      // click handler runs on the same touch). Tapping the FollowCapsule
+      // X button doesn't reach the canvas (the capsule sits above
+      // the map in DOM order), so this doesn't conflict with the
+      // dedicated exit affordance.
+      const canvas = map.getCanvas();
+      const onTouchStart = () => release();
+      const onMouseDown = (e: MouseEvent) => {
+        if (e.button === 0) release();
+      };
+      canvas.addEventListener("touchstart", onTouchStart, { passive: true });
+      canvas.addEventListener("mousedown", onMouseDown);
+      // Also wire up wheel — desktop scroll-zoom doesn't go through
+      // mousedown, but it's a clear "I'm controlling the camera"
+      // signal worth releasing on.
+      const onWheel = () => release();
+      canvas.addEventListener("wheel", onWheel, { passive: true });
       return () => {
-        map.off("dragstart", release);
-        map.off("rotatestart", release);
+        canvas.removeEventListener("touchstart", onTouchStart);
+        canvas.removeEventListener("mousedown", onMouseDown);
+        canvas.removeEventListener("wheel", onWheel);
       };
     } else {
       // Exit — restore flat top-down view. Shorter ease than the
@@ -2049,6 +1555,10 @@ export default function MapView({ selectedLine, stationStopId, onLineSelect, onS
       duration: 1100,
       padding,
     });
+    // pendingFly is a one-shot trigger consumed here. Resetting it
+    // immediately is the point — the lint cascade-renders warning
+    // doesn't apply to a self-clearing flag this size.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setPendingFly(false);
   }, [pendingFly, mapLoaded, geo.lat, geo.lng]);
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useSyncExternalStore } from "react";
 
 // v1 stored only an array of favorite stopIds at a separate key.
 // v2 unified favorites with the commute anchors (Home/Work) so the whole
@@ -39,7 +39,15 @@ export interface CommuteState {
 }
 
 let cache: CommuteState | null = null;
-const subscribers = new Set<(v: CommuteState) => void>();
+const subscribers = new Set<() => void>();
+// Stable empty snapshot for the SSR / pre-hydration tree. Returning a
+// fresh emptyState() per call would trip useSyncExternalStore's
+// reference-equality check and cause infinite render loops.
+const SERVER_SNAPSHOT: CommuteState = {
+  home: null,
+  work: null,
+  favorites: new Set(),
+};
 
 function emptyState(): CommuteState {
   return { home: null, work: null, favorites: new Set() };
@@ -159,19 +167,27 @@ function saveRaw(state: CommuteState) {
 function commit(next: CommuteState) {
   cache = next;
   saveRaw(next);
-  subscribers.forEach((cb) => cb(next));
+  subscribers.forEach((cb) => cb());
+}
+
+function subscribe(cb: () => void): () => void {
+  subscribers.add(cb);
+  return () => {
+    subscribers.delete(cb);
+  };
+}
+
+function getSnapshot(): CommuteState {
+  if (!cache) cache = load();
+  return cache;
+}
+
+function getServerSnapshot(): CommuteState {
+  return SERVER_SNAPSHOT;
 }
 
 function useStore(): CommuteState {
-  const [state, setState] = useState<CommuteState>(() => load());
-  useEffect(() => {
-    subscribers.add(setState);
-    setState(load());
-    return () => {
-      subscribers.delete(setState);
-    };
-  }, []);
-  return state;
+  return useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
 }
 
 // ─── Favorites ────────────────────────────────────────────────────────
@@ -193,9 +209,13 @@ export function useFavorites(): FavoritesHook {
     commit({ ...cur, favorites: nextFavs });
   }, []);
 
+  // `has` reads through the module cache rather than the closed-over
+  // `state.favorites`, so the dep list is empty on purpose — the
+  // useSyncExternalStore-driven re-render keeps the closure fresh.
+  void state;
   const has = useCallback(
     (stopId: string) => (cache ?? load()).favorites.has(stopId),
-    [state.favorites],
+    [],
   );
 
   return { favorites: state.favorites, toggle, has };
@@ -306,23 +326,24 @@ export function useCommute(): CommuteHook {
     [],
   );
 
-  const anchorOf = useCallback(
-    (stopId: string): CommuteAnchor | null => {
-      const c = cache ?? load();
-      if (endpointStopId(c.home) === stopId) return "home";
-      if (endpointStopId(c.work) === stopId) return "work";
-      return null;
-    },
-    [state.home, state.work],
-  );
+  // Same as `has` above — callbacks read through the module cache and
+  // the external-store subscription drives re-renders, so we don't
+  // need state.home / state.work in the dep arrays.
+  void state;
+  const anchorOf = useCallback((stopId: string): CommuteAnchor | null => {
+    const c = cache ?? load();
+    if (endpointStopId(c.home) === stopId) return "home";
+    if (endpointStopId(c.work) === stopId) return "work";
+    return null;
+  }, []);
 
   const isHome = useCallback(
     (stopId: string) => endpointStopId((cache ?? load()).home) === stopId,
-    [state.home],
+    [],
   );
   const isWork = useCallback(
     (stopId: string) => endpointStopId((cache ?? load()).work) === stopId,
-    [state.work],
+    [],
   );
 
   return {
