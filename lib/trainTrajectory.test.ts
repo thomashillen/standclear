@@ -395,6 +395,32 @@ describe("positionAt", () => {
     expect(p.lat).toBeCloseTo(40.77, 4);
   });
 
+  it("parked southbound trains face ~180° (motionDir derived from next arrival)", () => {
+    // A southbound L-shape line where shape order runs south → so
+    // northbound trains run AGAINST shape order. A train parked at
+    // the middle stop with a future arrival heading northward should
+    // store motionDir=-1 and render a bearing pointing ~0° (north).
+    const traj = buildTrajectory(
+      train({
+        prevStopId: "B",
+        nextStopId: "B",
+        progress: 1,
+        direction: "N",
+        status: "STOPPED_AT",
+      }),
+      [arrival({ stopId: "A", eta: NOW_SEC + 90, direction: "N" })],
+      line,
+      metrics,
+      NOW_MS,
+    )!;
+    expect(traj.motionDir).toBe(-1);
+    const p = positionAt(traj, line, metrics, NOW_MS)!;
+    // Bearing should point north (~0°), not south (~180°). Allow a
+    // wrap-around match since the helper returns [0, 360).
+    const wrapped = p.bearing > 180 ? 360 - p.bearing : p.bearing;
+    expect(wrapped).toBeLessThan(10);
+  });
+
   it("STOPPED_AT trajectories don't drift forward over time (no rubber-band)", () => {
     // Train parked at B. Even far in the future, the marker stays at
     // B — the consumer's per-frame LERP handles the cross-station

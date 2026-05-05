@@ -66,12 +66,23 @@ export interface Trajectory {
    *  direction (increasing for trains running with the shape order,
    *  decreasing for the opposite direction). */
   waypoints: Waypoint[];
+  /** +1 if the train moves with shape order (arcLength increasing
+   *  over time), -1 if against. Used by the consumer to enforce a
+   *  forward-only constraint on the rendered marker (so the visual
+   *  never rubber-bands backward when a poll re-anchors), and by
+   *  positionAt to orient the bearing for parked trains whose
+   *  trajectory has only one waypoint. */
+  motionDir: 1 | -1;
 }
 
 export interface Position {
   lng: number;
   lat: number;
   bearing: number;
+  /** Distance along line.shape from shape[0]. Echoed back from the
+   *  position query so consumers can clamp / compare arc-space
+   *  positions without re-computing the binary search. */
+  arcLength: number;
 }
 
 /**
@@ -92,10 +103,10 @@ export function shapePositionAtArc(
   // Clamp before binary search so out-of-range queries land at an
   // endpoint instead of falling off the array.
   if (arcLength <= 0) {
-    return endpointPosition(line, 0, motionDir);
+    return endpointPosition(line, 0, motionDir, 0);
   }
   if (arcLength >= cum[last]) {
-    return endpointPosition(line, last, motionDir);
+    return endpointPosition(line, last, motionDir, cum[last]);
   }
   // Binary search for the index where cum[lo] <= arcLength < cum[hi].
   let lo = 0;
@@ -116,6 +127,7 @@ export function shapePositionAtArc(
     lng,
     lat,
     bearing: motionDir >= 0 ? fwd : (fwd + 180) % 360,
+    arcLength,
   };
 }
 
@@ -123,6 +135,7 @@ function endpointPosition(
   line: SubwayLine,
   shapeIdx: number,
   motionDir: number,
+  arcLength: number,
 ): Position {
   const shape = line.shape;
   const idx = Math.min(Math.max(shapeIdx, 0), shape.length - 1);
@@ -138,6 +151,7 @@ function endpointPosition(
     lng: shape[idx][0],
     lat: shape[idx][1],
     bearing: motionDir >= 0 ? fwd : (fwd + 180) % 360,
+    arcLength,
   };
 }
 
@@ -225,11 +239,19 @@ export function buildTrajectory(
   // (A-stopped → B-stopped on the same trip) are produced by the
   // consumer's per-frame LERP smoothing the re-anchor when the next
   // poll lands with prev === B.
+  //
+  // motionDir is inferred from the first future arrival's shape index
+  // — the direction the train will face when it leaves. Without
+  // this, a parked southbound train on a line whose shape runs north
+  // → south would default to motionDir=+1 and render its bearing
+  // pointing the wrong way. Falling back to +1 (forward through
+  // shape) only when no arrival is available — a terminus dwell.
   if (train.status === "STOPPED_AT") {
     return {
       trainId: train.id,
       routeId: train.routeId,
       waypoints: [{ arcLength: prevArc, time: generatedAtMs }],
+      motionDir: inferParkedMotionDir(prev, tripArrivals, generatedAtMs, stopMap),
     };
   }
 
@@ -270,8 +292,13 @@ export function buildTrajectory(
       trainId: train.id,
       routeId: train.routeId,
       waypoints: [{ arcLength: prevArc, time: generatedAtMs }],
+      motionDir: inferParkedMotionDir(prev, tripArrivals, generatedAtMs, stopMap),
     };
   }
+
+  // For multi-waypoint trajectories, motionDir is unambiguous from
+  // the arc direction of the first segment.
+  const motionDir: 1 | -1 = endArc >= currentArc ? 1 : -1;
 
   // Stagger the apparent departure for trains that look like they
   // just left a platform. Without this, a stack platform (4/5/6 at
@@ -297,6 +324,7 @@ export function buildTrajectory(
           { arcLength: prevArc, time: generatedAtMs + stagger },
           { arcLength: endArc, time: endTime },
         ],
+        motionDir,
       };
     }
   }
@@ -308,7 +336,32 @@ export function buildTrajectory(
       { arcLength: currentArc, time: generatedAtMs },
       { arcLength: endArc, time: endTime },
     ],
+    motionDir,
   };
+}
+
+// Pick a direction for parked trains by looking at the first future
+// arrival on the trip. The stop the train is heading to next tells
+// us which way along the shape it will run; default to +1 if there's
+// no usable arrival (a terminus, or a feed gap).
+function inferParkedMotionDir(
+  prev: Stop,
+  tripArrivals: Arrival[],
+  generatedAtMs: number,
+  stopMap: Map<string, Stop>,
+): 1 | -1 {
+  const upcoming = tripArrivals
+    .filter(
+      (a) => a.stopId !== prev.id && a.eta * 1000 > generatedAtMs,
+    )
+    .sort((a, b) => a.eta - b.eta);
+  for (const a of upcoming) {
+    const stop = stopMap.get(a.stopId);
+    if (!stop) continue;
+    if (stop.shapeIdx === prev.shapeIdx) continue;
+    return stop.shapeIdx > prev.shapeIdx ? 1 : -1;
+  }
+  return 1;
 }
 
 /**
@@ -324,23 +377,20 @@ export function positionAt(
   metrics: ShapeMetrics,
   nowMs: number,
 ): Position | null {
-  const { waypoints } = traj;
+  const { waypoints, motionDir } = traj;
   if (waypoints.length === 0) return null;
 
   if (waypoints.length === 1) {
-    return shapePositionAtArc(line, metrics, waypoints[0].arcLength, 1);
+    return shapePositionAtArc(line, metrics, waypoints[0].arcLength, motionDir);
   }
 
   if (nowMs <= waypoints[0].time) {
-    const dir = Math.sign(waypoints[1].arcLength - waypoints[0].arcLength) || 1;
-    return shapePositionAtArc(line, metrics, waypoints[0].arcLength, dir);
+    return shapePositionAtArc(line, metrics, waypoints[0].arcLength, motionDir);
   }
 
   const last = waypoints[waypoints.length - 1];
   if (nowMs >= last.time) {
-    const prevW = waypoints[waypoints.length - 2];
-    const dir = Math.sign(last.arcLength - prevW.arcLength) || 1;
-    return shapePositionAtArc(line, metrics, last.arcLength, dir);
+    return shapePositionAtArc(line, metrics, last.arcLength, motionDir);
   }
 
   // Find the segment containing nowMs. Linear scan is fine — typical
@@ -353,8 +403,7 @@ export function positionAt(
       const span = Math.max(1, w1.time - w0.time);
       const t = (nowMs - w0.time) / span;
       const arcLength = w0.arcLength + (w1.arcLength - w0.arcLength) * t;
-      const dir = Math.sign(w1.arcLength - w0.arcLength) || 1;
-      return shapePositionAtArc(line, metrics, arcLength, dir);
+      return shapePositionAtArc(line, metrics, arcLength, motionDir);
     }
   }
 

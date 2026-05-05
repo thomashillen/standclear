@@ -8,6 +8,7 @@ import {
   buildTrajectory,
   computeShapeMetrics,
   positionAt,
+  shapePositionAtArc,
   type ShapeMetrics,
   type Trajectory,
 } from "./trainTrajectory";
@@ -149,21 +150,23 @@ export function useTrainMarkers({
     // to recenter on the same point the rider sees on screen.
     const lastRenderById = new Map<string, [number, number]>();
 
-    // Trajectory + smoothed render position per train. Trajectory is
-    // rebuilt every poll; renderState lerps toward the trajectory's
-    // current ideal position each frame.
+    // Trajectory + smoothed render state per train. Trajectory is
+    // rebuilt every poll; renderState tracks the marker's current
+    // arcLength along the line shape (LERPed toward the trajectory's
+    // ideal each frame, with a forward-only constraint so the marker
+    // never rubber-bands backward when a poll re-anchors). The
+    // displayed lng/lat/bearing are derived from arcLength via the
+    // shape metrics, so the marker walks the actual track curve.
     const trajectories = new Map<string, Trajectory>();
     const renderState = new Map<
       string,
-      { lng: number; lat: number; bearing: number }
+      {
+        arcLength: number;
+        lng: number;
+        lat: number;
+        bearing: number;
+      }
     >();
-
-    // Lerp an angle along the shorter arc — naive linear lerp across
-    // 0/360 snaps the long way around, which would flash a spin.
-    const lerpAngle = (a: number, b: number, t: number) => {
-      const d = ((b - a + 540) % 360) - 180;
-      return (a + d * t + 360) % 360;
-    };
 
     const tick = (now: number) => {
       frame = requestAnimationFrame(tick);
@@ -237,12 +240,40 @@ export function useTrainMarkers({
         // (0, 0) or wherever the previous Map default would land.
         let render = renderState.get(t.id);
         if (!render) {
-          render = { lng: ideal.lng, lat: ideal.lat, bearing: ideal.bearing };
+          render = {
+            arcLength: ideal.arcLength,
+            lng: ideal.lng,
+            lat: ideal.lat,
+            bearing: ideal.bearing,
+          };
           renderState.set(t.id, render);
         } else {
-          render.lng += (ideal.lng - render.lng) * LERP;
-          render.lat += (ideal.lat - render.lat) * LERP;
-          render.bearing = lerpAngle(render.bearing, ideal.bearing, LERP);
+          // FORWARD-ONLY CONSTRAINT. The marker may only move along
+          // its travel direction (motionDir) — never backward. A poll
+          // that re-anchors the trajectory behind the rendered
+          // position (e.g. the L feed flip-flopping IN_TRANSIT_TO →
+          // STOPPED_AT mid-segment) used to rubber-band: the LERP
+          // would smooth the marker BACK toward the platform and the
+          // bearing would flip. With this clamp the marker simply
+          // holds in place until the trajectory advances to where
+          // the rider already saw it.
+          const targetArc =
+            traj.motionDir > 0
+              ? Math.max(render.arcLength, ideal.arcLength)
+              : Math.min(render.arcLength, ideal.arcLength);
+          render.arcLength += (targetArc - render.arcLength) * LERP;
+          // Re-derive lng/lat/bearing from the LERPed arcLength so
+          // the marker walks the actual line shape (curves and all)
+          // instead of cutting chord paths through space.
+          const pos = shapePositionAtArc(
+            line,
+            metrics,
+            render.arcLength,
+            traj.motionDir,
+          );
+          render.lng = pos.lng;
+          render.lat = pos.lat;
+          render.bearing = pos.bearing;
         }
 
         seen.add(t.id);
