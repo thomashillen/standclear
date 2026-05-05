@@ -127,39 +127,6 @@ export default function SubwayMap() {
   // the map (handled inside MapView so the lock can release on any
   // explicit camera move).
   const [followedTrainId, setFollowedTrainIdState] = useState<string | null>(null);
-  // Drop every piece of trip-overlay state in one shot. The overlay
-  // belongs to whichever sheet sourced it (SearchSheet / NearbyPanel
-  // commute card); switching to a different context — opening Near-me,
-  // tapping a line, opening a station, entering follow mode, etc. —
-  // should put the map back into all-trains mode that matches the new
-  // panel. Previously each handler cleared a different subset of these
-  // four fields, so e.g. a leftover `walkOnlyOverlay` would keep a
-  // dashed walk path painted under the next view.
-  const clearTripOverlay = useCallback(() => {
-    setSelectedTripSelection(null);
-    setFocusedLegIndex(null);
-    setWalkOnlyOverlay(null);
-    setTripDetailExpanded(false);
-  }, []);
-  // Wrap the follow setter so entering follow mode also closes any
-  // sheet covering the map — a panel would defeat the cinematic
-  // shot, and every panel's open-state machine already expects
-  // mutual exclusion with the other entry points.
-  const setFollowedTrainId = useCallback((id: string | null) => {
-    setFollowedTrainIdState(id);
-    if (id) {
-      setNearbyOpen(false);
-      setSearchOpen(false);
-      setMoreOpen(false);
-      setSelectedLine(null);
-      setFocusStopId(undefined);
-      setStationStopId(null);
-      // Drop the trip overlay too — a highlighted route under the
-      // cinematic frame would split the rider's attention between
-      // "that train I'm following" and "this trip I planned earlier."
-      clearTripOverlay();
-    }
-  }, [clearTripOverlay]);
   // Index of the leg the rider has zoomed in on from the expanded
   // route detail. Null means "frame the whole trip" (default).
   // Cleared whenever the trip selection changes so a new plan opens
@@ -189,6 +156,44 @@ export default function SubwayMap() {
   // route's southern end doesn't hide behind the taller plan-list
   // panel.
   const [tripDetailExpanded, setTripDetailExpanded] = useState(false);
+
+  // Drop every piece of trip-overlay state in one shot. The overlay
+  // belongs to whichever sheet sourced it (SearchSheet / NearbyPanel
+  // commute card); switching to a different context — opening Near-me,
+  // tapping a line, opening a station, entering follow mode, etc. —
+  // should put the map back into all-trains mode that matches the new
+  // panel. Previously each handler cleared a different subset of these
+  // four fields, so e.g. a leftover `walkOnlyOverlay` would keep a
+  // dashed walk path painted under the next view. Declared *after*
+  // every state field it touches so the linter's no-use-before-defined
+  // rule sees the declarations in the right order — runtime works
+  // either way (callbacks resolve free vars at call time, not at
+  // creation time) but the static check would otherwise fail CI.
+  const clearTripOverlay = useCallback(() => {
+    setSelectedTripSelection(null);
+    setFocusedLegIndex(null);
+    setWalkOnlyOverlay(null);
+    setTripDetailExpanded(false);
+  }, []);
+  // Wrap the follow setter so entering follow mode also closes any
+  // sheet covering the map — a panel would defeat the cinematic
+  // shot, and every panel's open-state machine already expects
+  // mutual exclusion with the other entry points.
+  const setFollowedTrainId = useCallback((id: string | null) => {
+    setFollowedTrainIdState(id);
+    if (id) {
+      setNearbyOpen(false);
+      setSearchOpen(false);
+      setMoreOpen(false);
+      setSelectedLine(null);
+      setFocusStopId(undefined);
+      setStationStopId(null);
+      // Drop the trip overlay too — a highlighted route under the
+      // cinematic frame would split the rider's attention between
+      // "that train I'm following" and "this trip I planned earlier."
+      clearTripOverlay();
+    }
+  }, [clearTripOverlay]);
 
   // Bottom-padding fraction MapView reserves when fitting the
   // selected trip's bounds. Depends on which panel actually sourced
