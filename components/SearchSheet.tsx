@@ -491,9 +491,20 @@ export default function SearchSheet({
   // directly comparable to the per-plan walk legs we already show.
   const directWalk = useMemo(() => {
     if (mode !== "directions" || !tripFrom || !tripTo) return null;
+    // For address picks `tripFrom.lat/lng` are the *nearest station's*
+    // coordinates (TripEndpoint extends StationEntry); the rider's
+    // actual address sits in `tripFrom.address`. Falling back to the
+    // station coords would compute the walk between the two boarding
+    // platforms instead of door-to-door, which can flip the
+    // walk-vs-subway verdict for trips where the addresses are close
+    // but the nearest stations are blocks apart in opposite directions.
+    const fromLat = tripFrom.address?.lat ?? tripFrom.lat;
+    const fromLng = tripFrom.address?.lng ?? tripFrom.lng;
+    const toLat = tripTo.address?.lat ?? tripTo.lat;
+    const toLng = tripTo.address?.lng ?? tripTo.lng;
     const meters = haversineMeters(
-      { lat: tripFrom.lat, lng: tripFrom.lng },
-      { lat: tripTo.lat, lng: tripTo.lng },
+      { lat: fromLat, lng: fromLng },
+      { lat: toLat, lng: toLng },
     );
     return { meters, min: walkMinutes(meters) };
   }, [mode, tripFrom, tripTo]);

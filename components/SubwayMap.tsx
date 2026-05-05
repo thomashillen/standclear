@@ -1,7 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { MapPin, MoreHorizontal, Search, TrainFront } from "lucide-react";
 import { useLines } from "@/lib/subwayData";
 import { useTrains } from "@/lib/useTrains";
@@ -23,6 +23,7 @@ export type TripSelection = {
   walkFrom?: { lng: number; lat: number; name?: string };
   walkTo?: { lng: number; lat: number; name?: string };
 };
+import FollowCapsule from "./FollowCapsule";
 import LinePanel from "./LinePanel";
 import LinePicker from "./LinePicker";
 import LiveTrainsPopup from "./LiveTrainsPopup";
@@ -31,6 +32,7 @@ import NearbyPanel from "./NearbyPanel";
 import SearchSheet from "./SearchSheet";
 import StationPanel from "./StationPanel";
 import type { SelectedTrip } from "./MapView";
+import { useNow } from "@/lib/useNow";
 
 // Convert "#abcdef" → "171 205 239" so the value can be plugged into
 // `rgb(var(--glass-tint) / α)`. Tolerates 3- and 6-digit hex; returns
@@ -117,6 +119,29 @@ export default function SubwayMap() {
   // markers + walking segments and fits the camera.
   const [selectedTripSelection, setSelectedTripSelection] =
     useState<TripSelection | null>(null);
+  // Cinematic follow-my-train mode. When set, MapView locks the
+  // camera onto the train (tracking its live position with pitch +
+  // tighter zoom) and the floating header is replaced by a compact
+  // glass capsule showing the train's next stop and ETA. Cleared by
+  // tapping the capsule's exit affordance OR by dragging/zooming
+  // the map (handled inside MapView so the lock can release on any
+  // explicit camera move).
+  const [followedTrainId, setFollowedTrainIdState] = useState<string | null>(null);
+  // Wrap the setter so entering follow mode also closes any sheet
+  // covering the map — a panel would defeat the cinematic shot, and
+  // every panel's open-state machine already expects mutual exclusion
+  // with the other entry points.
+  const setFollowedTrainId = useCallback((id: string | null) => {
+    setFollowedTrainIdState(id);
+    if (id) {
+      setNearbyOpen(false);
+      setSearchOpen(false);
+      setMoreOpen(false);
+      setSelectedLine(null);
+      setFocusStopId(undefined);
+      setStationStopId(null);
+    }
+  }, []);
   // Index of the leg the rider has zoomed in on from the expanded
   // route detail. Null means "frame the whole trip" (default).
   // Cleared whenever the trip selection changes so a new plan opens
@@ -146,6 +171,19 @@ export default function SubwayMap() {
   // route's southern end doesn't hide behind the taller plan-list
   // panel.
   const [tripDetailExpanded, setTripDetailExpanded] = useState(false);
+
+  // Bottom-padding fraction MapView reserves when fitting the
+  // selected trip's bounds. Depends on which panel actually sourced
+  // the selection — SearchSheet's plan-list view occupies ~62dvh
+  // (full list scroll), but its detail view, NearbyPanel's
+  // half-detent commute card, and other compact entry points only
+  // take ~42dvh. Using a single boolean ("expanded?") would zoom out
+  // unnecessarily for any non-Search source. Computing it here keeps
+  // MapView ignorant of which sheet drove the selection.
+  const tripFitBottomDvh = useMemo(() => {
+    if (searchOpen && !tripDetailExpanded) return 0.62;
+    return 0.42;
+  }, [searchOpen, tripDetailExpanded]);
   // Fly-to-user signal — increments each time the user taps Near-me so
   // MapView can fly the camera to their location (waiting for geo if it
   // isn't available yet). Counter, not a boolean, so successive taps
@@ -158,6 +196,11 @@ export default function SubwayMap() {
   const [flyToDefaultSignal, setFlyToDefaultSignal] = useState(0);
   const data = useTrains();
   const lines = useLines();
+  // Live wall-clock for the follow capsule's countdown. Tied to a
+  // 1Hz tick so the ETA refreshes second by second; gated by an
+  // active follow lock so we don't run a global timer when nothing
+  // is consuming it.
+  const now = useNow(!!followedTrainId);
 
   // Drive the global liquid-glass tint from the currently selected
   // line. Every `.ios-glass` surface picks up `--glass-tint` /
@@ -461,7 +504,9 @@ export default function SubwayMap() {
           selectedTrip={selectedTrip}
           focusedLegIndex={focusedLegIndex}
           walkOnlyOverlay={walkOnlyOverlay}
-          tripDetailExpanded={tripDetailExpanded}
+          tripFitBottomDvh={tripFitBottomDvh}
+          followedTrainId={followedTrainId}
+          onFollowTrain={setFollowedTrainId}
         />
         {selectedLine && !nearbyOpen && !stationStopId && (
           <LinePanel
@@ -542,14 +587,34 @@ export default function SubwayMap() {
         />
       </div>
 
+      {/* Cinematic follow-my-train capsule — replaces the floating
+          header while a follow lock is active. Same vertical position
+          as the header so the rider's eye doesn't have to relocate
+          between the two modes. */}
+      {followedTrainId && (
+        <FollowCapsule
+          trainId={followedTrainId}
+          data={data}
+          lines={lines}
+          now={now}
+          onExit={() => setFollowedTrainId(null)}
+        />
+      )}
+
       {/* ── Floating Liquid Glass control row, overlaid on the map ──
           The container itself is pointer-events-none so users can pan
           the map between buttons; each interactive child opts back in
           with pointer-events-auto. iOS-26-style frosted-glass tiles
           float independently rather than sharing a header bar — same
-          spatial grouping as Apple Maps' top-row controls. */}
+          spatial grouping as Apple Maps' top-row controls. Hidden
+          while following a train so the cinematic frame isn't
+          fighting the line picker / live pulse / search controls
+          for screen real estate. */}
       <div
-        className="absolute inset-x-0 top-0 z-30 flex items-center gap-2 px-3 pointer-events-none"
+        className={`absolute inset-x-0 top-0 z-30 flex items-center gap-2 px-3 pointer-events-none transition-opacity duration-200 ${
+          followedTrainId ? "opacity-0 pointer-events-none" : "opacity-100"
+        }`}
+        aria-hidden={!!followedTrainId}
         style={{
           paddingTop: "calc(max(var(--safe-top), 0.5rem) + 0.5rem)",
         }}
