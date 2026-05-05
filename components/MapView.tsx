@@ -49,13 +49,23 @@ interface MapViewProps {
     to: { lng: number; lat: number };
     coords?: [number, number][];
   } | null;
-  /** True when the SearchSheet is showing a single plan's detail
-   *  view (panel collapses to ~38dvh) vs the plan-list view (~60dvh).
-   *  Drives a tighter bottom padding when fitting the trip's
-   *  bounds — the plan list covers more of the screen and needs
-   *  more room reserved at the bottom or the route gets cropped
-   *  behind the panel. */
-  tripDetailExpanded?: boolean;
+  /** Fraction of the viewport's height that the active trip-driving
+   *  panel currently occupies. Used as bottom padding when fitting
+   *  the trip's bounds so the route doesn't get cropped behind the
+   *  panel. SubwayMap computes this from whichever panel sourced the
+   *  selection (SearchSheet plan-list ≈0.62, SearchSheet detail or
+   *  NearbyPanel half-detent ≈0.42). Defaults to the plan-list
+   *  height so a missing prop errs on the side of more headroom. */
+  tripFitBottomDvh?: number;
+  /** Trip ID of the train currently being "cinematically followed",
+   *  or null if no follow lock is active. When set, MapView locks
+   *  the camera onto that train every animation tick with a tilted
+   *  pitch and tighter zoom. */
+  followedTrainId?: string | null;
+  /** Callback invoked when MapView wants to enter or exit follow
+   *  mode — fires on a train tap (enter) and on any explicit camera
+   *  gesture (exit, with null). */
+  onFollowTrain?: (trainId: string | null) => void;
 }
 
 /** Lightweight DTO between SubwayMap (which holds the user's chosen
@@ -117,6 +127,7 @@ type MapboxMap = {
   remove: () => void;
   getCanvas: () => HTMLCanvasElement;
   on: (event: string, ...args: unknown[]) => void;
+  off: (event: string, ...args: unknown[]) => void;
   addSource: (id: string, src: unknown) => void;
   addLayer: (layer: unknown, beforeId?: string) => void;
   addImage: (id: string, image: unknown, opts?: unknown) => void;
@@ -129,9 +140,14 @@ type MapboxMap = {
     padding?: { top?: number; right?: number; bottom?: number; left?: number };
   }) => void;
   easeTo: (opts: {
-    center: [number, number];
+    // All optional — follow-mode reuses easeTo to update center
+    // alone (during the per-tick lock) and pitch alone (when entering
+    // / exiting the cinematic mode).
+    center?: [number, number];
     zoom?: number;
+    pitch?: number;
     duration?: number;
+    essential?: boolean;
     padding?: { top: number; right: number; bottom: number; left: number };
   }) => void;
 };
@@ -413,7 +429,7 @@ function makeTrainGlowIcon(): ImageData {
   return ctx.getImageData(0, 0, W, H);
 }
 
-export default function MapView({ selectedLine, stationStopId, onLineSelect, onStationOpen, flyToUserSignal, flyToDefaultSignal, panelOpen, selectedTrip, focusedLegIndex, walkOnlyOverlay, tripDetailExpanded }: MapViewProps) {
+export default function MapView({ selectedLine, stationStopId, onLineSelect, onStationOpen, flyToUserSignal, flyToDefaultSignal, panelOpen, selectedTrip, focusedLegIndex, walkOnlyOverlay, tripFitBottomDvh = 0.62, followedTrainId = null, onFollowTrain }: MapViewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<MapboxMap | null>(null);
   const [mapLoaded, setMapLoaded] = useState(false);
@@ -427,6 +443,13 @@ export default function MapView({ selectedLine, stationStopId, onLineSelect, onS
   // without stale-closure issues.
   const stationStopIdRef = useRef(stationStopId);
   useEffect(() => { stationStopIdRef.current = stationStopId; }, [stationStopId]);
+  // Same pattern for the followed-train id and its setter — the rAF
+  // tick recenters the camera every frame while a follow lock is
+  // active, and the train-click handler enters follow mode.
+  const followedTrainIdRef = useRef(followedTrainId);
+  useEffect(() => { followedTrainIdRef.current = followedTrainId; }, [followedTrainId]);
+  const onFollowTrainRef = useRef(onFollowTrain);
+  useEffect(() => { onFollowTrainRef.current = onFollowTrain; }, [onFollowTrain]);
   // Set by the map line-click handler; read + cleared by the selection
   // effect so a click-initiated selection zooms to the nearest stop rather
   // than to the default downtown frame.
@@ -504,6 +527,20 @@ export default function MapView({ selectedLine, stationStopId, onLineSelect, onS
         map.addSource("subway-trains", {
           type: "geojson",
           data: { type: "FeatureCollection", features: [] },
+        });
+
+        // Motion trails — a per-train LineString of the last few seconds
+        // of positions. Sampled at TRAIL_SAMPLE_MS in the train animation
+        // tick and rendered as a low-opacity ribbon beneath each train so
+        // even a static map screenshot communicates "this thing is
+        // moving." `lineMetrics: true` is reserved here in case we later
+        // want to drive `line-gradient` for a head→tail fade; the current
+        // layer uses constant opacity, which is enough for the effect at
+        // typical zooms and avoids the per-feature gradient limitation.
+        map.addSource("subway-train-trails", {
+          type: "geojson",
+          data: { type: "FeatureCollection", features: [] },
+          lineMetrics: true,
         });
 
         // Single-point source for the user's current location. Driven by
@@ -875,6 +912,39 @@ export default function MapView({ selectedLine, stationStopId, onLineSelect, onS
           14, 1.03,
         ];
 
+        // Motion trails — added before the train-icon layer (stack order
+        // is insertion order), so each capsule paints on top of its own
+        // trail. Width and opacity ramp in with zoom: at city overview
+        // the trails would smear across the whole system, but as the
+        // rider zooms into a neighborhood each train picks up a subtle
+        // colored ribbon.
+        map.addLayer({
+          id: "subway-train-trails",
+          type: "line",
+          source: "subway-train-trails",
+          layout: {
+            "line-cap": "round",
+            "line-join": "round",
+          },
+          paint: {
+            "line-color": ["get", "color"],
+            "line-opacity": [
+              "interpolate", ["linear"], ["zoom"],
+              11, 0,
+              12, 0.18,
+              13, 0.35,
+              14.5, 0.45,
+            ],
+            "line-width": [
+              "interpolate", ["linear"], ["zoom"],
+              11, 1.5,
+              13, 3,
+              15, 4.5,
+            ],
+            "line-blur": 0.5,
+          },
+        });
+
         map.addLayer({
           id: "subway-trains-icon",
           type: "symbol",
@@ -1100,22 +1170,23 @@ export default function MapView({ selectedLine, stationStopId, onLineSelect, onS
         map.on("click", "subway-trains-icon", (e: unknown) => {
           const ev = e as {
             features?: {
-              properties?: { routeId?: string };
+              properties?: { routeId?: string; id?: string };
               geometry?: GeoJSON.Point;
             }[];
           };
           const feat = ev.features?.[0];
-          const routeId = feat?.properties?.routeId;
-          const coords = feat?.geometry?.coordinates as [number, number] | undefined;
-          if (!routeId || !coords) return;
-          const targetCorridor = CORRIDOR[routeId] ?? [routeId];
-          const target = targetCorridor[0];
-          const targetLine = lines[target];
-          const focusStopId = targetLine
-            ? nearestStop(targetLine.stops, coords[0], coords[1])?.id
-            : undefined;
-          clickLngLatRef.current = coords;
-          onLineSelect(target, focusStopId);
+          const trainId = feat?.properties?.id;
+          // Tap a train → enter cinematic follow mode. Riders who want
+          // to inspect the line as a whole still have the LinePicker
+          // and the "View line" link inside the follow capsule. The
+          // previous behavior of selecting the route on tap meant a
+          // single tap immediately yanked the camera to a different
+          // station and replaced the live trains with a static line
+          // overlay, which buried the most striking thing about the
+          // app — the live train you just clicked.
+          if (trainId && onFollowTrainRef.current) {
+            onFollowTrainRef.current(trainId);
+          }
         });
         map.on("mouseenter", "subway-trains-icon", () => {
           map.getCanvas().style.cursor = "pointer";
@@ -1340,6 +1411,25 @@ export default function MapView({ selectedLine, stationStopId, onLineSelect, onS
     let lastTickTime = 0;
     let lastData: typeof dataRef.current = null;
     let trainsByRoute: Map<string, Train[]> = new Map();
+
+    // Motion-trail history. We sample every TRAIL_SAMPLE_MS so a 6-second
+    // trail lands at ~24 vertices — plenty for a smooth ribbon, cheap
+    // enough to rebuild the entire FeatureCollection each tick. The
+    // sample-vs-tick split matters: ticking at 30fps would record 180
+    // points in 6 s, redundant for the visual effect and pricier to
+    // serialize into a GeoJSON LineString every frame.
+    const TRAIL_SAMPLE_MS = 250;
+    const TRAIL_MAX_AGE_MS = 6000;
+    const TRAIL_MIN_VERTICES = 2;
+    const trainTrails = new Map<
+      string,
+      {
+        // [lng, lat, capturedAtMs] tuples, oldest first.
+        points: [number, number, number][];
+        lastSampleMs: number;
+        color: string;
+      }
+    >();
     // Per-train motion state. baseProgress/baseTime is the last point we
     // trust from the server; velocity is learned from poll-to-poll deltas.
     // prevStopId/nextStopId pin the segment — if the train crosses a stop,
@@ -1596,16 +1686,101 @@ export default function MapView({ selectedLine, stationStopId, onLineSelect, onS
             },
             geometry: { type: "Point", coordinates: [renderLng, renderLat] },
           });
+
+          // Sample this train's render position into its trail history
+          // at TRAIL_SAMPLE_MS cadence. Storing post-stack-offset
+          // coordinates means the trail lines up exactly with the icon
+          // even where multiple trains share a platform; sampling
+          // pre-offset would make trails shimmy across stack lanes as
+          // bucket membership shifts.
+          let trail = trainTrails.get(c.trainId);
+          if (!trail) {
+            trail = { points: [], lastSampleMs: 0, color: c.line.color };
+            trainTrails.set(c.trainId, trail);
+          }
+          if (nowMs - trail.lastSampleMs >= TRAIL_SAMPLE_MS) {
+            trail.points.push([renderLng, renderLat, nowMs]);
+            trail.lastSampleMs = nowMs;
+            // Drop expired tail points. Trails older than the max-age
+            // threshold are physically wherever the train was 6 s ago,
+            // which at typical subway speed is half a block back —
+            // beyond that the line just fights the icon for attention.
+            const cutoff = nowMs - TRAIL_MAX_AGE_MS;
+            while (trail.points.length > 0 && trail.points[0][2] < cutoff) {
+              trail.points.shift();
+            }
+          }
+          // Keep color in sync if the upstream `lines` data ever
+          // re-colors a route (rare, but cheap to keep correct).
+          trail.color = c.line.color;
         }
       }
 
       // Drop state for trains that vanished (e.g. completed trip) so the
-      // map doesn't leak memory over long sessions.
+      // map doesn't leak memory over long sessions. The trail map is
+      // pruned alongside so its entries don't outlive their owners.
       if (seen.size !== trainState.size) {
         for (const id of trainState.keys()) if (!seen.has(id)) trainState.delete(id);
       }
+      if (seen.size !== trainTrails.size) {
+        for (const id of trainTrails.keys())
+          if (!seen.has(id)) trainTrails.delete(id);
+      }
       const src = map.getSource("subway-trains");
       src?.setData({ type: "FeatureCollection", features });
+
+      // ── Motion trails ──────────────────────────────────────────────────
+      // Build a fresh FeatureCollection of LineStrings, one per train
+      // that has at least TRAIL_MIN_VERTICES samples. Constructing
+      // every tick rather than diffing is fine — the array is small
+      // (≤ ~700 trains × ≤ 24 points) and Mapbox's setData handles
+      // the upload as a single buffer rebuild.
+      const trailFeatures: GeoJSON.Feature[] = [];
+      for (const [id, trail] of trainTrails) {
+        if (trail.points.length < TRAIL_MIN_VERTICES) continue;
+        trailFeatures.push({
+          type: "Feature",
+          properties: { id, color: trail.color },
+          geometry: {
+            type: "LineString",
+            coordinates: trail.points.map(([lng, lat]) => [lng, lat]),
+          },
+        });
+      }
+      const trailSrc = map.getSource("subway-train-trails");
+      trailSrc?.setData({
+        type: "FeatureCollection",
+        features: trailFeatures,
+      });
+
+      // ── Cinematic follow-my-train ──────────────────────────────────────
+      // While a follow lock is active, recenter the camera on the
+      // followed train every tick. We use the latest entry in its
+      // trail history (which we just appended above) so the camera
+      // tracks the same point the rider sees rendered. easeTo with a
+      // short 250ms duration smooths the per-tick jitter without
+      // lagging behind real motion. Pitch + zoom only get applied
+      // once at lock-on so subsequent ticks don't fight the rider's
+      // pinch-zoom — see the dragstart/zoomstart handlers below for
+      // exit behavior.
+      const followId = followedTrainIdRef.current;
+      if (followId) {
+        const trail = trainTrails.get(followId);
+        const head = trail?.points[trail.points.length - 1];
+        if (head) {
+          const [followLng, followLat] = head;
+          map.easeTo({
+            center: [followLng, followLat],
+            duration: 250,
+            essential: true,
+          });
+        } else {
+          // Train left the feed (completed trip / went out of service).
+          // Drop the lock so the rider isn't left staring at a frozen
+          // empty patch of map.
+          onFollowTrainRef.current?.(null);
+        }
+      }
 
       // ── Incoming-train pulse rings ──────────────────────────────────────
       // When a StationPanel is open, find which trains are headed to that
@@ -1705,6 +1880,50 @@ export default function MapView({ selectedLine, stationStopId, onLineSelect, onS
     return () => cancelAnimationFrame(frame);
   }, [mapLoaded, lines]);
 
+  // ── Follow-my-train enter/exit animation + gesture release ──────────
+  // Distinct from the per-tick recentering loop above: this effect
+  // fires only on the *transition* into or out of follow mode, animating
+  // pitch + zoom once and wiring the user-gesture exit listeners. The
+  // tick handles continuous tracking, so we don't fight the rider's
+  // pan/pinch — those gestures release the lock here, after which the
+  // tick stops updating the camera.
+  useEffect(() => {
+    if (!mapLoaded || !mapRef.current) return;
+    const map = mapRef.current;
+    if (followedTrainId) {
+      // Enter — tilt + zoom in. One-shot easeTo with the iOS-spring
+      // timing reads as a "the camera is leaning in to follow this
+      // thing" moment rather than a teleport.
+      map.easeTo({
+        pitch: 50,
+        zoom: Math.max(map.getZoom(), 15.5),
+        duration: 700,
+        essential: true,
+      });
+      // Any explicit camera gesture from the rider — drag, pinch,
+      // double-tap zoom — releases the lock. easeTo from inside the
+      // tick doesn't fire dragstart, so this only catches user input.
+      const release = () => onFollowTrainRef.current?.(null);
+      map.on("dragstart", release);
+      map.on("rotatestart", release);
+      return () => {
+        map.off("dragstart", release);
+        map.off("rotatestart", release);
+      };
+    } else {
+      // Exit — restore flat top-down view. Shorter ease than the
+      // entrance: when the rider's release gesture was a pan, they
+      // want to keep panning, not wait for the camera to finish
+      // unfolding. Animating only `pitch` (center / zoom stay where
+      // the user left them) lets the pan compose with the unfold.
+      map.easeTo({
+        pitch: 0,
+        duration: 400,
+        essential: true,
+      });
+    }
+  }, [mapLoaded, followedTrainId]);
+
   // Sync user-location source with geolocation state. The dot only appears
   // once the user has granted location permission via the Near Me panel.
   useEffect(() => {
@@ -1784,9 +2003,15 @@ export default function MapView({ selectedLine, stationStopId, onLineSelect, onS
     const vw = typeof window !== "undefined" ? window.innerWidth : 0;
     const vh = typeof window !== "undefined" ? window.innerHeight : 0;
     const isSmallScreen = vw < 640;
+    // Bottom padding tracks the NearbyPanel's half-detent height
+    // (50dvh of visible panel) plus a 10dvh buffer so the user dot
+    // lands well above the panel's top edge instead of pressed up
+    // against it. When the panel is at full detent this still
+    // works — the dot just lands proportionally higher in the
+    // visible map area.
     const padding = panelOpenRef.current
       ? isSmallScreen
-        ? { bottom: Math.round(vh * 0.55) }
+        ? { bottom: Math.round(vh * 0.6) }
         : { right: 360 }
       : undefined;
 
@@ -1825,9 +2050,15 @@ export default function MapView({ selectedLine, stationStopId, onLineSelect, onS
     const vw = typeof window !== "undefined" ? window.innerWidth : 0;
     const vh = typeof window !== "undefined" ? window.innerHeight : 0;
     const isSmallScreen = vw < 640;
+    // Bottom padding tracks the NearbyPanel's half-detent height
+    // (50dvh of visible panel) plus a 10dvh buffer so the user dot
+    // lands well above the panel's top edge instead of pressed up
+    // against it. When the panel is at full detent this still
+    // works — the dot just lands proportionally higher in the
+    // visible map area.
     const padding = panelOpenRef.current
       ? isSmallScreen
-        ? { bottom: Math.round(vh * 0.55) }
+        ? { bottom: Math.round(vh * 0.6) }
         : { right: 360 }
       : undefined;
     map.flyTo({
@@ -2242,20 +2473,19 @@ export default function MapView({ selectedLine, stationStopId, onLineSelect, onS
       Number.isFinite(maxLat)
     ) {
       const isMobile = window.matchMedia("(max-width: 639px)").matches;
-      // The SearchSheet sits at one of two heights when a trip is
-      // selected:
-      //   • ≈38dvh in route-detail mode (rider opened a plan's
-      //     A→Z timeline)
-      //   • ≈60dvh in plan-list mode (rider hasn't picked a plan
-      //     yet; auto-preselect renders the first plan but the sheet
-      //     keeps the full list visible above)
-      // The visible map area is the inverse of the panel height.
-      // Padding the bottom of fitBounds by that height keeps the
-      // trip from being cropped behind the panel. The `+ 24` buffer
-      // is breathing room above the panel's top edge.
-      const panelDvh = tripDetailExpanded ? 0.42 : 0.62;
+      // The trip-driving panel can be sitting at any of:
+      //   • SearchSheet plan-list (≈60dvh) — full list of options
+      //     with auto-preselect
+      //   • SearchSheet detail (≈38dvh) — a single plan's timeline
+      //   • NearbyPanel half-detent (≈38dvh) — Going-to commute card
+      // Padding the bottom of fitBounds by the panel's height keeps
+      // the trip from being cropped behind it. The `+ 24` buffer is
+      // breathing room above the panel's top edge. SubwayMap owns
+      // the panel state and computes `tripFitBottomDvh` accordingly,
+      // so MapView doesn't have to know which sheet sourced the
+      // selection.
       const bottomPad = isMobile
-        ? Math.round(window.innerHeight * panelDvh) + 24
+        ? Math.round(window.innerHeight * tripFitBottomDvh) + 24
         : 60;
       const rightPad = isMobile ? 40 : 360;
       map.fitBounds(
@@ -2270,7 +2500,7 @@ export default function MapView({ selectedLine, stationStopId, onLineSelect, onS
         },
       );
     }
-  }, [selectedTrip, mapLoaded, focusedLegIndex, tripDetailExpanded]);
+  }, [selectedTrip, mapLoaded, focusedLegIndex, tripFitBottomDvh]);
 
   // ── Walk-only overlay ──────────────────────────────────────────────
   // When the SearchSheet decides walking is faster than subway, it

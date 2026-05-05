@@ -670,13 +670,13 @@ export default function NearbyPanel({
   // station card or the Going-to card — leaving the map dominant on
   // first paint. Returning riders who explicitly pulled the sheet to
   // full have that preference restored from localStorage just below.
-  const { detent, sheetStyle, handlers, onHandleTap, setDetent } = useSheetDrag({
+  const { detent, sheetStyle, handlers, contentHandlers, onHandleTap, setDetent, isDragging } = useSheetDrag({
     // Panel height is now (100dvh - var(--panel-top-rest)) since we
     // switched from a fixed h-[88dvh] to a top-anchored layout. The
     // half-detent translation = panel_height - desired_visible, so
     // it now follows the var so the visible strip stays at ~38dvh
     // regardless of safe-area or whether a Route-shown pill is up.
-    halfRestingY: "calc(100dvh - var(--panel-top-rest) - 38dvh)",
+    halfRestingY: "calc(100dvh - var(--panel-top-rest) - 50dvh)",
     open,
     onDismiss: onClose,
     onDetentChange: (d) => {
@@ -687,13 +687,6 @@ export default function NearbyPanel({
       }
     },
   });
-
-  // Tracks the start of a content-area touch so an upward drag at
-  // half detent expands the sheet (iOS bottom-sheet pattern). We
-  // remember scrollTop at touchstart to make sure we only intercept
-  // pulls that started at the top of the list — partway-down drags
-  // continue scrolling content as expected.
-  const contentDragRef = useRef<{ startY: number; startScrollTop: number } | null>(null);
 
   // Restore the rider's last-used detent on first open. Initial
   // useState in useSheetDrag stays at "half" (SSR-safe), then this
@@ -736,11 +729,12 @@ export default function NearbyPanel({
         absolute z-20 overflow-hidden flex flex-col
         inset-x-0 bottom-0 top-[var(--panel-top-rest)] rounded-t-[28px] border-t border-white/[0.08]
         sm:inset-auto sm:right-3 sm:top-[var(--panel-top-rest)] sm:bottom-3 sm:w-[340px] sm:h-auto sm:rounded-[22px] sm:border sm:border-white/[0.08]
-        ios-glass
+        ios-glass ios-glass--sheet
         shadow-[0_20px_60px_-10px_rgba(0,0,0,0.6)]
         pb-[env(safe-area-inset-bottom)]
       "
       style={sheetStyle}
+      data-glass-active={isDragging || undefined}
     >
       {/* Drag handle — separate flow row above the title row so it
           gets a proper tap target (h-7 = 28px) for the tap-to-toggle
@@ -779,35 +773,22 @@ export default function NearbyPanel({
 
       <div
         className="flex-1 overflow-y-auto ios-scroll"
-        // At half detent the sheet hangs ~50dvh below the visible
-        // viewport (88dvh tall, ~38dvh visible), so the last items in
+        // At half detent the sheet hangs ~38dvh below the visible
+        // viewport (88dvh tall, ~50dvh visible), so the last items in
         // the scroll content end up physically below where the rider
-        // can see. Adding 50dvh of bottom padding pushes the
+        // can see. Adding 38dvh of bottom padding pushes the
         // scrollable bottom past the overlap — the rider can scroll
         // to the end without dragging the sheet up. Harmless at full
         // detent (just adds dead space at the bottom of the list,
         // which already has visual breathing room from the safe-area
         // inset).
         style={{
-          paddingBottom: "calc(50dvh + 1rem + env(safe-area-inset-bottom))",
+          paddingBottom: "calc(38dvh + 1rem + env(safe-area-inset-bottom))",
         }}
-        onTouchStart={(e) => {
-          // Track the start of a content-area swipe so we can promote
-          // an upward drag at half detent into an expand-to-full,
-          // mirroring iOS bottom-sheet behavior. Only the first touch
-          // counts; multi-touch (pinch) is ignored.
-          if (detent !== "half") {
-            contentDragRef.current = null;
-            return;
-          }
-          contentDragRef.current = {
-            startY: e.touches[0].clientY,
-            startScrollTop: e.currentTarget.scrollTop,
-          };
-        }}
+        onTouchStart={contentHandlers.onTouchStart}
         onTouchMove={(e) => {
-          // Match SearchSheet: scrolling the list dismisses any focused
-          // on-screen keyboard so the rider can see the full results.
+          // Scrolling the list dismisses any focused on-screen
+          // keyboard so the rider can see the full results.
           const el = document.activeElement;
           if (
             el instanceof HTMLElement &&
@@ -815,23 +796,10 @@ export default function NearbyPanel({
           ) {
             el.blur();
           }
-          // iOS bottom-sheet pattern: if the rider pulls up from the
-          // top of the content, expand the panel to full instead of
-          // (or in addition to) scrolling. Tiny threshold so a tap-
-          // wobble doesn't trigger, but anything meaningful pulls up.
-          if (detent !== "half" || !contentDragRef.current) return;
-          const dy = e.touches[0].clientY - contentDragRef.current.startY;
-          if (dy < -12 && contentDragRef.current.startScrollTop <= 0) {
-            setDetent("full");
-            contentDragRef.current = null;
-          }
+          contentHandlers.onTouchMove(e);
         }}
-        onTouchEnd={() => {
-          contentDragRef.current = null;
-        }}
-        onTouchCancel={() => {
-          contentDragRef.current = null;
-        }}
+        onTouchEnd={contentHandlers.onTouchEnd}
+        onTouchCancel={contentHandlers.onTouchCancel}
       >
         {/* Out-of-service-area banner. When the rider's location
             resolves to a point >50mi from any NYC stop, the

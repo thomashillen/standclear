@@ -192,7 +192,7 @@ export function AlertsDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="ios-glass border-white/[0.08] text-white rounded-t-[28px] sm:rounded-[22px] max-h-[85dvh] sm:max-h-[80dvh] overflow-hidden flex flex-col pb-[env(safe-area-inset-bottom)] sm:pb-6 shadow-[0_20px_60px_-10px_rgba(0,0,0,0.6)]">
+      <DialogContent className="ios-glass ios-glass--modal border-white/[0.08] text-white rounded-t-[28px] sm:rounded-[22px] max-h-[85dvh] sm:max-h-[80dvh] overflow-hidden flex flex-col pb-[env(safe-area-inset-bottom)] sm:pb-6 shadow-[0_20px_60px_-10px_rgba(0,0,0,0.6)]">
         <DialogHeader className="text-left pr-12">
           <DialogTitle className="text-white text-xl font-black tracking-tight flex items-center gap-2 leading-none">
             <Bell className="w-[18px] h-[18px]" />
@@ -355,7 +355,7 @@ export default function AlertsButton() {
               ? "bg-rose-500/25 text-rose-100 border-rose-500/40"
               : tone === "warning"
                 ? "bg-amber-500/20 text-amber-100 border-amber-500/40"
-                : "ios-glass text-gray-100 border-white/[0.10]"
+                : "ios-glass ios-glass--header text-gray-100 border-white/[0.10]"
           }`}
         >
           {hasSevere ? (
@@ -372,7 +372,7 @@ export default function AlertsButton() {
           )}
         </button>
       </DialogTrigger>
-      <DialogContent className="ios-glass border-white/[0.08] text-white rounded-t-[28px] sm:rounded-[22px] max-h-[85dvh] sm:max-h-[80dvh] overflow-hidden flex flex-col pb-[env(safe-area-inset-bottom)] sm:pb-6 shadow-[0_20px_60px_-10px_rgba(0,0,0,0.6)]">
+      <DialogContent className="ios-glass ios-glass--modal border-white/[0.08] text-white rounded-t-[28px] sm:rounded-[22px] max-h-[85dvh] sm:max-h-[80dvh] overflow-hidden flex flex-col pb-[env(safe-area-inset-bottom)] sm:pb-6 shadow-[0_20px_60px_-10px_rgba(0,0,0,0.6)]">
         <DialogHeader className="text-left pr-12">
           <DialogTitle className="text-white text-xl font-black tracking-tight flex items-center gap-2 leading-none">
             <Bell className="w-[18px] h-[18px]" />

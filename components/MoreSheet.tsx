@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Bell,
   BellRing,
@@ -15,6 +15,7 @@ import {
   Compass,
   Sparkles,
   MoreHorizontal,
+  Wand2,
 } from "lucide-react";
 import { useAlerts } from "@/lib/useAlerts";
 import { useCommute } from "@/lib/useFavorites";
@@ -27,6 +28,11 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { AlertsDialog } from "./AlertsButton";
+import {
+  isGlassTiltGated,
+  isGlassTiltGranted,
+  requestGlassTiltPermission,
+} from "./GlassTilt";
 
 // ─── MoreSheet ───────────────────────────────────────────────────────
 // Secondary-actions menu reachable from a "More" button in the floating
@@ -72,6 +78,21 @@ export default function MoreSheet({ open, onClose, onSetHome, onSetWork }: Props
   const [alertsOpen, setAlertsOpen] = useState(false);
   const [aboutOpen, setAboutOpen] = useState(false);
 
+  // Reactive-glass-on-tilt opt-in. Mirrors the localStorage flag the
+  // `<GlassTilt />` provider reads at startup; we mirror it here so
+  // the row's enabled state updates live after the permission prompt
+  // resolves. `tiltGated` is true on iOS Safari (the only platform
+  // that hides the toggle behind a user gesture); on every other
+  // platform the orientation listener attaches automatically and the
+  // row would just confuse riders, so we omit it.
+  const [tiltGated, setTiltGated] = useState(false);
+  const [tiltGranted, setTiltGranted] = useState(false);
+  const [tiltDenied, setTiltDenied] = useState(false);
+  useEffect(() => {
+    setTiltGated(isGlassTiltGated());
+    setTiltGranted(isGlassTiltGranted());
+  }, [open]);
+
   const totalAlerts = data?.alerts.length ?? 0;
   const hasSevere = (data?.alerts ?? []).some((a) => a.severity === "severe");
   const hasWarning = (data?.alerts ?? []).some((a) => a.severity === "warning");
@@ -90,7 +111,7 @@ export default function MoreSheet({ open, onClose, onSetHome, onSetWork }: Props
   // enough that a fixed full-height sheet works). Both rests sit at
   // 0px so the tap-to-toggle is a visual no-op while drag-down past
   // the dismiss threshold still fires onClose.
-  const { sheetStyle, handlers, onHandleTap } = useSheetDrag({
+  const { sheetStyle, handlers, contentHandlers, onHandleTap, isDragging } = useSheetDrag({
     halfRestingY: "0px",
     open,
     onDismiss: onClose,
@@ -111,12 +132,13 @@ export default function MoreSheet({ open, onClose, onSetHome, onSetWork }: Props
         className="
           absolute z-20 overflow-hidden flex flex-col
           inset-x-0 bottom-0 top-[var(--panel-top-rest)] rounded-t-[28px] border-t border-white/[0.08]
-          sm:inset-auto sm:right-3 sm:top-3 sm:bottom-3 sm:w-[340px] sm:h-auto sm:rounded-[22px] sm:border sm:border-white/[0.08]
-          ios-glass
+          sm:inset-auto sm:right-3 sm:top-[var(--panel-top-rest)] sm:bottom-3 sm:w-[340px] sm:h-auto sm:rounded-[22px] sm:border sm:border-white/[0.08]
+          ios-glass ios-glass--sheet
           shadow-[0_20px_60px_-10px_rgba(0,0,0,0.6)]
           pb-[env(safe-area-inset-bottom)]
         "
         style={sheetStyle}
+        data-glass-active={isDragging || undefined}
       >
         <button
           type="button"
@@ -147,7 +169,13 @@ export default function MoreSheet({ open, onClose, onSetHome, onSetWork }: Props
           </button>
         </div>
 
-        <div className="flex-1 overflow-y-auto ios-scroll px-3 pb-4 space-y-4">
+        <div
+          className="flex-1 overflow-y-auto ios-scroll px-3 pb-4 space-y-4"
+          onTouchStart={contentHandlers.onTouchStart}
+          onTouchMove={contentHandlers.onTouchMove}
+          onTouchEnd={contentHandlers.onTouchEnd}
+          onTouchCancel={contentHandlers.onTouchCancel}
+        >
           {/* ─── Service alerts ─── */}
           <section>
             <h3 className="px-2 pb-1.5 text-[10px] font-semibold uppercase tracking-wider text-gray-500">
@@ -249,6 +277,71 @@ export default function MoreSheet({ open, onClose, onSetHome, onSetWork }: Props
             </div>
           </section>
 
+          {/* ─── Personalize ─── */}
+          {/* Surfaces only on iOS, where DeviceOrientation is gated
+              behind a one-time permission prompt. On every other
+              platform the tilt highlight already works without a
+              user gesture, so the row would be a confusing no-op. */}
+          {tiltGated && (
+            <section>
+              <h3 className="px-2 pb-1.5 text-[10px] font-semibold uppercase tracking-wider text-gray-500">
+                Personalize
+              </h3>
+              <button
+                type="button"
+                disabled={tiltGranted}
+                onClick={async () => {
+                  // Must run synchronously inside the click handler
+                  // for iOS to honor the permission prompt — no
+                  // `await` before the first `requestPermission()`
+                  // call. The promise resolves later, but the gesture
+                  // chain has already been preserved.
+                  const result = await requestGlassTiltPermission();
+                  if (result === "granted") {
+                    setTiltGranted(true);
+                    setTiltDenied(false);
+                  } else if (result === "denied") {
+                    setTiltDenied(true);
+                  }
+                }}
+                className={`press w-full flex items-center gap-3 px-3 py-3 rounded-2xl touch-manipulation ${
+                  tiltGranted
+                    ? "bg-emerald-500/[0.10] ring-1 ring-emerald-400/[0.20] cursor-default"
+                    : "bg-white/[0.04] hover:bg-white/[0.08]"
+                }`}
+              >
+                <span
+                  className={`flex items-center justify-center w-9 h-9 rounded-full flex-shrink-0 ${
+                    tiltGranted
+                      ? "bg-emerald-400/20 text-emerald-200 ring-1 ring-emerald-400/30"
+                      : "bg-white/[0.08] text-gray-300"
+                  }`}
+                >
+                  <Wand2 className="w-4 h-4" />
+                </span>
+                <span className="flex-1 min-w-0 text-left">
+                  <span className="block text-[14px] font-semibold text-gray-100">
+                    Reactive glass on tilt
+                  </span>
+                  <span className="block text-[12px] text-gray-400 truncate">
+                    {tiltGranted
+                      ? "Enabled — glass highlights track your phone's pose"
+                      : tiltDenied
+                        ? "Permission denied. Enable in Settings → Safari → Motion & Orientation Access"
+                        : "Make panels and pills shimmer as you tilt your phone"}
+                  </span>
+                </span>
+                {tiltGranted ? (
+                  <span className="text-[11px] font-bold uppercase tracking-wider text-emerald-300 flex-shrink-0">
+                    On
+                  </span>
+                ) : (
+                  <ChevronRight className="w-4 h-4 text-gray-500 flex-shrink-0" />
+                )}
+              </button>
+            </section>
+          )}
+
           {/* ─── About ─── */}
           <section>
             <h3 className="px-2 pb-1.5 text-[10px] font-semibold uppercase tracking-wider text-gray-500">
@@ -303,7 +396,7 @@ function AboutDialog({
 }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="ios-glass border-white/[0.08] text-white rounded-t-[28px] sm:rounded-[22px] max-h-[85dvh] sm:max-h-[80dvh] overflow-hidden flex flex-col pb-[env(safe-area-inset-bottom)] sm:pb-6 shadow-[0_20px_60px_-10px_rgba(0,0,0,0.6)]">
+      <DialogContent className="ios-glass ios-glass--modal border-white/[0.08] text-white rounded-t-[28px] sm:rounded-[22px] max-h-[85dvh] sm:max-h-[80dvh] overflow-hidden flex flex-col pb-[env(safe-area-inset-bottom)] sm:pb-6 shadow-[0_20px_60px_-10px_rgba(0,0,0,0.6)]">
         <DialogHeader className="flex-shrink-0 text-left pr-12">
           <DialogTitle className="text-white text-xl font-black tracking-tight flex items-center gap-2">
             <span className="text-[26px]" aria-hidden>

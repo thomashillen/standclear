@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import type { TrainsResponse, Train, Arrival } from "@/app/api/trains/route";
 import type { SubwayLine } from "./subwayData";
 
-export type { Train, Arrival };
+export type { Train, Arrival, TrainsResponse };
 
 // MTA GTFS-RT feeds refresh roughly every 10–15s upstream. Polling faster
 // than ~8s mostly returns identical data; slower and the on-map positions

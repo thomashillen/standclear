@@ -1,7 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { MapPin, MoreHorizontal, Search, TrainFront } from "lucide-react";
 import { useLines } from "@/lib/subwayData";
 import { useTrains } from "@/lib/useTrains";
@@ -23,6 +23,7 @@ export type TripSelection = {
   walkFrom?: { lng: number; lat: number; name?: string };
   walkTo?: { lng: number; lat: number; name?: string };
 };
+import FollowCapsule from "./FollowCapsule";
 import LinePanel from "./LinePanel";
 import LinePicker from "./LinePicker";
 import LiveTrainsPopup from "./LiveTrainsPopup";
@@ -31,6 +32,28 @@ import NearbyPanel from "./NearbyPanel";
 import SearchSheet from "./SearchSheet";
 import StationPanel from "./StationPanel";
 import type { SelectedTrip } from "./MapView";
+import { useNow } from "@/lib/useNow";
+
+// Convert "#abcdef" → "171 205 239" so the value can be plugged into
+// `rgb(var(--glass-tint) / α)`. Tolerates 3- and 6-digit hex; returns
+// null on anything unparseable so callers can leave the tint at its
+// neutral default rather than rendering a random color.
+function hexToRgbTriplet(hex: string): string | null {
+  const h = hex.startsWith("#") ? hex.slice(1) : hex;
+  const expanded =
+    h.length === 3
+      ? h
+          .split("")
+          .map((c) => c + c)
+          .join("")
+      : h;
+  if (expanded.length !== 6) return null;
+  const r = parseInt(expanded.slice(0, 2), 16);
+  const g = parseInt(expanded.slice(2, 4), 16);
+  const b = parseInt(expanded.slice(4, 6), 16);
+  if (Number.isNaN(r) || Number.isNaN(g) || Number.isNaN(b)) return null;
+  return `${r} ${g} ${b}`;
+}
 
 const MapView = dynamic(() => import("./MapView"), {
   ssr: false,
@@ -96,6 +119,14 @@ export default function SubwayMap() {
   // markers + walking segments and fits the camera.
   const [selectedTripSelection, setSelectedTripSelection] =
     useState<TripSelection | null>(null);
+  // Cinematic follow-my-train mode. When set, MapView locks the
+  // camera onto the train (tracking its live position with pitch +
+  // tighter zoom) and the floating header is replaced by a compact
+  // glass capsule showing the train's next stop and ETA. Cleared by
+  // tapping the capsule's exit affordance OR by dragging/zooming
+  // the map (handled inside MapView so the lock can release on any
+  // explicit camera move).
+  const [followedTrainId, setFollowedTrainIdState] = useState<string | null>(null);
   // Index of the leg the rider has zoomed in on from the expanded
   // route detail. Null means "frame the whole trip" (default).
   // Cleared whenever the trip selection changes so a new plan opens
@@ -125,6 +156,57 @@ export default function SubwayMap() {
   // route's southern end doesn't hide behind the taller plan-list
   // panel.
   const [tripDetailExpanded, setTripDetailExpanded] = useState(false);
+
+  // Drop every piece of trip-overlay state in one shot. The overlay
+  // belongs to whichever sheet sourced it (SearchSheet / NearbyPanel
+  // commute card); switching to a different context — opening Near-me,
+  // tapping a line, opening a station, entering follow mode, etc. —
+  // should put the map back into all-trains mode that matches the new
+  // panel. Previously each handler cleared a different subset of these
+  // four fields, so e.g. a leftover `walkOnlyOverlay` would keep a
+  // dashed walk path painted under the next view. Declared *after*
+  // every state field it touches so the linter's no-use-before-defined
+  // rule sees the declarations in the right order — runtime works
+  // either way (callbacks resolve free vars at call time, not at
+  // creation time) but the static check would otherwise fail CI.
+  const clearTripOverlay = useCallback(() => {
+    setSelectedTripSelection(null);
+    setFocusedLegIndex(null);
+    setWalkOnlyOverlay(null);
+    setTripDetailExpanded(false);
+  }, []);
+  // Wrap the follow setter so entering follow mode also closes any
+  // sheet covering the map — a panel would defeat the cinematic
+  // shot, and every panel's open-state machine already expects
+  // mutual exclusion with the other entry points.
+  const setFollowedTrainId = useCallback((id: string | null) => {
+    setFollowedTrainIdState(id);
+    if (id) {
+      setNearbyOpen(false);
+      setSearchOpen(false);
+      setMoreOpen(false);
+      setSelectedLine(null);
+      setFocusStopId(undefined);
+      setStationStopId(null);
+      // Drop the trip overlay too — a highlighted route under the
+      // cinematic frame would split the rider's attention between
+      // "that train I'm following" and "this trip I planned earlier."
+      clearTripOverlay();
+    }
+  }, [clearTripOverlay]);
+
+  // Bottom-padding fraction MapView reserves when fitting the
+  // selected trip's bounds. Depends on which panel actually sourced
+  // the selection — SearchSheet's plan-list view occupies ~62dvh
+  // (full list scroll), but its detail view, NearbyPanel's
+  // half-detent commute card, and other compact entry points only
+  // take ~42dvh. Using a single boolean ("expanded?") would zoom out
+  // unnecessarily for any non-Search source. Computing it here keeps
+  // MapView ignorant of which sheet drove the selection.
+  const tripFitBottomDvh = useMemo(() => {
+    if (searchOpen && !tripDetailExpanded) return 0.62;
+    return 0.42;
+  }, [searchOpen, tripDetailExpanded]);
   // Fly-to-user signal — increments each time the user taps Near-me so
   // MapView can fly the camera to their location (waiting for geo if it
   // isn't available yet). Counter, not a boolean, so successive taps
@@ -137,6 +219,33 @@ export default function SubwayMap() {
   const [flyToDefaultSignal, setFlyToDefaultSignal] = useState(0);
   const data = useTrains();
   const lines = useLines();
+  // Live wall-clock for the follow capsule's countdown. Tied to a
+  // 1Hz tick so the ETA refreshes second by second; gated by an
+  // active follow lock so we don't run a global timer when nothing
+  // is consuming it.
+  const now = useNow(!!followedTrainId);
+
+  // Drive the global liquid-glass tint from the currently selected
+  // line. Every `.ios-glass` surface picks up `--glass-tint` /
+  // `--glass-tint-strength` automatically, so when the rider focuses
+  // a line every floating button, sheet, and modal subtly washes
+  // toward that line's color — a non-modal way to confirm the
+  // selection. Cleared when nothing is selected so the chrome
+  // returns to neutral.
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    const root = document.documentElement;
+    const line = selectedLine && lines ? lines[selectedLine] : null;
+    if (!line) {
+      root.style.setProperty("--glass-tint-strength", "0");
+      return;
+    }
+    const rgb = hexToRgbTriplet(line.color);
+    if (rgb) {
+      root.style.setProperty("--glass-tint", rgb);
+      root.style.setProperty("--glass-tint-strength", "1");
+    }
+  }, [selectedLine, lines]);
 
   const handleLineSelect = (line: string | null, stopId?: string) => {
     setSelectedLine(line);
@@ -150,7 +259,7 @@ export default function SubwayMap() {
       setNearbyOpen(false);
       setStationStopId(null);
       setSearchOpen(false);
-      setSelectedTripSelection(null);
+      clearTripOverlay();
     }
   };
 
@@ -162,7 +271,7 @@ export default function SubwayMap() {
     setSearchOpen(false);
     // Tapping a station drops the trip overlay — the rider has moved
     // on from the directions context.
-    setSelectedTripSelection(null);
+    clearTripOverlay();
   };
 
   const handleSearchToggle = () => {
@@ -183,6 +292,15 @@ export default function SubwayMap() {
       setSelectedLine(null);
       setFocusStopId(undefined);
       setStationStopId(null);
+      setMoreOpen(false);
+    } else {
+      // Closing via the header button — drop the trip overlay so a
+      // dashed walking path or highlighted route doesn't outlive the
+      // panel that owned it. SearchSheet's own dialog-close path
+      // already clears these; the toggle button skips that callback,
+      // so without this the overlay would persist on the map after
+      // the sheet animated out.
+      clearTripOverlay();
     }
   };
 
@@ -225,6 +343,11 @@ export default function SubwayMap() {
       setFocusStopId(undefined);
       setStationStopId(null);
       setSearchOpen(false);
+      setMoreOpen(false);
+      // Drop any active trip overlay too. Near-me is "what's around
+      // me right now"; a leftover highlighted route + walking legs
+      // would make the panel and the map disagree about context.
+      clearTripOverlay();
     }
     // Bump the signal both for open AND re-tap-while-open. Tapping
     // Near-me when the panel is already open is "find me again",
@@ -418,7 +541,9 @@ export default function SubwayMap() {
           selectedTrip={selectedTrip}
           focusedLegIndex={focusedLegIndex}
           walkOnlyOverlay={walkOnlyOverlay}
-          tripDetailExpanded={tripDetailExpanded}
+          tripFitBottomDvh={tripFitBottomDvh}
+          followedTrainId={followedTrainId}
+          onFollowTrain={setFollowedTrainId}
         />
         {selectedLine && !nearbyOpen && !stationStopId && (
           <LinePanel
@@ -499,14 +624,36 @@ export default function SubwayMap() {
         />
       </div>
 
+      {/* Cinematic follow-my-train capsule — replaces the floating
+          header while a follow lock is active. Same vertical position
+          as the header so the rider's eye doesn't have to relocate
+          between the two modes. */}
+      {followedTrainId && (
+        <FollowCapsule
+          trainId={followedTrainId}
+          data={data}
+          lines={lines}
+          now={now}
+          onExit={() => setFollowedTrainId(null)}
+        />
+      )}
+
       {/* ── Floating Liquid Glass control row, overlaid on the map ──
           The container itself is pointer-events-none so users can pan
           the map between buttons; each interactive child opts back in
           with pointer-events-auto. iOS-26-style frosted-glass tiles
           float independently rather than sharing a header bar — same
-          spatial grouping as Apple Maps' top-row controls. */}
+          spatial grouping as Apple Maps' top-row controls.
+
+          Unmounted entirely while following a train so the cinematic
+          frame isn't fighting the line picker / live pulse / search
+          controls for screen real estate. The earlier `opacity-0 +
+          pointer-events-none` approach left ghost taps hitting the
+          invisible buttons because each child opts back into pointer
+          events with `pointer-events-auto`. */}
+      {!followedTrainId && (
       <div
-        className="absolute inset-x-0 top-0 z-30 flex items-center gap-2 px-3 pointer-events-none"
+        className="absolute inset-x-0 top-0 z-30 flex items-center gap-2 px-3 pointer-events-none transition-opacity duration-200 opacity-100"
         style={{
           paddingTop: "calc(max(var(--safe-top), 0.5rem) + 0.5rem)",
         }}
@@ -514,7 +661,7 @@ export default function SubwayMap() {
         {/* Logo — small floating tile, hidden on mobile to give the
             line picker more room. Identity cue only, not navigation. */}
         <div
-          className="pointer-events-auto hidden sm:flex items-center justify-center w-11 h-11 rounded-full ios-glass border border-white/[0.10] shadow-[0_6px_20px_rgba(0,0,0,0.45)] text-[22px] flex-shrink-0 select-none"
+          className="pointer-events-auto hidden sm:flex items-center justify-center w-11 h-11 rounded-full ios-glass ios-glass--header border border-white/[0.10] shadow-[0_6px_20px_rgba(0,0,0,0.45)] text-[22px] flex-shrink-0 select-none"
           aria-label="StandClear"
         >
           🚇
@@ -556,7 +703,7 @@ export default function SubwayMap() {
                 ? "Stale — last refresh more than a minute ago"
                 : `${totalTrains} trains live`
           }
-          className="pointer-events-auto press flex items-center gap-1.5 h-9 px-2.5 flex-shrink-0 rounded-full ios-glass border border-white/[0.10] shadow-[0_6px_20px_rgba(0,0,0,0.45)] touch-manipulation"
+          className="pointer-events-auto press flex items-center gap-1.5 h-9 px-2.5 flex-shrink-0 rounded-full ios-glass ios-glass--header border border-white/[0.10] shadow-[0_6px_20px_rgba(0,0,0,0.45)] touch-manipulation"
         >
           <span className="relative flex w-2 h-2">
             <span
@@ -594,7 +741,7 @@ export default function SubwayMap() {
           className={`pointer-events-auto press flex items-center justify-center w-11 h-11 rounded-full touch-manipulation flex-shrink-0 transition-colors border shadow-[0_6px_20px_rgba(0,0,0,0.45)] ${
             searchOpen
               ? "bg-white text-gray-950 border-white/30 shadow-[0_6px_20px_rgba(255,255,255,0.20)]"
-              : "ios-glass text-gray-100 border-white/[0.10]"
+              : "ios-glass ios-glass--header text-gray-100 border-white/[0.10]"
           }`}
         >
           <Search className="w-[18px] h-[18px]" />
@@ -611,7 +758,7 @@ export default function SubwayMap() {
           className={`pointer-events-auto press flex items-center justify-center w-11 h-11 rounded-full touch-manipulation flex-shrink-0 transition-colors border shadow-[0_6px_20px_rgba(0,0,0,0.45)] ${
             nearbyOpen
               ? "bg-white text-gray-950 border-white/30 shadow-[0_6px_20px_rgba(255,255,255,0.20)]"
-              : "ios-glass text-gray-100 border-white/[0.10]"
+              : "ios-glass ios-glass--header text-gray-100 border-white/[0.10]"
           }`}
         >
           <MapPin className="w-[18px] h-[18px]" />
@@ -642,11 +789,12 @@ export default function SubwayMap() {
           }}
           aria-label="More options"
           aria-pressed={moreOpen}
-          className="pointer-events-auto press flex items-center justify-center w-11 h-11 rounded-full touch-manipulation flex-shrink-0 transition-colors border shadow-[0_6px_20px_rgba(0,0,0,0.45)] ios-glass text-gray-100 border-white/[0.10]"
+          className="pointer-events-auto press flex items-center justify-center w-11 h-11 rounded-full touch-manipulation flex-shrink-0 transition-colors border shadow-[0_6px_20px_rgba(0,0,0,0.45)] ios-glass ios-glass--header text-gray-100 border-white/[0.10]"
         >
           <MoreHorizontal className="w-[18px] h-[18px]" />
         </button>
       </div>
+      )}
 
     </div>
   );

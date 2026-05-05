@@ -101,7 +101,7 @@ export default function LiveTrainsPopup({ open, onClose }: Props) {
 
   return (
     <Dialog open={open} onOpenChange={(o) => (!o ? onClose() : undefined)}>
-      <DialogContent className="ios-glass border-white/[0.08] text-white rounded-t-[28px] sm:rounded-[22px] max-h-[85dvh] sm:max-h-[80dvh] overflow-hidden flex flex-col p-0 pb-[env(safe-area-inset-bottom)] sm:pb-0 gap-0 shadow-[0_20px_60px_-10px_rgba(0,0,0,0.6)]">
+      <DialogContent className="ios-glass ios-glass--modal border-white/[0.08] text-white rounded-t-[28px] sm:rounded-[22px] max-h-[85dvh] sm:max-h-[80dvh] overflow-hidden flex flex-col p-0 pb-[env(safe-area-inset-bottom)] sm:pb-0 gap-0 shadow-[0_20px_60px_-10px_rgba(0,0,0,0.6)]">
         <DialogHeader className="px-5 pt-5 pb-3 flex-shrink-0 text-left pr-12">
           <DialogTitle className="text-white text-xl font-black tracking-tight flex items-center gap-2">
             <span className="relative inline-flex w-2.5 h-2.5">
