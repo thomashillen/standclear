@@ -3,8 +3,14 @@
 import { useEffect, type RefObject } from "react";
 import type { TrainsResponse } from "@/app/api/trains/route";
 import { type Lines, type SubwayLine } from "./subwayData";
-import { trainLatLng, type Train } from "./useTrains";
 import { buildStationIndex } from "./stopsIndex";
+import {
+  buildTrajectory,
+  computeShapeMetrics,
+  positionAt,
+  type ShapeMetrics,
+  type Trajectory,
+} from "./trainTrajectory";
 
 // Minimal structural surface of the Mapbox map handle the hook touches —
 // keeps the hook decoupled from the broader MapboxMap shape MapView
@@ -55,9 +61,21 @@ export interface UseTrainMarkersArgs {
  * Animate the live train markers (and the open-station "incoming"
  * rings) on a Mapbox map.
  *
+ * Motion model: each train carries a `Trajectory` — a list of
+ * `(arcLength along line shape, wall-clock time)` waypoints anchored
+ * to the feed's current position plus the trip's predicted ETAs at
+ * upcoming stops. Per-frame position is a linear interpolation
+ * along that trajectory. This means motion is paced by the MTA's
+ * actual ETAs (an express skipping stops naturally animates faster
+ * than a local), continuous across segment boundaries, and works
+ * for routes whose feeds only refresh at station boundaries — the
+ * R, certain peak express trips, etc. Trajectories are rebuilt
+ * on each poll; a small per-frame LERP smooths the visual when a
+ * fresh trajectory's position-at-now differs from the previous
+ * one (the rider sees a glide, not a jump).
+ *
  * Owns:
- *   • per-train motion state (predicted progress + learned velocity +
- *     LP-filtered render position)
+ *   • per-train trajectory + smoothed render position
  *   • position-based stack-offset for collisions (4/5/6 at Union Sq,
  *     express overtaking local at a shared platform, etc.)
  *   • cinematic follow-my-train camera lock
@@ -87,21 +105,20 @@ export function useTrainMarkers({
     // complex (so arrivals at any of its platforms count as "incoming here").
     const stationIndex = buildStationIndex(lines);
 
+    // Cache shape metrics (cumulative arc length per shape vertex) per
+    // route. Computed once per `lines` version and reused across every
+    // poll/frame.
+    const metricsByRoute = new Map<string, ShapeMetrics>();
+    for (const line of Object.values(lines)) {
+      metricsByRoute.set(line.routeId, computeShapeMetrics(line));
+    }
+
     const TICK_MS = 33;
-    // Per-frame lerp factor for the displayed position. With accurate
-    // per-train velocity, target ≈ display each frame, so the lerp only
-    // absorbs micro-corrections at poll boundaries.
-    const LERP = 0.08;
-    // Default segment traversal time in seconds, used before we've
-    // observed any motion for a train. NYC interstation average ~90s.
-    const DEFAULT_TRAVERSAL_SEC = 90;
-    // Upper clamp on observed velocity so a single noisy poll (e.g. a
-    // GTFS-RT snapshot that jumped the train forward) can't project it
-    // off the end of the segment on the next frame. 30s corresponds to
-    // the fastest plausible express hop.
-    const MIN_TRAVERSAL_SEC = 30;
-    const DEFAULT_VELOCITY = 1 / DEFAULT_TRAVERSAL_SEC;
-    const MAX_VELOCITY = 1 / MIN_TRAVERSAL_SEC;
+    // Per-frame lerp factor for the displayed position. With trajectories
+    // giving us continuous accurate positions, this only needs to absorb
+    // re-anchor jumps when a fresh poll's trajectory moves the predicted
+    // position-at-now compared to the previous trajectory.
+    const LERP = 0.12;
 
     // Position-based stacking. Trains sit ON their line by default — no
     // perpendicular offset for a single train at a position. When two or
@@ -109,12 +126,6 @@ export function useTrainMarkers({
     // happens when a 4 / 5 / 6 are all stopped at Union Sq, or when
     // express overtakes local at a shared platform), we fan them out
     // perpendicular to travel direction so each is individually visible.
-    //
-    // The previous LANE_INDEX scheme always offset every train by its
-    // route's position within its CORRIDOR group, which produced a
-    // visible gap between e.g. an E train and its blue line even when
-    // no other lines were nearby. Position-based stacking only spends
-    // visual space when there's actually a collision to resolve.
     const STACK_BUCKET_DEG = 0.0002; // ≈ 22 m at NYC latitude
     const STACK_SPACING_PX = 14;
 
@@ -132,33 +143,23 @@ export function useTrainMarkers({
     let frame = 0;
     let lastTickTime = 0;
     let lastData: TrainsResponse | null = null;
-    let trainsByRoute: Map<string, Train[]> = new Map();
 
     // Latest rendered (post-stack-offset) position per train, captured
     // each tick where the marker feature is pushed. Used by follow-mode
     // to recenter on the same point the rider sees on screen.
     const lastRenderById = new Map<string, [number, number]>();
-    // Per-train motion state. baseProgress/baseTime is the last point we
-    // trust from the server; velocity is learned from poll-to-poll deltas.
-    // prevStopId/nextStopId pin the segment — if the train crosses a stop,
-    // we snap (lerping across segments cuts a chord through the void off
-    // the tracks).
-    const trainState = new Map<
+
+    // Trajectory + smoothed render position per train. Trajectory is
+    // rebuilt every poll; renderState lerps toward the trajectory's
+    // current ideal position each frame.
+    const trajectories = new Map<string, Trajectory>();
+    const renderState = new Map<
       string,
-      {
-        baseProgress: number;
-        baseTime: number;
-        velocity: number;
-        lng: number;
-        lat: number;
-        bearing: number;
-        prevStopId: string;
-        nextStopId: string;
-      }
+      { lng: number; lat: number; bearing: number }
     >();
 
-    // Lerp an angle along the shorter arc — naive linear lerp across the
-    // 0/360 boundary snaps 358°→2° the long way around, flashing a spin.
+    // Lerp an angle along the shorter arc — naive linear lerp across
+    // 0/360 snaps the long way around, which would flash a spin.
     const lerpAngle = (a: number, b: number, t: number) => {
       const d = ((b - a + 540) % 360) - 180;
       return (a + d * t + 360) % 360;
@@ -170,17 +171,34 @@ export function useTrainMarkers({
       lastTickTime = now;
 
       const d = dataRef.current;
-      if (!d) return;
+      if (!d || !lines) return;
 
-      // Re-bucket only when the upstream data object changes (every 8s poll).
+      // Rebuild trajectories on each fresh poll. Bucketing arrivals by
+      // tripId once amortizes the per-train arrival lookup across the
+      // whole pass; without it, each train would re-scan the global
+      // arrivals array (O(trains × arrivals)).
       const newPoll = d !== lastData;
       if (newPoll) {
         lastData = d;
-        trainsByRoute = new Map();
+        const arrivalsByTrip = new Map<string, typeof d.arrivals>();
+        for (const a of d.arrivals) {
+          const arr = arrivalsByTrip.get(a.tripId) ?? [];
+          arr.push(a);
+          arrivalsByTrip.set(a.tripId, arr);
+        }
         for (const t of d.trains) {
-          const arr = trainsByRoute.get(t.routeId) || [];
-          arr.push(t);
-          trainsByRoute.set(t.routeId, arr);
+          const line = lines[t.routeId];
+          if (!line) continue;
+          const metrics = metricsByRoute.get(t.routeId);
+          if (!metrics) continue;
+          const traj = buildTrajectory(
+            t,
+            arrivalsByTrip.get(t.id) ?? [],
+            line,
+            metrics,
+            d.generatedAt,
+          );
+          if (traj) trajectories.set(t.id, traj);
         }
       }
 
@@ -193,123 +211,53 @@ export function useTrainMarkers({
       type Computed = {
         trainId: string;
         line: SubwayLine;
-        train: Train;
         lng: number;
         lat: number;
         bearing: number;
         direction: "N" | "S";
+        routeId: string;
+        letter: string;
+        color: string;
+        textColor: "white" | "black";
       };
       const computed: Computed[] = [];
       const seen = new Set<string>();
-      for (const line of Object.values(lines)) {
-        const trains = trainsByRoute.get(line.routeId);
-        if (!trains) continue;
-        for (const t of trains) {
-          let state = trainState.get(t.id);
-          const segmentChanged =
-            state !== undefined &&
-            (state.prevStopId !== t.prevStopId ||
-              state.nextStopId !== t.nextStopId);
+      for (const t of d.trains) {
+        const line = lines[t.routeId];
+        if (!line) continue;
+        const metrics = metricsByRoute.get(t.routeId);
+        if (!metrics) continue;
+        const traj = trajectories.get(t.id);
+        if (!traj) continue;
+        const ideal = positionAt(traj, line, metrics, nowMs);
+        if (!ideal) continue;
 
-          if (!state || segmentChanged) {
-            // New train OR crossed into a new segment. We reset the
-            // motion baseline (baseProgress/baseTime/velocity) so
-            // prediction tracks the new segment, but we DELIBERATELY
-            // keep the previously rendered lng/lat/bearing (when we
-            // have one) so the LERP step below can glide the marker
-            // from the old position to the new segment over ~1–2 s.
-            //
-            // This is what makes routes whose feeds only update at
-            // station boundaries (R, certain express trips) animate
-            // consistently with routes that report continuous
-            // progress: a STOPPED_AT-A → STOPPED_AT-B transition
-            // glides between the two platforms instead of teleporting.
-            // The chord cuts through space (we're not walking the
-            // shape across segments), but at NYC interstation
-            // distances the chord ≈ the track and the LERP only
-            // owns the visual for ~2 seconds.
-            //
-            // First-mount case (no prior state) snaps to the raw
-            // position because there's nothing to animate from.
-            const pos = trainLatLng(line, t);
-            if (!pos) continue;
-            // Floor velocity to DEFAULT for in-motion trains so a
-            // feed that's not updating mid-segment progress still
-            // produces visible forward motion. STOPPED_AT keeps the
-            // learned (often near-zero) velocity — those trains
-            // *should* sit at their platform.
-            const inMotion =
-              t.status === "IN_TRANSIT_TO" || t.status === "INCOMING_AT";
-            const carriedVelocity = state?.velocity ?? DEFAULT_VELOCITY;
-            const seedVelocity = inMotion
-              ? Math.max(carriedVelocity, DEFAULT_VELOCITY)
-              : carriedVelocity;
-            state = {
-              baseProgress: t.progress,
-              baseTime: d.generatedAt,
-              velocity: seedVelocity,
-              lng: state?.lng ?? pos.lng,
-              lat: state?.lat ?? pos.lat,
-              bearing: state?.bearing ?? pos.bearing,
-              prevStopId: t.prevStopId,
-              nextStopId: t.nextStopId,
-            };
-            trainState.set(t.id, state);
-          } else if (newPoll) {
-            // Same segment, fresh poll — learn the observed velocity from
-            // the actual progress delta. Zero or negative deltas (train
-            // holding at a signal, ETA recalculation walking progress
-            // back) decay velocity via the LP filter so prediction
-            // stays close to the feed's reality.
-            const dtSec = (d.generatedAt - state.baseTime) / 1000;
-            if (dtSec > 0.5) {
-              const observed = (t.progress - state.baseProgress) / dtSec;
-              const clamped = Math.max(0, Math.min(MAX_VELOCITY, observed));
-              state.velocity = 0.5 * state.velocity + 0.5 * clamped;
-            }
-            // Floor velocity for IN_TRANSIT_TO / INCOMING_AT trains so
-            // routes whose feeds report 0 mid-segment progress (the R
-            // is a frequent offender) still produce visible motion.
-            // STOPPED_AT keeps whatever velocity it had — those trains
-            // are visually pinned to a platform regardless.
-            const inMotion =
-              t.status === "IN_TRANSIT_TO" || t.status === "INCOMING_AT";
-            if (inMotion && state.velocity < DEFAULT_VELOCITY) {
-              state.velocity = DEFAULT_VELOCITY;
-            }
-            state.baseProgress = t.progress;
-            state.baseTime = d.generatedAt;
-          }
-
-          // Predict progress as baseline + velocity × elapsed. This is what
-          // makes motion look continuous: every frame advances by a tiny
-          // fraction instead of sitting still until the next poll.
-          const elapsedSec = (nowMs - state.baseTime) / 1000;
-          const predictedProgress = Math.max(
-            0,
-            Math.min(1, state.baseProgress + state.velocity * elapsedSec),
-          );
-          const target = trainLatLng(line, { ...t, progress: predictedProgress });
-          if (!target) continue;
-
-          // Lerp display toward predicted. In steady state the per-frame
-          // delta is ~velocity × TICK_MS, so this is a small, invisible
-          // correction rather than a visible catch-up glide.
-          state.lng += (target.lng - state.lng) * LERP;
-          state.lat += (target.lat - state.lat) * LERP;
-          state.bearing = lerpAngle(state.bearing, target.bearing, LERP);
-          seen.add(t.id);
-
-          computed.push({
-            trainId: t.id,
-            line,
-            train: t,
-            lng: state.lng,
-            lat: state.lat,
-            bearing: state.bearing,
-            direction: t.direction,
-          });
+        // First sighting of this train: seed renderState directly at
+        // the trajectory's current position so we don't lerp in from
+        // (0, 0) or wherever the previous Map default would land.
+        let render = renderState.get(t.id);
+        if (!render) {
+          render = { lng: ideal.lng, lat: ideal.lat, bearing: ideal.bearing };
+          renderState.set(t.id, render);
+        } else {
+          render.lng += (ideal.lng - render.lng) * LERP;
+          render.lat += (ideal.lat - render.lat) * LERP;
+          render.bearing = lerpAngle(render.bearing, ideal.bearing, LERP);
         }
+
+        seen.add(t.id);
+        computed.push({
+          trainId: t.id,
+          line,
+          lng: render.lng,
+          lat: render.lat,
+          bearing: render.bearing,
+          direction: t.direction,
+          routeId: line.routeId,
+          letter: line.id,
+          color: line.color,
+          textColor: line.textColor,
+        });
       }
 
       // Bucket trains by rounded lat/lng. Anything within ~22m of each
@@ -334,7 +282,7 @@ export function useTrainMarkers({
       for (const arr of buckets.values()) {
         if (arr.length > 1) {
           arr.sort((a, b) => {
-            const r = a.line.routeId.localeCompare(b.line.routeId);
+            const r = a.routeId.localeCompare(b.routeId);
             return r !== 0 ? r : a.trainId.localeCompare(b.trainId);
           });
         }
@@ -355,7 +303,7 @@ export function useTrainMarkers({
         const dedupSeen = new Set<string>();
         const deduped: Computed[] = [];
         for (const c of arr) {
-          const groupKey = `${c.line.routeId}-${c.direction}`;
+          const groupKey = `${c.routeId}-${c.direction}`;
           if (dedupSeen.has(groupKey)) continue;
           dedupSeen.add(groupKey);
           deduped.push(c);
@@ -386,23 +334,10 @@ export function useTrainMarkers({
             // RIGHT side of travel direction. By NYC convention (and
             // because trains drive on the right), uptown trains are on
             // the east track and downtown on the west — and "right of
-            // travel" naturally encodes that:
-            //   • Northbound train: right = east (right of map)
-            //   • Southbound train: right = west (left of map)
-            // So a 2-train bucket with one N and one S splits cleanly
-            // to opposite sides without any direction-specific casing.
+            // travel" naturally encodes that.
             //
-            // Spacing is asymmetric between groups:
-            //   • The FIRST train in each direction sits at 0.5 lanes
-            //     off-center, so a single N + single S split cleanly
-            //     across the line.
-            //   • SAME-direction siblings are tightened to 0.55 of a
-            //     lane apart (vs. the 1.0 used for the cross-direction
-            //     gap). Trains on the same track aren't separated by
-            //     a track gap in real life — they're inches apart at
-            //     a platform — so collapsing them visually closer
-            //     reads better than fanning them out as if they were
-            //     on opposite sides.
+            // Spacing is asymmetric: same-direction siblings stack
+            // tighter (0.55 lanes) than cross-direction (1.0).
             const idxInDir = dirCounts[c.direction]++;
             const SAME_SIDE_STEP = 0.55;
             const stackOffset = 0.5 + idxInDir * SAME_SIDE_STEP;
@@ -423,10 +358,10 @@ export function useTrainMarkers({
               id: c.trainId,
               direction: c.direction,
               bearing: c.bearing,
-              routeId: c.line.routeId,
-              color: c.line.color,
-              letter: c.line.id,
-              textColor: c.line.textColor,
+              routeId: c.routeId,
+              color: c.color,
+              letter: c.letter,
+              textColor: c.textColor,
             },
             geometry: { type: "Point", coordinates: [renderLng, renderLat] },
           });
@@ -436,8 +371,13 @@ export function useTrainMarkers({
 
       // Drop state for trains that vanished (e.g. completed trip) so the
       // map doesn't leak memory over long sessions.
-      if (seen.size !== trainState.size) {
-        for (const id of trainState.keys()) if (!seen.has(id)) trainState.delete(id);
+      if (seen.size !== trajectories.size) {
+        for (const id of trajectories.keys())
+          if (!seen.has(id)) trajectories.delete(id);
+      }
+      if (seen.size !== renderState.size) {
+        for (const id of renderState.keys())
+          if (!seen.has(id)) renderState.delete(id);
       }
       if (seen.size !== lastRenderById.size) {
         for (const id of lastRenderById.keys())
