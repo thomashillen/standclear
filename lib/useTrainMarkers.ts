@@ -212,19 +212,45 @@ export function useTrainMarkers({
               state.nextStopId !== t.nextStopId);
 
           if (!state || segmentChanged) {
-            // New train or crossed into a new segment — snap to the raw
-            // position and start fresh. Velocity carries over so the next
-            // segment starts with a reasonable prediction instead of the
-            // generic 90s default.
+            // New train OR crossed into a new segment. We reset the
+            // motion baseline (baseProgress/baseTime/velocity) so
+            // prediction tracks the new segment, but we DELIBERATELY
+            // keep the previously rendered lng/lat/bearing (when we
+            // have one) so the LERP step below can glide the marker
+            // from the old position to the new segment over ~1–2 s.
+            //
+            // This is what makes routes whose feeds only update at
+            // station boundaries (R, certain express trips) animate
+            // consistently with routes that report continuous
+            // progress: a STOPPED_AT-A → STOPPED_AT-B transition
+            // glides between the two platforms instead of teleporting.
+            // The chord cuts through space (we're not walking the
+            // shape across segments), but at NYC interstation
+            // distances the chord ≈ the track and the LERP only
+            // owns the visual for ~2 seconds.
+            //
+            // First-mount case (no prior state) snaps to the raw
+            // position because there's nothing to animate from.
             const pos = trainLatLng(line, t);
             if (!pos) continue;
+            // Floor velocity to DEFAULT for in-motion trains so a
+            // feed that's not updating mid-segment progress still
+            // produces visible forward motion. STOPPED_AT keeps the
+            // learned (often near-zero) velocity — those trains
+            // *should* sit at their platform.
+            const inMotion =
+              t.status === "IN_TRANSIT_TO" || t.status === "INCOMING_AT";
+            const carriedVelocity = state?.velocity ?? DEFAULT_VELOCITY;
+            const seedVelocity = inMotion
+              ? Math.max(carriedVelocity, DEFAULT_VELOCITY)
+              : carriedVelocity;
             state = {
               baseProgress: t.progress,
               baseTime: d.generatedAt,
-              velocity: state?.velocity ?? DEFAULT_VELOCITY,
-              lng: pos.lng,
-              lat: pos.lat,
-              bearing: pos.bearing,
+              velocity: seedVelocity,
+              lng: state?.lng ?? pos.lng,
+              lat: state?.lat ?? pos.lat,
+              bearing: state?.bearing ?? pos.bearing,
               prevStopId: t.prevStopId,
               nextStopId: t.nextStopId,
             };
@@ -233,13 +259,23 @@ export function useTrainMarkers({
             // Same segment, fresh poll — learn the observed velocity from
             // the actual progress delta. Zero or negative deltas (train
             // holding at a signal, ETA recalculation walking progress
-            // back) decay velocity toward 0 via the LP filter, so we
-            // stop predicting forward motion the MTA feed isn't seeing.
+            // back) decay velocity via the LP filter so prediction
+            // stays close to the feed's reality.
             const dtSec = (d.generatedAt - state.baseTime) / 1000;
             if (dtSec > 0.5) {
               const observed = (t.progress - state.baseProgress) / dtSec;
               const clamped = Math.max(0, Math.min(MAX_VELOCITY, observed));
               state.velocity = 0.5 * state.velocity + 0.5 * clamped;
+            }
+            // Floor velocity for IN_TRANSIT_TO / INCOMING_AT trains so
+            // routes whose feeds report 0 mid-segment progress (the R
+            // is a frequent offender) still produce visible motion.
+            // STOPPED_AT keeps whatever velocity it had — those trains
+            // are visually pinned to a platform regardless.
+            const inMotion =
+              t.status === "IN_TRANSIT_TO" || t.status === "INCOMING_AT";
+            if (inMotion && state.velocity < DEFAULT_VELOCITY) {
+              state.velocity = DEFAULT_VELOCITY;
             }
             state.baseProgress = t.progress;
             state.baseTime = d.generatedAt;

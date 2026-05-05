@@ -1284,13 +1284,28 @@ export default function MapView({ selectedLine, stationStopId, onLineSelect, onS
         // a line from there, instead of being dropped into whichever
         // route's dot Mapbox happened to return first.
         map.on("click", "subway-stops-hit", (e: unknown) => {
-          showStopPopup(e);
           const ev = e as {
             features?: {
               geometry: GeoJSON.Point;
               properties?: { stopId?: string };
             }[];
+            point?: { x: number; y: number };
           };
+          // A train sitting STOPPED_AT a platform renders on top of the
+          // station dot; without this guard, tapping that train would
+          // fire BOTH this handler (open StationPanel) and the train
+          // handler (enter follow mode). Train marker wins — visually
+          // it's what the rider tapped, and the station is one tap
+          // away via the line-and-stop list inside the follow capsule.
+          if (ev.point) {
+            const trainHit = (map as unknown as {
+              queryRenderedFeatures: (p: unknown, o: unknown) => unknown[];
+            }).queryRenderedFeatures(ev.point, {
+              layers: ["subway-trains-icon"],
+            });
+            if (trainHit.length > 0) return;
+          }
+          showStopPopup(e);
           const feat = ev.features?.[0];
           const stopId = feat?.properties?.stopId;
           if (!stopId) return;
