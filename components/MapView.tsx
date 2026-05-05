@@ -1911,11 +1911,14 @@ export default function MapView({ selectedLine, stationStopId, onLineSelect, onS
         map.off("rotatestart", release);
       };
     } else {
-      // Exit — restore flat top-down view with a longer ease so the
-      // rider's eye can re-orient.
+      // Exit — restore flat top-down view. Shorter ease than the
+      // entrance: when the rider's release gesture was a pan, they
+      // want to keep panning, not wait for the camera to finish
+      // unfolding. Animating only `pitch` (center / zoom stay where
+      // the user left them) lets the pan compose with the unfold.
       map.easeTo({
         pitch: 0,
-        duration: 600,
+        duration: 400,
         essential: true,
       });
     }

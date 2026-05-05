@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Bell,
   BellRing,
@@ -15,6 +15,7 @@ import {
   Compass,
   Sparkles,
   MoreHorizontal,
+  Wand2,
 } from "lucide-react";
 import { useAlerts } from "@/lib/useAlerts";
 import { useCommute } from "@/lib/useFavorites";
@@ -27,6 +28,11 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { AlertsDialog } from "./AlertsButton";
+import {
+  isGlassTiltGated,
+  isGlassTiltGranted,
+  requestGlassTiltPermission,
+} from "./GlassTilt";
 
 // ─── MoreSheet ───────────────────────────────────────────────────────
 // Secondary-actions menu reachable from a "More" button in the floating
@@ -71,6 +77,21 @@ export default function MoreSheet({ open, onClose, onSetHome, onSetWork }: Props
   const { home, work, setAnchor } = useCommute();
   const [alertsOpen, setAlertsOpen] = useState(false);
   const [aboutOpen, setAboutOpen] = useState(false);
+
+  // Reactive-glass-on-tilt opt-in. Mirrors the localStorage flag the
+  // `<GlassTilt />` provider reads at startup; we mirror it here so
+  // the row's enabled state updates live after the permission prompt
+  // resolves. `tiltGated` is true on iOS Safari (the only platform
+  // that hides the toggle behind a user gesture); on every other
+  // platform the orientation listener attaches automatically and the
+  // row would just confuse riders, so we omit it.
+  const [tiltGated, setTiltGated] = useState(false);
+  const [tiltGranted, setTiltGranted] = useState(false);
+  const [tiltDenied, setTiltDenied] = useState(false);
+  useEffect(() => {
+    setTiltGated(isGlassTiltGated());
+    setTiltGranted(isGlassTiltGranted());
+  }, [open]);
 
   const totalAlerts = data?.alerts.length ?? 0;
   const hasSevere = (data?.alerts ?? []).some((a) => a.severity === "severe");
@@ -255,6 +276,71 @@ export default function MoreSheet({ open, onClose, onSetHome, onSetWork }: Props
               </p>
             </div>
           </section>
+
+          {/* ─── Personalize ─── */}
+          {/* Surfaces only on iOS, where DeviceOrientation is gated
+              behind a one-time permission prompt. On every other
+              platform the tilt highlight already works without a
+              user gesture, so the row would be a confusing no-op. */}
+          {tiltGated && (
+            <section>
+              <h3 className="px-2 pb-1.5 text-[10px] font-semibold uppercase tracking-wider text-gray-500">
+                Personalize
+              </h3>
+              <button
+                type="button"
+                disabled={tiltGranted}
+                onClick={async () => {
+                  // Must run synchronously inside the click handler
+                  // for iOS to honor the permission prompt — no
+                  // `await` before the first `requestPermission()`
+                  // call. The promise resolves later, but the gesture
+                  // chain has already been preserved.
+                  const result = await requestGlassTiltPermission();
+                  if (result === "granted") {
+                    setTiltGranted(true);
+                    setTiltDenied(false);
+                  } else if (result === "denied") {
+                    setTiltDenied(true);
+                  }
+                }}
+                className={`press w-full flex items-center gap-3 px-3 py-3 rounded-2xl touch-manipulation ${
+                  tiltGranted
+                    ? "bg-emerald-500/[0.10] ring-1 ring-emerald-400/[0.20] cursor-default"
+                    : "bg-white/[0.04] hover:bg-white/[0.08]"
+                }`}
+              >
+                <span
+                  className={`flex items-center justify-center w-9 h-9 rounded-full flex-shrink-0 ${
+                    tiltGranted
+                      ? "bg-emerald-400/20 text-emerald-200 ring-1 ring-emerald-400/30"
+                      : "bg-white/[0.08] text-gray-300"
+                  }`}
+                >
+                  <Wand2 className="w-4 h-4" />
+                </span>
+                <span className="flex-1 min-w-0 text-left">
+                  <span className="block text-[14px] font-semibold text-gray-100">
+                    Reactive glass on tilt
+                  </span>
+                  <span className="block text-[12px] text-gray-400 truncate">
+                    {tiltGranted
+                      ? "Enabled — glass highlights track your phone's pose"
+                      : tiltDenied
+                        ? "Permission denied. Enable in Settings → Safari → Motion & Orientation Access"
+                        : "Make panels and pills shimmer as you tilt your phone"}
+                  </span>
+                </span>
+                {tiltGranted ? (
+                  <span className="text-[11px] font-bold uppercase tracking-wider text-emerald-300 flex-shrink-0">
+                    On
+                  </span>
+                ) : (
+                  <ChevronRight className="w-4 h-4 text-gray-500 flex-shrink-0" />
+                )}
+              </button>
+            </section>
+          )}
 
           {/* ─── About ─── */}
           <section>

@@ -16,11 +16,85 @@ const MAX_TILT_DEG = 25;
 // "real glass" rather than a gyroscope debug overlay.
 const SMOOTH = 0.18;
 
+// localStorage key for the iOS permission grant. Surviving the grant
+// across reloads matters because iOS' `requestPermission` *requires*
+// a user gesture each call, but a stored "granted" flag lets the
+// next session attach the listener directly without re-prompting.
+const PERMISSION_STORAGE_KEY = "standclear:glass-tilt-permission";
+
+// Custom event the GlassTilt instance listens for so a runtime grant
+// (e.g. from MoreSheet's "Reactive glass on tilt" toggle) can attach
+// the orientation listener without unmounting/remounting the
+// provider. The event carries no payload — the listener just calls
+// the same attach path it would on initial mount.
+const PERMISSION_EVENT = "standclear:glass-tilt-permission-granted";
+
 type WindowWithDOE = Window & {
   DeviceOrientationEvent?: typeof DeviceOrientationEvent & {
     requestPermission?: () => Promise<"granted" | "denied">;
   };
 };
+
+/**
+ * True only when the runtime is iOS Safari (or another platform that
+ * gates DeviceOrientation behind `requestPermission`). UI surfaces
+ * use this to decide whether to render the opt-in toggle at all —
+ * everywhere else the listener attaches automatically and the toggle
+ * would be confusing.
+ */
+export function isGlassTiltGated(): boolean {
+  if (typeof window === "undefined") return false;
+  const W = window as WindowWithDOE;
+  return (
+    !!W.DeviceOrientationEvent &&
+    typeof W.DeviceOrientationEvent.requestPermission === "function"
+  );
+}
+
+/**
+ * True when the rider has already granted permission in a previous
+ * session (or this one). MoreSheet uses this to render the toggle in
+ * its "on" state without re-prompting.
+ */
+export function isGlassTiltGranted(): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    return window.localStorage.getItem(PERMISSION_STORAGE_KEY) === "granted";
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Prompt the rider for DeviceOrientation permission. Must be called
+ * synchronously inside a user-gesture handler (click / pointerdown);
+ * iOS rejects the prompt otherwise. On grant, stores the flag and
+ * dispatches a custom event so the live `<GlassTilt />` instance
+ * can attach the listener without unmounting. Returns the actual
+ * outcome so callers can surface a denied state.
+ */
+export async function requestGlassTiltPermission(): Promise<
+  "granted" | "denied" | "unsupported"
+> {
+  if (typeof window === "undefined") return "unsupported";
+  const W = window as WindowWithDOE;
+  const Doe = W.DeviceOrientationEvent;
+  if (!Doe || typeof Doe.requestPermission !== "function") return "unsupported";
+  try {
+    const result = await Doe.requestPermission();
+    if (result === "granted") {
+      try {
+        window.localStorage.setItem(PERMISSION_STORAGE_KEY, "granted");
+      } catch {
+        // Quota / private mode — best-effort only.
+      }
+      window.dispatchEvent(new CustomEvent(PERMISSION_EVENT));
+    }
+    return result;
+  } catch {
+    return "denied";
+  }
+}
 
 /**
  * Drives the global `--glass-tilt-x` / `--glass-tilt-y` CSS variables
@@ -29,10 +103,12 @@ type WindowWithDOE = Window & {
  *
  *   1. DeviceOrientation events (mobile, gyroscope-equipped). Auto-
  *      attaches on platforms where permission is implicit (Android,
- *      older iOS). On iOS 13+ the gated `requestPermission` API
- *      requires a user gesture to grant — we don't auto-prompt
- *      (would feel intrusive on a transit app). A future toggle in
- *      MoreSheet can opt riders in if they want the full effect.
+ *      older iOS) and on iOS where the rider previously opted in.
+ *      On iOS 13+ the gated `requestPermission` API requires a user
+ *      gesture to grant — we don't auto-prompt (would feel intrusive
+ *      on a transit app). MoreSheet's "Reactive glass on tilt" row
+ *      drives the prompt and dispatches `PERMISSION_EVENT` on grant
+ *      so this provider can attach the listener mid-session.
  *   2. Pointer position (desktop, plus iOS without orientation
  *      permission). The tilt tracks the cursor so a user moving
  *      their mouse over a panel still gets a live, light-catching
@@ -124,17 +200,35 @@ export function GlassTilt() {
       queue();
     };
 
-    const W = window as WindowWithDOE;
-    const Doe = W.DeviceOrientationEvent;
-    // Attach orientation listener only on platforms that don't gate
-    // it behind a user-gesture permission prompt (Android, older
-    // iOS). On iOS 13+ the listener would silently no-op anyway.
-    if (Doe && typeof Doe.requestPermission !== "function") {
+    let orientationAttached = false;
+    const attachOrientation = () => {
+      if (orientationAttached) return;
+      orientationAttached = true;
       window.addEventListener(
         "deviceorientation",
         onOrientation as EventListener,
         { passive: true },
       );
+    };
+
+    const W = window as WindowWithDOE;
+    const Doe = W.DeviceOrientationEvent;
+    if (Doe) {
+      if (typeof Doe.requestPermission !== "function") {
+        // Implicit-permission platform (Android, older iOS) — the
+        // listener fires from page load.
+        attachOrientation();
+      } else if (isGlassTiltGranted()) {
+        // iOS-style gated permission, but the rider already granted
+        // it in a previous session. Reattach immediately so the
+        // tilt highlight works without a fresh prompt.
+        attachOrientation();
+      } else {
+        // Wait for an explicit grant. MoreSheet's "Reactive glass on
+        // tilt" toggle calls `requestGlassTiltPermission()`, which
+        // dispatches this event on success.
+        window.addEventListener(PERMISSION_EVENT, attachOrientation);
+      }
     }
 
     window.addEventListener("pointermove", onPointer, { passive: true });
@@ -145,6 +239,7 @@ export function GlassTilt() {
         "deviceorientation",
         onOrientation as EventListener,
       );
+      window.removeEventListener(PERMISSION_EVENT, attachOrientation);
       if (raf) cancelAnimationFrame(raf);
     };
   }, []);

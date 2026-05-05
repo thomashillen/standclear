@@ -127,10 +127,24 @@ export default function SubwayMap() {
   // the map (handled inside MapView so the lock can release on any
   // explicit camera move).
   const [followedTrainId, setFollowedTrainIdState] = useState<string | null>(null);
-  // Wrap the setter so entering follow mode also closes any sheet
-  // covering the map — a panel would defeat the cinematic shot, and
-  // every panel's open-state machine already expects mutual exclusion
-  // with the other entry points.
+  // Drop every piece of trip-overlay state in one shot. The overlay
+  // belongs to whichever sheet sourced it (SearchSheet / NearbyPanel
+  // commute card); switching to a different context — opening Near-me,
+  // tapping a line, opening a station, entering follow mode, etc. —
+  // should put the map back into all-trains mode that matches the new
+  // panel. Previously each handler cleared a different subset of these
+  // four fields, so e.g. a leftover `walkOnlyOverlay` would keep a
+  // dashed walk path painted under the next view.
+  const clearTripOverlay = useCallback(() => {
+    setSelectedTripSelection(null);
+    setFocusedLegIndex(null);
+    setWalkOnlyOverlay(null);
+    setTripDetailExpanded(false);
+  }, []);
+  // Wrap the follow setter so entering follow mode also closes any
+  // sheet covering the map — a panel would defeat the cinematic
+  // shot, and every panel's open-state machine already expects
+  // mutual exclusion with the other entry points.
   const setFollowedTrainId = useCallback((id: string | null) => {
     setFollowedTrainIdState(id);
     if (id) {
@@ -140,8 +154,12 @@ export default function SubwayMap() {
       setSelectedLine(null);
       setFocusStopId(undefined);
       setStationStopId(null);
+      // Drop the trip overlay too — a highlighted route under the
+      // cinematic frame would split the rider's attention between
+      // "that train I'm following" and "this trip I planned earlier."
+      clearTripOverlay();
     }
-  }, []);
+  }, [clearTripOverlay]);
   // Index of the leg the rider has zoomed in on from the expanded
   // route detail. Null means "frame the whole trip" (default).
   // Cleared whenever the trip selection changes so a new plan opens
@@ -236,7 +254,7 @@ export default function SubwayMap() {
       setNearbyOpen(false);
       setStationStopId(null);
       setSearchOpen(false);
-      setSelectedTripSelection(null);
+      clearTripOverlay();
     }
   };
 
@@ -248,7 +266,7 @@ export default function SubwayMap() {
     setSearchOpen(false);
     // Tapping a station drops the trip overlay — the rider has moved
     // on from the directions context.
-    setSelectedTripSelection(null);
+    clearTripOverlay();
   };
 
   const handleSearchToggle = () => {
@@ -270,6 +288,14 @@ export default function SubwayMap() {
       setFocusStopId(undefined);
       setStationStopId(null);
       setMoreOpen(false);
+    } else {
+      // Closing via the header button — drop the trip overlay so a
+      // dashed walking path or highlighted route doesn't outlive the
+      // panel that owned it. SearchSheet's own dialog-close path
+      // already clears these; the toggle button skips that callback,
+      // so without this the overlay would persist on the map after
+      // the sheet animated out.
+      clearTripOverlay();
     }
   };
 
@@ -313,16 +339,10 @@ export default function SubwayMap() {
       setStationStopId(null);
       setSearchOpen(false);
       setMoreOpen(false);
-      // Drop any active trip overlay too. The previous behavior
-      // kept the highlighted route + walking legs on the map after
-      // the rider pulled up Near-me, which made the panel and the
-      // map disagree about what context the rider was in. Near-me
-      // is "what's around me right now", so clearing the trip puts
-      // the map back into all-trains mode that matches the panel.
-      setSelectedTripSelection(null);
-      setFocusedLegIndex(null);
-      setWalkOnlyOverlay(null);
-      setTripDetailExpanded(false);
+      // Drop any active trip overlay too. Near-me is "what's around
+      // me right now"; a leftover highlighted route + walking legs
+      // would make the panel and the map disagree about context.
+      clearTripOverlay();
     }
     // Bump the signal both for open AND re-tap-while-open. Tapping
     // Near-me when the panel is already open is "find me again",
