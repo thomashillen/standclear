@@ -155,13 +155,27 @@ export function bearingDeg(
 }
 
 /**
- * Build a time-keyed trajectory for one train. Anchors at the train's
- * current arcLength (computed from `prevStopId`/`nextStopId`/`progress`)
- * at `generatedAtMs`, then appends the trip's future ETAs as waypoints.
+ * Build a time-keyed trajectory for one train, paced by the feed's
+ * reported `status` so the visualization follows reality rather than
+ * predicting against it.
+ *
+ * STOPPED_AT → single waypoint at the platform's arcLength. positionAt
+ *   clamps to that point, so the marker parks until the next poll
+ *   reports the train has left. We deliberately do NOT extend a
+ *   trajectory toward the next stop's ETA: routes whose feed only
+ *   refreshes at station boundaries (the R, certain peak express
+ *   trips) would otherwise show every train continuously creeping
+ *   forward and snapping back on each poll's reanchor.
+ *
+ * IN_TRANSIT_TO / INCOMING_AT → two waypoints: current interpolated
+ *   position now, and the predicted ETA at the *next* stop only.
+ *   Including further-future stops compounds prediction error —
+ *   each new poll's small ETA correction would ripple into a multi-
+ *   station chain and rubberband the whole length. One segment at
+ *   a time keeps each per-poll correction small.
  *
  * Returns null only when the train can't be placed on the line at all
- * (unknown prev/next stop) — callers should fall back to skipping the
- * train rather than rendering a stale state.
+ * (unknown prev/next stop).
  */
 export function buildTrajectory(
   train: Train,
@@ -181,11 +195,25 @@ export function buildTrajectory(
   const next = stopMap.get(train.nextStopId);
   if (!prev || !next) return null;
 
-  // Current arcLength: dwelling at a stop (prev === next) parks
-  // exactly at the stop's shape index; mid-segment trains
-  // interpolate by `progress`.
   const prevArc = metrics.cumLength[prev.shapeIdx];
   const nextArc = metrics.cumLength[next.shapeIdx];
+
+  // STOPPED_AT: park at the platform, full stop. Cross-station glides
+  // (A-stopped → B-stopped on the same trip) are produced by the
+  // consumer's per-frame LERP smoothing the re-anchor when the next
+  // poll lands with prev === B.
+  if (train.status === "STOPPED_AT") {
+    return {
+      trainId: train.id,
+      routeId: train.routeId,
+      waypoints: [{ arcLength: prevArc, time: generatedAtMs }],
+    };
+  }
+
+  // IN_TRANSIT_TO / INCOMING_AT: animate between current interpolated
+  // position and the next stop. Current position is taken from the
+  // segment progress (or pinned to prev if prev === next, e.g. an
+  // INCOMING_AT report at the boundary).
   const currentArc =
     prev.shapeIdx === next.shapeIdx
       ? prevArc
@@ -195,60 +223,24 @@ export function buildTrajectory(
     { arcLength: currentArc, time: generatedAtMs },
   ];
 
-  // Future ETAs become the rest of the trajectory. ETA is in seconds
-  // (see app/api/trains/route.ts: toSec → unix seconds), generatedAt
-  // is in ms — we convert at the boundary so all internal time
-  // arithmetic is in ms.
-  const futureArrivals = tripArrivals
-    .filter((a) => a.eta * 1000 > generatedAtMs)
-    .slice() // tripArrivals is already sorted in upstream pipeline,
-    // but defensive sort is cheap (≤ ~30 entries per trip).
+  // Find the predicted ETA at the *next* stop only. ETA is in seconds
+  // (see app/api/trains/route.ts: toSec → unix seconds); we convert
+  // at the boundary so all internal time arithmetic is in ms.
+  const nextStopArrivals = tripArrivals
+    .filter((a) => a.stopId === next.id && a.eta * 1000 > generatedAtMs)
     .sort((a, b) => a.eta - b.eta);
 
-  for (const a of futureArrivals) {
-    const stop = stopMap.get(a.stopId);
-    if (!stop) continue;
+  if (nextStopArrivals.length > 0) {
     waypoints.push({
-      arcLength: metrics.cumLength[stop.shapeIdx],
-      time: a.eta * 1000,
+      arcLength: nextArc,
+      time: nextStopArrivals[0].eta * 1000,
     });
-  }
-
-  // Direction sign: arcLength either increases or decreases over
-  // time, depending on whether the train runs with or against
-  // shape order. We pick the sign from the FIRST forward gap
-  // (current → first arrival) and drop any later waypoints that
-  // contradict it. A non-monotonic ETA list is a feed anomaly —
-  // showing the train teleporting backward to satisfy the data
-  // would be worse than dropping the bad point.
-  if (waypoints.length >= 2) {
-    const dir = Math.sign(waypoints[1].arcLength - waypoints[0].arcLength);
-    if (dir !== 0) {
-      const filtered: Waypoint[] = [waypoints[0]];
-      let lastArc = waypoints[0].arcLength;
-      let lastTime = waypoints[0].time;
-      for (let i = 1; i < waypoints.length; i++) {
-        const w = waypoints[i];
-        if (
-          Math.sign(w.arcLength - lastArc) === dir &&
-          w.time > lastTime
-        ) {
-          filtered.push(w);
-          lastArc = w.arcLength;
-          lastTime = w.time;
-        }
-      }
-      waypoints.length = 0;
-      waypoints.push(...filtered);
-    }
-  }
-
-  // Fallback: no future ETAs (last stop on a trip, or arrivals data
-  // hadn't caught up yet). Synthesize one waypoint at the next stop
-  // using a typical inter-station travel time so the marker still
-  // creeps forward instead of freezing.
-  if (waypoints.length === 1 && prev.shapeIdx !== next.shapeIdx) {
-    const TYPICAL_TRAVEL_SEC = 90;
+  } else if (prev.shapeIdx !== next.shapeIdx) {
+    // No ETA available for the next stop (last leg of a trip, or
+    // arrivals payload missing this entry). Fall back to typical
+    // inter-station travel time scaled by remaining progress so the
+    // marker still creeps forward instead of freezing mid-segment.
+    const TYPICAL_TRAVEL_SEC = 60;
     const remaining = 1 - train.progress;
     waypoints.push({
       arcLength: nextArc,

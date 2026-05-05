@@ -138,60 +138,70 @@ describe("buildTrajectory", () => {
     expect(traj.waypoints[0].arcLength).toBeCloseTo((arcA + arcB) / 2, 9);
   });
 
-  it("appends future arrivals as waypoints in time order", () => {
+  it("STOPPED_AT yields a single parked waypoint with no future motion", () => {
     const traj = buildTrajectory(
-      train({ prevStopId: "A", nextStopId: "B", progress: 0 }),
-      [
-        arrival({ stopId: "B", eta: NOW_SEC + 60 }),
-        arrival({ stopId: "C", eta: NOW_SEC + 180 }),
-      ],
+      train({
+        prevStopId: "B",
+        nextStopId: "B",
+        progress: 1,
+        status: "STOPPED_AT",
+      }),
+      [arrival({ stopId: "C", eta: NOW_SEC + 90 })],
       line,
       metrics,
       NOW_MS,
     )!;
-    expect(traj.waypoints).toHaveLength(3);
-    expect(traj.waypoints[1].time).toBe((NOW_SEC + 60) * 1000);
-    expect(traj.waypoints[2].time).toBe((NOW_SEC + 180) * 1000);
-    expect(traj.waypoints[2].arcLength).toBeCloseTo(metrics.cumLength[4], 9);
+    expect(traj.waypoints).toHaveLength(1);
+    expect(traj.waypoints[0].arcLength).toBeCloseTo(metrics.cumLength[2], 9);
   });
 
-  it("drops past arrivals", () => {
+  it("IN_TRANSIT_TO appends only the next stop's ETA, not further-future stops", () => {
     const traj = buildTrajectory(
-      train({ prevStopId: "A", nextStopId: "B" }),
+      train({
+        prevStopId: "A",
+        nextStopId: "B",
+        progress: 0,
+        status: "IN_TRANSIT_TO",
+      }),
       [
-        arrival({ stopId: "A", eta: NOW_SEC - 30 }),
         arrival({ stopId: "B", eta: NOW_SEC + 60 }),
+        arrival({ stopId: "C", eta: NOW_SEC + 180 }),
       ],
       line,
       metrics,
       NOW_MS,
     )!;
     expect(traj.waypoints).toHaveLength(2);
+    expect(traj.waypoints[1].time).toBe((NOW_SEC + 60) * 1000);
     expect(traj.waypoints[1].arcLength).toBeCloseTo(metrics.cumLength[2], 9);
   });
 
-  it("drops non-monotonic later arrivals (feed anomaly safety)", () => {
+  it("drops a past ETA at the next stop (and falls back to default travel)", () => {
     const traj = buildTrajectory(
-      train({ prevStopId: "A", nextStopId: "B" }),
-      [
-        arrival({ stopId: "B", eta: NOW_SEC + 60 }),
-        arrival({ stopId: "A", eta: NOW_SEC + 120 }), // backward — anomaly
-        arrival({ stopId: "C", eta: NOW_SEC + 180 }),
-      ],
+      train({
+        prevStopId: "A",
+        nextStopId: "B",
+        progress: 0,
+        status: "IN_TRANSIT_TO",
+      }),
+      [arrival({ stopId: "B", eta: NOW_SEC - 30 })],
       line,
       metrics,
       NOW_MS,
     )!;
-    expect(traj.waypoints.map((w) => w.arcLength)).toEqual([
-      metrics.cumLength[0],
-      metrics.cumLength[2],
-      metrics.cumLength[4],
-    ]);
+    expect(traj.waypoints).toHaveLength(2);
+    expect(traj.waypoints[1].arcLength).toBeCloseTo(metrics.cumLength[2], 9);
+    expect(traj.waypoints[1].time).toBe(NOW_MS + 60_000);
   });
 
-  it("synthesizes a fallback waypoint when no future arrivals exist", () => {
+  it("synthesizes a fallback waypoint when no next-stop ETA exists", () => {
     const traj = buildTrajectory(
-      train({ prevStopId: "A", nextStopId: "B", progress: 0 }),
+      train({
+        prevStopId: "A",
+        nextStopId: "B",
+        progress: 0,
+        status: "IN_TRANSIT_TO",
+      }),
       [],
       line,
       metrics,
@@ -199,8 +209,30 @@ describe("buildTrajectory", () => {
     )!;
     expect(traj.waypoints).toHaveLength(2);
     expect(traj.waypoints[1].arcLength).toBeCloseTo(metrics.cumLength[2], 9);
-    // Default 90s remaining at progress 0.
-    expect(traj.waypoints[1].time).toBe(NOW_MS + 90_000);
+    // Default 60s remaining at progress 0.
+    expect(traj.waypoints[1].time).toBe(NOW_MS + 60_000);
+  });
+
+  it("ignores a future-stop ETA that doesn't match the train's next stop", () => {
+    // Train heading A→B, but only an ETA for C is present in
+    // arrivals. We should NOT use C's ETA to pace the A→B animation;
+    // fall back to the default travel time for the current segment
+    // instead.
+    const traj = buildTrajectory(
+      train({
+        prevStopId: "A",
+        nextStopId: "B",
+        progress: 0,
+        status: "IN_TRANSIT_TO",
+      }),
+      [arrival({ stopId: "C", eta: NOW_SEC + 90 })],
+      line,
+      metrics,
+      NOW_MS,
+    )!;
+    expect(traj.waypoints).toHaveLength(2);
+    expect(traj.waypoints[1].arcLength).toBeCloseTo(metrics.cumLength[2], 9);
+    expect(traj.waypoints[1].time).toBe(NOW_MS + 60_000);
   });
 });
 
@@ -248,21 +280,26 @@ describe("positionAt", () => {
     expect(p.lat).toBeCloseTo(40.78, 4);
   });
 
-  it("crosses segment boundaries continuously (A → B → C as one ride)", () => {
-    // 60 s to B, 60 s more to C. At t = 90 s we should be halfway
-    // between B (40.76) and C (40.72) → lat 40.74.
+  it("STOPPED_AT trajectories don't drift forward over time (no rubber-band)", () => {
+    // Train parked at B. Even far in the future, the marker stays at
+    // B — the consumer's per-frame LERP handles the cross-station
+    // glide when the *next* poll moves the train to C.
     const traj = buildTrajectory(
-      train({ prevStopId: "A", nextStopId: "B", progress: 0 }),
-      [
-        arrival({ stopId: "B", eta: NOW_SEC + 60 }),
-        arrival({ stopId: "C", eta: NOW_SEC + 120 }),
-      ],
+      train({
+        prevStopId: "B",
+        nextStopId: "B",
+        progress: 1,
+        status: "STOPPED_AT",
+      }),
+      [arrival({ stopId: "C", eta: NOW_SEC + 90 })],
       line,
       metrics,
       NOW_MS,
     )!;
-    const p = positionAt(traj, line, metrics, NOW_MS + 90_000)!;
-    expect(p.lat).toBeCloseTo(40.74, 4);
+    const pNow = positionAt(traj, line, metrics, NOW_MS)!;
+    const pLater = positionAt(traj, line, metrics, NOW_MS + 60_000)!;
+    expect(pNow.lat).toBeCloseTo(40.76, 6);
+    expect(pLater.lat).toBeCloseTo(40.76, 6);
   });
 
   it("orients southbound trains to ~180°", () => {
