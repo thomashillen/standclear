@@ -557,20 +557,6 @@ export default function MapView({ selectedLine, stationStopId, onLineSelect, onS
           data: { type: "FeatureCollection", features: [] },
         });
 
-        // Motion trails — a per-train LineString of the last few seconds
-        // of positions. Sampled at TRAIL_SAMPLE_MS in the train animation
-        // tick and rendered as a low-opacity ribbon beneath each train so
-        // even a static map screenshot communicates "this thing is
-        // moving." `lineMetrics: true` is reserved here in case we later
-        // want to drive `line-gradient` for a head→tail fade; the current
-        // layer uses constant opacity, which is enough for the effect at
-        // typical zooms and avoids the per-feature gradient limitation.
-        map.addSource("subway-train-trails", {
-          type: "geojson",
-          data: { type: "FeatureCollection", features: [] },
-          lineMetrics: true,
-        });
-
         // Single-point source for the user's current location. Driven by
         // `useGeolocationState` — populated only when Near Me (or any
         // other opted-in consumer) has the watch running, so the map
@@ -939,39 +925,6 @@ export default function MapView({ selectedLine, stationStopId, onLineSelect, onS
           13, 0.74,
           14, 1.03,
         ];
-
-        // Motion trails — added before the train-icon layer (stack order
-        // is insertion order), so each capsule paints on top of its own
-        // trail. Width and opacity ramp in with zoom: at city overview
-        // the trails would smear across the whole system, but as the
-        // rider zooms into a neighborhood each train picks up a subtle
-        // colored ribbon.
-        map.addLayer({
-          id: "subway-train-trails",
-          type: "line",
-          source: "subway-train-trails",
-          layout: {
-            "line-cap": "round",
-            "line-join": "round",
-          },
-          paint: {
-            "line-color": ["get", "color"],
-            "line-opacity": [
-              "interpolate", ["linear"], ["zoom"],
-              11, 0,
-              12, 0.18,
-              13, 0.35,
-              14.5, 0.45,
-            ],
-            "line-width": [
-              "interpolate", ["linear"], ["zoom"],
-              11, 1.5,
-              13, 3,
-              15, 4.5,
-            ],
-            "line-blur": 0.5,
-          },
-        });
 
         map.addLayer({
           id: "subway-trains-icon",
@@ -1440,24 +1393,10 @@ export default function MapView({ selectedLine, stationStopId, onLineSelect, onS
     let lastData: typeof dataRef.current = null;
     let trainsByRoute: Map<string, Train[]> = new Map();
 
-    // Motion-trail history. We sample every TRAIL_SAMPLE_MS so a 6-second
-    // trail lands at ~24 vertices — plenty for a smooth ribbon, cheap
-    // enough to rebuild the entire FeatureCollection each tick. The
-    // sample-vs-tick split matters: ticking at 30fps would record 180
-    // points in 6 s, redundant for the visual effect and pricier to
-    // serialize into a GeoJSON LineString every frame.
-    const TRAIL_SAMPLE_MS = 250;
-    const TRAIL_MAX_AGE_MS = 6000;
-    const TRAIL_MIN_VERTICES = 2;
-    const trainTrails = new Map<
-      string,
-      {
-        // [lng, lat, capturedAtMs] tuples, oldest first.
-        points: [number, number, number][];
-        lastSampleMs: number;
-        color: string;
-      }
-    >();
+    // Latest rendered (post-stack-offset) position per train, captured
+    // each tick where the marker feature is pushed. Used by follow-mode
+    // to recenter on the same point the rider sees on screen.
+    const lastRenderById = new Map<string, [number, number]>();
     // Per-train motion state. baseProgress/baseTime is the last point we
     // trust from the server; velocity is learned from poll-to-poll deltas.
     // prevStopId/nextStopId pin the segment — if the train crosses a stop,
@@ -1714,78 +1653,26 @@ export default function MapView({ selectedLine, stationStopId, onLineSelect, onS
             },
             geometry: { type: "Point", coordinates: [renderLng, renderLat] },
           });
-
-          // Sample this train's render position into its trail history
-          // at TRAIL_SAMPLE_MS cadence. Storing post-stack-offset
-          // coordinates means the trail lines up exactly with the icon
-          // even where multiple trains share a platform; sampling
-          // pre-offset would make trails shimmy across stack lanes as
-          // bucket membership shifts.
-          let trail = trainTrails.get(c.trainId);
-          if (!trail) {
-            trail = { points: [], lastSampleMs: 0, color: c.line.color };
-            trainTrails.set(c.trainId, trail);
-          }
-          if (nowMs - trail.lastSampleMs >= TRAIL_SAMPLE_MS) {
-            trail.points.push([renderLng, renderLat, nowMs]);
-            trail.lastSampleMs = nowMs;
-            // Drop expired tail points. Trails older than the max-age
-            // threshold are physically wherever the train was 6 s ago,
-            // which at typical subway speed is half a block back —
-            // beyond that the line just fights the icon for attention.
-            const cutoff = nowMs - TRAIL_MAX_AGE_MS;
-            while (trail.points.length > 0 && trail.points[0][2] < cutoff) {
-              trail.points.shift();
-            }
-          }
-          // Keep color in sync if the upstream `lines` data ever
-          // re-colors a route (rare, but cheap to keep correct).
-          trail.color = c.line.color;
+          lastRenderById.set(c.trainId, [renderLng, renderLat]);
         }
       }
 
       // Drop state for trains that vanished (e.g. completed trip) so the
-      // map doesn't leak memory over long sessions. The trail map is
-      // pruned alongside so its entries don't outlive their owners.
+      // map doesn't leak memory over long sessions.
       if (seen.size !== trainState.size) {
         for (const id of trainState.keys()) if (!seen.has(id)) trainState.delete(id);
       }
-      if (seen.size !== trainTrails.size) {
-        for (const id of trainTrails.keys())
-          if (!seen.has(id)) trainTrails.delete(id);
+      if (seen.size !== lastRenderById.size) {
+        for (const id of lastRenderById.keys())
+          if (!seen.has(id)) lastRenderById.delete(id);
       }
       const src = map.getSource("subway-trains");
       src?.setData({ type: "FeatureCollection", features });
 
-      // ── Motion trails ──────────────────────────────────────────────────
-      // Build a fresh FeatureCollection of LineStrings, one per train
-      // that has at least TRAIL_MIN_VERTICES samples. Constructing
-      // every tick rather than diffing is fine — the array is small
-      // (≤ ~700 trains × ≤ 24 points) and Mapbox's setData handles
-      // the upload as a single buffer rebuild.
-      const trailFeatures: GeoJSON.Feature[] = [];
-      for (const [id, trail] of trainTrails) {
-        if (trail.points.length < TRAIL_MIN_VERTICES) continue;
-        trailFeatures.push({
-          type: "Feature",
-          properties: { id, color: trail.color },
-          geometry: {
-            type: "LineString",
-            coordinates: trail.points.map(([lng, lat]) => [lng, lat]),
-          },
-        });
-      }
-      const trailSrc = map.getSource("subway-train-trails");
-      trailSrc?.setData({
-        type: "FeatureCollection",
-        features: trailFeatures,
-      });
-
       // ── Cinematic follow-my-train ──────────────────────────────────────
       // While a follow lock is active, recenter the camera on the
-      // followed train every tick. We use the latest entry in its
-      // trail history (which we just appended above) so the camera
-      // tracks the same point the rider sees rendered. easeTo with a
+      // followed train every tick using the same post-stack-offset
+      // position the marker was just rendered at. easeTo with a
       // short 250ms duration smooths the per-tick jitter without
       // lagging behind real motion. Pitch + zoom only get applied
       // once at lock-on so subsequent ticks don't fight the rider's
@@ -1793,8 +1680,7 @@ export default function MapView({ selectedLine, stationStopId, onLineSelect, onS
       // exit behavior.
       const followId = followedTrainIdRef.current;
       if (followId) {
-        const trail = trainTrails.get(followId);
-        const head = trail?.points[trail.points.length - 1];
+        const head = lastRenderById.get(followId);
         if (head) {
           const [followLng, followLat] = head;
           map.easeTo({
