@@ -1389,8 +1389,23 @@ export default function MapView({ selectedLine, stationStopId, onLineSelect, onS
         essential: true,
       });
       // Any explicit camera gesture from the rider — drag, pinch,
-      // double-tap zoom — releases the lock. easeTo from inside the
-      // tick doesn't fire dragstart, so these only catch user input.
+      // pitch, rotate — releases the lock. We listen on `move`
+      // gated by `originalEvent` instead of dragstart/rotatestart/
+      // pitchstart for two reasons:
+      //
+      //   1. dragstart only fires after a small movement threshold;
+      //      during that pre-threshold window the rAF tick is still
+      //      issuing recenter eases, which makes the drag feel dead
+      //      until the threshold trips. `move` fires from the very
+      //      first input frame, so the release happens instantly.
+      //   2. pitchstart and zoomstart fire from programmatic eases
+      //      too — including the entrance ease (pitch:50, zoom:15.5)
+      //      that THIS effect schedules immediately above. Binding
+      //      pitchstart here would self-fire on entry and exit follow
+      //      mode the same frame the rider activated it. `move` with
+      //      `originalEvent` is the only event Mapbox sets ONLY on
+      //      user-driven camera changes, so we can't accidentally
+      //      release ourselves.
       //
       // The release order matters:
       //   1. Clear `followedTrainIdRef.current` SYNCHRONOUSLY so the
@@ -1410,13 +1425,13 @@ export default function MapView({ selectedLine, stationStopId, onLineSelect, onS
         map.stop();
         onFollowTrainRef.current?.(null);
       };
-      map.on("dragstart", release);
-      map.on("rotatestart", release);
-      map.on("pitchstart", release);
+      const onMove = (e: unknown) => {
+        const ev = e as { originalEvent?: Event };
+        if (ev?.originalEvent) release();
+      };
+      map.on("move", onMove);
       return () => {
-        map.off("dragstart", release);
-        map.off("rotatestart", release);
-        map.off("pitchstart", release);
+        map.off("move", onMove);
       };
     } else {
       // Exit — restore flat top-down view. Shorter ease than the
