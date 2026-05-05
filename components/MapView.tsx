@@ -2000,9 +2000,15 @@ export default function MapView({ selectedLine, stationStopId, onLineSelect, onS
     const vw = typeof window !== "undefined" ? window.innerWidth : 0;
     const vh = typeof window !== "undefined" ? window.innerHeight : 0;
     const isSmallScreen = vw < 640;
+    // Bottom padding tracks the NearbyPanel's half-detent height
+    // (50dvh of visible panel) plus a 10dvh buffer so the user dot
+    // lands well above the panel's top edge instead of pressed up
+    // against it. When the panel is at full detent this still
+    // works — the dot just lands proportionally higher in the
+    // visible map area.
     const padding = panelOpenRef.current
       ? isSmallScreen
-        ? { bottom: Math.round(vh * 0.55) }
+        ? { bottom: Math.round(vh * 0.6) }
         : { right: 360 }
       : undefined;
 
@@ -2041,9 +2047,15 @@ export default function MapView({ selectedLine, stationStopId, onLineSelect, onS
     const vw = typeof window !== "undefined" ? window.innerWidth : 0;
     const vh = typeof window !== "undefined" ? window.innerHeight : 0;
     const isSmallScreen = vw < 640;
+    // Bottom padding tracks the NearbyPanel's half-detent height
+    // (50dvh of visible panel) plus a 10dvh buffer so the user dot
+    // lands well above the panel's top edge instead of pressed up
+    // against it. When the panel is at full detent this still
+    // works — the dot just lands proportionally higher in the
+    // visible map area.
     const padding = panelOpenRef.current
       ? isSmallScreen
-        ? { bottom: Math.round(vh * 0.55) }
+        ? { bottom: Math.round(vh * 0.6) }
         : { right: 360 }
       : undefined;
     map.flyTo({

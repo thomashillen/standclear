@@ -90,7 +90,7 @@ export default function MoreSheet({ open, onClose, onSetHome, onSetWork }: Props
   // enough that a fixed full-height sheet works). Both rests sit at
   // 0px so the tap-to-toggle is a visual no-op while drag-down past
   // the dismiss threshold still fires onClose.
-  const { sheetStyle, handlers, onHandleTap, isDragging } = useSheetDrag({
+  const { sheetStyle, handlers, contentHandlers, onHandleTap, isDragging } = useSheetDrag({
     halfRestingY: "0px",
     open,
     onDismiss: onClose,
@@ -148,7 +148,13 @@ export default function MoreSheet({ open, onClose, onSetHome, onSetWork }: Props
           </button>
         </div>
 
-        <div className="flex-1 overflow-y-auto ios-scroll px-3 pb-4 space-y-4">
+        <div
+          className="flex-1 overflow-y-auto ios-scroll px-3 pb-4 space-y-4"
+          onTouchStart={contentHandlers.onTouchStart}
+          onTouchMove={contentHandlers.onTouchMove}
+          onTouchEnd={contentHandlers.onTouchEnd}
+          onTouchCancel={contentHandlers.onTouchCancel}
+        >
           {/* ─── Service alerts ─── */}
           <section>
             <h3 className="px-2 pb-1.5 text-[10px] font-semibold uppercase tracking-wider text-gray-500">

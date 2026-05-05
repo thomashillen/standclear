@@ -342,7 +342,7 @@ export default function LinePanel({ lineId, focusStopId, onClose, onStationOpen 
   // Three-detent bottom sheet: half (default), full, and dismissed. The
   // sheet DOM is always `full` tall — detent switches just animate a
   // translateY. Tap the handle to toggle; swipe down from half to dismiss.
-  const { detent, sheetStyle, handlers, onHandleTap, isDragging } = useSheetDrag({
+  const { detent, sheetStyle, handlers, contentHandlers, onHandleTap, isDragging } = useSheetDrag({
     halfRestingY: "calc(100dvh - var(--panel-top-rest) - 50dvh)",
     open: true,
     onDismiss: onClose,
@@ -465,6 +465,10 @@ export default function LinePanel({ lineId, focusStopId, onClose, onStationOpen 
         style={{
           paddingBottom: detent === "half" ? "calc(88dvh - 50dvh)" : undefined,
         }}
+        onTouchStart={contentHandlers.onTouchStart}
+        onTouchMove={contentHandlers.onTouchMove}
+        onTouchEnd={contentHandlers.onTouchEnd}
+        onTouchCancel={contentHandlers.onTouchCancel}
       >
         {!data && (
           <div className="text-center text-xs text-gray-500 py-8 animate-pulse">

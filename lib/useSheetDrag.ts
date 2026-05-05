@@ -17,6 +17,25 @@ interface SheetDragResult {
     onPointerUp: (e: React.PointerEvent<HTMLElement>) => void;
     onPointerCancel: (e: React.PointerEvent<HTMLElement>) => void;
   };
+  // Touch handlers to attach to the sheet's *scrollable content
+  // region* (NOT the header). When the rider's finger starts at the
+  // top of the scroll (`scrollTop === 0`), these promote a vertical
+  // drag into a detent change instead of a no-op rubber-band:
+  //
+  //   • half  + drag-up   → expand to full
+  //   • full  + drag-down → collapse to half
+  //   • half  + drag-down → dismiss (when `dismissOnDrag`)
+  //
+  // Mirrors the iOS native sheet pattern where the boundary between
+  // "scroll content" and "drag sheet" is whether the content has
+  // already scrolled. If the rider starts mid-scroll, native scroll
+  // wins and we step out of the way.
+  contentHandlers: {
+    onTouchStart: (e: React.TouchEvent<HTMLElement>) => void;
+    onTouchMove: (e: React.TouchEvent<HTMLElement>) => void;
+    onTouchEnd: () => void;
+    onTouchCancel: () => void;
+  };
   // Optional handler to toggle detent on tap (without a drag).
   onHandleTap: () => void;
   // True while a pointer drag is in flight. Surfaces wire this into
@@ -167,6 +186,70 @@ export function useSheetDrag({
     },
   };
 
+  // ── Content-area scroll-driven detent gestures ────────────────────
+  // Track per-touch start position + scrollTop. We only care about
+  // gestures that start at the top of the scrollable region; a touch
+  // that starts mid-scroll is ordinary list scrolling and we get out
+  // of its way. `EXPAND_THRESHOLD_PX` is the minimal upward delta
+  // that promotes a half→full; deliberately small so a rider's first
+  // upward flick is rewarded immediately rather than fighting native
+  // scroll bounce. The dismiss / collapse thresholds reuse
+  // `dismissPx` / `commitPx` so they match the header-drag commit
+  // distances — same gesture, two tap targets.
+  const contentDragRef = useRef<{
+    startY: number;
+    startScrollTop: number;
+    fired: boolean;
+  } | null>(null);
+  const EXPAND_THRESHOLD_PX = 12;
+
+  const contentHandlers = {
+    onTouchStart: (e: React.TouchEvent<HTMLElement>) => {
+      if (!isDraggable()) {
+        contentDragRef.current = null;
+        return;
+      }
+      const el = e.currentTarget as HTMLElement;
+      contentDragRef.current = {
+        startY: e.touches[0].clientY,
+        startScrollTop: el.scrollTop,
+        fired: false,
+      };
+    },
+    onTouchMove: (e: React.TouchEvent<HTMLElement>) => {
+      const ref = contentDragRef.current;
+      if (!ref || ref.fired) return;
+      // Only the gestures that *began* at the top of scroll convert
+      // into detent changes. If startScrollTop > 0 the rider was
+      // already scrolling and the content owns the gesture.
+      if (ref.startScrollTop > 0) {
+        contentDragRef.current = null;
+        return;
+      }
+      const dy = e.touches[0].clientY - ref.startY;
+      if (detent === "half") {
+        if (dy < -EXPAND_THRESHOLD_PX) {
+          ref.fired = true;
+          setDetent("full");
+        } else if (dy > dismissPx && dismissOnDrag) {
+          ref.fired = true;
+          onDismiss();
+        }
+      } else {
+        if (dy > commitPx) {
+          ref.fired = true;
+          setDetent("half");
+        }
+      }
+    },
+    onTouchEnd: () => {
+      contentDragRef.current = null;
+    },
+    onTouchCancel: () => {
+      contentDragRef.current = null;
+    },
+  };
+
   // Tap on the handle (no drag) toggles between detents — a one-tap
   // alternative for users who don't discover the drag gesture.
   const onHandleTap = useCallback(() => {
@@ -186,5 +269,13 @@ export function useSheetDrag({
       }
     : {};
 
-  return { detent, setDetent, sheetStyle, handlers, onHandleTap, isDragging };
+  return {
+    detent,
+    setDetent,
+    sheetStyle,
+    handlers,
+    contentHandlers,
+    onHandleTap,
+    isDragging,
+  };
 }

@@ -670,7 +670,7 @@ export default function NearbyPanel({
   // station card or the Going-to card — leaving the map dominant on
   // first paint. Returning riders who explicitly pulled the sheet to
   // full have that preference restored from localStorage just below.
-  const { detent, sheetStyle, handlers, onHandleTap, setDetent, isDragging } = useSheetDrag({
+  const { detent, sheetStyle, handlers, contentHandlers, onHandleTap, setDetent, isDragging } = useSheetDrag({
     // Panel height is now (100dvh - var(--panel-top-rest)) since we
     // switched from a fixed h-[88dvh] to a top-anchored layout. The
     // half-detent translation = panel_height - desired_visible, so
@@ -687,13 +687,6 @@ export default function NearbyPanel({
       }
     },
   });
-
-  // Tracks the start of a content-area touch so an upward drag at
-  // half detent expands the sheet (iOS bottom-sheet pattern). We
-  // remember scrollTop at touchstart to make sure we only intercept
-  // pulls that started at the top of the list — partway-down drags
-  // continue scrolling content as expected.
-  const contentDragRef = useRef<{ startY: number; startScrollTop: number } | null>(null);
 
   // Restore the rider's last-used detent on first open. Initial
   // useState in useSheetDrag stays at "half" (SSR-safe), then this
@@ -792,23 +785,10 @@ export default function NearbyPanel({
         style={{
           paddingBottom: "calc(38dvh + 1rem + env(safe-area-inset-bottom))",
         }}
-        onTouchStart={(e) => {
-          // Track the start of a content-area swipe so we can promote
-          // an upward drag at half detent into an expand-to-full,
-          // mirroring iOS bottom-sheet behavior. Only the first touch
-          // counts; multi-touch (pinch) is ignored.
-          if (detent !== "half") {
-            contentDragRef.current = null;
-            return;
-          }
-          contentDragRef.current = {
-            startY: e.touches[0].clientY,
-            startScrollTop: e.currentTarget.scrollTop,
-          };
-        }}
+        onTouchStart={contentHandlers.onTouchStart}
         onTouchMove={(e) => {
-          // Match SearchSheet: scrolling the list dismisses any focused
-          // on-screen keyboard so the rider can see the full results.
+          // Scrolling the list dismisses any focused on-screen
+          // keyboard so the rider can see the full results.
           const el = document.activeElement;
           if (
             el instanceof HTMLElement &&
@@ -816,23 +796,10 @@ export default function NearbyPanel({
           ) {
             el.blur();
           }
-          // iOS bottom-sheet pattern: if the rider pulls up from the
-          // top of the content, expand the panel to full instead of
-          // (or in addition to) scrolling. Tiny threshold so a tap-
-          // wobble doesn't trigger, but anything meaningful pulls up.
-          if (detent !== "half" || !contentDragRef.current) return;
-          const dy = e.touches[0].clientY - contentDragRef.current.startY;
-          if (dy < -12 && contentDragRef.current.startScrollTop <= 0) {
-            setDetent("full");
-            contentDragRef.current = null;
-          }
+          contentHandlers.onTouchMove(e);
         }}
-        onTouchEnd={() => {
-          contentDragRef.current = null;
-        }}
-        onTouchCancel={() => {
-          contentDragRef.current = null;
-        }}
+        onTouchEnd={contentHandlers.onTouchEnd}
+        onTouchCancel={contentHandlers.onTouchCancel}
       >
         {/* Out-of-service-area banner. When the rider's location
             resolves to a point >50mi from any NYC stop, the

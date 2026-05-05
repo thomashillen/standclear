@@ -397,7 +397,7 @@ export default function StationPanel({ stopId, onClose, onSelectLine }: Props) {
   // sheet's lifetime — no extra gating needed.
   const now = useNow(true);
 
-  const { detent, sheetStyle, handlers, onHandleTap, isDragging } = useSheetDrag({
+  const { detent, sheetStyle, handlers, contentHandlers, onHandleTap, isDragging } = useSheetDrag({
     halfRestingY: "calc(100dvh - var(--panel-top-rest) - 55dvh)",
     open: true,
     onDismiss: onClose,
@@ -503,6 +503,10 @@ export default function StationPanel({ stopId, onClose, onSelectLine }: Props) {
         style={{
           paddingBottom: detent === "half" ? "calc(88dvh - 55dvh)" : undefined,
         }}
+        onTouchStart={contentHandlers.onTouchStart}
+        onTouchMove={contentHandlers.onTouchMove}
+        onTouchEnd={contentHandlers.onTouchEnd}
+        onTouchCancel={contentHandlers.onTouchCancel}
       >
         {!data && (
           <div className="text-center text-xs text-gray-500 py-8 animate-pulse">

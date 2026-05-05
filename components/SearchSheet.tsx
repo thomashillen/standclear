@@ -807,7 +807,7 @@ export default function SearchSheet({
   // the trip than they want. Drop to ~38dvh (matching NearbyPanel) so
   // the map dominates while detail steps are still glanceable.
   const halfVisibleDvh = expandedPlan ? 38 : 60;
-  const { detent, sheetStyle, handlers, onHandleTap, setDetent, isDragging } = useSheetDrag({
+  const { detent, sheetStyle, handlers, contentHandlers, onHandleTap, setDetent, isDragging } = useSheetDrag({
     halfRestingY: `calc(100dvh - var(--panel-top-rest) - ${halfVisibleDvh}dvh)`,
     open,
     onDismiss: onClose,
@@ -1082,8 +1082,11 @@ export default function SearchSheet({
         // keyboard collapses and the full list becomes visible. Tap
         // gestures alone don't fire touchmove, so this only triggers
         // on actual scrolls. blur() is idempotent — repeated calls
-        // during a drag are harmless.
-        onTouchMove={() => {
+        // during a drag are harmless. Then hand off to the hook's
+        // content gesture handlers so a top-of-list pull also drives
+        // detent changes.
+        onTouchStart={contentHandlers.onTouchStart}
+        onTouchMove={(e) => {
           const el = document.activeElement;
           if (
             el instanceof HTMLElement &&
@@ -1091,7 +1094,10 @@ export default function SearchSheet({
           ) {
             el.blur();
           }
+          contentHandlers.onTouchMove(e);
         }}
+        onTouchEnd={contentHandlers.onTouchEnd}
+        onTouchCancel={contentHandlers.onTouchCancel}
       >
         {mode === "search" ? (
           searchResults === null && searchPlaceResults.length === 0 ? (
