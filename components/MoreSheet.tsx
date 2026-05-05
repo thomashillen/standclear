@@ -111,7 +111,7 @@ export default function MoreSheet({ open, onClose, onSetHome, onSetWork }: Props
         className="
           absolute z-20 overflow-hidden flex flex-col
           inset-x-0 bottom-0 top-[var(--panel-top-rest)] rounded-t-[28px] border-t border-white/[0.08]
-          sm:inset-auto sm:right-3 sm:top-3 sm:bottom-3 sm:w-[340px] sm:h-auto sm:rounded-[22px] sm:border sm:border-white/[0.08]
+          sm:inset-auto sm:right-3 sm:top-[var(--panel-top-rest)] sm:bottom-3 sm:w-[340px] sm:h-auto sm:rounded-[22px] sm:border sm:border-white/[0.08]
           ios-glass ios-glass--sheet
           shadow-[0_20px_60px_-10px_rgba(0,0,0,0.6)]
           pb-[env(safe-area-inset-bottom)]

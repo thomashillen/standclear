@@ -269,6 +269,7 @@ export default function SubwayMap() {
       setSelectedLine(null);
       setFocusStopId(undefined);
       setStationStopId(null);
+      setMoreOpen(false);
     }
   };
 
@@ -311,6 +312,7 @@ export default function SubwayMap() {
       setFocusStopId(undefined);
       setStationStopId(null);
       setSearchOpen(false);
+      setMoreOpen(false);
     }
     // Bump the signal both for open AND re-tap-while-open. Tapping
     // Near-me when the panel is already open is "find me again",

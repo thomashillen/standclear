@@ -142,7 +142,11 @@ export default function LinePicker({ lines, selectedLine, onSelect }: LinePicker
         <button
           // Sized to match the live-count pill (h-9 / 36px) so the
           // header reads as a row of consistent-height controls.
-          className="press flex items-center gap-1.5 px-2.5 h-9 rounded-full bg-white/[0.08] hover:bg-white/[0.12] border border-white/[0.08] min-w-0 max-w-[260px] touch-manipulation transition-colors"
+          // Same `ios-glass--header` material as the rest of the
+          // floating top row so the picker reads as part of the same
+          // family — backdrop blur, tilt-reactive specular, and the
+          // ambient line-color tint when something is selected.
+          className="press flex items-center gap-1.5 px-2.5 h-9 rounded-full ios-glass ios-glass--header border border-white/[0.10] shadow-[0_6px_20px_rgba(0,0,0,0.45)] min-w-0 max-w-[260px] touch-manipulation transition-colors"
           aria-label={selected ? `Line ${selected.id} — ${selected.name}. Tap to choose another line.` : "Choose a subway line"}
         >
           {selected ? (

@@ -676,7 +676,7 @@ export default function NearbyPanel({
     // half-detent translation = panel_height - desired_visible, so
     // it now follows the var so the visible strip stays at ~38dvh
     // regardless of safe-area or whether a Route-shown pill is up.
-    halfRestingY: "calc(100dvh - var(--panel-top-rest) - 38dvh)",
+    halfRestingY: "calc(100dvh - var(--panel-top-rest) - 50dvh)",
     open,
     onDismiss: onClose,
     onDetentChange: (d) => {
@@ -780,17 +780,17 @@ export default function NearbyPanel({
 
       <div
         className="flex-1 overflow-y-auto ios-scroll"
-        // At half detent the sheet hangs ~50dvh below the visible
-        // viewport (88dvh tall, ~38dvh visible), so the last items in
+        // At half detent the sheet hangs ~38dvh below the visible
+        // viewport (88dvh tall, ~50dvh visible), so the last items in
         // the scroll content end up physically below where the rider
-        // can see. Adding 50dvh of bottom padding pushes the
+        // can see. Adding 38dvh of bottom padding pushes the
         // scrollable bottom past the overlap — the rider can scroll
         // to the end without dragging the sheet up. Harmless at full
         // detent (just adds dead space at the bottom of the list,
         // which already has visual breathing room from the safe-area
         // inset).
         style={{
-          paddingBottom: "calc(50dvh + 1rem + env(safe-area-inset-bottom))",
+          paddingBottom: "calc(38dvh + 1rem + env(safe-area-inset-bottom))",
         }}
         onTouchStart={(e) => {
           // Track the start of a content-area swipe so we can promote
