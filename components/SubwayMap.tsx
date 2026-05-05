@@ -198,15 +198,18 @@ export default function SubwayMap() {
   // Bottom-padding fraction MapView reserves when fitting the
   // selected trip's bounds. Depends on which panel actually sourced
   // the selection — SearchSheet's plan-list view occupies ~62dvh
-  // (full list scroll), but its detail view, NearbyPanel's
-  // half-detent commute card, and other compact entry points only
-  // take ~42dvh. Using a single boolean ("expanded?") would zoom out
-  // unnecessarily for any non-Search source. Computing it here keeps
-  // MapView ignorant of which sheet drove the selection.
+  // (full list scroll), NearbyPanel's half-detent commute card
+  // covers ~50dvh (see halfRestingY in NearbyPanel.tsx), and the
+  // SearchSheet detail view sits at ~38dvh. Using one fraction for
+  // every non-Search source previously cropped the bottom of routes
+  // tapped from NearbyPanel because 0.42 underestimates the half
+  // detent's true coverage by ~8dvh. Computing it here keeps MapView
+  // ignorant of which sheet drove the selection.
   const tripFitBottomDvh = useMemo(() => {
     if (searchOpen && !tripDetailExpanded) return 0.62;
+    if (nearbyOpen) return 0.52;
     return 0.42;
-  }, [searchOpen, tripDetailExpanded]);
+  }, [searchOpen, tripDetailExpanded, nearbyOpen]);
   // Fly-to-user signal — increments each time the user taps Near-me so
   // MapView can fly the camera to their location (waiting for geo if it
   // isn't available yet). Counter, not a boolean, so successive taps

@@ -429,6 +429,31 @@ function makeTrainGlowIcon(): ImageData {
   return ctx.getImageData(0, 0, W, H);
 }
 
+// Resolve the top camera padding needed for fitBounds calls so the
+// route's top extent clears the floating header. The header height is
+// `var(--panel-top-rest)` = `max(safe-top, 0.5rem) + 4rem`, which
+// ranges from ~72px on a no-notch viewport to ~108px on a Dynamic
+// Island device. A single hardcoded value can't satisfy both — too
+// small slips routes under the header on notched devices, too large
+// over-zooms on flat ones. We measure the variable in pixels via a
+// throwaway probe (CSS `calc()` only resolves to px through layout)
+// and add a 16px breathing buffer so the route line itself doesn't
+// kiss the header's bottom edge. Falls back to 100 if the probe
+// can't run (SSR / unusual environments).
+function computeTopPad(): number {
+  if (typeof document === "undefined") return 100;
+  const probe = document.createElement("div");
+  probe.style.position = "absolute";
+  probe.style.visibility = "hidden";
+  probe.style.pointerEvents = "none";
+  probe.style.height = "var(--panel-top-rest)";
+  document.body.appendChild(probe);
+  const px = probe.getBoundingClientRect().height;
+  document.body.removeChild(probe);
+  if (!Number.isFinite(px) || px <= 0) return 100;
+  return Math.round(px) + 16;
+}
+
 export default function MapView({ selectedLine, stationStopId, onLineSelect, onStationOpen, flyToUserSignal, flyToDefaultSignal, panelOpen, selectedTrip, focusedLegIndex, walkOnlyOverlay, tripFitBottomDvh = 0.62, followedTrainId = null, onFollowTrain }: MapViewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<MapboxMap | null>(null);
@@ -2477,7 +2502,7 @@ export default function MapView({ selectedLine, stationStopId, onLineSelect, onS
       //   • SearchSheet plan-list (≈60dvh) — full list of options
       //     with auto-preselect
       //   • SearchSheet detail (≈38dvh) — a single plan's timeline
-      //   • NearbyPanel half-detent (≈38dvh) — Going-to commute card
+      //   • NearbyPanel half-detent (≈50dvh) — Going-to commute card
       // Padding the bottom of fitBounds by the panel's height keeps
       // the trip from being cropped behind it. The `+ 24` buffer is
       // breathing room above the panel's top edge. SubwayMap owns
@@ -2488,13 +2513,14 @@ export default function MapView({ selectedLine, stationStopId, onLineSelect, onS
         ? Math.round(window.innerHeight * tripFitBottomDvh) + 24
         : 60;
       const rightPad = isMobile ? 40 : 360;
+      const topPad = computeTopPad();
       map.fitBounds(
         [
           [minLng, minLat],
           [maxLng, maxLat],
         ],
         {
-          padding: { top: 100, right: rightPad, bottom: bottomPad, left: 40 },
+          padding: { top: topPad, right: rightPad, bottom: bottomPad, left: 40 },
           duration: 800,
           maxZoom: 14,
         },
@@ -2572,13 +2598,14 @@ export default function MapView({ selectedLine, stationStopId, onLineSelect, onS
       ? Math.round(window.innerHeight * 0.42) + 24
       : 60;
     const rightPad = isMobile ? 40 : 360;
+    const topPad = computeTopPad();
     map.fitBounds(
       [
         [minLng, minLat],
         [maxLng, maxLat],
       ],
       {
-        padding: { top: 100, right: rightPad, bottom: bottomPad, left: 40 },
+        padding: { top: topPad, right: rightPad, bottom: bottomPad, left: 40 },
         duration: 800,
         maxZoom: 16,
       },
