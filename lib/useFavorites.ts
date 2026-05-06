@@ -170,7 +170,29 @@ function commit(next: CommuteState) {
   subscribers.forEach((cb) => cb());
 }
 
+// Cross-tab sync: when another tab writes to KEY (or migrates from a
+// legacy key), invalidate our cached snapshot and notify subscribers
+// so the second tab's UI doesn't show stale Home/Work/favorites until
+// next reload. Bound once on first subscribe; the listener is a
+// module-lifetime singleton, so we don't unbind on the last unsubscribe.
+let storageListenerBound = false;
+function bindStorageListener() {
+  if (storageListenerBound || typeof window === "undefined") return;
+  storageListenerBound = true;
+  window.addEventListener("storage", (e) => {
+    // Storage events fire for sessionStorage too; the key check is
+    // already specific enough to ignore those (the keys we own all
+    // sit under "standclear:" / "subwaysurfer:"), so we don't need to
+    // filter on e.storageArea (which jsdom doesn't reliably populate).
+    if (e.key !== KEY && e.key !== KEY_V3_LEGACY && e.key !== KEY_V2 && e.key !== KEY_V1)
+      return;
+    cache = null;
+    subscribers.forEach((cb) => cb());
+  });
+}
+
 function subscribe(cb: () => void): () => void {
+  if (subscribers.size === 0) bindStorageListener();
   subscribers.add(cb);
   return () => {
     subscribers.delete(cb);

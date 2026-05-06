@@ -221,6 +221,11 @@ export function makeDebouncedSuggester(
           ) {
             return;
           }
+          // Surface real failures (missing token, 401, 429, network)
+          // to the dev console — autocomplete still degrades to "no
+          // results" so the rider isn't stuck, but a silent miss has
+          // historically hidden config errors during deploy rollouts.
+          console.warn("Mapbox Search Box suggest failed:", err);
           onResult([]);
         });
     }, delayMs);

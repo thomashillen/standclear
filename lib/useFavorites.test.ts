@@ -250,3 +250,53 @@ describe("useCommute — anchor assignment", () => {
     expect(favs.current.has("635")).toBe(true);
   });
 });
+
+describe("useFavorites — cross-tab sync", () => {
+  beforeEach(() => {
+    localStorage.clear();
+  });
+
+  it("rehydrates when another tab writes to the v3 key", async () => {
+    const { useFavorites } = await freshImport();
+    const { result } = renderHook(() => useFavorites());
+    expect(result.current.favorites.size).toBe(0);
+
+    // Simulate a sibling tab writing the storage entry, then firing the
+    // browser-level `storage` event the listener listens for.
+    const next = JSON.stringify({
+      home: null,
+      work: null,
+      favorites: ["635", "L03"],
+    });
+    localStorage.setItem("standclear:commute:v3", next);
+    act(() => {
+      window.dispatchEvent(
+        new StorageEvent("storage", {
+          key: "standclear:commute:v3",
+          newValue: next,
+        }),
+      );
+    });
+
+    expect(result.current.has("635")).toBe(true);
+    expect(result.current.has("L03")).toBe(true);
+  });
+
+  it("ignores storage events for unrelated keys", async () => {
+    const { useFavorites } = await freshImport();
+    const { result } = renderHook(() => useFavorites());
+    act(() => result.current.toggle("635"));
+    expect(result.current.has("635")).toBe(true);
+
+    // Event for a completely unrelated key should not invalidate the cache.
+    act(() => {
+      window.dispatchEvent(
+        new StorageEvent("storage", {
+          key: "some-other-key",
+          newValue: "irrelevant",
+        }),
+      );
+    });
+    expect(result.current.has("635")).toBe(true);
+  });
+});

@@ -86,7 +86,23 @@ const subscribers = new Set<() => void>();
 // would fail useSyncExternalStore's reference check.
 const SERVER_SNAPSHOT: RecentSearch[] = [];
 
+// Cross-tab sync: a recent picked in one tab should appear in others
+// without a reload. Module-lifetime singleton listener; bound once on
+// first subscribe and never unbound (no per-tab leak — there's only
+// one window).
+let storageListenerBound = false;
+function bindStorageListener() {
+  if (storageListenerBound || typeof window === "undefined") return;
+  storageListenerBound = true;
+  window.addEventListener("storage", (e) => {
+    if (e.key !== STORAGE_KEY && e.key !== LEGACY_STORAGE_KEY) return;
+    cache = null;
+    subscribers.forEach((cb) => cb());
+  });
+}
+
 function subscribe(cb: () => void): () => void {
+  if (subscribers.size === 0) bindStorageListener();
   subscribers.add(cb);
   return () => {
     subscribers.delete(cb);
