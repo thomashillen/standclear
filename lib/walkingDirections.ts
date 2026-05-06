@@ -56,6 +56,60 @@ function cacheKey(
   return `${round(from.lng)},${round(from.lat)};${round(to.lng)},${round(to.lat)}`;
 }
 
+// Haversine distance in meters. Inlined here so this module doesn't
+// pull in stopsIndex.ts just for one call.
+function crowFliesMeters(
+  from: { lng: number; lat: number },
+  to: { lng: number; lat: number },
+): number {
+  const R = 6_371_000;
+  const toRad = (d: number) => (d * Math.PI) / 180;
+  const dLat = toRad(to.lat - from.lat);
+  const dLng = toRad(to.lng - from.lng);
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(from.lat)) * Math.cos(toRad(to.lat)) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.min(1, Math.sqrt(a)));
+}
+
+// At very short distances the street-snapped path is barely
+// distinguishable from a straight line and the Directions API call
+// is pure overhead. Below this threshold we synthesize a
+// straight-line route locally; above it we hit Mapbox.
+const SHORT_WALK_METERS = 80;
+// Mapbox's walking profile defaults to ~1.4 m/s on flat terrain.
+// We pad slightly (1.3) for traffic-light delay and curb cuts so the
+// synthesized estimate doesn't undercut the real one.
+const WALKING_SPEED_MPS = 1.3;
+
+function syntheticShortWalk(
+  from: { lng: number; lat: number },
+  to: { lng: number; lat: number },
+): WalkingRoute {
+  const meters = crowFliesMeters(from, to);
+  const seconds = meters / WALKING_SPEED_MPS;
+  return {
+    coordinates: [
+      [from.lng, from.lat],
+      [to.lng, to.lat],
+    ],
+    distance: meters,
+    duration: seconds,
+    steps: [
+      {
+        distance: meters,
+        duration: seconds,
+        instruction: "Walk to the entrance",
+        coordinates: [
+          [from.lng, from.lat],
+          [to.lng, to.lat],
+        ],
+        maneuver: "depart",
+      },
+    ],
+  };
+}
+
 interface MapboxDirectionsResponse {
   routes?: {
     distance: number;
@@ -89,6 +143,16 @@ export async function fetchWalkingRoute(
   const hit = cache.get(key);
   if (hit) return hit;
 
+  // Short hops don't deviate enough from a straight line to justify a
+  // Directions API call (and the round-trip frequently dwarfs the walk
+  // itself). Synthesize a single-step route in-process and cache it
+  // under the same key the streetwise call would use.
+  if (crowFliesMeters(from, to) < SHORT_WALK_METERS) {
+    const synthetic = Promise.resolve(syntheticShortWalk(from, to));
+    cache.set(key, synthetic);
+    return synthetic;
+  }
+
   const url = new URL(
     `https://api.mapbox.com/directions/v5/mapbox/walking/${from.lng},${from.lat};${to.lng},${to.lat}`,
   );
@@ -100,10 +164,18 @@ export async function fetchWalkingRoute(
 
   const promise = fetch(url.toString(), { signal: options.signal })
     .then(async (res): Promise<WalkingRoute | null> => {
-      if (!res.ok) return null;
+      if (!res.ok) {
+        // HTTP error — drop the cache so a retry from the UI can hit
+        // the network instead of silently returning the cached null.
+        cache.delete(key);
+        return null;
+      }
       const data = (await res.json()) as MapboxDirectionsResponse;
       const route = data.routes?.[0];
-      if (!route) return null;
+      if (!route) {
+        cache.delete(key);
+        return null;
+      }
       const steps: WalkingStep[] = [];
       for (const leg of route.legs ?? []) {
         for (const step of leg.steps ?? []) {
@@ -129,19 +201,32 @@ export async function fetchWalkingRoute(
       };
     })
     .catch((err: unknown) => {
+      // Drop the cache on any failure — abort, network, or otherwise.
+      // A cached `null` would shadow a healthy retry; better to refetch.
+      cache.delete(key);
       if (
         err &&
         typeof err === "object" &&
         "name" in err &&
         (err as { name?: string }).name === "AbortError"
       ) {
-        // Aborted requests are routine when the rider re-selects a
-        // different plan mid-fetch. Don't poison the cache.
-        cache.delete(key);
+        return null;
       }
       return null;
     });
 
   cache.set(key, promise);
   return promise;
+}
+
+/**
+ * Drop the cached entry (if any) for a from→to pair so the next call
+ * goes to the network. Used by the directions panel's retry button
+ * when a fetch failed and the rider asks for another try.
+ */
+export function clearWalkingRouteCache(
+  from: { lng: number; lat: number },
+  to: { lng: number; lat: number },
+): void {
+  cache.delete(cacheKey(from, to));
 }

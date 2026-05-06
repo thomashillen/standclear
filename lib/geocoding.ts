@@ -72,6 +72,46 @@ function trimSubtitle(raw: string | undefined): string {
     .join(", ");
 }
 
+// Session-scoped LRU cache for /suggest results. The same query +
+// proximity + limit fans out to identical Mapbox responses for the
+// session_token's lifetime, and a rider's typing flow ("br" → "broad"
+// → "broad" via backspace+retype, or two fields that share the same
+// proximity) repeats the same prefix often enough to make caching
+// pay off. We key on the query+proximity+limit tuple AND the active
+// session_token, so a token rotation invalidates entries (since
+// Mapbox's billing groups suggest+retrieve under a session, mixing
+// cached results from a closed session into a new one would let a
+// pick fall outside its session and break the retrieve). LRU bound
+// of 64 covers a typical typing flow without unbounded growth.
+const SUGGEST_CACHE_LIMIT = 64;
+const suggestCache = new Map<string, Suggestion[]>();
+
+function suggestCacheKey(
+  query: string,
+  options: { limit?: number; proximity?: { lng: number; lat: number } },
+): string {
+  const limit = String(Math.min(options.limit ?? 10, 10));
+  const prox = options.proximity
+    ? // Round proximity to ~1km so a fresh GPS sample one meter off
+      // doesn't bust the cache for an otherwise-identical query.
+      `${Math.round(options.proximity.lng * 100) / 100},${
+        Math.round(options.proximity.lat * 100) / 100
+      }`
+    : "";
+  return `${sessionToken}|${query}|${prox}|${limit}`;
+}
+
+function cacheSuggestResult(key: string, value: Suggestion[]) {
+  // LRU touch: delete + re-set moves the entry to the tail, so the
+  // oldest entry is at the head when we evict.
+  if (suggestCache.has(key)) suggestCache.delete(key);
+  suggestCache.set(key, value);
+  if (suggestCache.size > SUGGEST_CACHE_LIMIT) {
+    const firstKey = suggestCache.keys().next().value;
+    if (firstKey !== undefined) suggestCache.delete(firstKey);
+  }
+}
+
 /**
  * Live-typeahead suggestions for a partial query. Returns up to
  * `limit` ranked entries without coordinates — call `retrievePlace`
@@ -91,6 +131,15 @@ export async function suggestPlaces(
 
   const token = process.env.NEXT_PUBLIC_MAPBOX_TOKEN;
   if (!token) return [];
+
+  const cacheKey = suggestCacheKey(trimmed, options);
+  const cached = suggestCache.get(cacheKey);
+  if (cached) {
+    // LRU touch on read so frequently re-typed prefixes survive.
+    suggestCache.delete(cacheKey);
+    suggestCache.set(cacheKey, cached);
+    return cached;
+  }
 
   const url = new URL("https://api.mapbox.com/search/searchbox/v1/suggest");
   url.searchParams.set("q", trimmed);
@@ -131,6 +180,7 @@ export async function suggestPlaces(
       featureType: s.feature_type,
     });
   }
+  cacheSuggestResult(cacheKey, out);
   return out;
 }
 
@@ -172,7 +222,11 @@ export async function retrievePlace(
   const data = (await res.json()) as { features?: RetrieveFeature[] };
   // Rotate token regardless of result — the suggest/retrieve pair
   // is billed as one session whether or not the feature resolved.
+  // Drop the suggest cache too: keys embed the old token, and reusing
+  // an old session's suggestions across the token rotation would let
+  // the next retrieve land outside its session.
   sessionToken = newSessionToken();
+  suggestCache.clear();
 
   const feat = data.features?.[0];
   if (!feat) return null;

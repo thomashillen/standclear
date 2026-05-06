@@ -8,6 +8,7 @@ import { useTrains } from "@/lib/useTrains";
 import { legGeometry, type TripPlan } from "@/lib/commuteRouting";
 import { buildStationIndex, type StationEntry } from "@/lib/stopsIndex";
 import {
+  clearWalkingRouteCache,
   fetchWalkingRoute,
   type WalkingRoute,
 } from "@/lib/walkingDirections";
@@ -141,6 +142,18 @@ export default function SubwayMap() {
   // expanded view renders the per-step instructions.
   const [walkFromRoute, setWalkFromRoute] = useState<WalkingRoute | null>(null);
   const [walkToRoute, setWalkToRoute] = useState<WalkingRoute | null>(null);
+  // Failure flags for the two walking-route fetches above. Set when a
+  // fetchWalkingRoute call resolves to null (HTTP error, malformed
+  // response, or network failure on a flaky platform) so the route
+  // detail card can surface a retry affordance instead of leaving
+  // the rider with the silent crow-flies fallback. Cleared whenever
+  // endpoints change or the rider taps Retry.
+  const [walkFromError, setWalkFromError] = useState(false);
+  const [walkToError, setWalkToError] = useState(false);
+  // Bumping this re-runs the walking-route fetch effect even when the
+  // endpoint deps are unchanged. Wired to the Retry button in the
+  // route detail card.
+  const [walkRetryToken, setWalkRetryToken] = useState(0);
   // Stand-alone walking-faster overlay. Set by SearchSheet when the
   // direct walk between the two endpoints is at least as fast as any
   // subway plan — MapView renders a dashed walking line on its own
@@ -400,6 +413,8 @@ export default function SubwayMap() {
     /* eslint-disable react-hooks/set-state-in-effect */
     setWalkFromRoute(null);
     setWalkToRoute(null);
+    setWalkFromError(false);
+    setWalkToError(false);
     /* eslint-enable react-hooks/set-state-in-effect */
   }, [
     selectedTripSelection?.walkFrom?.lng,
@@ -479,37 +494,86 @@ export default function SubwayMap() {
   // resolved boarding / alighting station for the selected plan.
   // Without this the dashed walk segment would just be a straight
   // crow-flies line and the rider would have no idea which streets
-  // to actually take. AbortController cancels any in-flight request
-  // when the rider switches plans mid-fetch so we don't slam stale
-  // routes into state. legs[].boardStation comes from selectedTrip
-  // so it auto-resolves through the station index just like
-  // anything the map renders.
+  // to actually take.
+  //
+  // Dep list is the four endpoint coordinates explicitly. `selectedTrip`
+  // would be the natural object dep, but it's a useMemo whose own
+  // dep list includes walkFromRoute/walkToRoute — so when one fetch
+  // resolves and sets the route, selectedTrip recomputes a new ref
+  // and re-fires this effect, triggering a redundant
+  // (cache-hitting) second fetchWalkingRoute call. Keying on
+  // primitives sidesteps that and keeps the fetch firing exactly
+  // once per real endpoint change.
+  const walkBoard = selectedTrip?.legs[0]?.boardStation;
+  const walkAlight = selectedTrip?.legs[selectedTrip.legs.length - 1]?.alightStation;
+  const walkFromCoords = selectedTrip?.walkFrom;
+  const walkToCoords = selectedTrip?.walkTo;
   useEffect(() => {
-    if (!selectedTrip) return;
-    const board = selectedTrip.legs[0]?.boardStation;
-    const alight =
-      selectedTrip.legs[selectedTrip.legs.length - 1]?.alightStation;
+    if (!walkFromCoords && !walkToCoords) return;
     let cancelled = false;
-    if (selectedTrip.walkFrom && board) {
+    if (walkFromCoords && walkBoard) {
       fetchWalkingRoute(
-        { lng: selectedTrip.walkFrom.lng, lat: selectedTrip.walkFrom.lat },
-        { lng: board.lng, lat: board.lat },
+        { lng: walkFromCoords.lng, lat: walkFromCoords.lat },
+        { lng: walkBoard.lng, lat: walkBoard.lat },
       ).then((route) => {
-        if (!cancelled && route) setWalkFromRoute(route);
+        if (cancelled) return;
+        if (route) setWalkFromRoute(route);
+        else setWalkFromError(true);
       });
     }
-    if (selectedTrip.walkTo && alight) {
+    if (walkToCoords && walkAlight) {
       fetchWalkingRoute(
-        { lng: alight.lng, lat: alight.lat },
-        { lng: selectedTrip.walkTo.lng, lat: selectedTrip.walkTo.lat },
+        { lng: walkAlight.lng, lat: walkAlight.lat },
+        { lng: walkToCoords.lng, lat: walkToCoords.lat },
       ).then((route) => {
-        if (!cancelled && route) setWalkToRoute(route);
+        if (cancelled) return;
+        if (route) setWalkToRoute(route);
+        else setWalkToError(true);
       });
     }
     return () => {
       cancelled = true;
     };
-  }, [selectedTrip]);
+    // The four primitive coord/id deps capture full identity of the
+    // four endpoints; depending on the parent objects would re-fire
+    // the effect when an unrelated property updates.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    walkFromCoords?.lng,
+    walkFromCoords?.lat,
+    walkToCoords?.lng,
+    walkToCoords?.lat,
+    walkBoard?.stopId,
+    walkAlight?.stopId,
+    walkBoard?.lng,
+    walkBoard?.lat,
+    walkAlight?.lng,
+    walkAlight?.lat,
+    walkRetryToken,
+  ]);
+
+  // Retry handler for failed walking-route fetches. Drops the cached
+  // null entries that the failed fetches left behind, clears the
+  // error flags, and bumps the retry token so the fetch effect re-runs
+  // even though the endpoint deps haven't changed. Wired to the route
+  // detail card's Retry button.
+  const retryWalkRoutes = useCallback(() => {
+    if (walkFromCoords && walkBoard) {
+      clearWalkingRouteCache(
+        { lng: walkFromCoords.lng, lat: walkFromCoords.lat },
+        { lng: walkBoard.lng, lat: walkBoard.lat },
+      );
+    }
+    if (walkToCoords && walkAlight) {
+      clearWalkingRouteCache(
+        { lng: walkAlight.lng, lat: walkAlight.lat },
+        { lng: walkToCoords.lng, lat: walkToCoords.lat },
+      );
+    }
+    setWalkFromError(false);
+    setWalkToError(false);
+    setWalkRetryToken((t) => t + 1);
+  }, [walkFromCoords, walkToCoords, walkBoard, walkAlight]);
 
   // Trip selection handler — called from SearchSheet / NearbyPanel
   // when a plan row is tapped. Receives the plan plus optional
@@ -651,6 +715,8 @@ export default function SubwayMap() {
           selectedTripKey={selectedTripKey}
           walkFromRoute={walkFromRoute}
           walkToRoute={walkToRoute}
+          walkRouteError={walkFromError || walkToError}
+          onRetryWalkRoutes={retryWalkRoutes}
           focusedLegIndex={focusedLegIndex}
           onFocusLeg={setFocusedLegIndex}
           onWalkOnlyChange={setWalkOnlyOverlay}
