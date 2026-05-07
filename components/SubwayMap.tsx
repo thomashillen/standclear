@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { MapPin, MoreHorizontal, Search, TrainFront } from "lucide-react";
 import { useLines } from "@/lib/subwayData";
 import { useTrains } from "@/lib/useTrains";
+import { useOnline } from "@/lib/useOnline";
 import { legGeometry, type TripPlan } from "@/lib/commuteRouting";
 import { buildStationIndex, type StationEntry } from "@/lib/stopsIndex";
 import {
@@ -389,6 +390,10 @@ export default function SubwayMap() {
   // useNow above is gated on followedTrainId so it can't be reused.
   const staleTick = useNow(true, 10_000);
   const stale = data ? staleTick - data.generatedAt > 60_000 : false;
+  // Folded into the live-feed pill so the rider knows the app feels
+  // frozen because *they* are offline, not because the MTA feed is
+  // down. Drives a distinct red dot + "Offline" copy on the pill.
+  const online = useOnline();
 
   // Stable identifier for the selected plan, also passed to SearchSheet
   // so its TripPlanRow can show the right selected highlight without
@@ -789,46 +794,68 @@ export default function SubwayMap() {
           type="button"
           onClick={() => setLivePulseOpen(true)}
           aria-label={
-            !data
-              ? "Connecting to live feed"
-              : stale
-                ? "Live feed is stale — tap for details"
-                : `${totalTrains} trains live — tap for system pulse`
+            !online
+              ? "Offline — tap for details"
+              : !data
+                ? "Connecting to live feed"
+                : stale
+                  ? "Live feed is stale — tap for details"
+                  : `${totalTrains} trains live — tap for system pulse`
           }
           aria-pressed={livePulseOpen}
           title={
-            !data
-              ? "Connecting…"
-              : stale
-                ? "Stale — last refresh more than a minute ago"
-                : `${totalTrains} trains live`
+            !online
+              ? "Offline — showing last-known data"
+              : !data
+                ? "Connecting…"
+                : stale
+                  ? "Stale — last refresh more than a minute ago"
+                  : `${totalTrains} trains live`
           }
           className="pointer-events-auto press flex items-center gap-1.5 h-9 px-2.5 flex-shrink-0 rounded-full ios-glass ios-glass--header border border-white/[0.10] shadow-[0_6px_20px_rgba(0,0,0,0.45)] touch-manipulation"
         >
           <span className="relative flex w-2 h-2">
             <span
               className={`absolute inset-0 rounded-full ${
-                !data ? "bg-gray-500" : stale ? "bg-amber-400" : "bg-emerald-400"
+                !online
+                  ? "bg-rose-400"
+                  : !data
+                    ? "bg-gray-500"
+                    : stale
+                      ? "bg-amber-400"
+                      : "bg-emerald-400"
               } shadow-[0_0_8px_currentColor]`}
               style={{
-                color: !data
-                  ? "rgba(107,114,128,0.5)"
-                  : stale
-                    ? "rgba(251,191,36,0.6)"
-                    : "rgba(52,211,153,0.7)",
+                color: !online
+                  ? "rgba(251,113,133,0.65)"
+                  : !data
+                    ? "rgba(107,114,128,0.5)"
+                    : stale
+                      ? "rgba(251,191,36,0.6)"
+                      : "rgba(52,211,153,0.7)",
               }}
             />
-            {data && !stale && (
+            {online && data && !stale && (
               <span className="absolute inset-0 rounded-full bg-emerald-400 animate-ping opacity-60" />
             )}
           </span>
           {/* Train glyph next to the count so a first-time visitor
               reads "live trains" rather than just an unlabeled number.
-              Subtle gray so the pulsing dot stays the visual anchor. */}
-          <TrainFront className="w-3 h-3 text-gray-400 flex-shrink-0" />
-          <span className="text-[12px] font-bold tabular-nums text-gray-100 leading-none">
-            {data ? totalTrains : "…"}
-          </span>
+              Subtle gray so the pulsing dot stays the visual anchor.
+              When offline we show "Offline" copy instead of a count
+              that would be a stale lie. */}
+          {!online ? (
+            <span className="text-[11px] font-semibold uppercase tracking-wide text-rose-200 leading-none">
+              Offline
+            </span>
+          ) : (
+            <>
+              <TrainFront className="w-3 h-3 text-gray-400 flex-shrink-0" />
+              <span className="text-[12px] font-bold tabular-nums text-gray-100 leading-none">
+                {data ? totalTrains : "…"}
+              </span>
+            </>
+          )}
         </button>
 
         {/* Search & directions — Apple-Maps-style sheet for finding a

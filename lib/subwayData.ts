@@ -30,9 +30,44 @@ let cache: Lines | null = null;
 let loadPromise: Promise<Lines> | null = null;
 const subscribers = new Set<() => void>();
 
+// Failure surface. The previous shape silently rejected and reset the
+// promise on failure — line picker bullets pulsed forever with no way
+// for the rider to recover. The store now tracks an explicit error
+// flag so consumers can render a retry affordance, and auto-retries
+// with capped exponential backoff so transient flakes (single dropped
+// packet on a station's WiFi-only network) recover without the rider
+// noticing.
+type LoadStatus = { error: boolean; attempt: number };
+let status: LoadStatus = { error: false, attempt: 0 };
+const statusSubscribers = new Set<() => void>();
+let retryTimer: ReturnType<typeof setTimeout> | null = null;
+
+const MAX_RETRY_DELAY_MS = 30_000;
+const MAX_AUTO_RETRIES = 4;
+
+function publishStatus(next: LoadStatus) {
+  status = next;
+  statusSubscribers.forEach((cb) => cb());
+}
+
+function scheduleAutoRetry() {
+  if (retryTimer) return;
+  if (status.attempt >= MAX_AUTO_RETRIES) return;
+  // 1s, 2s, 4s, 8s, capped at 30s. Adds ±20% jitter so a thundering
+  // herd of devices waking up on a platform's WiFi don't all retry
+  // simultaneously.
+  const base = Math.min(1000 * Math.pow(2, status.attempt), MAX_RETRY_DELAY_MS);
+  const jitter = base * (Math.random() * 0.4 - 0.2);
+  retryTimer = setTimeout(() => {
+    retryTimer = null;
+    loadLines().catch(() => {});
+  }, base + jitter);
+}
+
 function loadLines(): Promise<Lines> {
   if (cache) return Promise.resolve(cache);
   if (!loadPromise) {
+    if (status.error) publishStatus({ error: false, attempt: status.attempt });
     loadPromise = fetch("/gtfsData.json")
       .then((r) => {
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
@@ -40,21 +75,38 @@ function loadLines(): Promise<Lines> {
       })
       .then((j) => {
         cache = j.lines;
+        publishStatus({ error: false, attempt: 0 });
         subscribers.forEach((cb) => cb());
         return cache;
       })
       .catch((err) => {
         console.error("Failed to load /gtfsData.json", err);
         loadPromise = null;
+        publishStatus({ error: true, attempt: status.attempt + 1 });
+        scheduleAutoRetry();
         throw err;
       });
   }
   return loadPromise;
 }
 
+/**
+ * Manually retry the GTFS load. Cancels any pending auto-retry so the
+ * rider's tap takes effect immediately. Resets the attempt counter so
+ * future auto-retries restart from a fresh backoff schedule.
+ */
+export function retryLoadLines(): void {
+  if (retryTimer) {
+    clearTimeout(retryTimer);
+    retryTimer = null;
+  }
+  publishStatus({ error: false, attempt: 0 });
+  loadLines().catch(() => {});
+}
+
 function subscribe(cb: () => void): () => void {
   subscribers.add(cb);
-  if (!cache) loadLines().catch(() => {});
+  if (!cache && !loadPromise) loadLines().catch(() => {});
   return () => {
     subscribers.delete(cb);
   };
@@ -70,6 +122,38 @@ function getServerSnapshot(): Lines | null {
 
 export function useLines(): Lines | null {
   return useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
+}
+
+function subscribeStatus(cb: () => void): () => void {
+  statusSubscribers.add(cb);
+  return () => {
+    statusSubscribers.delete(cb);
+  };
+}
+
+function getStatusSnapshot(): LoadStatus {
+  return status;
+}
+
+// Stable initial status for the SSR pass — useSyncExternalStore needs
+// a stable reference here to avoid hydration loops.
+const SERVER_STATUS: LoadStatus = { error: false, attempt: 0 };
+function getStatusServerSnapshot(): LoadStatus {
+  return SERVER_STATUS;
+}
+
+/**
+ * Reactive view of the GTFS load lifecycle. `error` flips true when a
+ * fetch fails; auto-retries continue in the background up to a cap,
+ * so a transient flake will usually flip it back to false on its own.
+ * Consumers render a retry affordance keyed off `error`.
+ */
+export function useSubwayDataStatus(): LoadStatus {
+  return useSyncExternalStore(
+    subscribeStatus,
+    getStatusSnapshot,
+    getStatusServerSnapshot,
+  );
 }
 
 // Order matches the official MTA "Lines" panel: numbered (IRT), 8 Av (ACE),

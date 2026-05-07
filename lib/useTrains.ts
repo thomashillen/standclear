@@ -2,6 +2,7 @@
 
 import { useSyncExternalStore } from "react";
 import type { TrainsResponse, Train, Arrival } from "@/app/api/trains/route";
+import { isOnline, subscribeOnline } from "./useOnline";
 import type { SubwayLine } from "./subwayData";
 
 export type { Train, Arrival, TrainsResponse };
@@ -63,6 +64,12 @@ function dedupeResponse(data: TrainsResponse): TrainsResponse {
 
 async function refresh() {
   if (cache.promise) return cache.promise;
+  // Don't fire into the void when the device says it's offline. The
+  // visibility check handles backgrounding; this handles airplane mode
+  // and platforms that have lost LTE entirely. We still allow refresh()
+  // to resolve so callers awaiting it don't hang — they just see no
+  // state change.
+  if (!isOnline()) return;
   cache.promise = (async () => {
     try {
       const res = await fetch("/api/trains", { cache: "no-store" });
@@ -85,6 +92,28 @@ function startPolling() {
   if (typeof document !== "undefined" && document.hidden) return;
   refresh();
   intervalId = setInterval(refresh, POLL_MS);
+}
+
+// Resume / pause polling when connectivity flips. Goes through the
+// same gate as the visibility listener — interval is cleared when
+// offline so we don't waste battery on guaranteed-failure ticks, and
+// kicked back to life on the `online` event with an immediate refresh
+// to surface fresh data the moment signal returns.
+let onlineUnsub: (() => void) | null = null;
+function bindOnline() {
+  if (onlineUnsub || typeof window === "undefined") return;
+  onlineUnsub = subscribeOnline(() => {
+    if (isOnline()) {
+      if (subscribers.size > 0 && !intervalId) {
+        if (typeof document !== "undefined" && document.hidden) return;
+        refresh();
+        intervalId = setInterval(refresh, POLL_MS);
+      }
+    } else if (intervalId) {
+      clearInterval(intervalId);
+      intervalId = null;
+    }
+  });
 }
 
 function stopPolling() {
@@ -130,6 +159,7 @@ function subscribe(cb: () => void): () => void {
   if (subscribers.size === 0) {
     hydrateFromStorage();
     bindVisibility();
+    bindOnline();
     startPolling();
   }
   subscribers.add(cb);

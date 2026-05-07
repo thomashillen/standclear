@@ -1,9 +1,14 @@
 "use client";
 
 import * as DialogPrimitive from "@radix-ui/react-dialog";
-import { ChevronDown, Train, X } from "lucide-react";
+import { AlertTriangle, ChevronDown, Train, X } from "lucide-react";
 import { useRef, useState } from "react";
-import { LINE_GROUPS, type Lines } from "@/lib/subwayData";
+import {
+  LINE_GROUPS,
+  retryLoadLines,
+  useSubwayDataStatus,
+  type Lines,
+} from "@/lib/subwayData";
 
 interface LinePickerProps {
   lines: Lines | null;
@@ -37,6 +42,12 @@ const OPEN_DRAG_LOCKOUT_MS = 240;
 export default function LinePicker({ lines, selectedLine, onSelect }: LinePickerProps) {
   const [open, setOpen] = useState(false);
   const selected = selectedLine && lines ? lines[selectedLine] : null;
+  // Surface load failures so a flake on the rider's first cold-boot
+  // doesn't leave the bullets pulsing forever. We only treat this as
+  // an error when there are no cached lines — once data is in memory
+  // a background revalidation failure shouldn't blank the UI.
+  const dataStatus = useSubwayDataStatus();
+  const showLoadError = dataStatus.error && !lines;
 
   const pick = (id: string | null) => {
     onSelect(id);
@@ -238,6 +249,22 @@ export default function LinePicker({ lines, selectedLine, onSelect }: LinePicker
             </div>
 
             <div className="px-4 pt-1 pb-5 sm:px-4 sm:pt-2 sm:pb-5">
+              {showLoadError && (
+                <div className="mb-3 flex items-center gap-2 rounded-xl bg-amber-500/10 ring-1 ring-amber-500/30 px-3 py-2 text-[12px] text-amber-200">
+                  <AlertTriangle className="w-4 h-4 flex-shrink-0" />
+                  <span className="flex-1 min-w-0">
+                    Couldn&rsquo;t load subway data. Check your signal.
+                  </span>
+                  <button
+                    type="button"
+                    data-no-drag
+                    onClick={retryLoadLines}
+                    className="press flex-shrink-0 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 px-2.5 py-1 text-[12px] font-semibold text-amber-100 touch-manipulation"
+                  >
+                    Retry
+                  </button>
+                </div>
+              )}
               <div className="grid grid-cols-7 sm:grid-cols-8 gap-2">
                 {ORDERED_LINES.map((id) => {
                   const line = lines?.[id];

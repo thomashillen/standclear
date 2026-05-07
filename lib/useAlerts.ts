@@ -2,6 +2,7 @@
 
 import { useSyncExternalStore } from "react";
 import type { AlertsResponse, ServiceAlert } from "@/app/api/alerts/route";
+import { isOnline, subscribeOnline } from "./useOnline";
 
 export type { ServiceAlert };
 
@@ -47,6 +48,11 @@ let intervalId: ReturnType<typeof setInterval> | null = null;
 
 async function refresh() {
   if (cache.promise) return cache.promise;
+  // Skip the poll when the device is offline — airplane mode or a
+  // platform that's lost signal will fail every fetch otherwise. The
+  // online-event listener below picks polling back up when signal
+  // returns.
+  if (!isOnline()) return;
   cache.promise = (async () => {
     try {
       const res = await fetch("/api/alerts", { cache: "no-store" });
@@ -94,10 +100,32 @@ function bindVisibility() {
   });
 }
 
+// Resume / pause polling on connectivity flips. Same shape as the
+// useTrains binding — the slower 60s cadence makes the savings less
+// dramatic, but we still don't want to waste battery firing into
+// airplane-mode void.
+let onlineUnsub: (() => void) | null = null;
+function bindOnline() {
+  if (onlineUnsub || typeof window === "undefined") return;
+  onlineUnsub = subscribeOnline(() => {
+    if (isOnline()) {
+      if (subscribers.size > 0 && !intervalId) {
+        if (typeof document !== "undefined" && document.hidden) return;
+        refresh();
+        intervalId = setInterval(refresh, POLL_MS);
+      }
+    } else if (intervalId) {
+      clearInterval(intervalId);
+      intervalId = null;
+    }
+  });
+}
+
 function subscribe(cb: () => void): () => void {
   if (subscribers.size === 0) {
     hydrateFromStorage();
     bindVisibility();
+    bindOnline();
     startPolling();
   }
   subscribers.add(cb);
