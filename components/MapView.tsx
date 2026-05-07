@@ -951,19 +951,19 @@ export default function MapView({ selectedLine, stationStopId, onLineSelect, onS
             // small anyway. By z=12.5 the icons are fully visible.
             // Runtime selection logic in the line-selection effect
             // wraps this expression so dimming-by-corridor still works.
-            // Multiplied by per-feature `staleMul` (set by
-            // useTrainMarkers) so markers fade out as their underlying
-            // data ages — a frozen marker on stale data shouldn't
-            // look "live."
+            //
+            // Per-feature `staleMul` (set by useTrainMarkers) is
+            // multiplied INSIDE each interpolate stop, not around the
+            // whole interpolate — Mapbox requires zoom-driven
+            // interpolations to be the top-level expression of a
+            // property, and wrapping them in `*` makes the property
+            // silently fail (icons go invisible). Multiplying each
+            // stop output is allowed.
             "icon-opacity": [
-              "*",
-              [
-                "interpolate", ["linear"], ["zoom"],
-                10.5, 0,
-                11.5, 0.55,
-                12.5, 1,
-              ],
-              ["coalesce", ["get", "staleMul"], 1],
+              "interpolate", ["linear"], ["zoom"],
+              10.5, 0,
+              11.5, ["*", 0.55, ["coalesce", ["get", "staleMul"], 1]],
+              12.5, ["*", 1, ["coalesce", ["get", "staleMul"], 1]],
             ],
           },
         });
@@ -997,16 +997,12 @@ export default function MapView({ selectedLine, stationStopId, onLineSelect, onS
               "#ffffff",
             ],
             // Letters are unreadable at low zoom — fade them in around z=12.
-            // Multiplied by per-feature staleMul so the letter fades
-            // alongside the icon when data ages.
+            // staleMul multiplied per-stop (see icon-opacity above for
+            // why wrapping the whole interpolate fails Mapbox).
             "text-opacity": [
-              "*",
-              [
-                "interpolate", ["linear"], ["zoom"],
-                11.5, 0,
-                12.5, 1,
-              ],
-              ["coalesce", ["get", "staleMul"], 1],
+              "interpolate", ["linear"], ["zoom"],
+              11.5, 0,
+              12.5, ["*", 1, ["coalesce", ["get", "staleMul"], 1]],
             ],
           },
         });
@@ -1689,36 +1685,38 @@ export default function MapView({ selectedLine, stationStopId, onLineSelect, onS
     // Train icon/text opacity must stay zoom-faded (so cold-start at
     // z≈11 isn't a wall of capsules) AND respect line-selection
     // dimming AND fade with data staleness (per-feature staleMul set
-    // by useTrainMarkers). Per the comment above, `zoom` has to live
-    // at the top of an interpolate, so we push the selection `case`
-    // into each stop's value rather than wrapping the whole
-    // interpolate; the staleMul multiplication wraps the outside.
-    const trainIconBase = inCorridor
+    // by useTrainMarkers).
+    //
+    // Mapbox requires zoom-driven interpolates to be the top-level
+    // expression of a paint property — wrapping the interpolate in
+    // `["*", ..., staleMul]` silently fails the property and makes
+    // every train invisible. So both the corridor dim and the stale
+    // multiplier have to be pushed INTO each stop output.
+    const staleGet = ["coalesce", ["get", "staleMul"], 1];
+    const trainIconOpacity = inCorridor
       ? [
           "interpolate", ["linear"], ["zoom"],
           10.5, 0,
-          11.5, ["case", inCorridor, 0.55, 0],
-          12.5, ["case", inCorridor, 1, 0],
+          11.5, ["*", ["case", inCorridor, 0.55, 0], staleGet],
+          12.5, ["*", ["case", inCorridor, 1, 0], staleGet],
         ]
       : [
           "interpolate", ["linear"], ["zoom"],
           10.5, 0,
-          11.5, 0.55,
-          12.5, 1,
+          11.5, ["*", 0.55, staleGet],
+          12.5, ["*", 1, staleGet],
         ];
-    const trainTextBase = inCorridor
+    const trainTextOpacity = inCorridor
       ? [
           "interpolate", ["linear"], ["zoom"],
           11.5, 0,
-          12.5, ["case", inCorridor, 1, 0],
+          12.5, ["*", ["case", inCorridor, 1, 0], staleGet],
         ]
       : [
           "interpolate", ["linear"], ["zoom"],
           11.5, 0,
-          12.5, 1,
+          12.5, ["*", 1, staleGet],
         ];
-    const trainIconOpacity = ["*", trainIconBase, ["coalesce", ["get", "staleMul"], 1]];
-    const trainTextOpacity = ["*", trainTextBase, ["coalesce", ["get", "staleMul"], 1]];
     map.setPaintProperty("subway-trains-icon", "icon-opacity", trainIconOpacity);
     map.setPaintProperty("subway-trains-text", "text-opacity", trainTextOpacity);
 
