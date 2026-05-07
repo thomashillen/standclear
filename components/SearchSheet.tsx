@@ -107,6 +107,14 @@ interface Props {
    *  the API is still resolving. */
   walkFromRoute?: WalkingRoute | null;
   walkToRoute?: WalkingRoute | null;
+  /** True when at least one walking-route fetch failed. Surfaces a
+   *  retry strip in TripPlanDetail so a flaky platform connection
+   *  doesn't silently leave the rider with the crow-flies fallback. */
+  walkRouteError?: boolean;
+  /** Callback invoked when the rider taps Retry on the failure strip.
+   *  Owned by SubwayMap (the only thing that knows the actual
+   *  endpoints to refetch). */
+  onRetryWalkRoutes?: () => void;
   /** Index of the leg the rider has zoomed in on from the expanded
    *  route detail. Owned by SubwayMap so the map can refit. Null
    *  means "frame the whole trip". */
@@ -186,6 +194,8 @@ export default function SearchSheet({
   presetTrip = null,
   walkFromRoute = null,
   walkToRoute = null,
+  walkRouteError = false,
+  onRetryWalkRoutes,
   focusedLegIndex = null,
   onFocusLeg,
   onWalkOnlyChange,
@@ -1551,6 +1561,8 @@ export default function SearchSheet({
                   now={now}
                   focusedLegIndex={focusedLegIndex}
                   onFocusLeg={onFocusLeg}
+                  walkRouteError={walkRouteError}
+                  onRetryWalkRoutes={onRetryWalkRoutes}
                 />
               );
             })()

@@ -370,6 +370,24 @@ export function useTrainMarkers({
       // Cache zoom-dependent meters/pixel scaling once per tick.
       const zoomScale = iconScaleAtZoom(currentZoom);
 
+      // Staleness multiplier — fed into the icon/text opacity
+      // expressions so markers visibly fade as the data ages. The
+      // backstop is the rider on a platform losing signal mid-glance:
+      // markers should not look "live" when they're frozen on
+      // 5-minute-old positions. Curve:
+      //   < 60s old: full opacity (1.0)
+      //   60–180s:   linear fade to 0.4
+      //   > 180s:    floor at 0.4 so markers don't disappear entirely
+      // Computed once per tick — every feature in a given snapshot
+      // shares the same generatedAt, so per-feature variation isn't
+      // needed.
+      const ageSec = Math.max(0, (nowMs - d.generatedAt) / 1000);
+      let staleMul = 1;
+      if (ageSec > 60) {
+        const t = Math.min(1, (ageSec - 60) / 120);
+        staleMul = 1 - 0.6 * t;
+      }
+
       const features: GeoJSON.Feature[] = [];
       for (const arr of buckets.values()) {
         const n = arr.length;
@@ -418,6 +436,7 @@ export function useTrainMarkers({
               color: c.color,
               letter: c.letter,
               textColor: c.textColor,
+              staleMul,
             },
             geometry: { type: "Point", coordinates: [renderLng, renderLat] },
           });
@@ -545,7 +564,10 @@ export function useTrainMarkers({
               properties: {
                 bearing: f.properties?.bearing ?? 90,
                 pulseSize: baseSize + sizeRange * phase,
-                pulseOpacity: baseOpacity + opacityRange * phase,
+                // Fold staleness into the ring opacity so an
+                // "incoming in 30s" ring stops shouting urgency when
+                // the underlying snapshot is itself minutes old.
+                pulseOpacity: (baseOpacity + opacityRange * phase) * staleMul,
                 etaText,
                 labelColor,
               },

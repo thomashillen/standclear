@@ -951,11 +951,19 @@ export default function MapView({ selectedLine, stationStopId, onLineSelect, onS
             // small anyway. By z=12.5 the icons are fully visible.
             // Runtime selection logic in the line-selection effect
             // wraps this expression so dimming-by-corridor still works.
+            // Multiplied by per-feature `staleMul` (set by
+            // useTrainMarkers) so markers fade out as their underlying
+            // data ages — a frozen marker on stale data shouldn't
+            // look "live."
             "icon-opacity": [
-              "interpolate", ["linear"], ["zoom"],
-              10.5, 0,
-              11.5, 0.55,
-              12.5, 1,
+              "*",
+              [
+                "interpolate", ["linear"], ["zoom"],
+                10.5, 0,
+                11.5, 0.55,
+                12.5, 1,
+              ],
+              ["coalesce", ["get", "staleMul"], 1],
             ],
           },
         });
@@ -989,10 +997,16 @@ export default function MapView({ selectedLine, stationStopId, onLineSelect, onS
               "#ffffff",
             ],
             // Letters are unreadable at low zoom — fade them in around z=12.
+            // Multiplied by per-feature staleMul so the letter fades
+            // alongside the icon when data ages.
             "text-opacity": [
-              "interpolate", ["linear"], ["zoom"],
-              11.5, 0,
-              12.5, 1,
+              "*",
+              [
+                "interpolate", ["linear"], ["zoom"],
+                11.5, 0,
+                12.5, 1,
+              ],
+              ["coalesce", ["get", "staleMul"], 1],
             ],
           },
         });
@@ -1674,10 +1688,12 @@ export default function MapView({ selectedLine, stationStopId, onLineSelect, onS
     );
     // Train icon/text opacity must stay zoom-faded (so cold-start at
     // z≈11 isn't a wall of capsules) AND respect line-selection
-    // dimming. Per the comment above, `zoom` has to live at the top of
-    // an interpolate, so we push the selection `case` into each stop's
-    // value rather than wrapping the whole interpolate.
-    const trainIconOpacity = inCorridor
+    // dimming AND fade with data staleness (per-feature staleMul set
+    // by useTrainMarkers). Per the comment above, `zoom` has to live
+    // at the top of an interpolate, so we push the selection `case`
+    // into each stop's value rather than wrapping the whole
+    // interpolate; the staleMul multiplication wraps the outside.
+    const trainIconBase = inCorridor
       ? [
           "interpolate", ["linear"], ["zoom"],
           10.5, 0,
@@ -1690,7 +1706,7 @@ export default function MapView({ selectedLine, stationStopId, onLineSelect, onS
           11.5, 0.55,
           12.5, 1,
         ];
-    const trainTextOpacity = inCorridor
+    const trainTextBase = inCorridor
       ? [
           "interpolate", ["linear"], ["zoom"],
           11.5, 0,
@@ -1701,6 +1717,8 @@ export default function MapView({ selectedLine, stationStopId, onLineSelect, onS
           11.5, 0,
           12.5, 1,
         ];
+    const trainIconOpacity = ["*", trainIconBase, ["coalesce", ["get", "staleMul"], 1]];
+    const trainTextOpacity = ["*", trainTextBase, ["coalesce", ["get", "staleMul"], 1]];
     map.setPaintProperty("subway-trains-icon", "icon-opacity", trainIconOpacity);
     map.setPaintProperty("subway-trains-text", "text-opacity", trainTextOpacity);
 

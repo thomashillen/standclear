@@ -758,6 +758,14 @@ interface TripPlanDetailProps {
   /** Toggle map focus on a specific leg. Tap the same leg again to
    *  return to the whole-trip frame. */
   onFocusLeg?: (i: number | null) => void;
+  /** True when at least one walking-route fetch failed. Drives a
+   *  small retry strip at the top of the card so a flaky platform
+   *  connection doesn't silently leave the rider with the
+   *  crow-flies fallback. */
+  walkRouteError?: boolean;
+  /** Tapped from the retry strip. Owned upstream so the SubwayMap
+   *  knows the actual endpoints to refetch. */
+  onRetryWalkRoutes?: () => void;
 }
 
 export function TripPlanDetail({
@@ -773,6 +781,8 @@ export function TripPlanDetail({
   now,
   focusedLegIndex,
   onFocusLeg,
+  walkRouteError = false,
+  onRetryWalkRoutes,
 }: TripPlanDetailProps) {
   const board = stationsByComplexId.get(plan.legs[0].boardComplexId);
   const alight = stationsByComplexId.get(
@@ -858,6 +868,23 @@ export function TripPlanDetail({
           </div>
         )}
       </div>
+
+      {walkRouteError && (
+        <div className="mb-3 flex items-center gap-2 rounded-xl bg-amber-500/10 ring-1 ring-amber-500/30 px-3 py-2 text-[12px] text-amber-200">
+          <span className="flex-1 min-w-0">
+            Couldn&rsquo;t load walking directions. Showing a straight line.
+          </span>
+          {onRetryWalkRoutes && (
+            <button
+              type="button"
+              onClick={onRetryWalkRoutes}
+              className="press flex-shrink-0 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 px-2.5 py-1 text-[12px] font-semibold text-amber-100 touch-manipulation"
+            >
+              Retry
+            </button>
+          )}
+        </div>
+      )}
 
       <ol className="px-1">
         {showWalkFrom && (

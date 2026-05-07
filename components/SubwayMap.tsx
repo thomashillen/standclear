@@ -5,9 +5,11 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { MapPin, MoreHorizontal, Search, TrainFront } from "lucide-react";
 import { useLines } from "@/lib/subwayData";
 import { useTrains } from "@/lib/useTrains";
+import { useOnline } from "@/lib/useOnline";
 import { legGeometry, type TripPlan } from "@/lib/commuteRouting";
 import { buildStationIndex, type StationEntry } from "@/lib/stopsIndex";
 import {
+  clearWalkingRouteCache,
   fetchWalkingRoute,
   type WalkingRoute,
 } from "@/lib/walkingDirections";
@@ -141,6 +143,18 @@ export default function SubwayMap() {
   // expanded view renders the per-step instructions.
   const [walkFromRoute, setWalkFromRoute] = useState<WalkingRoute | null>(null);
   const [walkToRoute, setWalkToRoute] = useState<WalkingRoute | null>(null);
+  // Failure flags for the two walking-route fetches above. Set when a
+  // fetchWalkingRoute call resolves to null (HTTP error, malformed
+  // response, or network failure on a flaky platform) so the route
+  // detail card can surface a retry affordance instead of leaving
+  // the rider with the silent crow-flies fallback. Cleared whenever
+  // endpoints change or the rider taps Retry.
+  const [walkFromError, setWalkFromError] = useState(false);
+  const [walkToError, setWalkToError] = useState(false);
+  // Bumping this re-runs the walking-route fetch effect even when the
+  // endpoint deps are unchanged. Wired to the Retry button in the
+  // route detail card.
+  const [walkRetryToken, setWalkRetryToken] = useState(0);
   // Stand-alone walking-faster overlay. Set by SearchSheet when the
   // direct walk between the two endpoints is at least as fast as any
   // subway plan — MapView renders a dashed walking line on its own
@@ -376,6 +390,10 @@ export default function SubwayMap() {
   // useNow above is gated on followedTrainId so it can't be reused.
   const staleTick = useNow(true, 10_000);
   const stale = data ? staleTick - data.generatedAt > 60_000 : false;
+  // Folded into the live-feed pill so the rider knows the app feels
+  // frozen because *they* are offline, not because the MTA feed is
+  // down. Drives a distinct red dot + "Offline" copy on the pill.
+  const online = useOnline();
 
   // Stable identifier for the selected plan, also passed to SearchSheet
   // so its TripPlanRow can show the right selected highlight without
@@ -400,6 +418,8 @@ export default function SubwayMap() {
     /* eslint-disable react-hooks/set-state-in-effect */
     setWalkFromRoute(null);
     setWalkToRoute(null);
+    setWalkFromError(false);
+    setWalkToError(false);
     /* eslint-enable react-hooks/set-state-in-effect */
   }, [
     selectedTripSelection?.walkFrom?.lng,
@@ -479,37 +499,86 @@ export default function SubwayMap() {
   // resolved boarding / alighting station for the selected plan.
   // Without this the dashed walk segment would just be a straight
   // crow-flies line and the rider would have no idea which streets
-  // to actually take. AbortController cancels any in-flight request
-  // when the rider switches plans mid-fetch so we don't slam stale
-  // routes into state. legs[].boardStation comes from selectedTrip
-  // so it auto-resolves through the station index just like
-  // anything the map renders.
+  // to actually take.
+  //
+  // Dep list is the four endpoint coordinates explicitly. `selectedTrip`
+  // would be the natural object dep, but it's a useMemo whose own
+  // dep list includes walkFromRoute/walkToRoute — so when one fetch
+  // resolves and sets the route, selectedTrip recomputes a new ref
+  // and re-fires this effect, triggering a redundant
+  // (cache-hitting) second fetchWalkingRoute call. Keying on
+  // primitives sidesteps that and keeps the fetch firing exactly
+  // once per real endpoint change.
+  const walkBoard = selectedTrip?.legs[0]?.boardStation;
+  const walkAlight = selectedTrip?.legs[selectedTrip.legs.length - 1]?.alightStation;
+  const walkFromCoords = selectedTrip?.walkFrom;
+  const walkToCoords = selectedTrip?.walkTo;
   useEffect(() => {
-    if (!selectedTrip) return;
-    const board = selectedTrip.legs[0]?.boardStation;
-    const alight =
-      selectedTrip.legs[selectedTrip.legs.length - 1]?.alightStation;
+    if (!walkFromCoords && !walkToCoords) return;
     let cancelled = false;
-    if (selectedTrip.walkFrom && board) {
+    if (walkFromCoords && walkBoard) {
       fetchWalkingRoute(
-        { lng: selectedTrip.walkFrom.lng, lat: selectedTrip.walkFrom.lat },
-        { lng: board.lng, lat: board.lat },
+        { lng: walkFromCoords.lng, lat: walkFromCoords.lat },
+        { lng: walkBoard.lng, lat: walkBoard.lat },
       ).then((route) => {
-        if (!cancelled && route) setWalkFromRoute(route);
+        if (cancelled) return;
+        if (route) setWalkFromRoute(route);
+        else setWalkFromError(true);
       });
     }
-    if (selectedTrip.walkTo && alight) {
+    if (walkToCoords && walkAlight) {
       fetchWalkingRoute(
-        { lng: alight.lng, lat: alight.lat },
-        { lng: selectedTrip.walkTo.lng, lat: selectedTrip.walkTo.lat },
+        { lng: walkAlight.lng, lat: walkAlight.lat },
+        { lng: walkToCoords.lng, lat: walkToCoords.lat },
       ).then((route) => {
-        if (!cancelled && route) setWalkToRoute(route);
+        if (cancelled) return;
+        if (route) setWalkToRoute(route);
+        else setWalkToError(true);
       });
     }
     return () => {
       cancelled = true;
     };
-  }, [selectedTrip]);
+    // The four primitive coord/id deps capture full identity of the
+    // four endpoints; depending on the parent objects would re-fire
+    // the effect when an unrelated property updates.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    walkFromCoords?.lng,
+    walkFromCoords?.lat,
+    walkToCoords?.lng,
+    walkToCoords?.lat,
+    walkBoard?.stopId,
+    walkAlight?.stopId,
+    walkBoard?.lng,
+    walkBoard?.lat,
+    walkAlight?.lng,
+    walkAlight?.lat,
+    walkRetryToken,
+  ]);
+
+  // Retry handler for failed walking-route fetches. Drops the cached
+  // null entries that the failed fetches left behind, clears the
+  // error flags, and bumps the retry token so the fetch effect re-runs
+  // even though the endpoint deps haven't changed. Wired to the route
+  // detail card's Retry button.
+  const retryWalkRoutes = useCallback(() => {
+    if (walkFromCoords && walkBoard) {
+      clearWalkingRouteCache(
+        { lng: walkFromCoords.lng, lat: walkFromCoords.lat },
+        { lng: walkBoard.lng, lat: walkBoard.lat },
+      );
+    }
+    if (walkToCoords && walkAlight) {
+      clearWalkingRouteCache(
+        { lng: walkAlight.lng, lat: walkAlight.lat },
+        { lng: walkToCoords.lng, lat: walkToCoords.lat },
+      );
+    }
+    setWalkFromError(false);
+    setWalkToError(false);
+    setWalkRetryToken((t) => t + 1);
+  }, [walkFromCoords, walkToCoords, walkBoard, walkAlight]);
 
   // Trip selection handler — called from SearchSheet / NearbyPanel
   // when a plan row is tapped. Receives the plan plus optional
@@ -651,6 +720,8 @@ export default function SubwayMap() {
           selectedTripKey={selectedTripKey}
           walkFromRoute={walkFromRoute}
           walkToRoute={walkToRoute}
+          walkRouteError={walkFromError || walkToError}
+          onRetryWalkRoutes={retryWalkRoutes}
           focusedLegIndex={focusedLegIndex}
           onFocusLeg={setFocusedLegIndex}
           onWalkOnlyChange={setWalkOnlyOverlay}
@@ -723,46 +794,68 @@ export default function SubwayMap() {
           type="button"
           onClick={() => setLivePulseOpen(true)}
           aria-label={
-            !data
-              ? "Connecting to live feed"
-              : stale
-                ? "Live feed is stale — tap for details"
-                : `${totalTrains} trains live — tap for system pulse`
+            !online
+              ? "Offline — tap for details"
+              : !data
+                ? "Connecting to live feed"
+                : stale
+                  ? "Live feed is stale — tap for details"
+                  : `${totalTrains} trains live — tap for system pulse`
           }
           aria-pressed={livePulseOpen}
           title={
-            !data
-              ? "Connecting…"
-              : stale
-                ? "Stale — last refresh more than a minute ago"
-                : `${totalTrains} trains live`
+            !online
+              ? "Offline — showing last-known data"
+              : !data
+                ? "Connecting…"
+                : stale
+                  ? "Stale — last refresh more than a minute ago"
+                  : `${totalTrains} trains live`
           }
           className="pointer-events-auto press flex items-center gap-1.5 h-9 px-2.5 flex-shrink-0 rounded-full ios-glass ios-glass--header border border-white/[0.10] shadow-[0_6px_20px_rgba(0,0,0,0.45)] touch-manipulation"
         >
           <span className="relative flex w-2 h-2">
             <span
               className={`absolute inset-0 rounded-full ${
-                !data ? "bg-gray-500" : stale ? "bg-amber-400" : "bg-emerald-400"
+                !online
+                  ? "bg-rose-400"
+                  : !data
+                    ? "bg-gray-500"
+                    : stale
+                      ? "bg-amber-400"
+                      : "bg-emerald-400"
               } shadow-[0_0_8px_currentColor]`}
               style={{
-                color: !data
-                  ? "rgba(107,114,128,0.5)"
-                  : stale
-                    ? "rgba(251,191,36,0.6)"
-                    : "rgba(52,211,153,0.7)",
+                color: !online
+                  ? "rgba(251,113,133,0.65)"
+                  : !data
+                    ? "rgba(107,114,128,0.5)"
+                    : stale
+                      ? "rgba(251,191,36,0.6)"
+                      : "rgba(52,211,153,0.7)",
               }}
             />
-            {data && !stale && (
+            {online && data && !stale && (
               <span className="absolute inset-0 rounded-full bg-emerald-400 animate-ping opacity-60" />
             )}
           </span>
           {/* Train glyph next to the count so a first-time visitor
               reads "live trains" rather than just an unlabeled number.
-              Subtle gray so the pulsing dot stays the visual anchor. */}
-          <TrainFront className="w-3 h-3 text-gray-400 flex-shrink-0" />
-          <span className="text-[12px] font-bold tabular-nums text-gray-100 leading-none">
-            {data ? totalTrains : "…"}
-          </span>
+              Subtle gray so the pulsing dot stays the visual anchor.
+              When offline we show "Offline" copy instead of a count
+              that would be a stale lie. */}
+          {!online ? (
+            <span className="text-[11px] font-semibold uppercase tracking-wide text-rose-200 leading-none">
+              Offline
+            </span>
+          ) : (
+            <>
+              <TrainFront className="w-3 h-3 text-gray-400 flex-shrink-0" />
+              <span className="text-[12px] font-bold tabular-nums text-gray-100 leading-none">
+                {data ? totalTrains : "…"}
+              </span>
+            </>
+          )}
         </button>
 
         {/* Search & directions — Apple-Maps-style sheet for finding a
