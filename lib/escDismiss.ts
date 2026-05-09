@@ -11,10 +11,11 @@
  * us a node-env regression test against silent reordering.
  *
  * The Radix-managed dialogs (LiveTrainsPopup, MoreSheet's nested
- * AlertsDialog / AboutDialog) intentionally do NOT appear here —
- * Radix's own ESC handler swallows the keydown before our
- * window-level listener fires, so they always dismiss themselves
- * first regardless of this list.
+ * AlertsDialog / AboutDialog) intentionally do NOT appear here.
+ * Radix dismisses them via a capture-phase document listener that
+ * calls event.preventDefault(); SubwayMap's keydown effect then
+ * short-circuits on `event.defaultPrevented` so this priority list
+ * only runs when no Radix layer claimed the keypress.
  */
 export type DismissablePanelState = {
   searchOpen: boolean;

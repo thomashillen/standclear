@@ -391,15 +391,26 @@ export default function SubwayMap() {
   // Bottom-sheet panels in this app are custom (not Radix), so they
   // don't get the Dialog primitive's free escape-to-close. Wire one
   // window-level listener here that consults pickDismissTarget for
-  // the priority order. Radix-managed dialogs (LiveTrainsPopup,
-  // MoreSheet's nested AlertsDialog/AboutDialog) call
-  // event.stopPropagation() in their own escape handler, so this
-  // listener never fires for them — they always close themselves
-  // first when layered on top of a custom panel.
+  // the priority order.
+  //
+  // Radix-managed dialogs (LiveTrainsPopup, MoreSheet's nested
+  // AlertsDialog / AboutDialog, the LinePicker popover) attach their
+  // own ESC listener on the document in capture phase; when that
+  // dismisses the topmost layer it calls event.preventDefault() but
+  // *not* event.stopPropagation() (see
+  // @radix-ui/react-dismissable-layer). Without an explicit guard,
+  // this bubble-phase listener would still fire on the same keypress
+  // and dismiss whichever custom panel is open underneath, breaking
+  // stacked-dismissal semantics. The defaultPrevented short-circuit
+  // is the fix — exactly one layer should respond per ESC.
   useEffect(() => {
     if (typeof window === "undefined") return;
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
+      // A Radix layer (or any other inner ESC handler) already
+      // claimed this keypress — don't fire a second dismiss on the
+      // panel underneath.
+      if (e.defaultPrevented) return;
       // IME composition swallows ESC for input candidates; let the
       // input handle it before we treat ESC as a dismiss.
       if (e.isComposing) return;
