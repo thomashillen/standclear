@@ -4,6 +4,7 @@ import { useSyncExternalStore } from "react";
 import type { TrainsResponse, Train, Arrival } from "@/app/api/trains/route";
 import { isOnline, subscribeOnline } from "./useOnline";
 import type { SubwayLine } from "./subwayData";
+import { captureException } from "./observability";
 
 export type { Train, Arrival, TrainsResponse };
 
@@ -11,19 +12,54 @@ export type { Train, Arrival, TrainsResponse };
 // than ~8s mostly returns identical data; slower and the on-map positions
 // jump when a stale snapshot finally refreshes.
 const POLL_MS = 8_000;
+// Maximum backoff on consecutive failures so a long outage doesn't
+// hammer /api/trains every 8s — 60s feels alive without burning
+// battery + bandwidth at the same rate as the steady-state poll.
+const MAX_POLL_MS = 60_000;
 
 // Persist the last successful response to localStorage so a cold boot
 // surfaces the last-known state immediately instead of a "Connecting…"
 // pulse. The poll loop replaces it with fresh data on first success.
 const STORAGE_KEY = "standclear:trains:v1";
 
+// ─── Feed health ─────────────────────────────────────────────────────
+// Exposed alongside the train snapshot via useFeedHealth(). The
+// SubwayMap pill reads this to surface a "Feed degraded" banner when
+// the API has been failing recently — distinct from "stale" (last
+// success > 60s ago) and "offline" (the device itself dropped its
+// connection). This lets a rider tell apart "I'm in a tunnel" from
+// "MTA's having a moment."
+export interface FeedHealth {
+  online: boolean;
+  /** Number of consecutive failed /api/trains polls. Reset on success. */
+  consecutiveFailures: number;
+  /** Wall-clock ms of the last successful response. Null on cold boot. */
+  lastSuccessAt: number | null;
+  /** Wall-clock ms of the last failure. Null until first failure. */
+  lastFailureAt: number | null;
+  /** Short reason from the last failure (HTTP status / network error). */
+  lastError: string | null;
+  /** True once we've crossed the threshold for visible degradation. */
+  degraded: boolean;
+}
+
+const DEGRADED_THRESHOLD = 2;
+
 let cache: { data: TrainsResponse | null; ts: number; promise: Promise<void> | null } = {
   data: null,
   ts: 0,
   promise: null,
 };
+let health: FeedHealth = {
+  online: true,
+  consecutiveFailures: 0,
+  lastSuccessAt: null,
+  lastFailureAt: null,
+  lastError: null,
+  degraded: false,
+};
 const subscribers = new Set<() => void>();
-let intervalId: ReturnType<typeof setInterval> | null = null;
+let timeoutId: ReturnType<typeof setTimeout> | null = null;
 
 function hydrateFromStorage() {
   if (cache.data) return;
@@ -62,6 +98,22 @@ function dedupeResponse(data: TrainsResponse): TrainsResponse {
   return { ...data, trains: Array.from(byId.values()) };
 }
 
+function notify() {
+  subscribers.forEach((cb) => cb());
+}
+
+function setHealth(next: Partial<FeedHealth>) {
+  health = {
+    ...health,
+    ...next,
+    degraded:
+      ("consecutiveFailures" in next
+        ? next.consecutiveFailures!
+        : health.consecutiveFailures) >= DEGRADED_THRESHOLD,
+  };
+  notify();
+}
+
 async function refresh() {
   if (cache.promise) return cache.promise;
   // Don't fire into the void when the device says it's offline. The
@@ -69,7 +121,10 @@ async function refresh() {
   // and platforms that have lost LTE entirely. We still allow refresh()
   // to resolve so callers awaiting it don't hang — they just see no
   // state change.
-  if (!isOnline()) return;
+  if (!isOnline()) {
+    setHealth({ online: false });
+    return;
+  }
   cache.promise = (async () => {
     try {
       const res = await fetch("/api/trains", { cache: "no-store" });
@@ -78,24 +133,79 @@ async function refresh() {
       const data = dedupeResponse(raw);
       cache = { data, ts: Date.now(), promise: null };
       persistToStorage(data);
-      subscribers.forEach((cb) => cb());
+      // Reset the failure counter on every successful poll. Keep
+      // `lastFailureAt` and `lastError` for diagnostics — they
+      // describe history, not current state.
+      setHealth({
+        online: true,
+        consecutiveFailures: 0,
+        lastSuccessAt: cache.ts,
+      });
+      // setHealth already notified — no double-fire.
     } catch (err) {
-      console.error("Failed to fetch /api/trains", err);
       cache.promise = null;
+      const message = err instanceof Error ? err.message : String(err);
+      const failures = health.consecutiveFailures + 1;
+      setHealth({
+        consecutiveFailures: failures,
+        lastFailureAt: Date.now(),
+        lastError: message,
+      });
+      // Only log once per N failures to avoid swamping the console
+      // (and any wired-up Sentry quota) during a sustained outage.
+      // First failure + every 5th after.
+      if (failures === 1 || failures % 5 === 0) {
+        captureException(err, {
+          what: "useTrains: /api/trains poll failed",
+          consecutiveFailures: failures,
+        });
+      }
     }
   })();
   return cache.promise;
 }
 
+// Backoff schedule. Steady state: POLL_MS. After consecutive
+// failures, exponentially back off (16s, 32s, 60s, …) up to MAX_POLL_MS.
+function nextDelayMs(): number {
+  const failures = health.consecutiveFailures;
+  if (failures === 0) return POLL_MS;
+  const delay = POLL_MS * 2 ** Math.min(failures, 4);
+  return Math.min(delay, MAX_POLL_MS);
+}
+
+function clearScheduled() {
+  if (timeoutId) {
+    clearTimeout(timeoutId);
+    timeoutId = null;
+  }
+}
+
+function scheduleNext() {
+  clearScheduled();
+  timeoutId = setTimeout(async () => {
+    timeoutId = null;
+    if (subscribers.size === 0) return;
+    if (typeof document !== "undefined" && document.hidden) return;
+    if (!isOnline()) {
+      setHealth({ online: false });
+      return;
+    }
+    await refresh();
+    if (subscribers.size > 0) scheduleNext();
+  }, nextDelayMs());
+}
+
 function startPolling() {
-  if (intervalId) return;
+  if (timeoutId) return;
   if (typeof document !== "undefined" && document.hidden) return;
-  refresh();
-  intervalId = setInterval(refresh, POLL_MS);
+  refresh().then(() => {
+    if (subscribers.size > 0) scheduleNext();
+  });
 }
 
 // Resume / pause polling when connectivity flips. Goes through the
-// same gate as the visibility listener — interval is cleared when
+// same gate as the visibility listener — schedule is cancelled when
 // offline so we don't waste battery on guaranteed-failure ticks, and
 // kicked back to life on the `online` event with an immediate refresh
 // to surface fresh data the moment signal returns.
@@ -104,23 +214,20 @@ function bindOnline() {
   if (onlineUnsub || typeof window === "undefined") return;
   onlineUnsub = subscribeOnline(() => {
     if (isOnline()) {
-      if (subscribers.size > 0 && !intervalId) {
+      setHealth({ online: true });
+      if (subscribers.size > 0 && !timeoutId) {
         if (typeof document !== "undefined" && document.hidden) return;
-        refresh();
-        intervalId = setInterval(refresh, POLL_MS);
+        startPolling();
       }
-    } else if (intervalId) {
-      clearInterval(intervalId);
-      intervalId = null;
+    } else {
+      setHealth({ online: false });
+      clearScheduled();
     }
   });
 }
 
 function stopPolling() {
-  if (intervalId && subscribers.size === 0) {
-    clearInterval(intervalId);
-    intervalId = null;
-  }
+  if (subscribers.size === 0) clearScheduled();
 }
 
 // Pause polling when the tab is backgrounded. On mobile Safari this matters:
@@ -133,13 +240,9 @@ function bindVisibility() {
   visibilityBound = true;
   document.addEventListener("visibilitychange", () => {
     if (document.hidden) {
-      if (intervalId) {
-        clearInterval(intervalId);
-        intervalId = null;
-      }
-    } else if (subscribers.size > 0 && !intervalId) {
-      refresh();
-      intervalId = setInterval(refresh, POLL_MS);
+      clearScheduled();
+    } else if (subscribers.size > 0 && !timeoutId) {
+      startPolling();
     }
   });
 }
@@ -184,6 +287,28 @@ function getServerSnapshot(): TrainsResponse | null {
 
 export function useTrains(): TrainsResponse | null {
   return useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
+}
+
+// Health snapshot for the live-feed pill. Returns the same `health`
+// reference until something changes (every change builds a fresh
+// object via setHealth), so useSyncExternalStore can dedupe renders
+// on identity. Kept on the same subscriber list as useTrains so a
+// single store powers both consumers.
+const SERVER_HEALTH: FeedHealth = Object.freeze({
+  online: true,
+  consecutiveFailures: 0,
+  lastSuccessAt: null,
+  lastFailureAt: null,
+  lastError: null,
+  degraded: false,
+});
+
+export function useFeedHealth(): FeedHealth {
+  return useSyncExternalStore(
+    subscribe,
+    () => health,
+    () => SERVER_HEALTH,
+  );
 }
 
 // Compass bearing (0=N, 90=E, 180=S, 270=W) from a→b, accounting for lat

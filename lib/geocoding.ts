@@ -1,5 +1,7 @@
 "use client";
 
+import { captureWarning } from "./observability";
+
 /**
  * Mapbox Search Box autocomplete helpers. Two-step flow:
  *
@@ -276,10 +278,13 @@ export function makeDebouncedSuggester(
             return;
           }
           // Surface real failures (missing token, 401, 429, network)
-          // to the dev console — autocomplete still degrades to "no
-          // results" so the rider isn't stuck, but a silent miss has
-          // historically hidden config errors during deploy rollouts.
-          console.warn("Mapbox Search Box suggest failed:", err);
+          // through the observability shim — autocomplete still
+          // degrades to "no results" so the rider isn't stuck, but a
+          // silent miss has historically hidden config errors during
+          // deploy rollouts.
+          captureWarning("Mapbox suggest failed", {
+            error: err instanceof Error ? err.message : String(err),
+          });
           onResult([]);
         });
     }, delayMs);

@@ -1,5 +1,7 @@
 "use client";
 
+import { captureWarning } from "./observability";
+
 /**
  * Mapbox Directions API helper — walking profile. Resolves a pair of
  * lng/lat endpoints into a real pedestrian path that follows streets,
@@ -212,6 +214,13 @@ export async function fetchWalkingRoute(
       ) {
         return null;
       }
+      // Real failure (rate limit, network, 401) — surface it through
+      // observability so the silent fallback to "crow-flies dashed
+      // line" is at least visible to operators. Caller still sees
+      // null and renders the fallback path.
+      captureWarning("Mapbox walking directions failed", {
+        error: err instanceof Error ? err.message : String(err),
+      });
       return null;
     });
 

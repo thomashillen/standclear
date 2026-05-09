@@ -17,6 +17,7 @@ Built with Next.js 16, React 19, TypeScript, Tailwind, and Mapbox GL. Data comes
 
 ```bash
 npm install
+cp .env.example .env.local   # then fill in NEXT_PUBLIC_MAPBOX_TOKEN
 npm run dev
 ```
 
@@ -29,6 +30,15 @@ NEXT_PUBLIC_MAPBOX_TOKEN=pk.eyJ1...
 ```
 
 The MTA GTFS-Realtime feeds are public and require no key.
+
+### Production deploy notes
+
+`NEXT_PUBLIC_MAPBOX_TOKEN` is bundled into the client. Before production:
+
+1. Restrict the token at https://account.mapbox.com/access-tokens/ under *URL restrictions* to your production domain(s). A leaked token can otherwise be billed against your account from arbitrary origins.
+2. Set `NEXT_PUBLIC_SITE_URL` to your canonical URL so OG/Twitter cards, sitemap, and robots.txt resolve absolute URLs correctly.
+3. (Optional) Wire `NEXT_PUBLIC_SENTRY_DSN` to forward client + server errors through `lib/observability.ts` to Sentry. The shim ships with a structured-console default, so error tracking works without a DSN — the DSN only enables remote forwarding.
+4. Hook `/api/health` into an external uptime monitor (UptimeRobot, Better Stack). It returns 503 when the upstream MTA feed is unreachable so a probe can flip a status page without parsing JSON.
 
 ## Project layout
 

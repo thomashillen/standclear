@@ -1,11 +1,11 @@
 import type { MetadataRoute } from "next";
+import { SITE_NAME, SITE_SHORT_DESCRIPTION, SITE_TITLE } from "@/lib/site";
 
 export default function manifest(): MetadataRoute.Manifest {
   return {
-    name: "StandClear — NYC Subway Tracker",
-    short_name: "StandClear",
-    description:
-      "Real-time NYC subway tracking with arrivals, nearby stations, and service alerts.",
+    name: SITE_TITLE,
+    short_name: SITE_NAME,
+    description: SITE_SHORT_DESCRIPTION,
     start_url: "/",
     scope: "/",
     display: "standalone",

@@ -16,7 +16,16 @@ import {
   Sparkles,
   MoreHorizontal,
   Wand2,
+  MessageSquare,
+  ExternalLink,
 } from "lucide-react";
+import { GithubIcon } from "@/components/marketing/GithubIcon";
+import {
+  FEEDBACK_URL,
+  GITHUB_URL,
+  ISSUES_URL,
+  VERSION_LABEL,
+} from "@/lib/site";
 import { useAlerts } from "@/lib/useAlerts";
 import { useCommute } from "@/lib/useFavorites";
 import { useSheetDrag } from "@/lib/useSheetDrag";
@@ -348,32 +357,77 @@ export default function MoreSheet({ open, onClose, onSetHome, onSetWork }: Props
             </section>
           )}
 
-          {/* ─── About ─── */}
+          {/* ─── About + community ─── */}
           <section>
             <h3 className="px-2 pb-1.5 text-[10px] font-semibold uppercase tracking-wider text-gray-500">
               About
             </h3>
-            <button
-              type="button"
-              onClick={() => {
-                onClose();
-                setAboutOpen(true);
-              }}
-              className="press w-full flex items-center gap-3 px-3 py-3 rounded-2xl bg-white/[0.04] hover:bg-white/[0.08] touch-manipulation"
-            >
-              <span className="flex items-center justify-center w-9 h-9 rounded-full bg-white/[0.08] text-gray-300 flex-shrink-0">
-                <Info className="w-4 h-4" />
-              </span>
-              <span className="flex-1 min-w-0 text-left">
-                <span className="block text-[14px] font-semibold text-gray-100">
-                  About StandClear
+            <div className="space-y-1.5">
+              <button
+                type="button"
+                onClick={() => {
+                  onClose();
+                  setAboutOpen(true);
+                }}
+                className="press w-full flex items-center gap-3 px-3 py-3 rounded-2xl bg-white/[0.04] hover:bg-white/[0.08] touch-manipulation"
+              >
+                <span className="flex items-center justify-center w-9 h-9 rounded-full bg-white/[0.08] text-gray-300 flex-shrink-0">
+                  <Info className="w-4 h-4" />
                 </span>
-                <span className="block text-[12px] text-gray-400 truncate">
-                  What this app does, where the data comes from
+                <span className="flex-1 min-w-0 text-left">
+                  <span className="block text-[14px] font-semibold text-gray-100">
+                    About StandClear
+                  </span>
+                  <span className="block text-[12px] text-gray-400 truncate">
+                    What this app does, where the data comes from
+                  </span>
                 </span>
-              </span>
-              <ChevronRight className="w-4 h-4 text-gray-500 flex-shrink-0" />
-            </button>
+                <ChevronRight className="w-4 h-4 text-gray-500 flex-shrink-0" />
+              </button>
+              {/* Send feedback — GitHub Issues with a pre-filled
+                  "feedback" label, opening in a new tab so the rider's
+                  current trip context isn't blown away. */}
+              <a
+                href={FEEDBACK_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="press w-full flex items-center gap-3 px-3 py-3 rounded-2xl bg-white/[0.04] hover:bg-white/[0.08] touch-manipulation"
+              >
+                <span className="flex items-center justify-center w-9 h-9 rounded-full bg-emerald-500/15 text-emerald-200 ring-1 ring-emerald-500/30 flex-shrink-0">
+                  <MessageSquare className="w-4 h-4" />
+                </span>
+                <span className="flex-1 min-w-0 text-left">
+                  <span className="block text-[14px] font-semibold text-gray-100">
+                    Send feedback
+                  </span>
+                  <span className="block text-[12px] text-gray-400 truncate">
+                    Bugs, feature requests, kind words
+                  </span>
+                </span>
+                <ExternalLink className="w-3.5 h-3.5 text-gray-500 flex-shrink-0" />
+              </a>
+              {/* Source on GitHub. Out-of-app link, also new tab so the
+                  rider doesn't lose the live map. */}
+              <a
+                href={GITHUB_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="press w-full flex items-center gap-3 px-3 py-3 rounded-2xl bg-white/[0.04] hover:bg-white/[0.08] touch-manipulation"
+              >
+                <span className="flex items-center justify-center w-9 h-9 rounded-full bg-white/[0.08] text-gray-300 flex-shrink-0">
+                  <GithubIcon className="w-[15px] h-[15px]" />
+                </span>
+                <span className="flex-1 min-w-0 text-left">
+                  <span className="block text-[14px] font-semibold text-gray-100">
+                    View source on GitHub
+                  </span>
+                  <span className="block text-[12px] text-gray-400 truncate">
+                    MIT-licensed · open issues + PRs welcome
+                  </span>
+                </span>
+                <ExternalLink className="w-3.5 h-3.5 text-gray-500 flex-shrink-0" />
+              </a>
+            </div>
           </section>
         </div>
       </div>
@@ -510,10 +564,62 @@ function AboutDialog({
             </div>
           </section>
 
-          <section className="px-1 text-center">
-            <span className="text-[11px] text-gray-500 tabular-nums">
-              v0.9 · MVP build
-            </span>
+          {/* Legal + community footer. Opens out-of-app links in a new
+              tab so the rider's live map context isn't blown away. The
+              in-app /privacy and /terms routes use plain anchors (not
+              Next <Link/>) to sidestep the SPA boundary — those pages
+              own their own scroll layout, and a same-tab navigation
+              from the dialog is the right intent there. */}
+          <section className="px-1 pt-2 border-t border-white/[0.06]">
+            <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1.5 text-[11.5px] text-gray-400">
+              <a
+                href="/about"
+                className="hover:text-white transition-colors"
+              >
+                About
+              </a>
+              <span aria-hidden className="text-gray-700">
+                ·
+              </span>
+              <a
+                href="/changelog"
+                className="hover:text-white transition-colors"
+              >
+                Changelog
+              </a>
+              <span aria-hidden className="text-gray-700">
+                ·
+              </span>
+              <a
+                href="/privacy"
+                className="hover:text-white transition-colors"
+              >
+                Privacy
+              </a>
+              <span aria-hidden className="text-gray-700">
+                ·
+              </span>
+              <a
+                href="/terms"
+                className="hover:text-white transition-colors"
+              >
+                Terms
+              </a>
+              <span aria-hidden className="text-gray-700">
+                ·
+              </span>
+              <a
+                href={ISSUES_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="hover:text-white transition-colors"
+              >
+                Feedback
+              </a>
+            </div>
+            <p className="mt-3 text-center text-[11px] text-gray-500 tabular-nums">
+              {VERSION_LABEL} · build
+            </p>
           </section>
         </div>
       </DialogContent>

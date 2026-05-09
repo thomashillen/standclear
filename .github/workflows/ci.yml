@@ -7,7 +7,7 @@ on:
 
 jobs:
   lint-and-test:
-    name: Lint & Test
+    name: Lint, typecheck, test, build
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -23,5 +23,22 @@ jobs:
       - name: Lint
         run: npm run lint
 
+      # tsconfig has noEmit:true so the build doesn't reject on type
+      # errors — run tsc explicitly so a broken type ships nothing.
+      - name: Typecheck
+        run: npx tsc --noEmit
+
       - name: Test
         run: npm test
+
+      # Catch syntax + dynamic-route mistakes that lint + tsc miss
+      # (e.g. unrecognised metadata exports, import ordering that
+      # breaks Turbopack). A token is required for the dynamic-route
+      # collection pass — a bogus value is fine since CI never hits
+      # the network. NEXT_PUBLIC_SITE_URL pins the canonical URL so
+      # OG/sitemap rendering stays deterministic.
+      - name: Build
+        env:
+          NEXT_PUBLIC_MAPBOX_TOKEN: pk.ci_placeholder_token
+          NEXT_PUBLIC_SITE_URL: https://standclear.app
+        run: npm run build
