@@ -540,6 +540,13 @@ export function useTrainMarkers({
       // once at lock-on so subsequent ticks don't fight the rider's
       // pinch-zoom — see the dragstart/zoomstart handlers below for
       // exit behavior.
+      //
+      // `essential: true` is intentionally omitted: with
+      // `prefers-reduced-motion` Mapbox collapses the 250ms ease into
+      // an instant recenter, which is the right behavior — the
+      // camera still tracks the train precisely each tick, just
+      // without smoothing. Tracking is preserved; only the
+      // smoothing is dropped.
       const followId = followedTrainIdRef.current;
       if (followId) {
         const head = lastRenderById.get(followId);
@@ -548,7 +555,6 @@ export function useTrainMarkers({
           map.easeTo({
             center: [followLng, followLat],
             duration: 250,
-            essential: true,
           });
         } else {
           // Train left the feed (completed trip / went out of service).
