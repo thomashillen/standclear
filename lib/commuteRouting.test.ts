@@ -159,6 +159,25 @@ describe("planTrips", () => {
     expect(plan.legs[1].boardComplexId).toBe("635");
     expect(plan.legs[1].alightComplexId).toBe("419");
     expect(plan.transferComplexId).toBe("635");
+    // Whichever of 4/5 wasn't the survivor is recorded as a sibling
+    // on leg 2 — the rider would board whichever express arrives first
+    // at Union Sq, and the UI uses this to render both bullets.
+    const survivor = plan.legs[1].routeId;
+    const expectedSibling = survivor === "4" ? "5" : "4";
+    expect(plan.legs[1].siblingRouteIds).toEqual([expectedSibling]);
+  });
+
+  it("collapses co-running direct routes into one plan with siblings on leg 1", () => {
+    // 4 and 5 share the trunk Grand Central → Union Sq → Wall St.
+    // After path-dedup there should be exactly one direct plan; the
+    // dropped route is recorded as a sibling so the UI can show both
+    // bullets and live arrivals from either count toward "next train."
+    const plans = planTrips(lines, index, ["631"], ["419"]);
+    const direct = plans.filter((p) => p.legs.length === 1);
+    expect(direct).toHaveLength(1);
+    const survivor = direct[0].legs[0].routeId;
+    const expectedSibling = survivor === "4" ? "5" : "4";
+    expect(direct[0].legs[0].siblingRouteIds).toEqual([expectedSibling]);
   });
 
   it("plans a cross-trunk transfer (N → 4) when neither line alone reaches the destination", () => {
@@ -283,6 +302,37 @@ describe("estimateTripTimeSec", () => {
     const map = new Map<string, Arrival[]>([["631", arrivals]]);
     const t = estimateTripTimeSec(ONE_LEG_PLAN, { arrivalsByStation: map, nowSec: 0 });
     expect(t).toBe(FALLBACK_WAIT_S + 1 * TRAVEL_PER_STOP_S);
+  });
+
+  it("counts a sibling route's live arrival toward the leg-1 wait", () => {
+    // Plan boards primary "4", but a "5" arrives sooner. Co-running
+    // siblings share the platform — the rider takes whichever pulls
+    // in first, so the wait should reflect the 5's ETA.
+    const planWithSibling: TripPlan = {
+      legs: [
+        {
+          routeId: "4",
+          direction: "S",
+          boardStopId: "631",
+          alightStopId: "419",
+          boardComplexId: "631",
+          alightComplexId: "419",
+          stopCount: 2,
+          siblingRouteIds: ["5"],
+        },
+      ],
+      totalStops: 2,
+    };
+    const arrivals: Arrival[] = [
+      { routeId: "4", stopId: "631", direction: "S", eta: 600, tripId: "late-4" },
+      { routeId: "5", stopId: "631", direction: "S", eta: 60, tripId: "soon-5" },
+    ];
+    const map = new Map<string, Arrival[]>([["631", arrivals]]);
+    const t = estimateTripTimeSec(planWithSibling, {
+      arrivalsByStation: map,
+      nowSec: 0,
+    });
+    expect(t).toBe(60 + 2 * TRAVEL_PER_STOP_S);
   });
 
   it("adds walk time from origin and to destination", () => {

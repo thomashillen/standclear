@@ -26,6 +26,15 @@ export interface TripLeg {
   alightComplexId: string;
   /** Stops traveled on this leg (alightIdx − boardIdx, sign-stripped). */
   stopCount: number;
+  /** Other routeIds that traverse the same physical board→alight
+   *  segment in the same direction. Populated by the path-aware dedup
+   *  in `planTrips` when co-running routes (e.g., N/R/W on Broadway
+   *  BMT, A/C on 8 Av) collapse into one plan. From the rider's
+   *  perspective these are interchangeable: board whichever arrives
+   *  first. The UI uses this to show all relevant route bullets and
+   *  to surface live arrivals across siblings, not just the nominal
+   *  `routeId` survivor. Undefined or empty when no siblings exist. */
+  siblingRouteIds?: string[];
 }
 
 export interface TripPlan {
@@ -269,11 +278,21 @@ export function estimateTripTimeSec(
       // matching this leg's route + direction. The arrivals lookup
       // is keyed on canonical complex stopId; the leg already
       // carries that.
+      // Co-running routes (siblingRouteIds — N/R/W on Broadway BMT
+      // etc.) count as the same option from the rider's perspective:
+      // they share the platform, traverse the same complexes, so
+      // whichever arrives first is "the train." Including siblings
+      // here keeps the wait estimate truthful when the live next
+      // train happens to be a sibling of the nominal routeId.
+      const validRoutes = new Set<string>([leg.routeId]);
+      if (leg.siblingRouteIds) {
+        for (const sib of leg.siblingRouteIds) validRoutes.add(sib);
+      }
       const arrivals = arrivalsByStation.get(leg.boardComplexId);
       if (arrivals) {
         let earliest = Infinity;
         for (const a of arrivals) {
-          if (a.routeId !== leg.routeId) continue;
+          if (!validRoutes.has(a.routeId)) continue;
           if (a.direction !== leg.direction) continue;
           if (a.eta < nowSec - 5) continue; // already left
           if (a.eta < earliest) earliest = a.eta;
@@ -536,12 +555,13 @@ export function planTrips(
   //      same intermediate stations. From the rider's perspective
   //      that's ONE option ("take any Broadway-line train"), not
   //      three. We dedupe AFTER sorting so the surviving plan in
-  //      each path-group is the lowest-stop one. Riders see the
-  //      route bullet of whichever variant won; live arrivals on
-  //      that complex still surface trains from any of the
-  //      co-running routes since they all stop there.
+  //      each path-group is the lowest-stop one — but we record the
+  //      collapsed routeIds on the survivor's leg as siblingRouteIds,
+  //      so the UI can show all the bullets and aggregate live
+  //      arrivals across the trunk rather than just the nominal
+  //      survivor.
   const seen = new Set<string>();
-  const seenPath = new Set<string>();
+  const seenPathToPlan = new Map<string, TripPlan>();
   const deduped: TripPlan[] = [];
   for (const plan of results) {
     const exactKey =
@@ -553,9 +573,24 @@ export function planTrips(
     const pathKey = plan.legs
       .map((l) => `${l.boardComplexId}>${l.alightComplexId}-${l.direction}`)
       .join("|");
-    if (seenPath.has(pathKey)) continue;
-    seenPath.add(pathKey);
-
+    const survivor = seenPathToPlan.get(pathKey);
+    if (survivor) {
+      // Same path, different routeId(s). Merge each differing leg's
+      // routeId into the survivor's per-leg sibling list. Mutating
+      // the survivor is safe — it was constructed in this function
+      // and hasn't escaped yet.
+      for (let i = 0; i < survivor.legs.length; i++) {
+        const survLeg = survivor.legs[i];
+        const dupLeg = plan.legs[i];
+        if (!dupLeg || dupLeg.routeId === survLeg.routeId) continue;
+        if (!survLeg.siblingRouteIds) survLeg.siblingRouteIds = [];
+        if (!survLeg.siblingRouteIds.includes(dupLeg.routeId)) {
+          survLeg.siblingRouteIds.push(dupLeg.routeId);
+        }
+      }
+      continue;
+    }
+    seenPathToPlan.set(pathKey, plan);
     deduped.push(plan);
   }
 
@@ -568,9 +603,17 @@ export function planTrips(
   // in the direct-plan set is dropped. Riders who actually need a
   // cross-trunk transfer (e.g., 4 → L) keep their plan because
   // neither route alone reaches the destination.
+  // Siblings of a direct plan's leg count too — if the rider has a
+  // direct N/R/W via Broadway BMT, a transfer plan whose first leg
+  // is "W to <somewhere>" is the same noise.
   const directRoutes = new Set<string>();
   for (const plan of deduped) {
-    if (plan.legs.length === 1) directRoutes.add(plan.legs[0].routeId);
+    if (plan.legs.length !== 1) continue;
+    const leg = plan.legs[0];
+    directRoutes.add(leg.routeId);
+    if (leg.siblingRouteIds) {
+      for (const sib of leg.siblingRouteIds) directRoutes.add(sib);
+    }
   }
   const trimmed = deduped.filter((plan) => {
     if (plan.legs.length === 1) return true;
