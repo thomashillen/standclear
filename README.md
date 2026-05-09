@@ -46,6 +46,7 @@ Additional pre-production checklist:
 1. Set `NEXT_PUBLIC_SITE_URL` to your canonical URL so OG/Twitter cards, sitemap, and robots.txt resolve absolute URLs correctly.
 2. (Optional) Wire `NEXT_PUBLIC_SENTRY_DSN` to forward client + server errors through `lib/observability.ts` to Sentry. The shim ships with a structured-console default, so error tracking works without a DSN — the DSN only enables remote forwarding.
 3. Hook `/api/health` into an external uptime monitor (UptimeRobot, Better Stack). It returns 503 when the upstream MTA feed is unreachable so a probe can flip a status page without parsing JSON.
+4. Client-side `error`/`warn` records from `lib/observability.ts` are POSTed to `/api/log` (rate-limited, sanitized, capped per page-load) and re-emitted via the server logger so they land in your function-log sink (Vercel logs, etc.) without needing a third-party DSN. Set `NEXT_PUBLIC_LOG_FORWARD=off` to disable the network hop — useful for local development or when wiring a different transport.
 
 ### A note on `standclear.app`
 
