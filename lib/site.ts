@@ -35,9 +35,14 @@ export const CONTACT_EMAIL: string | null = null;
 export const AUTHOR_NAME = "Thomas Hillen";
 export const AUTHOR_HANDLE = "thomashillen";
 
-// Versioning. VERSION should track package.json; APP_RELEASE_NAME is a
-// human-readable label surfaced in the About dialog and footer.
-export const VERSION = "0.9.0";
+// Versioning. VERSION is sourced directly from package.json so the
+// /api/health response, the status page, the About dialog footer, and
+// the marketing footer can never drift apart from the actual shipped
+// build — operator-facing identifiers are only useful if they match
+// what's running. APP_RELEASE_NAME is the human-readable label
+// (e.g. "MVP") that lives alongside the numeric version.
+import pkg from "../package.json" with { type: "json" };
+export const VERSION = pkg.version;
 export const APP_RELEASE_NAME = "MVP";
 export const VERSION_LABEL = `v${VERSION} · ${APP_RELEASE_NAME}`;
 
