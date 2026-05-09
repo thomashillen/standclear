@@ -668,7 +668,14 @@ export default function SearchSheet({
   // already made (e.g. tapped the second-fastest); that selection
   // sticks until the trip pair changes (which clears tripPlans and
   // brings us back through this effect with no selection).
+  //
+  // Gate on `open` because closing the sheet clears the parent's
+  // `selectedTripSelection` (so `selectedTripKey` flips to null) while
+  // the local `tripPlans` memo is still populated — without this
+  // guard the effect would re-fire after onClose and re-select the
+  // top plan, repainting the route the rider just dismissed.
   useEffect(() => {
+    if (!open) return;
     if (mode !== "directions") return;
     if (!onTripSelect || selectedTripKey || tripPlans.length === 0) return;
     const plan = tripPlans[0];
@@ -689,7 +696,7 @@ export default function SearchSheet({
           }
         : undefined,
     });
-  }, [mode, tripPlans, selectedTripKey, onTripSelect, tripFrom, tripTo]);
+  }, [open, mode, tripPlans, selectedTripKey, onTripSelect, tripFrom, tripTo]);
 
   // ── Picker results (when a directions field needs filling).
   const plannerSearchResults = useMemo<StationEntry[] | null>(() => {
