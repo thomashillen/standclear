@@ -225,4 +225,55 @@ describe("GET /api/trains", () => {
     const body = (await res.json()) as TrainsResponse;
     expect(body.trains).toEqual([]);
   });
+
+  it("propagates per-vehicle timestamp into Train.lastReportedAt", async () => {
+    // T6 carries an explicit vehicle.timestamp 80s before the pinned
+    // wall clock. The header's timestamp is older — proves per-vehicle
+    // wins when both are present.
+    const entity = {
+      id: "T6",
+      tripUpdate: {
+        trip: { tripId: "T6", routeId: "N" },
+        stopTimeUpdate: [
+          { stopId: "R20N", arrival: { time: 1_700_000_700 } },
+        ],
+      },
+      vehicle: {
+        trip: { tripId: "T6", routeId: "N" },
+        stopId: "R20N",
+        currentStatus: 1,
+        timestamp: 1_700_000_420, // 80s before wall now (1_700_000_500)
+      },
+    };
+    fetchMock.mockResolvedValue(feedResponse(feed([entity], 1_700_000_300)));
+
+    const body = (await (await GET()).json()) as TrainsResponse;
+    const t6 = body.trains.find((t) => t.id === "T6");
+    expect(t6?.lastReportedAt).toBe(1_700_000_420);
+  });
+
+  it("falls back to feed header timestamp when vehicle.timestamp is absent", async () => {
+    // T7 has no vehicle.timestamp; lastReportedAt should track the
+    // feed header instead so the client at least knows when the feed
+    // assembly happened.
+    const entity = {
+      id: "T7",
+      tripUpdate: {
+        trip: { tripId: "T7", routeId: "Q" },
+        stopTimeUpdate: [
+          { stopId: "Q05N", arrival: { time: 1_700_000_700 } },
+        ],
+      },
+      vehicle: {
+        trip: { tripId: "T7", routeId: "Q" },
+        stopId: "Q05N",
+        currentStatus: 1,
+      },
+    };
+    fetchMock.mockResolvedValue(feedResponse(feed([entity], 1_700_000_350)));
+
+    const body = (await (await GET()).json()) as TrainsResponse;
+    const t7 = body.trains.find((t) => t.id === "T7");
+    expect(t7?.lastReportedAt).toBe(1_700_000_350);
+  });
 });
