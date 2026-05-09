@@ -234,9 +234,17 @@ export async function retrievePlace(
 /**
  * Debounced wrapper around `suggestPlaces`. Holds a single pending
  * request internally; subsequent calls within the debounce window
- * cancel and replace the in-flight request. Errors (other than
- * AbortError) surface as an empty result so autocomplete UIs handle
- * "no results" gracefully.
+ * cancel and replace the in-flight request.
+ *
+ * Errors (other than AbortError) surface to the caller two ways:
+ *   • `onResult([])` is still called so the UI can clear stale rows.
+ *   • `onError` (optional) is called so the UI can distinguish
+ *     "no matches" from "service unavailable" and render a notice.
+ *
+ * The split exists because riders previously saw a generic "No
+ * matches" empty state when the proxy returned 503 (e.g. missing
+ * `MAPBOX_TOKEN` on deploy), giving no signal that address search
+ * itself was broken — see PR description for the incident.
  */
 export function makeDebouncedSuggester(
   delayMs: number = 250,
@@ -244,10 +252,11 @@ export function makeDebouncedSuggester(
   query: string,
   options: Parameters<typeof suggestPlaces>[1] | undefined,
   onResult: (results: Suggestion[]) => void,
+  onError?: () => void,
 ) => void {
   let timer: ReturnType<typeof setTimeout> | null = null;
   let abort: AbortController | null = null;
-  return (query, options, onResult) => {
+  return (query, options, onResult, onError) => {
     if (timer) clearTimeout(timer);
     if (abort) abort.abort();
     timer = setTimeout(() => {
@@ -273,6 +282,7 @@ export function makeDebouncedSuggester(
             error: err instanceof Error ? err.message : String(err),
           });
           onResult([]);
+          onError?.();
         });
     }, delayMs);
   };
