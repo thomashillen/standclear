@@ -44,6 +44,13 @@ const config: CapacitorConfig = {
   // instant; native updates are reserved for shell or plugin
   // changes. cleartext: false forces HTTPS so a hostile network
   // can't downgrade the connection mid-session.
+  //
+  // The `standclear.app` URL is the brand target. Until the domain
+  // is registered + DNS-pointed at the Vercel deploy, swap this
+  // for the active Vercel preview URL (e.g. `standclear-xxx.vercel.app`)
+  // so the simulator and TestFlight builds load real content. Re-run
+  // `npm run cap:sync:ios` after editing so the change reaches the
+  // Xcode project's bundled capacitor.config.json.
   server: {
     url: "https://standclear.app",
     cleartext: false,

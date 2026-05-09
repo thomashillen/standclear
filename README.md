@@ -45,6 +45,13 @@ Additional pre-production checklist:
 2. (Optional) Wire `NEXT_PUBLIC_SENTRY_DSN` to forward client + server errors through `lib/observability.ts` to Sentry. The shim ships with a structured-console default, so error tracking works without a DSN — the DSN only enables remote forwarding.
 3. Hook `/api/health` into an external uptime monitor (UptimeRobot, Better Stack). It returns 503 when the upstream MTA feed is unreachable so a probe can flip a status page without parsing JSON.
 
+### A note on `standclear.app`
+
+The codebase defaults to `https://standclear.app` as the canonical URL — that's the brand target, not necessarily the live deploy. Until the domain is registered + DNS-pointed at the Vercel deploy, set `NEXT_PUBLIC_SITE_URL` to the actual deployment URL (the Vercel preview URL is fine) so social previews and the sitemap don't reference a 404. Two places to update if the brand ever pivots away from `StandClear`:
+
+- `lib/site.ts` — `SITE_NAME`, `SITE_URL`, `GITHUB_REPO`, etc.
+- `capacitor.config.ts` — `appId`, `appName`, `server.url` (then run `npm run cap:sync:ios`).
+
 ## Project layout
 
 ```
@@ -77,7 +84,7 @@ The script picks the longest representative trip + shape per route, snaps each s
 
 ## Native iOS app
 
-StandClear also ships as a native iOS app via Capacitor. The native shell loads `https://standclear.app` in a WebView, with native plugins for splash, status bar, share, and preferences layered on top — Apple Review-friendly without bundling a separate static export.
+StandClear also ships as a native iOS app via Capacitor. The native shell loads the live web app in a WebView, with native plugins for splash, status bar, share, and preferences layered on top — Apple Review-friendly without bundling a separate static export.
 
 Quick start (on a Mac):
 
@@ -86,6 +93,11 @@ npm install
 cd ios/App && pod install && cd -
 npm run cap:open:ios   # opens the Xcode workspace
 ```
+
+**You don't need a paid Apple Developer subscription to develop or test:**
+
+- Free Xcode signing covers the iOS Simulator and your own iPhone (re-sign weekly via ⌘R).
+- The $99/year Apple Developer Program is only needed for App Store submission and for distributing TestFlight builds to other testers.
 
 Full setup, real-device testing, and App Store submission walkthrough in [NATIVE.md](./NATIVE.md).
 
