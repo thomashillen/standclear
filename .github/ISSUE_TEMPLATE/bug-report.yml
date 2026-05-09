@@ -1,0 +1,80 @@
+name: Bug report
+description: Something is broken or behaves wrong.
+title: "[bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for filing a bug. The more detail, the faster we can fix it. If this is a security issue, please use the [private security advisory](https://github.com/thomashillen/standclear/security/advisories/new) flow instead — see SECURITY.md.
+
+  - type: input
+    id: summary
+    attributes:
+      label: One-line summary
+      placeholder: "Trains disappear from the map after I tap a route bullet"
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Minimal repro. The first list item should be "open StandClear at <url>" if the bug needs a fresh page.
+      placeholder: |
+        1. Open https://standclear.app
+        2. Tap the [F] route in the line picker
+        3. Wait ~10 seconds
+        4. Tap a station marker
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect?
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: What actually happened?
+    validations:
+      required: true
+
+  - type: textarea
+    id: screenshot
+    attributes:
+      label: Screenshot or screen recording
+      description: Drag a file in. Especially helpful for visual bugs.
+
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      multiple: true
+      options:
+        - iOS Safari
+        - iOS standalone PWA
+        - Android Chrome
+        - Android standalone PWA
+        - Desktop Chrome
+        - Desktop Safari
+        - Desktop Firefox
+        - Other (mention in browser version below)
+    validations:
+      required: true
+
+  - type: input
+    id: browser
+    attributes:
+      label: Browser version
+      placeholder: "Safari 17.5 on iOS 17.6.1"
+
+  - type: textarea
+    id: console
+    attributes:
+      label: Console errors
+      description: If you can open DevTools, paste any red errors from the Console tab here.
+      render: shell

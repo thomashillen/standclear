@@ -1,0 +1,43 @@
+name: Feature request
+description: Something StandClear should do that it doesn't do today.
+title: "[feat]: "
+labels: ["feature"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the suggestion. The best feature requests are concrete: what should the rider be able to do, and why does it matter for them.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What's the problem?
+      description: The user-facing pain. ("It's hard to know which exit to use," not "Add an exits database.")
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: What's the proposed solution?
+      description: How would the rider experience it? Describe the flow.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Other approaches you weighed.
+
+  - type: dropdown
+    id: tier
+    attributes:
+      label: Where should this live?
+      options:
+        - "Free — should be available to everyone"
+        - "Pro — power-rider feature, paid tier OK"
+        - "Either — happy with any path that gets it shipped"
+      default: 2
+    validations:
+      required: true

@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Question, idea, or general feedback
+    url: https://github.com/thomashillen/standclear/discussions
+    about: Open a discussion for anything that isn't clearly a bug or a feature request.
+  - name: Security vulnerability
+    url: https://github.com/thomashillen/standclear/security/advisories/new
+    about: Use GitHub's private security advisory flow — please don't open a public issue for vulnerabilities.
