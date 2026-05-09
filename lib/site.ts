@@ -15,7 +15,13 @@ export const SITE_SHORT_DESCRIPTION =
 export const SITE_DESCRIPTION =
   "Real-time NYC subway tracking — every train on every line, animated live on a Mapbox dark map with arrivals, nearby stations, address-to-address routing, and service alerts. Streaming straight from the MTA's public GTFS-Realtime feeds.";
 
-// Canonical site URL. Override per environment via NEXT_PUBLIC_SITE_URL.
+// Canonical site URL. The `standclear.app` default is the brand
+// target — if/when the domain is provisioned this is the URL OG
+// cards, sitemap, robots.txt, and structured data resolve against.
+// Until then, set NEXT_PUBLIC_SITE_URL to the actual deployment
+// URL (the Vercel preview URL works) so social previews and the
+// sitemap don't 404 against a domain that isn't pointed at this
+// app yet. Override per environment via NEXT_PUBLIC_SITE_URL.
 export const SITE_URL =
   process.env.NEXT_PUBLIC_SITE_URL ?? "https://standclear.app";
 

@@ -2,17 +2,24 @@
 
 This document is the canonical reference for building, testing, and shipping StandClear's native iOS (and later Android) app via Capacitor.
 
-The native app is a thin Capacitor shell that loads the live web app at `https://standclear.app` inside a WebView, layered with native plugins (splash screen, status bar styling, share, preferences). This pattern lets us iterate on the web app instantly while still satisfying Apple's App Review guideline 4.2 ("apps must offer some level of native interaction").
+The native app is a thin Capacitor shell that loads the live web app inside a WebView, layered with native plugins (splash screen, status bar styling, share, preferences). This pattern lets us iterate on the web app instantly while still satisfying Apple's App Review guideline 4.2 ("apps must offer some level of native interaction").
+
+> **What this guide assumes vs. what's optional.** You can do *most* of this without paying anyone:
+>
+> - **Free path (today):** build + run in the iOS Simulator, install on your own iPhone via free Xcode signing (re-sign every 7 days). All you need is a Mac with Xcode and a free Apple ID.
+> - **Paid path (when you're ready to ship):** $99/year Apple Developer Program. Required for App Store submission and for distributing TestFlight builds to non-self testers. Do not pay until you have a working build you actually want to release.
+>
+> **About the domain.** `capacitor.config.ts` currently points `server.url` at `https://standclear.app`. Until that domain is registered + DNS-pointed at the Vercel deploy, swap it for the active Vercel preview URL (e.g. `https://standclear-xxx.vercel.app`) so the simulator and TestFlight builds load real content. Re-run `npm run cap:sync:ios` after editing.
 
 ## Prerequisites
 
-| Requirement | iOS | Android |
-| --- | --- | --- |
-| OS for native build | macOS (any recent) | macOS, Linux, or Windows |
-| IDE | Xcode 15+ | Android Studio Hedgehog+ |
-| Developer account | Apple Developer ($99/yr) | Google Play Developer ($25 one-time) |
-| Device for real-device testing | iPhone with Apple ID | Android phone with USB debugging |
-| CocoaPods | Yes — `sudo gem install cocoapods` | n/a |
+| Requirement | iOS (free dev) | iOS (App Store submit) | Android |
+| --- | --- | --- | --- |
+| OS for native build | macOS (any recent) | macOS (any recent) | macOS, Linux, or Windows |
+| IDE | Xcode 15+ | Xcode 15+ | Android Studio Hedgehog+ |
+| Developer account | **Free Apple ID** | Apple Developer ($99/yr) | Google Play Developer ($25 one-time) |
+| Device for real-device testing | iPhone (re-sign weekly) | iPhone (no expiry) | Android phone with USB debugging |
+| CocoaPods | Yes — `sudo gem install cocoapods` | Yes | n/a |
 
 The Node toolchain is the same as for the web app; nothing extra needs to be installed in your shell beyond what `npm install` already pulled.
 
@@ -61,10 +68,16 @@ npm run cap:open:ios    # Opens ios/App/App.xcworkspace in Xcode
 2. `npm install` to fetch JS deps including the Capacitor plugins.
 3. `cd ios/App && pod install && cd -` — this fetches the native iOS plugin pods.
 4. `npm run cap:open:ios` — opens the Xcode workspace.
-5. In Xcode: select the **App** target → **Signing & Capabilities** tab → set your **Team** to your Apple Developer account. The bundle identifier `app.standclear` is reserved by you the first time you upload to App Store Connect; until then, you can change it temporarily for development if needed.
-6. Pick a simulator from the run-target dropdown (e.g. *iPhone 15 Pro*) and hit ⌘R. The app should boot to the dark splash, transition into the live `standclear.app` map.
+5. In Xcode: select the **App** target → **Signing & Capabilities** tab → set **Team**. Two options:
+   - **Free path:** sign in with your free Apple ID and pick the resulting "Personal Team." Builds work in the simulator forever and on your own iPhone for 7 days at a time before re-signing.
+   - **Paid path:** if you have the $99/year Apple Developer Program, your team appears here. Required for TestFlight + App Store submission.
+
+   The bundle identifier `app.standclear` is reserved by you the first time you upload to App Store Connect; until then, you can change it temporarily for development if needed (e.g. if you're using a free Personal Team that's already signed something else with that ID).
+6. Pick a simulator from the run-target dropdown (e.g. *iPhone 15 Pro*) and hit ⌘R. The app should boot to the dark splash, transition into the live web app.
 
 ## Testing on a real device
+
+Works without a paid developer account, with one caveat: the build expires after 7 days and you'll need to re-sign by hitting ⌘R in Xcode again. With the paid Apple Developer Program, builds don't expire.
 
 1. Plug your iPhone in via USB and trust the Mac when prompted on the phone.
 2. In Xcode, select the device from the run-target dropdown.
@@ -73,7 +86,7 @@ npm run cap:open:ios    # Opens ios/App/App.xcworkspace in Xcode
 
 ## App Store submission checklist
 
-When the app is ready to ship:
+When the app is ready to ship. **This section requires the $99/year Apple Developer Program** — sign up at https://developer.apple.com/programs/. Allow 24–48h for Apple to verify the membership before App Store Connect lets you create a listing.
 
 ### Pre-submission
 
@@ -84,7 +97,7 @@ When the app is ready to ship:
   - `NSLocationWhenInUseUsageDescription` — "StandClear uses your location to surface nearby subway stations and walking routes to the platform. Your location stays on this device — it is never sent to our servers." (populated)
   - `NSMotionUsageDescription` — "StandClear uses motion data only for the optional reactive-glass tilt effect on panels and pills. The data never leaves your device and the effect can be disabled in More → Personalize." (populated)
   - `NSAppTransportSecurity` — defaults to HTTPS-only; we don't load any plaintext domains. No exception keys set.
-- [ ] Confirm `capacitor.config.ts`'s `server.url` points at production (`https://standclear.app`), not a preview deployment.
+- [ ] Confirm `capacitor.config.ts`'s `server.url` points at the production domain (currently `https://standclear.app`), not a preview deployment. If the domain isn't yet registered + pointing at the Vercel deploy, register it before this step — App Review will reject a build whose `server.url` returns 404 or a vendor splash page.
 - [ ] Run the PR checks one more time: `npm run lint && npx tsc --noEmit && npm test`.
 
 ### App Store Connect setup (one-time)
