@@ -75,6 +75,20 @@ The repo ships with a pre-built `public/gtfsData.json`. To regenerate from a fre
 
 The script picks the longest representative trip + shape per route, snaps each stop to the nearest shape vertex, and emits a single JSON the client streams in.
 
+## Native iOS app
+
+StandClear also ships as a native iOS app via Capacitor. The native shell loads `https://standclear.app` in a WebView, with native plugins for splash, status bar, share, and preferences layered on top — Apple Review-friendly without bundling a separate static export.
+
+Quick start (on a Mac):
+
+```bash
+npm install
+cd ios/App && pod install && cd -
+npm run cap:open:ios   # opens the Xcode workspace
+```
+
+Full setup, real-device testing, and App Store submission walkthrough in [NATIVE.md](./NATIVE.md).
+
 ## Scripts
 
 | Command            | What it does                                  |
@@ -86,6 +100,8 @@ The script picks the longest representative trip + shape per route, snaps each s
 | `npm test`         | Vitest unit tests                             |
 | `npm run test:watch` | Vitest watch mode                           |
 | `npm run build:gtfs` | Regenerate `public/gtfsData.json` from raw GTFS |
+| `npm run cap:sync:ios` | Push web shell + plugin updates into the Xcode project |
+| `npm run cap:open:ios` | Open `ios/App/App.xcworkspace` in Xcode |
 
 ## Contributing
 

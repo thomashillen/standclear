@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Share, X } from "lucide-react";
+import { isNative } from "@/lib/native";
 
 // ─── Add-to-Home-Screen prompt ───────────────────────────────────────
 // Shows once, on mobile, when the rider isn't already running the
@@ -73,6 +74,8 @@ export default function InstallPrompt() {
   const [ios, setIos] = useState(false);
 
   useEffect(() => {
+    // Already running as a native app — no install prompt makes sense.
+    if (isNative()) return;
     if (isStandalone() || !isMobile() || dismissed()) return;
     /* eslint-disable react-hooks/set-state-in-effect */
     // One-shot platform sniff on mount — the install path differs
