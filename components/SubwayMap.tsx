@@ -27,6 +27,7 @@ export type TripSelection = {
   walkTo?: { lng: number; lat: number; name?: string };
 };
 import FollowCapsule from "./FollowCapsule";
+import InstallPrompt from "./InstallPrompt";
 import LinePanel from "./LinePanel";
 import LinePicker from "./LinePicker";
 import LiveTrainsPopup from "./LiveTrainsPopup";
@@ -401,6 +402,39 @@ export default function SubwayMap() {
   // (the device dropped its own connection).
   const feedHealth = useFeedHealth();
   const feedDegraded = online && feedHealth.degraded;
+
+  // ─── Deep-link bootstrap ──────────────────────────────────────────
+  // Per-station SEO pages link back here as `/?station=<stopId>`,
+  // and the marketing surface uses `?line=<id>` for line landings.
+  // Read once on mount and apply — we don't keep the URL in sync
+  // afterward (the in-app navigation is its own state machine; a
+  // deep link is an entry point, not a continuous binding). The
+  // set-state-in-effect linter flag is suppressed for this block:
+  // we're intentionally seeding initial state from the URL on mount,
+  // which is the documented "external system → React state" pattern.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    const stationParam = params.get("station");
+    const lineParam = params.get("line");
+    /* eslint-disable react-hooks/set-state-in-effect */
+    if (stationParam) {
+      setStationStopId(stationParam);
+      setNearbyOpen(false);
+      // Clear the param so a refresh doesn't re-apply forever after
+      // the rider closes the panel.
+      const url = new URL(window.location.href);
+      url.searchParams.delete("station");
+      window.history.replaceState({}, "", url.toString());
+    } else if (lineParam) {
+      setSelectedLine(lineParam);
+      setNearbyOpen(false);
+      const url = new URL(window.location.href);
+      url.searchParams.delete("line");
+      window.history.replaceState({}, "", url.toString());
+    }
+    /* eslint-enable react-hooks/set-state-in-effect */
+  }, []);
 
   // Stable identifier for the selected plan, also passed to SearchSheet
   // so its TripPlanRow can show the right selected highlight without
@@ -963,6 +997,12 @@ export default function SubwayMap() {
       </div>
       )}
 
+      {/* One-shot Add-to-Home-Screen nudge. Hides itself on standalone
+          PWAs, on desktop, and after a one-time dismiss — so the
+          steady-state UI is unaffected. Mounted as a sibling of the
+          floating header so the prompt sits above the bottom-sheet
+          stacking context. */}
+      <InstallPrompt />
     </div>
   );
 }

@@ -1,10 +1,10 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { ArrowUp, ArrowDown, Star, X } from "lucide-react";
+import { ArrowUp, ArrowDown, Briefcase, Home, Star, X } from "lucide-react";
 import { useLines } from "@/lib/subwayData";
 import { useTrains, type Arrival, type Train } from "@/lib/useTrains";
-import { useFavorites } from "@/lib/useFavorites";
+import { useCommute, useFavorites } from "@/lib/useFavorites";
 import { useNow } from "@/lib/useNow";
 import { buildStationIndex } from "@/lib/stopsIndex";
 import { useSheetDrag } from "@/lib/useSheetDrag";
@@ -186,6 +186,7 @@ export default function StationPanel({ stopId, onClose, onSelectLine }: Props) {
   const lines = useLines();
   const data = useTrains();
   const { has, toggle } = useFavorites();
+  const { isHome, isWork, assignAnchor, setAnchor } = useCommute();
   // Live wall-clock so countdowns tick every second AND so the
   // STOPPED_AT recency window can be evaluated during render without
   // a bare Date.now() call (React 19 flags impure-during-render).
@@ -414,6 +415,14 @@ export default function StationPanel({ stopId, onClose, onSelectLine }: Props) {
   // regardless of which platform the user tapped first.
   const favId = station.stopId;
   const isFav = has(favId);
+  // Inline commute-anchor state. The previous design routed Home/Work
+  // setup exclusively through MoreSheet → SearchSheet, which made
+  // pinning a station you'd already opened a 3-tap detour. Toggling
+  // here mirrors the Save chip's tap-toggles-self pattern: tap to set,
+  // tap again to clear. assignAnchor() handles "this stop is already
+  // your Work, switch it to Home" by clearing the other anchor.
+  const isPinnedHome = isHome(favId);
+  const isPinnedWork = isWork(favId);
 
   return (
     <div
@@ -475,14 +484,17 @@ export default function StationPanel({ stopId, onClose, onSelectLine }: Props) {
           </button>
         </div>
 
-        {/* Save chip — toggles this station as a favorite, surfacing
-            it in the Nearby panel's "favorites" section. The two
-            commute anchors (Home / Work) used to live here too, but
-            they were a parallel path to the same setting that More →
-            Commute already owns; consolidating in a single place
-            avoids the rider hitting "Set Home" from a station and
-            then having no obvious place to remove or change it from.
-            Home/Work setup now lives only in the More menu. */}
+        {/* Action row — Save (favorite), Home, Work. Each chip's
+            tap-toggles-self semantics: when active, tapping clears
+            that anchor; when inactive, tapping assigns it. The
+            previous build routed Home/Work setup exclusively through
+            More → Search to avoid the "no obvious unset path" UX
+            trap, but that made pinning the station you're already
+            looking at a three-tap detour. Restoring the chips with
+            the same toggle pattern Save uses (and that the More
+            menu's AnchorRow X-button parallels) closes the loop:
+            you can pin and un-pin in one tap from the same surface.
+            MoreSheet still owns address-based anchors. */}
         <div className="flex items-center gap-2 flex-wrap">
           <AnchorChip
             label={isFav ? "Saved" : "Save"}
@@ -492,6 +504,36 @@ export default function StationPanel({ stopId, onClose, onSelectLine }: Props) {
             activeBg="bg-amber-300/15 text-amber-100"
             onClick={() => toggle(favId)}
             aria-label={isFav ? "Remove from favorites" : "Add to favorites"}
+          />
+          <AnchorChip
+            label={isPinnedHome ? "Home" : "Set as Home"}
+            icon={<Home className={`w-[15px] h-[15px] ${isPinnedHome ? "fill-emerald-300/30 text-emerald-200" : ""}`} />}
+            active={isPinnedHome}
+            activeRing="ring-emerald-400/40"
+            activeBg="bg-emerald-400/15 text-emerald-100"
+            onClick={() =>
+              isPinnedHome
+                ? setAnchor("home", null)
+                : assignAnchor("home", favId)
+            }
+            aria-label={
+              isPinnedHome ? "Remove home pin" : "Pin as home station"
+            }
+          />
+          <AnchorChip
+            label={isPinnedWork ? "Work" : "Set as Work"}
+            icon={<Briefcase className={`w-[15px] h-[15px] ${isPinnedWork ? "fill-sky-300/30 text-sky-200" : ""}`} />}
+            active={isPinnedWork}
+            activeRing="ring-sky-400/40"
+            activeBg="bg-sky-400/15 text-sky-100"
+            onClick={() =>
+              isPinnedWork
+                ? setAnchor("work", null)
+                : assignAnchor("work", favId)
+            }
+            aria-label={
+              isPinnedWork ? "Remove work pin" : "Pin as work station"
+            }
           />
         </div>
       </div>
