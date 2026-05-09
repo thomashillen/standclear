@@ -133,6 +133,9 @@ export default function MarketingShell({
             <Link href="/status" className="hover:text-white transition-colors">
               Status
             </Link>
+            <Link href="/press" className="hover:text-white transition-colors">
+              Press
+            </Link>
             <Link
               href="/privacy"
               className="hover:text-white transition-colors"
