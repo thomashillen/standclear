@@ -27,6 +27,13 @@ const MAPBOX_SEARCH_BASE = "https://api.mapbox.com/search/searchbox/v1";
 const RATE_LIMIT_MAX = 60;
 const RATE_LIMIT_WINDOW_MS = 60_000;
 
+// Module-scope latch so the fallback-misconfig warning fires at most
+// once per Vercel function instance (~ once per cold start). Without
+// this, a deploy running on the public-token fallback would emit a
+// per-request warning under real traffic — flooding the operator's
+// log sink and inflating cost. captureWarning itself doesn't dedupe.
+let fallbackWarningLogged = false;
+
 // Forward a fixed allow-list of search-box parameters from the client
 // request. Unknown params are silently dropped so a malicious client
 // can't inject stray Mapbox options.
@@ -65,11 +72,8 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     );
     return NextResponse.json({ suggestions: [], features: [] }, { status: 503 });
   }
-  if (!process.env.MAPBOX_TOKEN) {
-    // Rate-limited inside captureWarning is fine — every request that
-    // arrives here would log identically, but logEvent dedupes only
-    // on identity, so once per cold start is enough to flag the
-    // misconfig in operator logs without flooding.
+  if (!process.env.MAPBOX_TOKEN && !fallbackWarningLogged) {
+    fallbackWarningLogged = true;
     captureWarning(
       "MAPBOX_TOKEN unset; geocode proxy fell back to NEXT_PUBLIC_MAPBOX_TOKEN. Set MAPBOX_TOKEN to keep PII-adjacent queries off the public token.",
     );

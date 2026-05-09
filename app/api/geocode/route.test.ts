@@ -89,4 +89,37 @@ describe("/api/geocode token resolution", () => {
     expect(res.status).toBe(503);
     expect(fetchMock).not.toHaveBeenCalled();
   });
+
+  // captureWarning forwards to console.warn and doesn't dedupe; without
+  // a module-level latch the per-request fallback warning would flood
+  // operator logs under real traffic. Caught in PR #51 review by Codex.
+  it("logs the fallback warning at most once per process", async () => {
+    vi.stubEnv("MAPBOX_TOKEN", "");
+    vi.stubEnv("NEXT_PUBLIC_MAPBOX_TOKEN", "public-client-token");
+    // Fresh Response per call — Response bodies are single-use, so a
+    // shared mockResolvedValue would throw "Body has already been read"
+    // on the second iteration.
+    fetchMock.mockImplementation(
+      async () =>
+        new Response(JSON.stringify({ suggestions: [] }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+    );
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const GET = await loadGet();
+    for (let i = 0; i < 5; i++) {
+      const req = makeRequest(`action=suggest&q=q${i}&session_token=t${i}`);
+      await GET(req);
+    }
+
+    const fallbackWarnings = warnSpy.mock.calls.filter(
+      (args) =>
+        typeof args[0] === "string" &&
+        args[0].includes("fell back to NEXT_PUBLIC_MAPBOX_TOKEN"),
+    );
+    expect(fallbackWarnings.length).toBe(1);
+    expect(fetchMock).toHaveBeenCalledTimes(5);
+  });
 });

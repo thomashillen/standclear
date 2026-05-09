@@ -24,6 +24,10 @@ export const dynamic = "force-dynamic";
 const RATE_LIMIT_MAX = 20;
 const RATE_LIMIT_WINDOW_MS = 60_000;
 
+// Module-scope latch — see /api/geocode for the rationale. The
+// public-token fallback warning must not fire per-request.
+let fallbackWarningLogged = false;
+
 export async function GET(req: NextRequest): Promise<NextResponse> {
   const ip = callerKey(req.headers);
   if (isRateLimited(ip, RATE_LIMIT_MAX, RATE_LIMIT_WINDOW_MS)) {
@@ -47,7 +51,8 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     // synthetic straight-line path rather than showing an error.
     return NextResponse.json(null, { status: 503 });
   }
-  if (!process.env.MAPBOX_TOKEN) {
+  if (!process.env.MAPBOX_TOKEN && !fallbackWarningLogged) {
+    fallbackWarningLogged = true;
     captureWarning(
       "MAPBOX_TOKEN unset; walk proxy fell back to NEXT_PUBLIC_MAPBOX_TOKEN.",
     );
