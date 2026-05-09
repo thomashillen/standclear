@@ -182,6 +182,25 @@ type TripEndpoint = StationEntry & {
   address?: Place;
 };
 
+// Visible inline notice rendered when the Mapbox geocode proxy errors
+// out (HTTP 5xx, missing MAPBOX_TOKEN env var, network failure). Lets
+// a rider distinguish "this address has no match" from "address search
+// itself is down" — without this, both states surface as a generic
+// empty list and a deploy-time misconfiguration looks identical to a
+// typo.
+function PlaceSearchUnavailable() {
+  return (
+    <div className="mx-4 mt-3 mb-2 rounded-xl border border-amber-500/25 bg-amber-500/[0.08] px-3 py-2.5">
+      <p className="text-[12px] font-semibold text-amber-200 leading-snug">
+        Address search is temporarily unavailable
+      </p>
+      <p className="mt-0.5 text-[11px] text-amber-100/70 leading-snug">
+        Stations still searchable. Try again in a moment.
+      </p>
+    </div>
+  );
+}
+
 // ─── Set-as-Home/Work toggle button ─────────────────────────────────
 export default function SearchSheet({
   open,
@@ -250,6 +269,13 @@ export default function SearchSheet({
   // mixed — Apple Maps' single-search pattern.
   const [query, setQuery] = useState("");
   const [searchPlaceResults, setSearchPlaceResults] = useState<Suggestion[]>([]);
+  // True after the geocode proxy has failed for the current query.
+  // Reset whenever the query changes or the user switches modes so a
+  // transient outage doesn't leave a stale notice on screen. We track
+  // this separately from "results === []" so the UI can distinguish
+  // "no matches for this string" from "address search itself is down"
+  // — see lib/geocoding.ts makeDebouncedSuggester for context.
+  const [searchPlaceError, setSearchPlaceError] = useState(false);
 
   // Directions-mode state. Endpoint type is a station-with-optional-
   // address-metadata so the field can show an address label while
@@ -263,6 +289,7 @@ export default function SearchSheet({
   const [activeField, setActiveField] = useState<"from" | "to" | null>("from");
   const [plannerQuery, setPlannerQuery] = useState("");
   const [plannerPlaceResults, setPlannerPlaceResults] = useState<Suggestion[]>([]);
+  const [plannerPlaceError, setPlannerPlaceError] = useState(false);
 
   // Read-only geo (no permission prompt) for proximity-biased
   // geocoding. The NearbyPanel mounts useGeolocation on its open
@@ -684,11 +711,14 @@ export default function SearchSheet({
   // when the rider switches modes / clears the field.
   useEffect(() => {
     if (mode !== "directions") {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
+      /* eslint-disable react-hooks/set-state-in-effect */
       setPlannerPlaceResults([]);
+      setPlannerPlaceError(false);
+      /* eslint-enable react-hooks/set-state-in-effect */
       return;
     }
     const q = plannerQuery.trim();
+    setPlannerPlaceError(false);
     if (q.length < 2) {
       setPlannerPlaceResults([]);
       return;
@@ -699,6 +729,7 @@ export default function SearchSheet({
         ? { proximity: { lng: geo.lng, lat: geo.lat }, limit: 10 }
         : { limit: 10 },
       setPlannerPlaceResults,
+      () => setPlannerPlaceError(true),
     );
   }, [mode, plannerQuery, debouncedSuggester, geo.lat, geo.lng]);
 
@@ -709,11 +740,14 @@ export default function SearchSheet({
   // collapse into a single API call.
   useEffect(() => {
     if (mode !== "search") {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
+      /* eslint-disable react-hooks/set-state-in-effect */
       setSearchPlaceResults([]);
+      setSearchPlaceError(false);
+      /* eslint-enable react-hooks/set-state-in-effect */
       return;
     }
     const q = query.trim();
+    setSearchPlaceError(false);
     if (q.length < 2) {
       setSearchPlaceResults([]);
       return;
@@ -724,6 +758,7 @@ export default function SearchSheet({
         ? { proximity: { lng: geo.lng, lat: geo.lat }, limit: 10 }
         : { limit: 10 },
       setSearchPlaceResults,
+      () => setSearchPlaceError(true),
     );
   }, [mode, query, debouncedSuggester, geo.lat, geo.lng]);
 
@@ -1348,7 +1383,8 @@ export default function SearchSheet({
               )}
             </div>
           ) : (searchResults?.length ?? 0) === 0 &&
-            searchPlaceResults.length === 0 ? (
+            searchPlaceResults.length === 0 &&
+            !searchPlaceError ? (
             <div className="px-6 py-10 text-center text-sm text-gray-500">
               No stations or places match &ldquo;{query}&rdquo;
             </div>
@@ -1444,6 +1480,7 @@ export default function SearchSheet({
                   ))}
                 </>
               )}
+              {searchPlaceError && <PlaceSearchUnavailable />}
             </div>
           )
         ) : plannerPicking ? (
@@ -1455,7 +1492,9 @@ export default function SearchSheet({
               </span>
               .
             </div>
-          ) : plannerSearchResults.length === 0 && plannerPlaceResults.length === 0 ? (
+          ) : plannerSearchResults.length === 0 &&
+            plannerPlaceResults.length === 0 &&
+            !plannerPlaceError ? (
             <div className="px-6 py-10 text-center text-sm text-gray-500">
               No stations or places match &ldquo;{plannerQuery}&rdquo;
             </div>
@@ -1543,6 +1582,7 @@ export default function SearchSheet({
                   ))}
                 </>
               )}
+              {plannerPlaceError && <PlaceSearchUnavailable />}
             </div>
           )
         ) : tripFrom && tripTo ? (

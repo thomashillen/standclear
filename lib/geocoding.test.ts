@@ -101,3 +101,50 @@ describe("suggestPlaces — session cache", () => {
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 });
+
+describe("makeDebouncedSuggester — error reporting", () => {
+  beforeEach(() => {
+    vi.unstubAllEnvs();
+    vi.restoreAllMocks();
+    vi.useFakeTimers();
+  });
+
+  // Riders previously saw a generic "no matches" empty state when
+  // the proxy returned 5xx (e.g. missing MAPBOX_TOKEN on deploy).
+  // The debouncer now reports failures via an optional onError so
+  // the UI can show a distinct "address search unavailable" notice.
+  it("invokes onError when the proxy fetch rejects", async () => {
+    const { makeDebouncedSuggester } = await freshImport();
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response("Service Unavailable", { status: 503 }),
+    );
+
+    const onResult = vi.fn();
+    const onError = vi.fn();
+    const debounced = makeDebouncedSuggester(0);
+    debounced("550 madison", undefined, onResult, onError);
+
+    await vi.runAllTimersAsync();
+    await vi.waitFor(() => expect(onError).toHaveBeenCalledTimes(1));
+    expect(onResult).toHaveBeenCalledWith([]);
+  });
+
+  it("does not invoke onError when the result is a plain empty list", async () => {
+    const { makeDebouncedSuggester } = await freshImport();
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ suggestions: [] }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+
+    const onResult = vi.fn();
+    const onError = vi.fn();
+    const debounced = makeDebouncedSuggester(0);
+    debounced("zzznomatch", undefined, onResult, onError);
+
+    await vi.runAllTimersAsync();
+    await vi.waitFor(() => expect(onResult).toHaveBeenCalledWith([]));
+    expect(onError).not.toHaveBeenCalled();
+  });
+});
