@@ -13,6 +13,7 @@ import {
   Briefcase,
   RefreshCw,
   Footprints,
+  Sparkles,
 } from "lucide-react";
 import { useLines } from "@/lib/subwayData";
 import { useTrains, refreshTrains, type Arrival } from "@/lib/useTrains";
@@ -21,6 +22,7 @@ import { useFavorites, useCommute, type CommuteEndpoint } from "@/lib/useFavorit
 import { useGeolocationState } from "@/lib/useGeolocation";
 import { useNow } from "@/lib/useNow";
 import { useRecentSearches } from "@/lib/useRecentSearches";
+import { getPopularStations } from "@/lib/popularStations";
 import { useSheetDrag } from "@/lib/useSheetDrag";
 import {
   estimateTripTimeSec,
@@ -304,6 +306,16 @@ export default function SearchSheet({
     for (const s of index) m.set(s.stopId, s);
     return m;
   }, [index]);
+
+  // Curated popular destinations resolved against the live index.
+  // Stable across renders for a given index, so the empty state doesn't
+  // flicker. Resolution is intentionally a no-op (empty array) before
+  // the index has loaded — matches the existing skeleton-empty pattern
+  // and avoids a brief render of placeholder rows.
+  const popularStations = useMemo(
+    () => getPopularStations(stationsByComplexId),
+    [stationsByComplexId],
+  );
 
   // Wall-clock tick for live countdowns + catch verdicts. Pause
   // entirely when the sheet is closed.
@@ -1284,6 +1296,62 @@ export default function SearchSheet({
                     })()}
                 </div>
               )}
+
+              {/* Popular destinations — curated NYC interchange
+                  complexes surfaced when the rider has no Recent
+                  history yet. Zero-onboarding handhold so a first-time
+                  visitor sees a one-tap path to the city's anchor
+                  stations rather than a blank empty state. Once the
+                  rider has any Recent the curated section yields to
+                  it (their own history is more relevant than the
+                  curation). Suppressed in anchor-pick mode where the
+                  rider is mid-set, not navigating. */}
+              {!anchorPickMode &&
+                recents.length === 0 &&
+                popularStations.length > 0 && (
+                  <div className="pt-2">
+                    <div className="flex items-center justify-between px-2 pb-1.5">
+                      <h3 className="text-[10px] font-semibold uppercase tracking-wider text-gray-500">
+                        Popular
+                      </h3>
+                    </div>
+                    <div className="space-y-1">
+                      {popularStations.map((s) => (
+                        <button
+                          key={`popular-${s.stopId}`}
+                          type="button"
+                          onClick={() => startDirectionsTo(s as TripEndpoint)}
+                          aria-label={`Directions to ${s.name}`}
+                          className="press w-full flex items-center gap-3 px-3 py-2.5 rounded-xl bg-white/[0.04] hover:bg-white/[0.08] text-left touch-manipulation"
+                        >
+                          <span className="w-8 h-8 rounded-full bg-amber-300/10 border border-amber-300/20 flex items-center justify-center flex-shrink-0">
+                            <Sparkles className="w-3.5 h-3.5 text-amber-200" />
+                          </span>
+                          <span className="flex-1 min-w-0">
+                            <span className="block text-[13px] font-semibold text-gray-100 truncate">
+                              {s.name}
+                            </span>
+                            <span className="flex items-center gap-1 mt-1 flex-wrap">
+                              {s.routes.slice(0, 6).map((r) => {
+                                const info = routeColors.get(r.routeId);
+                                if (!info) return null;
+                                return (
+                                  <RouteBullet
+                                    key={r.routeId}
+                                    id={info.displayId}
+                                    color={info.color}
+                                    textColor={info.textColor}
+                                  />
+                                );
+                              })}
+                            </span>
+                          </span>
+                          <ChevronRight className="w-4 h-4 text-gray-500 flex-shrink-0" />
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
 
               {/* Recent searches — last 10 places the rider tapped
                   on. Each row replays the same "directions to here"
