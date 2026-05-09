@@ -3,7 +3,7 @@
 	"appName": "StandClear",
 	"webDir": "native-shell",
 	"server": {
-		"url": "https://standclear.app",
+		"url": "https://standclear.vercel.app",
 		"cleartext": false,
 		"androidScheme": "https",
 		"iosScheme": "https"
