@@ -24,6 +24,7 @@ const ENTRIES: Entry[] = [
     date: "2026-05-09",
     title: "MVP build",
     changes: [
+      { type: "added", text: "Per-page Open Graph cards for /about, /pricing, and /changelog so shared marketing links get framed thumbnails instead of the generic site card." },
       { type: "added", text: "Tappable walking card opens turn-by-turn detail at half-detent." },
       { type: "added", text: "Offline shell, cross-tab sync, audit-driven app improvements across the board." },
       { type: "added", text: "iOS-26 Liquid Glass design system with tilt-reactive specular highlights." },
