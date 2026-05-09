@@ -12,6 +12,7 @@ import {
   type ShapeMetrics,
   type Trajectory,
 } from "./trainTrajectory";
+import { ringPulsePhase } from "./ringPulse";
 
 // Minimal structural surface of the Mapbox map handle the hook touches —
 // keeps the hook decoupled from the broader MapboxMap shape MapView
@@ -182,6 +183,23 @@ export function useTrainMarkers({
     let frame = 0;
     let lastTickTime = 0;
     let lastData: TrainsResponse | null = null;
+
+    // Tracked here (rather than on each tick) so toggling the OS-level
+    // reduced-motion preference takes effect on the next frame without
+    // any hook re-mount. The breathing pulse on the open-station
+    // incoming rings is decorative — riders with `prefers-reduced-motion`
+    // see the rings held at their visual midpoint instead of oscillating.
+    // The marker LERP itself is informational (real motion of moving
+    // trains) and intentionally NOT gated on this flag.
+    const motionQuery =
+      typeof window !== "undefined"
+        ? window.matchMedia("(prefers-reduced-motion: reduce)")
+        : null;
+    let prefersReducedMotion = motionQuery?.matches ?? false;
+    const onMotionChange = (e: MediaQueryListEvent) => {
+      prefersReducedMotion = e.matches;
+    };
+    motionQuery?.addEventListener?.("change", onMotionChange);
 
     // Latest rendered (post-stack-offset) position per train, captured
     // each tick where the marker feature is pushed. Used by follow-mode
@@ -604,7 +622,9 @@ export function useTrainMarkers({
           }
 
           // Phase: 0→1→0 at ~0.9 Hz — roughly "one breath" per second.
-          const phase = (Math.sin((nowMs / 700) * Math.PI * 2) + 1) / 2;
+          // Held at 0.5 (the wave's mean) when the rider has set
+          // prefers-reduced-motion: see ringPulsePhase for the rationale.
+          const phase = ringPulsePhase(nowMs, prefersReducedMotion);
 
           const ringFeatures: GeoJSON.Feature[] = [];
           for (const f of features) {
@@ -663,7 +683,10 @@ export function useTrainMarkers({
       }
     };
     frame = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(frame);
+    return () => {
+      cancelAnimationFrame(frame);
+      motionQuery?.removeEventListener?.("change", onMotionChange);
+    };
     // getMap is intentionally captured at effect-mount; the parent
     // passes a stable closure over its mapRef so we don't need to
     // re-attach when the function identity changes.
