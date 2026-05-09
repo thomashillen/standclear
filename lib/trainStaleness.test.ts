@@ -7,7 +7,7 @@ const NOW_MS = new Date("2026-05-09T18:00:00Z").getTime();
 const NOW_SEC = NOW_MS / 1000;
 
 describe("trainStaleness", () => {
-  it("treats < 90s reports as fresh and returns no label", () => {
+  it("treats short reports as fresh and returns no label", () => {
     const r = trainStaleness(NOW_SEC - 30, NOW_MS, NOW_SEC);
     expect(r.stale).toBe(false);
     expect(r.veryStale).toBe(false);
@@ -15,18 +15,24 @@ describe("trainStaleness", () => {
     expect(r.ageSec).toBe(30);
   });
 
-  it("treats exactly 89s as fresh (boundary)", () => {
-    const r = trainStaleness(NOW_SEC - 89, NOW_MS, NOW_SEC);
+  it("treats exactly 90s as fresh (boundary matches marker-fade `ageSec <= 90`)", () => {
+    const r = trainStaleness(NOW_SEC - 90, NOW_MS, NOW_SEC);
     expect(r.stale).toBe(false);
     expect(r.label).toBeNull();
   });
 
-  it("flags stale at 90s and renders an 'Updated Nm ago' label", () => {
-    // 90s rounds to 2m via Math.round(90 / 60).
+  it("flags stale just past 90s and renders an 'Updated Nm ago' label", () => {
     const r = trainStaleness(NOW_SEC - 120, NOW_MS, NOW_SEC);
     expect(r.stale).toBe(true);
     expect(r.veryStale).toBe(false);
     expect(r.label).toBe("Updated 2m ago");
+  });
+
+  it("treats exactly 360s as soft-stale, not hard-stale (boundary is inclusive)", () => {
+    const r = trainStaleness(NOW_SEC - 360, NOW_MS, NOW_SEC);
+    expect(r.stale).toBe(true);
+    expect(r.veryStale).toBe(false);
+    expect(r.label).toBe("Updated 6m ago");
   });
 
   it("flips to a hard-stale label past 360s", () => {
@@ -37,10 +43,10 @@ describe("trainStaleness", () => {
   });
 
   it("falls back to the snapshot's generatedAt when the per-vehicle timestamp is missing", () => {
-    // No per-vehicle ts; snapshot itself is 4 minutes behind. Should
-    // surface as hard-stale so a silent-feed outage doesn't hide
-    // behind missing per-vehicle data.
-    const r = trainStaleness(undefined, NOW_MS, NOW_SEC - 360);
+    // No per-vehicle ts; snapshot itself is well past the hard-stale
+    // floor. Should surface as hard-stale so a silent-feed outage
+    // doesn't hide behind missing per-vehicle data.
+    const r = trainStaleness(undefined, NOW_MS, NOW_SEC - 600);
     expect(r.stale).toBe(true);
     expect(r.veryStale).toBe(true);
     expect(r.label).toMatch(/^Stale · /);

@@ -11,10 +11,12 @@
 // stale the underlying GTFS-RT VehiclePosition.timestamp is.
 //
 // Thresholds match the marker fade so the visual + textual signals
-// agree:
-//   < 90 s   → fresh, no indicator (calm default; principle #4)
-//   90–360 s → "Updated Nm ago", warn tone
-//   > 360 s  → "Stale · Nm", warn tone
+// agree at the boundary — the marker keeps full opacity through
+// `ageSec <= 90` (see `useTrainMarkers.ts`), so this helper uses the
+// same inclusive bound to flip the label:
+//   ageSec <= 90 s  → fresh, no indicator (calm default; principle #4)
+//   90 < age <= 360 → "Updated Nm ago", warn tone
+//   ageSec > 360 s  → "Stale · Nm", warn tone
 // The 90 s lead-in matches typical NYCT vehicle-report cadence
 // (every 30–60 s); anything tighter would flag healthy trains in
 // steady state. 360 s ≈ two missed report windows + tunnel buffer;
@@ -38,8 +40,8 @@ export interface TrainStaleness {
   ageSec: number;
 }
 
-const FRESH_BELOW_SEC = 90;
-const HARD_STALE_AT_SEC = 360;
+const FRESH_AT_OR_BELOW_SEC = 90;
+const HARD_STALE_ABOVE_SEC = 360;
 
 function fmtAge(ageSec: number): string {
   // Below the fresh threshold the helper returns `null`, so we don't
@@ -68,10 +70,13 @@ export function trainStaleness(
 ): TrainStaleness {
   const tsSec = lastReportedAtSec ?? fallbackSec;
   const ageSec = Math.max(0, nowMs / 1000 - tsSec);
-  if (ageSec < FRESH_BELOW_SEC) {
+  // Inclusive bounds at both ends so a train sitting exactly on the
+  // marker-fade boundary doesn't briefly flash an amber label while
+  // the icon is still fully bright.
+  if (ageSec <= FRESH_AT_OR_BELOW_SEC) {
     return { stale: false, veryStale: false, label: null, ageSec };
   }
-  if (ageSec >= HARD_STALE_AT_SEC) {
+  if (ageSec > HARD_STALE_ABOVE_SEC) {
     return {
       stale: true,
       veryStale: true,
