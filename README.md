@@ -39,6 +39,8 @@ The app uses two Mapbox tokens with different exposure profiles:
 - **`MAPBOX_TOKEN`** (server-only) — used by `/api/geocode` and `/api/walk` to proxy geocoding and walking-directions calls. Never leaves the server. No URL restriction needed.
 - **`NEXT_PUBLIC_MAPBOX_TOKEN`** (client-visible) — used by Mapbox GL JS for tile rendering. Ships in the client bundle; restrict it at https://account.mapbox.com/access-tokens/ under *URL restrictions* to your production domain(s). A leaked map token restricted to your domain can only render tiles, not run geocoding or billing-intensive calls.
 
+If `MAPBOX_TOKEN` is not set, `/api/geocode` and `/api/walk` fall back to `NEXT_PUBLIC_MAPBOX_TOKEN` so the app stays functional rather than silently 503-ing on every search. Setting `MAPBOX_TOKEN` is still recommended in production: it keeps PII-adjacent address queries off the same token that ships in the client bundle, and lets you scope each token's billing limits independently. The server logs a one-line warning per cold start when running on the fallback so the misconfig is visible in operator logs. Note that URL-restricted public tokens may not work when called server-to-Mapbox (no browser Referer is sent), so the fallback only helps if your public token's restrictions are lax — a fresh dedicated `MAPBOX_TOKEN` is always the most reliable setup.
+
 Additional pre-production checklist:
 
 1. Set `NEXT_PUBLIC_SITE_URL` to your canonical URL so OG/Twitter cards, sitemap, and robots.txt resolve absolute URLs correctly.

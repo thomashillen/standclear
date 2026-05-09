@@ -50,10 +50,29 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     );
   }
 
-  const token = process.env.MAPBOX_TOKEN;
+  // Prefer the dedicated server-only MAPBOX_TOKEN — that's the
+  // production-correct setup and keeps PII-adjacent address queries
+  // out of any leak window for the public token. Fall back to
+  // NEXT_PUBLIC_MAPBOX_TOKEN as a backstop so a deploy that has only
+  // the public token configured still has working address search
+  // instead of silently returning a 503 (the failure mode that
+  // shipped to standclear.app and broke /550 madison/ for users).
+  const token =
+    process.env.MAPBOX_TOKEN || process.env.NEXT_PUBLIC_MAPBOX_TOKEN;
   if (!token) {
-    captureWarning("MAPBOX_TOKEN not set — geocode proxy unavailable");
+    captureWarning(
+      "Neither MAPBOX_TOKEN nor NEXT_PUBLIC_MAPBOX_TOKEN set — geocode proxy unavailable",
+    );
     return NextResponse.json({ suggestions: [], features: [] }, { status: 503 });
+  }
+  if (!process.env.MAPBOX_TOKEN) {
+    // Rate-limited inside captureWarning is fine — every request that
+    // arrives here would log identically, but logEvent dedupes only
+    // on identity, so once per cold start is enough to flag the
+    // misconfig in operator logs without flooding.
+    captureWarning(
+      "MAPBOX_TOKEN unset; geocode proxy fell back to NEXT_PUBLIC_MAPBOX_TOKEN. Set MAPBOX_TOKEN to keep PII-adjacent queries off the public token.",
+    );
   }
 
   const { searchParams } = req.nextUrl;
