@@ -131,9 +131,6 @@ export async function suggestPlaces(
   const trimmed = query.trim();
   if (trimmed.length < 2) return [];
 
-  const token = process.env.NEXT_PUBLIC_MAPBOX_TOKEN;
-  if (!token) return [];
-
   const cacheKey = suggestCacheKey(trimmed, options);
   const cached = suggestCache.get(cacheKey);
   if (cached) {
@@ -143,26 +140,21 @@ export async function suggestPlaces(
     return cached;
   }
 
-  const url = new URL("https://api.mapbox.com/search/searchbox/v1/suggest");
-  url.searchParams.set("q", trimmed);
-  url.searchParams.set("access_token", token);
-  url.searchParams.set("session_token", sessionToken);
-  url.searchParams.set("limit", String(Math.min(options.limit ?? 10, 10)));
-  url.searchParams.set("bbox", NYC_BBOX);
-  url.searchParams.set(
-    "types",
-    "poi,category,address,street,neighborhood,locality,place",
-  );
-  url.searchParams.set("country", "us");
+  // Route through the server proxy so MAPBOX_TOKEN never touches the client.
+  const params = new URLSearchParams();
+  params.set("action", "suggest");
+  params.set("q", trimmed);
+  params.set("session_token", sessionToken);
+  params.set("limit", String(Math.min(options.limit ?? 10, 10)));
+  params.set("bbox", NYC_BBOX);
+  params.set("types", "poi,category,address,street,neighborhood,locality,place");
+  params.set("country", "us");
   if (options.proximity) {
-    url.searchParams.set(
-      "proximity",
-      `${options.proximity.lng},${options.proximity.lat}`,
-    );
+    params.set("proximity", `${options.proximity.lng},${options.proximity.lat}`);
   }
-  url.searchParams.set("language", "en");
+  params.set("language", "en");
 
-  const res = await fetch(url.toString(), { signal: options.signal });
+  const res = await fetch(`/api/geocode?${params}`, { signal: options.signal });
   if (!res.ok) {
     throw new Error(`Mapbox Search Box suggest HTTP ${res.status}`);
   }
@@ -206,18 +198,13 @@ export async function retrievePlace(
   suggestion: Suggestion,
   options: { signal?: AbortSignal } = {},
 ): Promise<Place | null> {
-  const token = process.env.NEXT_PUBLIC_MAPBOX_TOKEN;
-  if (!token) return null;
+  // Route through the server proxy so MAPBOX_TOKEN never touches the client.
+  const params = new URLSearchParams();
+  params.set("action", "retrieve");
+  params.set("mapbox_id", suggestion.mapboxId);
+  params.set("session_token", sessionToken);
 
-  const url = new URL(
-    `https://api.mapbox.com/search/searchbox/v1/retrieve/${encodeURIComponent(
-      suggestion.mapboxId,
-    )}`,
-  );
-  url.searchParams.set("access_token", token);
-  url.searchParams.set("session_token", sessionToken);
-
-  const res = await fetch(url.toString(), { signal: options.signal });
+  const res = await fetch(`/api/geocode?${params}`, { signal: options.signal });
   if (!res.ok) {
     throw new Error(`Mapbox Search Box retrieve HTTP ${res.status}`);
   }

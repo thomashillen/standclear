@@ -5,9 +5,8 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 // reference; reset modules between tests so each starts clean.
 async function freshImport() {
   vi.resetModules();
-  // The Mapbox helper short-circuits to null when no token is set, so
-  // give it one for the network paths to actually run.
-  vi.stubEnv("NEXT_PUBLIC_MAPBOX_TOKEN", "test-token");
+  // No token stub needed — walkingDirections.ts calls /api/walk (server proxy)
+  // and the fetch spy intercepts that call directly.
   return await import("./walkingDirections");
 }
 

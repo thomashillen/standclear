@@ -138,9 +138,6 @@ export async function fetchWalkingRoute(
   to: { lng: number; lat: number },
   options: { signal?: AbortSignal } = {},
 ): Promise<WalkingRoute | null> {
-  const token = process.env.NEXT_PUBLIC_MAPBOX_TOKEN;
-  if (!token) return null;
-
   const key = cacheKey(from, to);
   const hit = cache.get(key);
   if (hit) return hit;
@@ -155,16 +152,12 @@ export async function fetchWalkingRoute(
     return synthetic;
   }
 
-  const url = new URL(
-    `https://api.mapbox.com/directions/v5/mapbox/walking/${from.lng},${from.lat};${to.lng},${to.lat}`,
-  );
-  url.searchParams.set("access_token", token);
-  url.searchParams.set("geometries", "geojson");
-  url.searchParams.set("overview", "full");
-  url.searchParams.set("steps", "true");
-  url.searchParams.set("language", "en");
+  // Route through the server proxy so MAPBOX_TOKEN never touches the client.
+  const params = new URLSearchParams();
+  params.set("from", `${from.lng},${from.lat}`);
+  params.set("to", `${to.lng},${to.lat}`);
 
-  const promise = fetch(url.toString(), { signal: options.signal })
+  const promise = fetch(`/api/walk?${params}`, { signal: options.signal })
     .then(async (res): Promise<WalkingRoute | null> => {
       if (!res.ok) {
         // HTTP error — drop the cache so a retry from the UI can hit
