@@ -139,6 +139,26 @@ export function useTrainMarkers({
     const MAX_VISUAL_SPEED_DEG_PER_SEC = 0.002;
     const MAX_ARC_STEP_PER_TICK = MAX_VISUAL_SPEED_DEG_PER_SEC * (TICK_MS / 1000);
 
+    // Snap (don't lerp) when the re-anchor gap between the rendered
+    // position and the trajectory's ideal exceeds this many degrees of
+    // arc. ~0.005° ≈ 500 m at NYC's latitude — roughly half a station,
+    // which is far larger than any normal 8 s poll's per-tick correction
+    // (those land in the tens of meters) but smaller than the multi-
+    // station gaps produced when:
+    //   • the cold-boot localStorage hydrate seeded the marker from a
+    //     stale snapshot whose trains have since advanced several stops,
+    //   • the tab was backgrounded long enough for the cached frame to
+    //     fall many stops behind reality before the wake-fetch lands,
+    //   • a long network blip dropped enough polls that the next one
+    //     reports the train far past where the last visible position was.
+    // Without this, the per-frame LERP — capped at MAX_VISUAL_SPEED for
+    // anti-teleport reasons — would visibly walk the marker through every
+    // intervening station to catch up, which is exactly the "trains
+    // travelling 10 stops to reach their actual position on load"
+    // symptom. Snapping is correct here: the rider has no prior visual
+    // anchor to honor, so a jump to truth is the truthful update.
+    const SNAP_GAP_THRESHOLD_DEG = 0.005;
+
     // Position-based stacking. Trains sit ON their line by default — no
     // perpendicular offset for a single train at a position. When two or
     // more trains land within STACK_BUCKET_DEG of each other (which
@@ -265,6 +285,27 @@ export function useTrainMarkers({
             bearing: ideal.bearing,
           };
           renderState.set(t.id, render);
+        } else if (
+          Math.abs(ideal.arcLength - render.arcLength) > SNAP_GAP_THRESHOLD_DEG
+        ) {
+          // Re-anchor gap is too big to lerp through gracefully — see
+          // SNAP_GAP_THRESHOLD_DEG. Snap directly to the ideal so the
+          // marker reaches truth this frame instead of crawling for
+          // ~10 s. We bypass the forward-only clamp here because the
+          // gap is large enough that the rider's visual memory has
+          // already lost continuity (cold boot, post-wake, network
+          // recovery); freezing in place "to honor" a stale render
+          // would hide the snap behind silence rather than fix it.
+          render.arcLength = ideal.arcLength;
+          const pos = shapePositionAtArc(
+            line,
+            metrics,
+            render.arcLength,
+            traj.motionDir,
+          );
+          render.lng = pos.lng;
+          render.lat = pos.lat;
+          render.bearing = pos.bearing;
         } else {
           // FORWARD-ONLY CONSTRAINT. The marker may only move along
           // its travel direction (motionDir) — never backward. A poll
