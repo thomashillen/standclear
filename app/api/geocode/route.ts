@@ -27,6 +27,13 @@ const MAPBOX_SEARCH_BASE = "https://api.mapbox.com/search/searchbox/v1";
 const RATE_LIMIT_MAX = 60;
 const RATE_LIMIT_WINDOW_MS = 60_000;
 
+// Module-scope latch so the fallback-misconfig warning fires at most
+// once per Vercel function instance (~ once per cold start). Without
+// this, a deploy running on the public-token fallback would emit a
+// per-request warning under real traffic — flooding the operator's
+// log sink and inflating cost. captureWarning itself doesn't dedupe.
+let fallbackWarningLogged = false;
+
 // Forward a fixed allow-list of search-box parameters from the client
 // request. Unknown params are silently dropped so a malicious client
 // can't inject stray Mapbox options.
@@ -50,10 +57,26 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     );
   }
 
-  const token = process.env.MAPBOX_TOKEN;
+  // Prefer the dedicated server-only MAPBOX_TOKEN — that's the
+  // production-correct setup and keeps PII-adjacent address queries
+  // out of any leak window for the public token. Fall back to
+  // NEXT_PUBLIC_MAPBOX_TOKEN as a backstop so a deploy that has only
+  // the public token configured still has working address search
+  // instead of silently returning a 503 (the failure mode that
+  // shipped to standclear.app and broke /550 madison/ for users).
+  const token =
+    process.env.MAPBOX_TOKEN || process.env.NEXT_PUBLIC_MAPBOX_TOKEN;
   if (!token) {
-    captureWarning("MAPBOX_TOKEN not set — geocode proxy unavailable");
+    captureWarning(
+      "Neither MAPBOX_TOKEN nor NEXT_PUBLIC_MAPBOX_TOKEN set — geocode proxy unavailable",
+    );
     return NextResponse.json({ suggestions: [], features: [] }, { status: 503 });
+  }
+  if (!process.env.MAPBOX_TOKEN && !fallbackWarningLogged) {
+    fallbackWarningLogged = true;
+    captureWarning(
+      "MAPBOX_TOKEN unset; geocode proxy fell back to NEXT_PUBLIC_MAPBOX_TOKEN. Set MAPBOX_TOKEN to keep PII-adjacent queries off the public token.",
+    );
   }
 
   const { searchParams } = req.nextUrl;

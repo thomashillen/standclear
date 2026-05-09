@@ -24,6 +24,10 @@ export const dynamic = "force-dynamic";
 const RATE_LIMIT_MAX = 20;
 const RATE_LIMIT_WINDOW_MS = 60_000;
 
+// Module-scope latch — see /api/geocode for the rationale. The
+// public-token fallback warning must not fire per-request.
+let fallbackWarningLogged = false;
+
 export async function GET(req: NextRequest): Promise<NextResponse> {
   const ip = callerKey(req.headers);
   if (isRateLimited(ip, RATE_LIMIT_MAX, RATE_LIMIT_WINDOW_MS)) {
@@ -34,12 +38,24 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     });
   }
 
-  const token = process.env.MAPBOX_TOKEN;
+  // Prefer the dedicated server-only MAPBOX_TOKEN; fall back to
+  // NEXT_PUBLIC_MAPBOX_TOKEN if it isn't set. See the matching
+  // comment in /api/geocode for the deploy-mode rationale.
+  const token =
+    process.env.MAPBOX_TOKEN || process.env.NEXT_PUBLIC_MAPBOX_TOKEN;
   if (!token) {
-    captureWarning("MAPBOX_TOKEN not set — walk proxy unavailable");
+    captureWarning(
+      "Neither MAPBOX_TOKEN nor NEXT_PUBLIC_MAPBOX_TOKEN set — walk proxy unavailable",
+    );
     // null signals "no route" to the client; it falls back to the
     // synthetic straight-line path rather than showing an error.
     return NextResponse.json(null, { status: 503 });
+  }
+  if (!process.env.MAPBOX_TOKEN && !fallbackWarningLogged) {
+    fallbackWarningLogged = true;
+    captureWarning(
+      "MAPBOX_TOKEN unset; walk proxy fell back to NEXT_PUBLIC_MAPBOX_TOKEN.",
+    );
   }
 
   const { searchParams } = req.nextUrl;
