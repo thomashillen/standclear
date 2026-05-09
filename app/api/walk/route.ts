@@ -1,5 +1,6 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { logEvent, captureWarning } from "@/lib/observability";
+import { isRateLimited, callerKey } from "@/lib/rateLimit";
 
 // ─── Walking-directions proxy ────────────────────────────────────────
 // Wraps Mapbox Directions API (walking profile) so the private
@@ -9,11 +10,30 @@ import { logEvent, captureWarning } from "@/lib/observability";
 //
 // Coordinate pairs are passed as "lng,lat" strings — same format the
 // Mapbox Directions URL uses — so the client can forward them directly.
+//
+// Rate limiting: 20 requests per minute per IP. A real user plans a
+// route once per trip leg; the client caches results so the same pair
+// only calls this endpoint once per session. 20/min covers pathological
+// rapid replanning while blocking automated scanning.
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+// 20 requests/min per IP — walks are cached client-side, so 20 is
+// far above any realistic human usage rate.
+const RATE_LIMIT_MAX = 20;
+const RATE_LIMIT_WINDOW_MS = 60_000;
+
 export async function GET(req: NextRequest): Promise<NextResponse> {
+  const ip = callerKey(req.headers);
+  if (isRateLimited(ip, RATE_LIMIT_MAX, RATE_LIMIT_WINDOW_MS)) {
+    captureWarning("walk proxy rate limited", { ip });
+    return NextResponse.json(null, {
+      status: 429,
+      headers: { "Retry-After": "60" },
+    });
+  }
+
   const token = process.env.MAPBOX_TOKEN;
   if (!token) {
     captureWarning("MAPBOX_TOKEN not set — walk proxy unavailable");

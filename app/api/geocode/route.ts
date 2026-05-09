@@ -1,5 +1,6 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { logEvent, captureWarning } from "@/lib/observability";
+import { isRateLimited, callerKey } from "@/lib/rateLimit";
 
 // ─── Geocode proxy ───────────────────────────────────────────────────
 // Wraps Mapbox Search Box suggest + retrieve so the private MAPBOX_TOKEN
@@ -11,11 +12,20 @@ import { logEvent, captureWarning } from "@/lib/observability";
 // for GL JS (tile rendering), but geocoding calls carry the full plaintext
 // query — "550 madison ave" is PII-adjacent. Keeping those requests
 // behind the server halves the blast radius of a leaked token.
+//
+// Rate limiting: 60 suggest+retrieve requests per minute per IP. A real
+// user typing quickly in the search box triggers ~1 suggest per keystroke
+// (~10–20/min); 60/min is generous. Sustained abuse above this rate is
+// rejected with 429 before the Mapbox call is made.
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const MAPBOX_SEARCH_BASE = "https://api.mapbox.com/search/searchbox/v1";
+
+// 60 requests/min per IP — generous for typeahead, blocks bots.
+const RATE_LIMIT_MAX = 60;
+const RATE_LIMIT_WINDOW_MS = 60_000;
 
 // Forward a fixed allow-list of search-box parameters from the client
 // request. Unknown params are silently dropped so a malicious client
@@ -31,6 +41,15 @@ const SUGGEST_FORWARD = [
 ] as const;
 
 export async function GET(req: NextRequest): Promise<NextResponse> {
+  const ip = callerKey(req.headers);
+  if (isRateLimited(ip, RATE_LIMIT_MAX, RATE_LIMIT_WINDOW_MS)) {
+    captureWarning("geocode proxy rate limited", { ip });
+    return NextResponse.json(
+      { suggestions: [], features: [] },
+      { status: 429, headers: { "Retry-After": "60" } },
+    );
+  }
+
   const token = process.env.MAPBOX_TOKEN;
   if (!token) {
     captureWarning("MAPBOX_TOKEN not set — geocode proxy unavailable");
