@@ -92,7 +92,7 @@ When the app is ready to ship. **This section requires the $99/year Apple Develo
 
 - [ ] Bump `version` in `package.json` (this also updates `lib/site.ts`'s `VERSION` because they share a source).
 - [ ] In Xcode, bump **Build** number (CFBundleVersion) — must monotonically increase per upload, even within the same Marketing Version.
-- [ ] Verify the iOS asset catalog (`ios/App/App/Assets.xcassets/AppIcon.appiconset`) has all required icon sizes. App Store Connect rejects uploads missing the 1024×1024 marketing icon.
+- [ ] Verify the iOS asset catalog (`ios/App/App/Assets.xcassets/AppIcon.appiconset`) has the 1024×1024 marketing icon. The committed `AppIcon-512@2x.png` is generated from `public/icon-512.png` via `npm run build:icons`; if you replace the brand artwork in `public/`, re-run that script and commit the regenerated PNGs.
 - [ ] Verify `Info.plist` privacy strings are accurate. The committed defaults:
   - `NSLocationWhenInUseUsageDescription` — "StandClear uses your location to surface nearby subway stations and walking routes to the platform. Your location stays on this device — it is never sent to our servers." (populated)
   - `NSMotionUsageDescription` — "StandClear uses motion data only for the optional reactive-glass tilt effect on panels and pills. The data never leaves your device and the effect can be disabled in More → Personalize." (populated)

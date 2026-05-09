@@ -8,6 +8,7 @@
     "start": "next start",
     "lint": "eslint .",
     "build:gtfs": "node scripts/build-gtfs.mjs",
+    "build:icons": "node scripts/build-ios-icons.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
     "cap:sync": "cap sync",
@@ -51,6 +52,7 @@
     "eslint-config-next": "^16.2.5",
     "jsdom": "^29.1.1",
     "postcss": "^8.5.14",
+    "sharp": "^0.34.5",
     "tailwindcss": "^4.2.4",
     "typescript": "^6.0.3",
     "vitest": "^4.1.5"
