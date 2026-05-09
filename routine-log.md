@@ -9,3 +9,4 @@ One line per autonomous run: date/time · mode · branch or PR · summary.
 2026-05-09 13:10 UTC · MODE B · claude/keen-goldberg-UK9md · per-station OG cards: build-time PNG per slug with station name + MTA route bullets so a tweeted station link gets a custom card
 2026-05-09 13:45 UTC · MODE B · claude/keen-goldberg-tFvbg · per-page OG cards for /about, /pricing, /changelog so each marketing surface gets its own framed social thumbnail
 2026-05-09 14:00 UTC · MODE B · claude/per-train-staleness-2026-05-09 · per-train marker fade driven by GTFS-RT VehiclePosition.timestamp so a vehicle that hasn't reported in 90s+ visibly dims even when the snapshot itself is fresh
+2026-05-09 14:15 UTC · MODE B · claude/line-landing-pages-2026-05-09 · per-line landing pages at /line/[id] mirroring /station/[slug] — every train (1–7, A/C/E, B/D/F/M, G, J/Z, L, N/Q/R/W, shuttles, SI) has a static SEO surface that links into the live map at ?line=&lt;id&gt;
