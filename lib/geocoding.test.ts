@@ -3,7 +3,8 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 
 async function freshImport() {
   vi.resetModules();
-  vi.stubEnv("NEXT_PUBLIC_MAPBOX_TOKEN", "test-token");
+  // No token stub needed — geocoding.ts calls /api/geocode (server proxy)
+  // and the fetch spy intercepts that call directly.
   return await import("./geocoding");
 }
 
@@ -48,7 +49,7 @@ describe("suggestPlaces — session cache", () => {
     const fetchSpy = vi
       .spyOn(globalThis, "fetch")
       .mockImplementation(async (url) => {
-        const q = new URL(String(url)).searchParams.get("q") ?? "";
+        const q = new URL(String(url), "http://localhost").searchParams.get("q") ?? "";
         return mockSuggestResponse(q);
       });
 
@@ -65,8 +66,8 @@ describe("suggestPlaces — session cache", () => {
       .spyOn(globalThis, "fetch")
       .mockImplementation(async (url) => {
         const u = String(url);
-        if (u.includes("/suggest")) return mockSuggestResponse("Broadway");
-        if (u.includes("/retrieve"))
+        if (u.includes("action=suggest")) return mockSuggestResponse("Broadway");
+        if (u.includes("action=retrieve"))
           return new Response(
             JSON.stringify({
               features: [
@@ -86,7 +87,7 @@ describe("suggestPlaces — session cache", () => {
     await suggestPlaces("broadway"); // post-rotation; should re-fetch
 
     const suggestCalls = fetchSpy.mock.calls.filter((c) =>
-      String(c[0]).includes("/suggest"),
+      String(c[0]).includes("action=suggest"),
     );
     expect(suggestCalls.length).toBe(2);
   });

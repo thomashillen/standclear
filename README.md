@@ -17,28 +17,33 @@ Built with Next.js 16, React 19, TypeScript, Tailwind, and Mapbox GL. Data comes
 
 ```bash
 npm install
-cp .env.example .env.local   # then fill in NEXT_PUBLIC_MAPBOX_TOKEN
+cp .env.example .env.local   # then fill in MAPBOX_TOKEN + NEXT_PUBLIC_MAPBOX_TOKEN
 npm run dev
 ```
 
 Then open http://localhost:3000.
 
-You'll need a Mapbox access token to see the map. Create one (free tier is plenty) at https://mapbox.com, then add it to `.env.local`:
+You'll need a Mapbox access token to see the map. Create one (free tier is plenty) at https://mapbox.com, then add both vars to `.env.local` (they can be the same token in dev):
 
 ```
-NEXT_PUBLIC_MAPBOX_TOKEN=pk.eyJ1...
+MAPBOX_TOKEN=pk.eyJ1...           # server-only: geocoding + walking directions
+NEXT_PUBLIC_MAPBOX_TOKEN=pk.eyJ1... # client-visible: GL JS map tile rendering
 ```
 
 The MTA GTFS-Realtime feeds are public and require no key.
 
 ### Production deploy notes
 
-`NEXT_PUBLIC_MAPBOX_TOKEN` is bundled into the client. Before production:
+The app uses two Mapbox tokens with different exposure profiles:
 
-1. Restrict the token at https://account.mapbox.com/access-tokens/ under *URL restrictions* to your production domain(s). A leaked token can otherwise be billed against your account from arbitrary origins.
-2. Set `NEXT_PUBLIC_SITE_URL` to your canonical URL so OG/Twitter cards, sitemap, and robots.txt resolve absolute URLs correctly.
-3. (Optional) Wire `NEXT_PUBLIC_SENTRY_DSN` to forward client + server errors through `lib/observability.ts` to Sentry. The shim ships with a structured-console default, so error tracking works without a DSN — the DSN only enables remote forwarding.
-4. Hook `/api/health` into an external uptime monitor (UptimeRobot, Better Stack). It returns 503 when the upstream MTA feed is unreachable so a probe can flip a status page without parsing JSON.
+- **`MAPBOX_TOKEN`** (server-only) — used by `/api/geocode` and `/api/walk` to proxy geocoding and walking-directions calls. Never leaves the server. No URL restriction needed.
+- **`NEXT_PUBLIC_MAPBOX_TOKEN`** (client-visible) — used by Mapbox GL JS for tile rendering. Ships in the client bundle; restrict it at https://account.mapbox.com/access-tokens/ under *URL restrictions* to your production domain(s). A leaked map token restricted to your domain can only render tiles, not run geocoding or billing-intensive calls.
+
+Additional pre-production checklist:
+
+1. Set `NEXT_PUBLIC_SITE_URL` to your canonical URL so OG/Twitter cards, sitemap, and robots.txt resolve absolute URLs correctly.
+2. (Optional) Wire `NEXT_PUBLIC_SENTRY_DSN` to forward client + server errors through `lib/observability.ts` to Sentry. The shim ships with a structured-console default, so error tracking works without a DSN — the DSN only enables remote forwarding.
+3. Hook `/api/health` into an external uptime monitor (UptimeRobot, Better Stack). It returns 503 when the upstream MTA feed is unreachable so a probe can flip a status page without parsing JSON.
 
 ## Project layout
 
