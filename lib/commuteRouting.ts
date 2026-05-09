@@ -548,18 +548,30 @@ export function planTrips(
   //   1. Exact dedup by (routeId-direction|...) — kills truly identical
   //      plans (same line on same path).
   //
-  //   2. Path dedup by (boardComplex→alightComplex|...) — collapses
-  //      co-running routes that share a physical track segment. The
-  //      classic NYC case: between Times Sq and 5Av/59 St the N, R,
-  //      and W all run the same Broadway BMT tunnel and stop at the
-  //      same intermediate stations. From the rider's perspective
+  //   2. Path dedup by (boardComplex→alightComplex|stopCount|...) —
+  //      collapses co-running routes that share a physical track
+  //      segment AND make the same number of stops between endpoints.
+  //      The classic NYC case: between Times Sq and 5Av/59 St the N,
+  //      R, and W all run the same Broadway BMT tunnel and stop at
+  //      the same intermediate stations. From the rider's perspective
   //      that's ONE option ("take any Broadway-line train"), not
-  //      three. We dedupe AFTER sorting so the surviving plan in
-  //      each path-group is the lowest-stop one — but we record the
-  //      collapsed routeIds on the survivor's leg as siblingRouteIds,
-  //      so the UI can show all the bullets and aggregate live
-  //      arrivals across the trunk rather than just the nominal
-  //      survivor.
+  //      three.
+  //
+  //      stopCount is part of the key on purpose: a 4 (express) and a
+  //      6 (local) sharing endpoints (e.g. 125 St → 86 St) traverse
+  //      the same trunk but make a very different number of stops.
+  //      Collapsing them would either hide the local entirely or
+  //      pair a sibling local's live wait with the express survivor's
+  //      stopCount in `estimateTripTimeSec` — physically inconsistent.
+  //      Keying on stopCount keeps express and local as distinct plans
+  //      and reserves the sibling list for true peer trains.
+  //
+  //      We dedupe AFTER sorting so the surviving plan in each path
+  //      group is the first one (already the lowest-stop bucket
+  //      because of the sort). Collapsed routeIds are recorded on the
+  //      survivor's leg as siblingRouteIds, so the UI can show all
+  //      the bullets and aggregate live arrivals across the trunk
+  //      rather than just the nominal survivor.
   const seen = new Set<string>();
   const seenPathToPlan = new Map<string, TripPlan>();
   const deduped: TripPlan[] = [];
@@ -571,7 +583,10 @@ export function planTrips(
     seen.add(exactKey);
 
     const pathKey = plan.legs
-      .map((l) => `${l.boardComplexId}>${l.alightComplexId}-${l.direction}`)
+      .map(
+        (l) =>
+          `${l.boardComplexId}>${l.alightComplexId}-${l.direction}-${l.stopCount}`,
+      )
       .join("|");
     const survivor = seenPathToPlan.get(pathKey);
     if (survivor) {

@@ -223,6 +223,43 @@ describe("planTrips", () => {
     const plans = planTrips(lines, index, ["L01"], ["419"], { maxTransfers: 0 });
     expect(plans).toEqual([]);
   });
+
+  it("keeps express and local as distinct plans when stopCounts differ", () => {
+    // Synthetic Lex corridor: a 4 (express) skips intermediate stops
+    // between 125 St and 86 St, a 6 (local) makes them. Both share the
+    // same complex endpoints in the same direction, but their
+    // stopCounts differ — so they must NOT collapse into one plan.
+    // Collapsing would either hide the local entirely or pair the
+    // local's live arrival ETA with the express's shorter in-train
+    // travel time in estimateTripTimeSec. Keep them separate.
+    const ST_125 = stop("621", "125 St", 40.8043, -73.9376);
+    const ST_116 = stop("622", "116 St", 40.7984, -73.9416);
+    const ST_103 = stop("623", "103 St", 40.7905, -73.9472);
+    const ST_96  = stop("624", "96 St",  40.7853, -73.9510);
+    const ST_86  = stop("626", "86 St",  40.7791, -73.9555);
+
+    const fourLocal = line({
+      id: "4", routeId: "4",
+      stops: [ST_125, ST_86],
+    });
+    const sixLocal = line({
+      id: "6", routeId: "6",
+      stops: [ST_125, ST_116, ST_103, ST_96, ST_86],
+    });
+    const synthLines: Lines = { "4": fourLocal, "6": sixLocal };
+    const synthIndex = buildSampleIndex(synthLines);
+
+    const plans = planTrips(synthLines, synthIndex, ["621"], ["626"]);
+    const direct = plans.filter((p) => p.legs.length === 1);
+    expect(direct).toHaveLength(2);
+    const byRoute = Object.fromEntries(direct.map((p) => [p.legs[0].routeId, p]));
+    expect(byRoute["4"]?.legs[0].stopCount).toBe(1);
+    expect(byRoute["6"]?.legs[0].stopCount).toBe(4);
+    // Neither plan picks up the other as a sibling — they're not
+    // interchangeable for the purposes of live-wait estimation.
+    expect(byRoute["4"]?.legs[0].siblingRouteIds).toBeUndefined();
+    expect(byRoute["6"]?.legs[0].siblingRouteIds).toBeUndefined();
+  });
 });
 
 // ─── estimateTripTimeSec ────────────────────────────────────────────
