@@ -49,14 +49,17 @@ export async function generateMetadata({ params }: Params): Promise<Metadata> {
       ? `Real-time arrivals on the ${line.id} train (${line.name}). ${line.stops.length} stations from ${first.name} to ${last.name}. Open ${SITE_NAME} for live ETAs and active alerts.`
       : `Real-time arrivals on the ${line.id} train (${line.name}). Open ${SITE_NAME} for live ETAs and active alerts.`;
 
+  // URL slug uses `routeId`, not `id` — see the live-link comment in
+  // the page body for why the two diverge for shuttles.
+  const slug = lineSlug(line.routeId);
   return {
     title,
     description,
-    alternates: { canonical: `/line/${lineSlug(line.id)}` },
+    alternates: { canonical: `/line/${slug}` },
     openGraph: {
       title,
       description,
-      url: `/line/${lineSlug(line.id)}`,
+      url: `/line/${slug}`,
       type: "article",
     },
   };
@@ -87,10 +90,16 @@ export default async function LinePage({ params }: Params) {
   const stations = getAllStationsServer();
   const stopIdToStation = buildStopIdToStation(stations);
 
-  // GTFS keys are uppercase. The deep-link bootstrap in SubwayMap does
-  // a direct `lines[selectedLine]` lookup, so the URL must carry the
-  // canonical case ("A", not "a").
-  const liveLink = `/?line=${encodeURIComponent(line.id)}`;
+  // The deep-link bootstrap in SubwayMap does a direct
+  // `lines[selectedLine]` lookup, where the Lines record is keyed by
+  // GTFS routeId. For most trains `line.id === line.routeId`, but the
+  // three shuttles are aliased — `line.id` is the display bullet "S"
+  // (because that's what the map renders) while the lookup key stays
+  // "GS" / "FS" / "H". Using `line.id` here would produce `?line=S`,
+  // which `lines["S"]` returns undefined for, breaking the CTA on
+  // every shuttle landing page. Always route through `routeId`.
+  const liveLink = `/?line=${encodeURIComponent(line.routeId)}`;
+  const slug = lineSlug(line.routeId);
   const first = line.stops[0];
   const last = line.stops[line.stops.length - 1];
 
@@ -102,7 +111,7 @@ export default async function LinePage({ params }: Params) {
     "@context": "https://schema.org",
     "@type": "BusOrSubwayRoute",
     name: `${line.id} train — ${line.name}`,
-    url: `${SITE_URL}/line/${lineSlug(line.id)}`,
+    url: `${SITE_URL}/line/${slug}`,
     description: line.name,
     provider: {
       "@type": "Organization",
