@@ -450,18 +450,58 @@ export function TripPlanRow({
     ? stationsByComplexId.get(plan.transferComplexId)
     : null;
 
+  // Co-running route bullets, resolved against the route color map.
+  // These get rendered next to the primary bullets so the rider sees
+  // every train that goes their way (N + R + W on Broadway BMT,
+  // 4 + 5 across the Lex express trunk, etc.). Plain `Set`-keyed
+  // resolution avoids re-rendering the bullets if the color map
+  // identity changes but the underlying list doesn't.
+  const leg1Siblings = useMemo(() => {
+    if (!leg1?.siblingRouteIds) return [];
+    return leg1.siblingRouteIds
+      .map((rid) => routeColors.get(rid))
+      .filter((x): x is NonNullable<typeof x> => !!x);
+  }, [leg1, routeColors]);
+  const leg2Siblings = useMemo(() => {
+    if (!leg2?.siblingRouteIds) return [];
+    return leg2.siblingRouteIds
+      .map((rid) => routeColors.get(rid))
+      .filter((x): x is NonNullable<typeof x> => !!x);
+  }, [leg2, routeColors]);
+
+  // Set of routeIds that count as a board-able train for leg 1.
+  // Includes primary + siblings so live arrivals on co-running routes
+  // count toward "next train" — the rider doesn't care which BMT
+  // bullet pulls in first.
+  const leg1ValidRouteIds = useMemo(() => {
+    const s = new Set<string>();
+    if (leg1) {
+      s.add(leg1.routeId);
+      if (leg1.siblingRouteIds) {
+        for (const sib of leg1.siblingRouteIds) s.add(sib);
+      }
+    }
+    return s;
+  }, [leg1]);
+
   const upcoming = useMemo(() => {
     if (!leg1) return [];
     const cutoff = now / 1000 - 5;
     return arrivals
       .filter(
         (a) =>
-          a.routeId === leg1.routeId &&
+          leg1ValidRouteIds.has(a.routeId) &&
           a.direction === leg1.direction &&
           a.eta >= cutoff,
       )
+      // Sort by ETA so the rider always sees the soonest train first
+      // even when arrivals on different sibling routes interleave
+      // (the upstream feed sorts per-route, but mixing trunks means
+      // the merged list might not be).
+      .slice()
+      .sort((a, b) => a.eta - b.eta)
       .slice(0, 3);
-  }, [arrivals, leg1, now]);
+  }, [arrivals, leg1, leg1ValidRouteIds, now]);
 
   // Total trip time in minutes — walk + wait (live next-train ETA
   // when known) + travel + transfer + walk. Wraps the row's already
@@ -524,6 +564,14 @@ export function TripPlanRow({
             textColor={leg1Info.textColor}
           />
         )}
+        {leg1Siblings.map((info) => (
+          <RouteBullet
+            key={`leg1-sib-${info.displayId}`}
+            id={info.displayId}
+            color={info.color}
+            textColor={info.textColor}
+          />
+        ))}
         {leg2 && (
           <>
             <ArrowRight className="w-3 h-3 text-gray-500 flex-shrink-0" />
@@ -534,6 +582,14 @@ export function TripPlanRow({
                 textColor={leg2Info.textColor}
               />
             )}
+            {leg2Siblings.map((info) => (
+              <RouteBullet
+                key={`leg2-sib-${info.displayId}`}
+                id={info.displayId}
+                color={info.color}
+                textColor={info.textColor}
+              />
+            ))}
           </>
         )}
         <span className="text-[11px] text-gray-400 ml-1.5 truncate min-w-0">
@@ -564,9 +620,42 @@ export function TripPlanRow({
 
       {upcoming.length === 0 ? (
         <p className="text-[12px] text-gray-500 leading-snug">
-          No upcoming {leg1Info?.displayId ?? leg1?.routeId} trains in that
-          direction right now.
+          No upcoming{" "}
+          {leg1ValidRouteIds.size > 1
+            ? "trains on this trunk"
+            : `${leg1Info?.displayId ?? leg1?.routeId} trains`}{" "}
+          in that direction right now.
         </p>
+      ) : leg1Siblings.length > 0 ? (
+        // Trunk case (N/R/W, A/C, etc.): each upcoming train gets its
+        // own route bullet so the rider knows whether to board a W or
+        // an N as the train pulls in. Without this they'd see the
+        // primary survivor's bullet only, which lies about "what's
+        // arriving."
+        <div className="flex items-center gap-1.5 flex-wrap">
+          <span className="text-[13px] text-gray-500 leading-snug">Next:</span>
+          {upcoming.map((a, i) => {
+            const info = routeColors.get(a.routeId);
+            return (
+              <span
+                key={`${a.tripId}-${i}`}
+                className="inline-flex items-center gap-1 text-[13px] tabular-nums text-gray-100"
+              >
+                {info && (
+                  <RouteBullet
+                    id={info.displayId}
+                    color={info.color}
+                    textColor={info.textColor}
+                  />
+                )}
+                <span className="font-semibold">{fmtEta(a.eta, now)}</span>
+              </span>
+            );
+          })}
+          <span className="text-[11px] text-gray-500 ml-0.5 self-center">
+            at {origin.name}
+          </span>
+        </div>
       ) : (
         <div className="flex items-center gap-1.5 flex-wrap">
           {leg1Info && (
@@ -817,25 +906,37 @@ export function TripPlanDetail({
   const totalMin = Math.max(1, Math.round(totalSec / 60));
 
   // Soonest upcoming arrival on leg 1 — drives the "L in 2m" hint
-  // next to the total. Filters by leg 1's route + direction so the
+  // next to the total. Filters by leg 1's route(s) + direction so the
   // countdown corresponds to the train the rider needs to catch.
-  const nextLeg1Eta = useMemo(() => {
+  // Siblings (co-running trunk routes) count: at Times Sq inbound,
+  // a W arriving sooner than the primary N is the train to catch.
+  const nextLeg1 = useMemo(() => {
     if (!arrivalsByStation || typeof now !== "number") return null;
     const leg1 = plan.legs[0];
     if (!leg1) return null;
     const arrivals = arrivalsByStation.get(leg1.boardComplexId);
     if (!arrivals) return null;
+    const validRoutes = new Set<string>([leg1.routeId]);
+    if (leg1.siblingRouteIds) {
+      for (const sib of leg1.siblingRouteIds) validRoutes.add(sib);
+    }
     const cutoff = now / 1000 - 5;
     let earliest = Infinity;
+    let earliestRouteId = leg1.routeId;
     for (const a of arrivals) {
-      if (a.routeId !== leg1.routeId) continue;
+      if (!validRoutes.has(a.routeId)) continue;
       if (a.direction !== leg1.direction) continue;
       if (a.eta < cutoff) continue;
-      if (a.eta < earliest) earliest = a.eta;
+      if (a.eta < earliest) {
+        earliest = a.eta;
+        earliestRouteId = a.routeId;
+      }
     }
-    return Number.isFinite(earliest) ? earliest : null;
+    return Number.isFinite(earliest)
+      ? { eta: earliest, routeId: earliestRouteId }
+      : null;
   }, [arrivalsByStation, now, plan]);
-  const leg1Info = routeColors.get(plan.legs[0].routeId);
+  const nextLeg1Info = nextLeg1 ? routeColors.get(nextLeg1.routeId) : null;
 
   const showWalkFrom = !!board;
   const showWalkTo =
@@ -856,17 +957,17 @@ export function TripPlanDetail({
           </span>
           <span className="text-[13px] text-gray-400">min total</span>
         </div>
-        {nextLeg1Eta !== null && leg1Info && typeof now === "number" && (
+        {nextLeg1 && nextLeg1Info && typeof now === "number" && (
           <div className="ml-auto flex items-center gap-1.5 flex-shrink-0">
             <RouteBullet
-              id={leg1Info.displayId}
-              color={leg1Info.color}
-              textColor={leg1Info.textColor}
+              id={nextLeg1Info.displayId}
+              color={nextLeg1Info.color}
+              textColor={nextLeg1Info.textColor}
             />
             <span className="text-[13px] tabular-nums text-gray-200">
               <span className="text-gray-500">in </span>
               <span className="font-semibold text-gray-100">
-                {fmtEta(nextLeg1Eta, now)}
+                {fmtEta(nextLeg1.eta, now)}
               </span>
             </span>
           </div>
