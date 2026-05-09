@@ -25,6 +25,14 @@ export type Train = {
   prevStopId: string;
   nextStopId: string;
   status: "STOPPED_AT" | "INCOMING_AT" | "IN_TRANSIT_TO";
+  /** Per-vehicle position timestamp (epoch seconds) — when MTA last
+   *  received a report from this specific train. Falls back to the
+   *  feed header's timestamp when the per-vehicle field is absent.
+   *  Lets the client distinguish "the snapshot is fresh but this
+   *  train hasn't been heard from in 4 minutes" from "the API is
+   *  failing." Optional because GTFS-RT lets both timestamps be
+   *  blank, in which case the client falls back to `generatedAt`. */
+  lastReportedAt?: number;
 };
 
 export type Arrival = {
@@ -103,6 +111,12 @@ async function fetchFeed(url: string): Promise<{ trains: Train[]; arrivals: Arri
   }
   const buf = Buffer.from(await res.arrayBuffer());
   const feed = GtfsRealtimeBindings.transit_realtime.FeedMessage.decode(buf);
+
+  // Feed-header timestamp is the floor for per-train freshness: any
+  // vehicle without its own `timestamp` is, at oldest, as fresh as the
+  // header (the feed itself was assembled then). Decoded once here so
+  // the per-entity loop doesn't pay for it repeatedly.
+  const feedTs = toSec(feed.header?.timestamp);
 
   const updatesByTrip = new Map<string, StopUpdate[]>();
   const routeByTrip = new Map<string, string>();
@@ -195,6 +209,18 @@ async function fetchFeed(url: string): Promise<{ trains: Train[]; arrivals: Arri
       }
     }
 
+    // Per-vehicle timestamp wins; otherwise inherit the feed header.
+    // Both can legitimately be missing (some MTA test feeds omit them
+    // entirely), in which case we leave `lastReportedAt` undefined and
+    // the client falls back to the snapshot's generatedAt.
+    //
+    // `> 0` because protobuf decodes a missing uint64 as 0, not null —
+    // nullish coalescing alone would treat the proto-default zero as
+    // a real timestamp and pin every vehicle to the epoch.
+    const vTs = toSec(v.timestamp);
+    const vehicleTs =
+      vTs && vTs > 0 ? vTs : feedTs && feedTs > 0 ? feedTs : undefined;
+
     trains.push({
       id: tripId,
       routeId,
@@ -203,6 +229,7 @@ async function fetchFeed(url: string): Promise<{ trains: Train[]; arrivals: Arri
       prevStopId,
       nextStopId,
       status,
+      ...(vehicleTs != null ? { lastReportedAt: vehicleTs } : {}),
     });
   }
 

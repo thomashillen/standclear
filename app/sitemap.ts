@@ -1,10 +1,13 @@
 import type { MetadataRoute } from "next";
 import { SITE_URL } from "@/lib/site";
-import { getAllStationsServer } from "@/lib/stations.server";
+import { getAllStationsServer, getLinesServer } from "@/lib/stations.server";
 import { stationSlug } from "@/lib/stationSlug";
+import { lineSlug } from "@/lib/lineSlug";
 
 // Marketing-surface sitemap. Per-station SEO pages live at
 // /station/[slug] — about ~470 entries pulled in from the GTFS index.
+// Per-line landing pages live at /line/[id] — 27 entries (the GTFS
+// line keys including the three shuttle routes split out separately).
 // Modern crawlers handle 50k URLs per sitemap fine; if we ever exceed
 // that, switch to a sitemap index with chunked children.
 export default function sitemap(): MetadataRoute.Sitemap {
@@ -15,6 +18,14 @@ export default function sitemap(): MetadataRoute.Sitemap {
       lastModified: now,
       changeFrequency: "monthly",
       priority: 0.5,
+    }),
+  );
+  const lineEntries: MetadataRoute.Sitemap = Object.keys(getLinesServer()).map(
+    (id) => ({
+      url: `${SITE_URL}/line/${lineSlug(id)}`,
+      lastModified: now,
+      changeFrequency: "monthly",
+      priority: 0.6,
     }),
   );
   return [
@@ -66,6 +77,7 @@ export default function sitemap(): MetadataRoute.Sitemap {
       changeFrequency: "yearly",
       priority: 0.3,
     },
+    ...lineEntries,
     ...stationEntries,
   ];
 }

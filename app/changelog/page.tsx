@@ -25,6 +25,7 @@ const ENTRIES: Entry[] = [
     title: "MVP build",
     changes: [
       { type: "added", text: "Press kit at /press — boilerplate paragraph, brand assets, screenshot URLs, and a contact link for journalists writing about the project." },
+      { type: "added", text: "Per-line landing pages at /line/[id] mirror the per-station pages — every train (1–7, A/C/E, B/D/F/M, G, J/Z, L, N/Q/R/W, shuttles, SI) has its own SEO-indexable surface that links straight into the live map." },
       { type: "added", text: "Per-page Open Graph cards for /about, /pricing, and /changelog so shared marketing links get framed thumbnails instead of the generic site card." },
       { type: "added", text: "Tappable walking card opens turn-by-turn detail at half-detent." },
       { type: "added", text: "Offline shell, cross-tab sync, audit-driven app improvements across the board." },
