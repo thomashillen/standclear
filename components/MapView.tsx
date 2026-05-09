@@ -1392,11 +1392,16 @@ export default function MapView({ selectedLine, stationStopId, onLineSelect, onS
       // Enter — tilt + zoom in. One-shot easeTo with the iOS-spring
       // timing reads as a "the camera is leaning in to follow this
       // thing" moment rather than a teleport.
+      //
+      // No `essential: true`: the tilt is decorative polish, not
+      // load-bearing for tracking. Riders with `prefers-reduced-motion`
+      // get the same final framing (pitch 50°, zoom ≥ 15.5) without
+      // the 700ms camera lean, courtesy of Mapbox's
+      // `respectPrefersReducedMotion` default.
       map.easeTo({
         pitch: 50,
         zoom: Math.max(map.getZoom(), 15.5),
         duration: 700,
-        essential: true,
       });
       // The release order matters:
       //   1. Clear `followedTrainIdRef.current` SYNCHRONOUSLY so the
@@ -1457,10 +1462,12 @@ export default function MapView({ selectedLine, stationStopId, onLineSelect, onS
       // want to keep panning, not wait for the camera to finish
       // unfolding. Animating only `pitch` (center / zoom stay where
       // the user left them) lets the pan compose with the unfold.
+      // Like the entrance, this is purely decorative — `prefers-
+      // reduced-motion` riders snap straight to pitch 0 and resume
+      // panning immediately.
       map.easeTo({
         pitch: 0,
         duration: 400,
-        essential: true,
       });
     }
   }, [mapLoaded, followedTrainId]);
