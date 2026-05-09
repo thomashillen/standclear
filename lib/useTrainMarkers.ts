@@ -260,6 +260,11 @@ export function useTrainMarkers({
         letter: string;
         color: string;
         textColor: "white" | "black";
+        /** Per-train freshness (epoch seconds) carried from the API
+         *  payload — see Train.lastReportedAt. Optional: when the
+         *  feed omits it, the staleness pass falls back to the
+         *  snapshot's generatedAt. */
+        lastReportedAt?: number;
       };
       const computed: Computed[] = [];
       const seen = new Set<string>();
@@ -354,6 +359,7 @@ export function useTrainMarkers({
           letter: line.id,
           color: line.color,
           textColor: line.textColor,
+          lastReportedAt: t.lastReportedAt,
         });
       }
 
@@ -412,24 +418,45 @@ export function useTrainMarkers({
       const zoomScale = iconScaleAtZoom(currentZoom);
 
       // Staleness multiplier — fed into the icon/text opacity
-      // expressions so markers visibly fade as the data ages. The
-      // backstop is the rider on a platform losing signal mid-glance:
-      // markers should not look "live" when they're frozen on
-      // 5-minute-old positions. Curve:
-      //   < 60s old: full opacity (1.0)
-      //   60–180s:   linear fade to 0.4
-      //   > 180s:    floor at 0.4 so markers don't disappear entirely
-      // Computed once per tick — every feature in a given snapshot
-      // shares the same generatedAt, so per-feature variation isn't
-      // needed.
-      const ageSec = Math.max(0, (nowMs - d.generatedAt) / 1000);
-      let staleMul = 1;
-      if (ageSec > 60) {
-        const t = Math.min(1, (ageSec - 60) / 120);
-        staleMul = 1 - 0.6 * t;
-      }
+      // expressions so markers visibly fade as the data ages.
+      //
+      // We compute this PER TRAIN from `lastReportedAt` (the GTFS-RT
+      // VehiclePosition.timestamp surfaced by the API) so the rider
+      // sees the truth: the snapshot can be 2 seconds old while a
+      // particular vehicle hasn't reported in 4 minutes (NYCT trains
+      // typically only report at platforms; tunnels are silent). The
+      // old per-snapshot model only faded when the API itself was
+      // failing — useful for outages, useless for the rider whose
+      // train is stuck on a 4-minute-old position right now.
+      //
+      // Curve, applied to per-train age:
+      //   < 90s old:    full opacity (1.0)
+      //   90–360s:     linear fade to 0.4
+      //   > 360s:      floor at 0.4
+      // 90s lead-in matches typical NYCT vehicle-report cadence
+      // (most cars report every 30–60s, so anything tighter would
+      // dim healthy trains in steady state). 360s ≈ two missed
+      // report windows + tunnel buffer; past that, the rendered
+      // position is genuinely unreliable.
+      //
+      // Falls back to the snapshot's generatedAt when a feed omits
+      // both per-vehicle and header timestamps — preserves the
+      // outage-detection floor.
+      const generatedAtSec = d.generatedAt / 1000;
+      const staleMulFor = (lastReportedAt: number | undefined): number => {
+        const tsSec = lastReportedAt ?? generatedAtSec;
+        const ageSec = Math.max(0, (nowMs / 1000) - tsSec);
+        if (ageSec <= 90) return 1;
+        const t = Math.min(1, (ageSec - 90) / 270);
+        return 1 - 0.6 * t;
+      };
 
       const features: GeoJSON.Feature[] = [];
+      // Side-channel for per-train staleness keyed by tripId. The
+      // station-incoming-rings pass downstream needs the same
+      // multiplier per train (so stale incoming-now rings stop
+      // shouting urgency) but doesn't see the Computed list.
+      const staleMulById = new Map<string, number>();
       for (const arr of buckets.values()) {
         const n = arr.length;
 
@@ -467,6 +494,8 @@ export function useTrainMarkers({
               (perpM * Math.sin(perpRad)) / (111320 * Math.cos(latRad));
           }
 
+          const staleMul = staleMulFor(c.lastReportedAt);
+          staleMulById.set(c.trainId, staleMul);
           features.push({
             type: "Feature",
             properties: {
@@ -600,15 +629,17 @@ export function useTrainMarkers({
             const baseOpacity = isImminent ? 0.70 : 0.50;
             const opacityRange = isImminent ? 0.25 : 0.18;
 
+            const ringStaleMul = staleMulById.get(tripId) ?? 1;
             ringFeatures.push({
               type: "Feature" as const,
               properties: {
                 bearing: f.properties?.bearing ?? 90,
                 pulseSize: baseSize + sizeRange * phase,
-                // Fold staleness into the ring opacity so an
-                // "incoming in 30s" ring stops shouting urgency when
-                // the underlying snapshot is itself minutes old.
-                pulseOpacity: (baseOpacity + opacityRange * phase) * staleMul,
+                // Fold per-train staleness into the ring opacity so
+                // an "incoming in 30s" ring stops shouting urgency
+                // when this specific train's last position report is
+                // minutes old.
+                pulseOpacity: (baseOpacity + opacityRange * phase) * ringStaleMul,
                 etaText,
                 labelColor,
               },
