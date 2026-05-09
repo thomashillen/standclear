@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { MapPin, MoreHorizontal, Search, TrainFront } from "lucide-react";
 import { useLines } from "@/lib/subwayData";
-import { useTrains } from "@/lib/useTrains";
+import { useFeedHealth, useTrains } from "@/lib/useTrains";
 import { useOnline } from "@/lib/useOnline";
 import { legGeometry, type TripPlan } from "@/lib/commuteRouting";
 import { buildStationIndex, type StationEntry } from "@/lib/stopsIndex";
@@ -395,6 +395,12 @@ export default function SubwayMap() {
   // frozen because *they* are offline, not because the MTA feed is
   // down. Drives a distinct red dot + "Offline" copy on the pill.
   const online = useOnline();
+  // Feed health from useTrains — surfaces a "Feed degraded" state on
+  // the live pill when /api/trains has failed N consecutive polls,
+  // distinct from "stale" (last success > 60s ago) and "offline"
+  // (the device dropped its own connection).
+  const feedHealth = useFeedHealth();
+  const feedDegraded = online && feedHealth.degraded;
 
   // Stable identifier for the selected plan, also passed to SearchSheet
   // so its TripPlanRow can show the right selected highlight without
@@ -815,9 +821,11 @@ export default function SubwayMap() {
               ? "Offline — tap for details"
               : !data
                 ? "Connecting to live feed"
-                : stale
-                  ? "Live feed is stale — tap for details"
-                  : `${totalTrains} trains live — tap for system pulse`
+                : feedDegraded
+                  ? `Feed degraded after ${feedHealth.consecutiveFailures} retries — tap for details`
+                  : stale
+                    ? "Live feed is stale — tap for details"
+                    : `${totalTrains} trains live — tap for system pulse`
           }
           aria-pressed={livePulseOpen}
           title={
@@ -825,9 +833,11 @@ export default function SubwayMap() {
               ? "Offline — showing last-known data"
               : !data
                 ? "Connecting…"
-                : stale
-                  ? "Stale — last refresh more than a minute ago"
-                  : `${totalTrains} trains live`
+                : feedDegraded
+                  ? `Feed degraded — ${feedHealth.consecutiveFailures} failed polls (${feedHealth.lastError ?? "network error"})`
+                  : stale
+                    ? "Stale — last refresh more than a minute ago"
+                    : `${totalTrains} trains live`
           }
           className="pointer-events-auto press flex items-center gap-1.5 h-9 px-2.5 flex-shrink-0 rounded-full ios-glass ios-glass--header border border-white/[0.10] shadow-[0_6px_20px_rgba(0,0,0,0.45)] touch-manipulation"
         >
@@ -838,21 +848,25 @@ export default function SubwayMap() {
                   ? "bg-rose-400"
                   : !data
                     ? "bg-gray-500"
-                    : stale
-                      ? "bg-amber-400"
-                      : "bg-emerald-400"
+                    : feedDegraded
+                      ? "bg-rose-400"
+                      : stale
+                        ? "bg-amber-400"
+                        : "bg-emerald-400"
               } shadow-[0_0_8px_currentColor]`}
               style={{
                 color: !online
                   ? "rgba(251,113,133,0.65)"
                   : !data
                     ? "rgba(107,114,128,0.5)"
-                    : stale
-                      ? "rgba(251,191,36,0.6)"
-                      : "rgba(52,211,153,0.7)",
+                    : feedDegraded
+                      ? "rgba(251,113,133,0.65)"
+                      : stale
+                        ? "rgba(251,191,36,0.6)"
+                        : "rgba(52,211,153,0.7)",
               }}
             />
-            {online && data && !stale && (
+            {online && data && !stale && !feedDegraded && (
               <span className="absolute inset-0 rounded-full bg-emerald-400 animate-ping opacity-60" />
             )}
           </span>
@@ -864,6 +878,10 @@ export default function SubwayMap() {
           {!online ? (
             <span className="text-[11px] font-semibold uppercase tracking-wide text-rose-200 leading-none">
               Offline
+            </span>
+          ) : feedDegraded ? (
+            <span className="text-[11px] font-semibold uppercase tracking-wide text-rose-200 leading-none">
+              Feed
             </span>
           ) : (
             <>

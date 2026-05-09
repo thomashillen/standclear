@@ -1,6 +1,7 @@
 "use client";
 
 import { useSyncExternalStore } from "react";
+import { captureException } from "./observability";
 
 export interface Stop {
   id: string;
@@ -80,7 +81,10 @@ function loadLines(): Promise<Lines> {
         return cache;
       })
       .catch((err) => {
-        console.error("Failed to load /gtfsData.json", err);
+        captureException(err, {
+          what: "Failed to load /gtfsData.json",
+          attempt: status.attempt + 1,
+        });
         loadPromise = null;
         publishStatus({ error: true, attempt: status.attempt + 1 });
         scheduleAutoRetry();

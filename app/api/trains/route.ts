@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import GtfsRealtimeBindings from "gtfs-realtime-bindings";
+import { captureException, captureWarning } from "@/lib/observability";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -97,7 +98,7 @@ function pruneTripStopCache(nowMs: number) {
 async function fetchFeed(url: string): Promise<{ trains: Train[]; arrivals: Arrival[] }> {
   const res = await fetch(url, { cache: "no-store" });
   if (!res.ok) {
-    console.warn(`MTA feed ${url} → ${res.status}`);
+    captureWarning("MTA feed non-2xx", { feed: url, status: res.status });
     return { trains: [], arrivals: [] };
   }
   const buf = Buffer.from(await res.arrayBuffer());
@@ -230,13 +231,30 @@ export async function GET() {
   const results = await Promise.allSettled(FEEDS.map(fetchFeed));
   const trains: Train[] = [];
   const arrivals: Arrival[] = [];
+  let failed = 0;
   for (const r of results) {
     if (r.status === "fulfilled") {
       trains.push(...r.value.trains);
       arrivals.push(...r.value.arrivals);
     } else {
-      console.warn("Feed fetch failed:", r.reason);
+      failed++;
+      captureException(r.reason, { what: "MTA feed fetch rejected" });
     }
+  }
+  // If every feed failed we still return a 200 with empty arrays so
+  // the client renders the "stale / offline" state cleanly, but we
+  // emit a structured warning so the outage is visible to whoever's
+  // tailing logs / configured Sentry.
+  if (failed === FEEDS.length) {
+    captureWarning("All MTA feeds failed in one cycle", {
+      failed,
+      feeds: FEEDS.length,
+    });
+  } else if (failed > 0) {
+    captureWarning("Partial MTA feed outage", {
+      failed,
+      feeds: FEEDS.length,
+    });
   }
 
   // tripId-only dedup. MTA's feeds occasionally echo the same trip

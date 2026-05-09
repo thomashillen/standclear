@@ -1,0 +1,77 @@
+name: Refresh GTFS static data
+
+# Re-bake `public/gtfsData.json` from the latest MTA static GTFS dump.
+# Runs weekly so when the MTA changes line geometry or adds a stop the
+# repo doesn't drift indefinitely. Manual dispatch is also wired so a
+# maintainer can pull a fresh build on demand.
+#
+# When the script produces a diff vs. main, this workflow opens a PR
+# instead of pushing directly — a human gets to glance at what
+# changed (e.g. is this a real stop addition or a one-off feed
+# anomaly) before it ships.
+
+on:
+  schedule:
+    # Tuesdays at 09:00 UTC = 04:00–05:00 ET, when the MTA's overnight
+    # publishing is reliably done.
+    - cron: "0 9 * * 2"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Download GTFS static dump
+        run: |
+          set -euo pipefail
+          mkdir -p data
+          curl --fail --silent --show-error --location \
+            --output data/gtfs_subway.zip \
+            "http://web.mta.info/developers/data/nyct/subway/google_transit.zip"
+          mkdir -p data/gtfs
+          unzip -o data/gtfs_subway.zip -d data/gtfs >/dev/null
+
+      - name: Re-bake gtfsData.json
+        run: npm run build:gtfs
+
+      - name: Detect change
+        id: change
+        run: |
+          if git diff --quiet -- public/gtfsData.json; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Open PR if data changed
+        if: steps.change.outputs.changed == 'true'
+        uses: peter-evans/create-pull-request@v6
+        with:
+          commit-message: "chore: refresh public/gtfsData.json from MTA"
+          title: "chore: refresh GTFS static data"
+          branch: chore/refresh-gtfs
+          delete-branch: true
+          body: |
+            Automated weekly refresh of `public/gtfsData.json` from the
+            MTA's static GTFS dump.
+
+            Sanity-check the diff before merging — a sudden mass change
+            (e.g. every shape moved by ~10m) usually means the MTA
+            republished with a slightly different shape simplification,
+            not that anything physically moved.
+          add-paths: |
+            public/gtfsData.json

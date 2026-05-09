@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import GtfsRealtimeBindings from "gtfs-realtime-bindings";
+import { captureException } from "@/lib/observability";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -167,7 +168,7 @@ export async function GET() {
 
     body = { generatedAt: Date.now(), alerts };
   } catch (err) {
-    console.warn("alerts feed failed", err);
+    captureException(err, { what: "alerts feed failed", url: ALERTS_URL });
   }
 
   return NextResponse.json(body, {
