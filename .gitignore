@@ -45,12 +45,18 @@ next-env.d.ts
 # ─── iOS / Capacitor build artifacts ──────────────────────────────
 # The iOS Xcode project itself is committed (everyone needs it to
 # build), but generated build outputs, user-specific Xcode state,
-# and CocoaPods downloads stay local. CapacitorJS regenerates
-# `ios/App/App/public/` from `native-shell/` on every `cap sync`,
-# so we don't track it.
+# and CocoaPods downloads stay local.
+#
+# Note: `ios/App/App/public/` IS tracked, despite being regenerated
+# by `cap sync`. The Xcode project's pbxproj references it as a
+# required bundle resource, and a fresh checkout would otherwise
+# fail to build until the developer ran `npx cap sync ios` manually.
+# Committing the synced output makes the documented Mac flow
+# (`pod install && cap:open:ios`) work without an extra step. When
+# native-shell/ or capacitor.config.ts changes, `cap sync` will
+# update this folder; commit the diff alongside.
 /ios/App/Pods/
 /ios/App/Podfile.lock
-/ios/App/App/public/
 /ios/App/build/
 /ios/App/DerivedData/
 /ios/App/App.xcworkspace/xcuserdata/

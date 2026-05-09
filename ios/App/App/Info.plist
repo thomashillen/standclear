@@ -47,5 +47,9 @@
 	</array>
 	<key>UIViewControllerBasedStatusBarAppearance</key>
 	<true/>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>StandClear uses your location to surface nearby subway stations and walking routes to the platform. Your location stays on this device — it is never sent to our servers.</string>
+	<key>NSMotionUsageDescription</key>
+	<string>StandClear uses motion data only for the optional reactive-glass tilt effect on panels and pills. The data never leaves your device and the effect can be disabled in More → Personalize.</string>
 </dict>
 </plist>

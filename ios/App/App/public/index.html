@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+<!--
+  Native shell fallback. The Capacitor config sets `server.url` to
+  https://standclear.app, so this file is normally never rendered —
+  the WebView loads the live site directly on launch.
+
+  The only path that hits this fallback is when:
+    1. The device is offline AND has never loaded the site (no SW
+       cache yet), or
+    2. server.url is misconfigured at build time.
+
+  Both are edge cases. The page just acknowledges the situation and
+  surfaces a tap-to-retry that re-attempts the live site.
+-->
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0a0a0a">
+  <title>StandClear</title>
+  <style>
+    :root { color-scheme: dark; }
+    html, body {
+      margin: 0;
+      padding: 0;
+      background: #0a0a0a;
+      color: #f3f4f6;
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
+      min-height: 100vh;
+      min-height: 100dvh;
+      overscroll-behavior: none;
+    }
+    .wrap {
+      min-height: 100dvh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+      text-align: center;
+      gap: 18px;
+    }
+    .glyph {
+      font-size: 56px;
+      line-height: 1;
+      filter: drop-shadow(0 6px 18px rgba(0,0,0,0.4));
+    }
+    h1 {
+      margin: 0;
+      font-size: 22px;
+      font-weight: 800;
+      letter-spacing: -0.02em;
+    }
+    p {
+      margin: 0;
+      font-size: 14.5px;
+      color: #9ca3af;
+      max-width: 320px;
+      line-height: 1.5;
+    }
+    button {
+      margin-top: 12px;
+      padding: 12px 22px;
+      border-radius: 9999px;
+      background: white;
+      color: #0a0a0a;
+      font-weight: 600;
+      font-size: 14px;
+      border: none;
+      cursor: pointer;
+      -webkit-tap-highlight-color: transparent;
+    }
+    button:active { background: #e5e7eb; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="glyph" aria-hidden>🚇</div>
+    <h1>StandClear</h1>
+    <p>You're offline, and the live data isn't reachable. Reconnect and tap below to load the app.</p>
+    <button onclick="window.location.href='https://standclear.app'">Reconnect</button>
+  </div>
+</body>
+</html>
