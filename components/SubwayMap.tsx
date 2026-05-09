@@ -1,6 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
+import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { MapPin, MoreHorizontal, Search, TrainFront } from "lucide-react";
 import { useLines } from "@/lib/subwayData";
@@ -763,14 +764,30 @@ export default function SubwayMap() {
           paddingTop: "calc(max(var(--safe-top), 0.5rem) + 0.5rem)",
         }}
       >
-        {/* Logo — small floating tile, hidden on mobile to give the
-            line picker more room. Identity cue only, not navigation. */}
-        <div
-          className="pointer-events-auto hidden sm:flex items-center justify-center w-11 h-11 rounded-full ios-glass ios-glass--header border border-white/[0.10] shadow-[0_6px_20px_rgba(0,0,0,0.45)] text-[22px] flex-shrink-0 select-none"
-          aria-label="StandClear"
+        {/* Brand pill — wordmark + tagline above the fold. Hidden on
+            mobile (the floating row gets crowded by the line picker
+            and 4 buttons; the iOS standalone status-bar carries the
+            brand there). On desktop it doubles as identity AND a
+            home affordance — a same-page link to "/" reloads the
+            map shell, which is the closest thing to a "back to
+            top" we have. */}
+        <Link
+          href="/"
+          aria-label="StandClear — live NYC subway"
+          className="pointer-events-auto hidden sm:flex items-center gap-2 h-11 pl-3 pr-4 rounded-full ios-glass ios-glass--header border border-white/[0.10] shadow-[0_6px_20px_rgba(0,0,0,0.45)] flex-shrink-0 select-none touch-manipulation hover:border-white/[0.18] transition-colors"
         >
-          🚇
-        </div>
+          <span className="text-[20px] leading-none" aria-hidden>
+            🚇
+          </span>
+          <span className="leading-tight">
+            <span className="block text-[13px] font-black tracking-tight text-white">
+              StandClear
+            </span>
+            <span className="block text-[10px] font-medium tracking-wide text-gray-400">
+              Live NYC subway
+            </span>
+          </span>
+        </Link>
 
         {/* Line picker — primary nav. Already styles itself as a glass
             pill internally; the wrapping div just owns layout flex and
