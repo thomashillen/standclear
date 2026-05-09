@@ -51,6 +51,21 @@ Vitest config (`vitest.config.ts`) defaults to `jsdom` so hook tests get `window
 
 `@/` resolves to the repo root in both Next and Vitest.
 
+## Native (iOS / Android via Capacitor)
+
+The same web app ships as a native iOS (and later Android) app via Capacitor. The native shell loads `https://standclear.app` in a WebView with native plugins layered on top. Full setup, build, and submission docs live in [`NATIVE.md`](./NATIVE.md).
+
+Key pieces:
+
+- `capacitor.config.ts` — bundle ID `app.standclear`, server URL pointed at production, splash + status-bar config.
+- `ios/` — committed Xcode project. Open `App.xcworkspace` (not `.xcodeproj`) after running `pod install`.
+- `native-shell/` — small offline-fallback HTML used as a `webDir` placeholder.
+- `lib/native.ts` — `isNative()` runtime check + Capacitor lifecycle helpers. Use this to gate code that should only run in the native shell.
+- `components/NativeBoot.tsx` — mounted in `app/layout.tsx`; hides splash and sets status bar style on first mount.
+- `RegisterSW` and `InstallPrompt` short-circuit when `isNative()` is true.
+
+Day-to-day: web-only changes need no native rebuild — they ship via Vercel and the native WebView picks them up on next launch. Native rebuilds are only needed when `capacitor.config.ts`, `ios/App/`, or a Capacitor plugin changes.
+
 ## Conventions
 
 - The codebase has dense comments explaining *why* — many encode incidents (the 65GB tsserver incident, the terminus-dedup undercounting, iOS Safari geolocation cold-start). Treat them as load-bearing; don't strip them when refactoring.

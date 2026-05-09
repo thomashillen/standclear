@@ -41,3 +41,31 @@ next-env.d.ts
 
 # claude code agent config (launch configs, local settings)
 /.claude/
+
+# ─── iOS / Capacitor build artifacts ──────────────────────────────
+# The iOS Xcode project itself is committed (everyone needs it to
+# build), but generated build outputs, user-specific Xcode state,
+# and CocoaPods downloads stay local. CapacitorJS regenerates
+# `ios/App/App/public/` from `native-shell/` on every `cap sync`,
+# so we don't track it.
+/ios/App/Pods/
+/ios/App/Podfile.lock
+/ios/App/App/public/
+/ios/App/build/
+/ios/App/DerivedData/
+/ios/App/App.xcworkspace/xcuserdata/
+/ios/App/App.xcodeproj/xcuserdata/
+/ios/App/App.xcodeproj/project.xcworkspace/xcuserdata/
+/ios/App/App.xcworkspace/xcshareddata/IDEWorkspaceChecks.plist
+/ios/.last_build_id
+*.xcuserstate
+
+# ─── Android / Capacitor build artifacts ──────────────────────────
+# Pre-emptive — these only matter once `npx cap add android` runs
+# but adding them now keeps a future Android-add diff clean.
+/android/app/build/
+/android/build/
+/android/.gradle/
+/android/local.properties
+/android/captures/
+/android/app/release/

@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { Inter } from "next/font/google";
 import { Analytics } from "@vercel/analytics/next";
 import "./globals.css";
+import NativeBoot from "@/components/NativeBoot";
 import RegisterSW from "@/components/RegisterSW";
 import { GlassTilt } from "@/components/GlassTilt";
 import {
@@ -106,6 +107,7 @@ export default function RootLayout({
         {children}
         <GlassTilt />
         <RegisterSW />
+        <NativeBoot />
         <Analytics />
       </body>
     </html>
