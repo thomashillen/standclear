@@ -4,6 +4,7 @@ import { useMemo } from "react";
 import { ArrowUp, ArrowDown, X } from "lucide-react";
 import type { Lines } from "@/lib/subwayData";
 import type { TrainsResponse } from "@/lib/useTrains";
+import { trainStaleness } from "@/lib/trainStaleness";
 
 interface Props {
   trainId: string;
@@ -66,6 +67,17 @@ export default function FollowCapsule({
     return { train, line, nextStop, arrival };
   }, [trainId, data, lines]);
 
+  // Per-train freshness — the textual companion to the marker fade in
+  // useTrainMarkers. When the underlying VehiclePosition is older
+  // than 90s the eyebrow row swaps from "NEXT STOP" to a small amber
+  // "Updated Nm ago" so a rider committed to one specific train can
+  // tell at a glance when the displayed position is staler than the
+  // snapshot itself. Fresh data → null → no chrome change. Recomputed
+  // each `now` tick so the label keeps counting up between polls.
+  const stale = info && data
+    ? trainStaleness(info.train.lastReportedAt, now, data.generatedAt / 1000)
+    : null;
+
   if (!info) return null;
   const { train, line, nextStop, arrival } = info;
 
@@ -104,8 +116,13 @@ export default function FollowCapsule({
       {/* Next-stop block. Truncates with ellipsis on narrow screens
           so the ETA + close button always stay visible. */}
       <div className="flex-1 min-w-0 flex flex-col leading-tight">
-        <span className="text-[10px] uppercase tracking-wider text-gray-400">
-          {train.status === "STOPPED_AT" ? "Stopped at" : "Next stop"}
+        <span
+          className={`text-[10px] uppercase tracking-wider ${
+            stale?.label ? "text-amber-300" : "text-gray-400"
+          }`}
+        >
+          {stale?.label
+            ?? (train.status === "STOPPED_AT" ? "Stopped at" : "Next stop")}
         </span>
         <span className="text-[13px] font-semibold text-gray-50 truncate">
           {nextStop?.name ?? "—"}
