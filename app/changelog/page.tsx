@@ -35,6 +35,7 @@ const ENTRIES: Entry[] = [
       { type: "added", text: "Incoming-train pulse rings on the map; desktop panel overlap fix." },
       { type: "added", text: "Real walking paths from Mapbox Directions; expandable route details with refresh." },
       { type: "added", text: "Pin Home and Work; planner picks the fastest route based on where you are." },
+      { type: "changed", text: "Line panel snapshot-staleness now aligns with the rest of the app — 60 s threshold (was 30 s) so a single recovered poll hiccup no longer flashes 'stale' for a moment, and the eyebrow now shows the actual age ('Stale · 90s' / 'Stale · 2m') instead of a binary label." },
       { type: "changed", text: "Search now uses Mapbox /suggest + /retrieve for typeahead-grade autocomplete." },
       { type: "changed", text: "Scroll-up-to-expand on route detail; auto fastest-route preview; smaller route-detail sheet." },
       { type: "changed", text: "Flatter LinePicker with grouped lines and drag-to-dismiss." },
