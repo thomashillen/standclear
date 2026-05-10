@@ -111,8 +111,21 @@ export function useTrainMarkers({
     // route. Computed once per `lines` version and reused across every
     // poll/frame.
     const metricsByRoute = new Map<string, ShapeMetrics>();
+    // Per-route { stopId → stop } lookup, used to snap STOPPED_AT trains to
+    // the parent station's lat/lng. Each route's shape has its nearest-vertex
+    // to a given station at slightly different coordinates, so two trains on
+    // different routes (1/2/3 at 72nd St, 4/5/6 at Union Sq) parked at the
+    // same physical platform end up at slightly different lng/lat and can
+    // fall into different stack buckets — losing the perpendicular fan-out
+    // and leaving visible gaps. The build script writes `lat: parent.lat,
+    // lng: parent.lng` for every stop, so snapping to the stop entry is
+    // identical across routes for the same parent station.
+    const stopsByRoute = new Map<string, Map<string, { lat: number; lng: number }>>();
     for (const line of Object.values(lines)) {
       metricsByRoute.set(line.routeId, computeShapeMetrics(line));
+      const m = new Map<string, { lat: number; lng: number }>();
+      for (const s of line.stops) m.set(s.id, { lat: s.lat, lng: s.lng });
+      stopsByRoute.set(line.routeId, m);
     }
 
     const TICK_MS = 33;
@@ -366,11 +379,31 @@ export function useTrainMarkers({
         }
 
         seen.add(t.id);
+
+        // STOPPED_AT trains snap to the parent station's lat/lng (shared
+        // across all routes that serve the station) instead of their own
+        // shape's nearest vertex — so a 1, 2, and 3 all parked at 72nd St
+        // share one bucket and fan out perpendicularly together. Without
+        // this, the small per-route shape divergence at express stations
+        // can put them in adjacent buckets, breaking the fan-out and
+        // leaving an obvious "missing slot" gap between markers. The
+        // bearing still comes from the route's own shape so the icon
+        // points the right way. Skipped for in-motion trains so segment
+        // animation continues to track each route's actual track curve.
+        let stackLng = render.lng;
+        let stackLat = render.lat;
+        if (t.status === "STOPPED_AT") {
+          const stop = stopsByRoute.get(t.routeId)?.get(t.prevStopId);
+          if (stop) {
+            stackLng = stop.lng;
+            stackLat = stop.lat;
+          }
+        }
         computed.push({
           trainId: t.id,
           line,
-          lng: render.lng,
-          lat: render.lat,
+          lng: stackLng,
+          lat: stackLat,
           bearing: render.bearing,
           direction: t.direction,
           routeId: line.routeId,
