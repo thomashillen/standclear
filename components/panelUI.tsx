@@ -28,6 +28,7 @@ import {
 } from "@/lib/stopsIndex";
 import type { CommuteAnchor } from "@/lib/useFavorites";
 import { estimateTripTimeSec, type TripPlan } from "@/lib/commuteRouting";
+import { pickBalancedArrivals } from "@/lib/topArrivals";
 import type { WalkingRoute, WalkingStep } from "@/lib/walkingDirections";
 import { trainStaleness } from "@/lib/trainStaleness";
 
@@ -165,9 +166,14 @@ export function StationRow({
   // STOPPED_AT the platform still shows for a beat). Filtering here,
   // not at the parent memo, lets the live `now` tick drive drop-out
   // instantly rather than on the 8s feed poll cadence.
-  const topArrivals = arrivals
-    .filter((a) => a.eta - now / 1000 > -5)
-    .slice(0, 3);
+  //
+  // Then balance the three-slot pick across directions: at a busy
+  // station like Times Square the three soonest arrivals can all be
+  // Northbound during rush hour, leaving Southbound silently absent.
+  // pickBalancedArrivals guarantees one per direction when both are
+  // running within ~30 min, otherwise falls back to soonest-by-time.
+  const upcoming = arrivals.filter((a) => a.eta - now / 1000 > -5);
+  const topArrivals = pickBalancedArrivals(upcoming, 3, now / 1000);
 
   return (
     <div className="border-b border-white/5 last:border-b-0">
