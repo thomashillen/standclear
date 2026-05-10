@@ -407,6 +407,60 @@ describe("estimateTripTimeSec", () => {
       FALLBACK_WAIT_S + TRANSFER_S + 2 * TRAVEL_PER_STOP_S;
     expect(t).toBe(expected);
   });
+
+  it("skips uncatchable arrivals when walkFromMeters > 0", () => {
+    // catchVerdict bands at 300m: runnable ≈ 131s, walkable ≈ 299s.
+    // The 60s arrival is "miss" — even sprinting won't make it. The
+    // 200s arrival is "run" and should drive the wait. Without this
+    // skip the totalMin would silently use the 60s arrival and the
+    // rider would chase a train they can't reach.
+    const arrivals: Arrival[] = [
+      { routeId: "4", stopId: "631", direction: "S", eta: 60, tripId: "miss" },
+      { routeId: "4", stopId: "631", direction: "S", eta: 200, tripId: "run" },
+    ];
+    const map = new Map<string, Arrival[]>([["631", arrivals]]);
+    const t = estimateTripTimeSec(ONE_LEG_PLAN, {
+      arrivalsByStation: map,
+      nowSec: 0,
+      walkFromMeters: 300,
+    });
+    const walkSec = 300 * (1.3 / 1.4);
+    expect(t).toBeCloseTo(walkSec + 200 + 1 * TRAVEL_PER_STOP_S, 6);
+  });
+
+  it("uses the soonest live arrival when walkFromMeters is 0 (rider on platform)", () => {
+    // Same shape as the "miss" case but with no walk — the rider can
+    // board immediately, so the 60s arrival is catchable. Confirms
+    // the skip is gated and doesn't degrade on-platform estimates.
+    const arrivals: Arrival[] = [
+      { routeId: "4", stopId: "631", direction: "S", eta: 60, tripId: "soon" },
+    ];
+    const map = new Map<string, Arrival[]>([["631", arrivals]]);
+    const t = estimateTripTimeSec(ONE_LEG_PLAN, {
+      arrivalsByStation: map,
+      nowSec: 0,
+      walkFromMeters: 0,
+    });
+    expect(t).toBe(60 + 1 * TRAVEL_PER_STOP_S);
+  });
+
+  it("falls back to FALLBACK_WAIT_S when every arrival is uncatchable", () => {
+    // All arrivals are within the "miss" band — the rider can't make
+    // any of them. estimateTripTimeSec should fall back to the
+    // schedule-frequency fallback rather than picking a missed one.
+    const arrivals: Arrival[] = [
+      { routeId: "4", stopId: "631", direction: "S", eta: 30, tripId: "m1" },
+      { routeId: "4", stopId: "631", direction: "S", eta: 90, tripId: "m2" },
+    ];
+    const map = new Map<string, Arrival[]>([["631", arrivals]]);
+    const t = estimateTripTimeSec(ONE_LEG_PLAN, {
+      arrivalsByStation: map,
+      nowSec: 0,
+      walkFromMeters: 300,
+    });
+    const walkSec = 300 * (1.3 / 1.4);
+    expect(t).toBeCloseTo(walkSec + FALLBACK_WAIT_S + 1 * TRAVEL_PER_STOP_S, 6);
+  });
 });
 
 // ─── rankPlansByTime ───────────────────────────────────────────────

@@ -201,3 +201,97 @@ describe("TripPlanRow staleness", () => {
     expect(onSelect).toHaveBeenCalledOnce();
   });
 });
+
+describe("TripPlanRow catch verdict", () => {
+  // catchVerdict bands at walkFromMeters=300: runnable ≈ 131s, walkable
+  // ≈ 299s, chill threshold ≈ 419s. Each test below picks ETA offsets
+  // that put the arrival squarely in one band so the rendered class
+  // is unambiguous.
+
+  it("strikes through ETAs the rider can't physically catch", () => {
+    const arrivals = [
+      makeArrival("trip-miss", 60),
+      makeArrival("trip-chill", 500),
+    ];
+    const { container } = render(
+      <TripPlanRow
+        plan={directLPlan}
+        origin={origin}
+        routeColors={routeColors}
+        stationsByComplexId={stationsByComplexId}
+        arrivals={arrivals}
+        now={NOW_MS}
+        isPrimary={true}
+        walkFromMeters={300}
+      />,
+    );
+    // VERDICT_STYLES.miss carries `line-through` — the only place that
+    // class appears in TripPlanRow's render tree.
+    expect(container.querySelectorAll(".line-through").length).toBeGreaterThan(0);
+  });
+
+  it("tints a runnable ETA amber when walkFromMeters is set", () => {
+    const arrivals = [makeArrival("trip-run", 200)];
+    const { container } = render(
+      <TripPlanRow
+        plan={directLPlan}
+        origin={origin}
+        routeColors={routeColors}
+        stationsByComplexId={stationsByComplexId}
+        arrivals={arrivals}
+        now={NOW_MS}
+        isPrimary={true}
+        walkFromMeters={300}
+      />,
+    );
+    expect(container.querySelectorAll(".text-amber-300").length).toBeGreaterThan(0);
+  });
+
+  it("leaves ETAs neutral when walkFromMeters is omitted (rider on platform)", () => {
+    // Same eta that would be "miss" with a walk — without one, no
+    // verdict tinting should apply.
+    const arrivals = [makeArrival("trip-on-platform", 60)];
+    const { container } = render(
+      <TripPlanRow
+        plan={directLPlan}
+        origin={origin}
+        routeColors={routeColors}
+        stationsByComplexId={stationsByComplexId}
+        arrivals={arrivals}
+        now={NOW_MS}
+        isPrimary={true}
+      />,
+    );
+    expect(container.querySelectorAll(".line-through")).toHaveLength(0);
+  });
+
+  it("verdict tint wins over stale tint when both apply", () => {
+    // Rider is walking up (walkFromMeters=300) AND the next train's
+    // VehiclePosition hasn't reported in 4 minutes (soft-stale). The
+    // verdict should win for color — the train is in the "miss" band,
+    // strikethrough-gray is more actionable than stale-amber. The
+    // leadStale sub-line still surfaces "Updated 4m ago" textually.
+    const arrivals = [makeArrival("trip-miss-stale", 60)];
+    const lastReportedByTripId = new Map<string, number | undefined>([
+      ["trip-miss-stale", NOW_SEC - 4 * 60],
+    ]);
+    const { container } = render(
+      <TripPlanRow
+        plan={directLPlan}
+        origin={origin}
+        routeColors={routeColors}
+        stationsByComplexId={stationsByComplexId}
+        arrivals={arrivals}
+        now={NOW_MS}
+        isPrimary={true}
+        walkFromMeters={300}
+        lastReportedByTripId={lastReportedByTripId}
+        generatedAtSec={NOW_SEC}
+      />,
+    );
+    // miss verdict applied to the chip — not amber.
+    expect(container.querySelectorAll(".line-through").length).toBeGreaterThan(0);
+    // Stale sub-line still rendered below the inline ETAs.
+    expect(screen.getByText("Updated 4m ago")).toBeTruthy();
+  });
+});

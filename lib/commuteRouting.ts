@@ -1,5 +1,5 @@
 import type { Lines, SubwayLine } from "./subwayData";
-import { haversineMeters, type StationEntry } from "./stopsIndex";
+import { catchVerdict, haversineMeters, type StationEntry } from "./stopsIndex";
 import type { Arrival } from "./useTrains";
 
 export interface DirectRoute {
@@ -295,6 +295,21 @@ export function estimateTripTimeSec(
           if (!validRoutes.has(a.routeId)) continue;
           if (a.direction !== leg.direction) continue;
           if (a.eta < nowSec - 5) continue; // already left
+          // When the rider is walking up from a non-station origin,
+          // skip arrivals they can't physically catch. catchVerdict's
+          // "miss" band means even running won't make it (eta − now <
+          // runnable + entry buffer); anything less stays in. Without
+          // this guard, a 60-second arrival would drive `totalMin`
+          // even when the rider is a 4-minute walk away — contradicting
+          // the strikethrough on TripPlanRow's "Next:" inline ETA chip
+          // and undercounting the actual wait. `walkFromMeters === 0`
+          // (rider already on the platform) leaves behavior unchanged.
+          if (
+            walkFromMeters > 0 &&
+            catchVerdict(walkFromMeters, a.eta, nowSec) === "miss"
+          ) {
+            continue;
+          }
           if (a.eta < earliest) earliest = a.eta;
         }
         if (Number.isFinite(earliest)) {
