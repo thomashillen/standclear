@@ -2,6 +2,7 @@
 
 import { useSyncExternalStore } from "react";
 import type { AlertsResponse, ServiceAlert } from "@/app/api/alerts/route";
+import { captureException } from "./observability";
 import { isOnline, subscribeOnline } from "./useOnline";
 
 export type { ServiceAlert };
@@ -62,7 +63,12 @@ async function refresh() {
       persistToStorage(data);
       subscribers.forEach((cb) => cb());
     } catch (err) {
-      console.warn("Failed to fetch /api/alerts", err);
+      // Route through observability so a failing alerts poll lands in
+      // /api/log alongside other client errors. The previous
+      // console.warn left these failures invisible to the operator —
+      // a sustained MTA feed outage at the alerts source would only
+      // show up as a stale `data` snapshot in localStorage.
+      captureException(err, { source: "useAlerts" });
       cache.promise = null;
     }
   })();
