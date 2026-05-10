@@ -13,14 +13,28 @@ const ALERTS_URL =
 
 export type AlertSeverity = "severe" | "warning" | "info";
 
+// One GTFS-RT informed_entity selector. Each `informedEntity` is an AND
+// (a route+stop selector means "this route at this stop"); multiple
+// selectors on an alert are an OR. Preserving the per-selector shape is
+// load-bearing for `alertsForStation` — flattening selectors into two
+// independent sets loses the per-selector AND, so a mixed alert that
+// pairs a route-wide selector with a stop-specific selector would get
+// scoped down to the listed stop only. Codex flagged this as a P1 on
+// the first cut; the structured field below is the fix.
+export interface AlertSelector {
+  routeId?: string;
+  stopId?: string; // parent stop id (N/S suffix stripped)
+}
+
 export interface ServiceAlert {
   id: string;
   header: string;       // short title, e.g. "No [F] service between Jay St and 2 Av"
   description: string;  // longer human body; may be empty
   effect: string;       // GTFS effect enum name (NO_SERVICE, SIGNIFICANT_DELAYS, …)
   severity: AlertSeverity;
-  routeIds: string[];
-  stopIds: string[];    // parent stop ids (N/S suffix stripped)
+  routeIds: string[];   // flattened from selectors — for legacy callers and "affected lines" badges
+  stopIds: string[];    // flattened from selectors — for legacy callers and stop-affected badges
+  selectors: AlertSelector[]; // per-entity scope, preserves the AND/OR semantics
   startTime: number | null;  // unix seconds
   endTime: number | null;
 }
@@ -146,9 +160,21 @@ export async function GET() {
       const effect = effectName(a.effect);
       const routeIds = new Set<string>();
       const stopIds = new Set<string>();
+      const selectors: AlertSelector[] = [];
       for (const ie of a.informedEntity ?? []) {
-        if (ie.routeId) routeIds.add(ie.routeId);
-        if (ie.stopId) stopIds.add(parentStop(ie.stopId));
+        const selector: AlertSelector = {};
+        if (ie.routeId) {
+          selector.routeId = ie.routeId;
+          routeIds.add(ie.routeId);
+        }
+        if (ie.stopId) {
+          const parent = parentStop(ie.stopId);
+          selector.stopId = parent;
+          stopIds.add(parent);
+        }
+        // Skip selectors that carry neither a route nor a stop (agency-
+        // wide or trip-only selectors aren't actionable for our UI).
+        if (selector.routeId || selector.stopId) selectors.push(selector);
       }
 
       const firstPeriod = periods[0];
@@ -161,6 +187,7 @@ export async function GET() {
         severity: severityOf(effect, header),
         routeIds: [...routeIds],
         stopIds: [...stopIds],
+        selectors,
         startTime: firstPeriod ? toSec(firstPeriod.start) : null,
         endTime: firstPeriod ? toSec(firstPeriod.end) : null,
       });

@@ -161,3 +161,48 @@ export function alertsForRoutes(
     a.routeIds.some((r: string) => set.has(r)),
   );
 }
+
+// Filter active alerts to those affecting a specific station complex.
+//
+// The MTA tags many alerts with explicit stop scope ("No [R] at
+// Cortlandt St this weekend"). Filtering by route alone surfaces those
+// at every other R station too — useless noise for a rider opening
+// Times Sq when the outage is downtown.
+//
+// We evaluate each per-entity GTFS-RT selector independently because
+// its fields are an AND ({route:R, stop:R23} = "R route AT R23") and
+// multiple selectors are an OR. A first cut that flattened selectors
+// into independent route/stop sets would mis-scope mixed alerts: an
+// alert pairing one route-wide selector with one stop-specific
+// selector would appear only at the listed stop, hiding the line-wide
+// disruption at every other station. Codex flagged that as P1 on
+// PR #71; preserving per-selector evaluation here is the fix.
+export function alertsForStation(
+  data: AlertsResponse | null,
+  stationStopIds: Iterable<string>,
+  stationRouteIds: Iterable<string>,
+): ServiceAlert[] {
+  if (!data) return [];
+  const stopSet = new Set(stationStopIds);
+  const routeSet = new Set(stationRouteIds);
+  return data.alerts.filter((a: ServiceAlert) => {
+    // Legacy path for cached responses written before `selectors` was
+    // added — fall back to the old route-or-stop union so the panel
+    // doesn't go silent during a stale-while-revalidate window after
+    // a deploy.
+    if (!a.selectors || a.selectors.length === 0) {
+      if (a.stopIds.length > 0 && a.stopIds.some((s) => stopSet.has(s))) return true;
+      return a.routeIds.some((r) => routeSet.has(r));
+    }
+    return a.selectors.some((sel) => {
+      const routeMatch = sel.routeId !== undefined && routeSet.has(sel.routeId);
+      const stopMatch = sel.stopId !== undefined && stopSet.has(sel.stopId);
+      // Selector is an AND of its present fields. A {route, stop}
+      // selector means "this route AT this stop" — both must match.
+      if (sel.routeId !== undefined && sel.stopId !== undefined) {
+        return routeMatch && stopMatch;
+      }
+      return routeMatch || stopMatch;
+    });
+  });
+}
