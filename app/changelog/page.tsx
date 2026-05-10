@@ -25,6 +25,7 @@ const ENTRIES: Entry[] = [
     title: "MVP build",
     changes: [
       { type: "added", text: "Station arrival rows now flag stale predictions — when the underlying train hasn't reported its position in 90 s+, an amber 'Updated 4m ago' sub-line appears under the route so a rider deciding whether to run for a 'next train in 5 min' can tell the prediction is being made off old data." },
+      { type: "added", text: "Trip-plan rows carry the same staleness signal: each upcoming-arrival ETA on the boarding-station inline list flips amber when its train hasn't reported in 90 s+, with a single 'Updated Nm ago' / 'Stale · Nm' sub-line beneath the soonest stale entry — same idiom as the station panel, threaded into both the Near-me hero card and the Search directions list." },
       { type: "added", text: "Press kit at /press — boilerplate paragraph, brand assets, screenshot URLs, and a contact link for journalists writing about the project." },
       { type: "added", text: "Per-line landing pages at /line/[id] mirror the per-station pages — every train (1–7, A/C/E, B/D/F/M, G, J/Z, L, N/Q/R/W, shuttles, SI) has its own SEO-indexable surface that links straight into the live map." },
       { type: "added", text: "Per-page Open Graph cards for /about, /pricing, and /changelog so shared marketing links get framed thumbnails instead of the generic site card." },

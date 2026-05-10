@@ -343,6 +343,21 @@ export default function SearchSheet({
     return m;
   }, [data, index]);
 
+  // Per-trip last-reported VehiclePosition timestamp, threaded into
+  // each TripPlanRow so the row can flip its leg-1 ETA chips amber
+  // when the train hasn't reported in 90 s+ — same idiom as
+  // StationPanel's ArrivalRow staleness chrome. Trips that show up in
+  // stop_time_updates without a paired VehiclePosition get no entry,
+  // so by definition their predictions are as fresh as the latest
+  // poll and the row stays calm.
+  const lastReportedByTripId = useMemo(() => {
+    const m = new Map<string, number | undefined>();
+    if (!data) return m;
+    for (const t of data.trains) m.set(t.id, t.lastReportedAt);
+    return m;
+  }, [data]);
+  const generatedAtSec = data ? data.generatedAt / 1000 : 0;
+
   // Reset state when sheet closes so re-opening lands clean. Mode
   // resets to whatever the entry point requested (initialMode), not a
   // hardcoded "search" — so opening via "See all routes" repeatedly
@@ -1853,6 +1868,8 @@ export default function SearchSheet({
                     walkFromName={tripFrom.address?.name}
                     walkToMeters={walkToMeters}
                     walkToName={tripTo.address?.name}
+                    lastReportedByTripId={lastReportedByTripId}
+                    generatedAtSec={generatedAtSec}
                   />
                 );
               })}
