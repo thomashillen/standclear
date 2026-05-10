@@ -762,12 +762,22 @@ export function TripPlanRow({
           {upcoming.map((a, i) => {
             const info = routeColors.get(a.routeId);
             const stale = upcomingStaleness[i] != null;
+            const verdict = upcomingVerdicts[i];
+            // Same verdict-wins-over-stale rule as the non-trunk render
+            // below. A rider walking up to Times Sq for any of N/R/W
+            // needs miss/run/walk feedback as much as a rider walking
+            // up to a single-route platform — without it, the trunk
+            // path silently dropped the catchability signal that
+            // StationRow + the non-trunk TripPlanRow branch already
+            // surface. Bullet stays its real route color; only the
+            // ETA text gets the verdict tint.
+            const verdictCls = verdict ? VERDICT_STYLES[verdict].etaCls : null;
+            const tint =
+              verdictCls ?? (stale ? "text-amber-300" : "text-gray-100");
             return (
               <span
                 key={`${a.tripId}-${i}`}
-                className={`inline-flex items-center gap-1 text-[13px] tabular-nums ${
-                  stale ? "text-amber-300" : "text-gray-100"
-                }`}
+                className="inline-flex items-center gap-1 text-[13px] tabular-nums"
               >
                 {info && (
                   <RouteBullet
@@ -776,7 +786,9 @@ export function TripPlanRow({
                     textColor={info.textColor}
                   />
                 )}
-                <span className="font-semibold">{fmtEta(a.eta, now)}</span>
+                <span className={`font-semibold ${tint}`}>
+                  {fmtEta(a.eta, now)}
+                </span>
               </span>
             );
           })}
