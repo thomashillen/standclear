@@ -1,7 +1,7 @@
 // @vitest-environment node
 
 import { describe, expect, it } from "vitest";
-import { trainStaleness } from "./trainStaleness";
+import { summarizeFleetStaleness, trainStaleness } from "./trainStaleness";
 
 const NOW_MS = new Date("2026-05-09T18:00:00Z").getTime();
 const NOW_SEC = NOW_MS / 1000;
@@ -59,5 +59,38 @@ describe("trainStaleness", () => {
     expect(r.ageSec).toBe(0);
     expect(r.stale).toBe(false);
     expect(r.label).toBeNull();
+  });
+});
+
+describe("summarizeFleetStaleness", () => {
+  it("returns zero counts for an empty fleet", () => {
+    expect(summarizeFleetStaleness([], NOW_MS, NOW_SEC)).toEqual({
+      stale: 0,
+      veryStale: 0,
+    });
+  });
+
+  it("counts stale and veryStale across the fleet using trainStaleness thresholds", () => {
+    const trains = [
+      { lastReportedAt: NOW_SEC - 30 }, // fresh
+      { lastReportedAt: NOW_SEC - 90 }, // boundary fresh
+      { lastReportedAt: NOW_SEC - 120 }, // soft-stale
+      { lastReportedAt: NOW_SEC - 240 }, // soft-stale
+      { lastReportedAt: NOW_SEC - 600 }, // hard-stale
+      { lastReportedAt: NOW_SEC - 1200 }, // hard-stale
+    ];
+    expect(summarizeFleetStaleness(trains, NOW_MS, NOW_SEC)).toEqual({
+      stale: 4,
+      veryStale: 2,
+    });
+  });
+
+  it("falls back to generatedAt when a vehicle omits lastReportedAt", () => {
+    // Snapshot is past the hard-stale floor; every vehicle without a
+    // per-vehicle ts inherits that, so the fleet reads as fully stale.
+    const trains = [{}, {}, {}];
+    expect(
+      summarizeFleetStaleness(trains, NOW_MS, NOW_SEC - 600),
+    ).toEqual({ stale: 3, veryStale: 3 });
   });
 });
