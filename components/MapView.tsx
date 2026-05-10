@@ -693,12 +693,17 @@ export default function MapView({ selectedLine, stationStopId, onLineSelect, onS
 
         // Invisible wider circle for tap targets on stops. Same story as
         // subway-lines-hit: keep the dot small visually, expand the hit area.
+        // Sized at 18px radius (≈36px diameter) so finger taps land
+        // reliably on the dot without needing pixel-level precision —
+        // 14px was below Apple's 44pt recommendation and missed often on
+        // small-screen phones. Adjacent station dots are still spaced
+        // far enough apart at default zoom that overlap is rare.
         map.addLayer({
           id: "subway-stops-hit",
           type: "circle",
           source: "subway-stops",
           paint: {
-            "circle-radius": 14,
+            "circle-radius": 18,
             "circle-color": "#000",
             "circle-opacity": 0,
           },
@@ -1286,8 +1291,21 @@ export default function MapView({ selectedLine, stationStopId, onLineSelect, onS
             )
             .addTo(map as unknown as mapboxgl.Map);
         };
-        map.on("mouseenter", "subway-stops-hit", showStopPopup);
-        map.on("mouseleave", "subway-stops-hit", () => popup.remove());
+        // Hover-popup is desktop-only. On iOS Safari, Mapbox simulates
+        // `mouseenter` on the first tap which adds the popup to the DOM;
+        // the popup then captures the click that should have fired the
+        // tap-to-open handler below, so the rider has to tap a second
+        // time to actually open the station. Detecting touch capability
+        // and skipping the hover binding gives mobile a single-tap path
+        // to StationPanel while desktop keeps the hover preview.
+        const isTouch =
+          typeof window !== "undefined" &&
+          (("ontouchstart" in window) ||
+            (typeof navigator !== "undefined" && navigator.maxTouchPoints > 0));
+        if (!isTouch) {
+          map.on("mouseenter", "subway-stops-hit", showStopPopup);
+          map.on("mouseleave", "subway-stops-hit", () => popup.remove());
+        }
         // Tapping a station opens the StationPanel (all lines serving
         // this stop, with live arrivals), not a single-line panel. A
         // station like Union Sq serves 4/5/6, N/Q/R/W, and L — the
@@ -1316,7 +1334,7 @@ export default function MapView({ selectedLine, stationStopId, onLineSelect, onS
             });
             if (trainHit.length > 0) return;
           }
-          showStopPopup(e);
+          if (!isTouch) showStopPopup(e);
           const feat = ev.features?.[0];
           const stopId = feat?.properties?.stopId;
           if (!stopId) return;

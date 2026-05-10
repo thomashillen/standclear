@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { ArrowUp, ArrowDown, Briefcase, Home, Star, X } from "lucide-react";
+import { ArrowUp, ArrowDown, Briefcase, Compass, Home, Star, X } from "lucide-react";
 import { useLines } from "@/lib/subwayData";
 import { useTrains, type Arrival, type Train } from "@/lib/useTrains";
 import { useCommute, useFavorites } from "@/lib/useFavorites";
@@ -13,6 +13,11 @@ interface Props {
   stopId: string;
   onClose: () => void;
   onSelectLine: (routeId: string) => void;
+  /** Fired when the rider taps the Directions button. The parent
+   *  opens SearchSheet in directions mode with this station preset
+   *  as the destination, so the rider can pick a starting point and
+   *  see ranked plans. */
+  onStartDirections?: (stopId: string) => void;
 }
 
 // Arrival rows we synthesize for trains physically AT (or very recently at)
@@ -182,7 +187,7 @@ function ArrivalRow({ arrival, now, badge, isExpress, terminusName, onTapRoute }
 // you pick a station (by tapping it on any list or the map) and see every
 // train coming, not just the first per route. Bullets are tappable to
 // jump into that line's view.
-export default function StationPanel({ stopId, onClose, onSelectLine }: Props) {
+export default function StationPanel({ stopId, onClose, onSelectLine, onStartDirections }: Props) {
   const lines = useLines();
   const data = useTrains();
   const { has, toggle } = useFavorites();
@@ -484,18 +489,28 @@ export default function StationPanel({ stopId, onClose, onSelectLine }: Props) {
           </button>
         </div>
 
-        {/* Action row — Save (favorite), Home, Work. Each chip's
-            tap-toggles-self semantics: when active, tapping clears
-            that anchor; when inactive, tapping assigns it. The
-            previous build routed Home/Work setup exclusively through
-            More → Search to avoid the "no obvious unset path" UX
-            trap, but that made pinning the station you're already
-            looking at a three-tap detour. Restoring the chips with
-            the same toggle pattern Save uses (and that the More
-            menu's AnchorRow X-button parallels) closes the loop:
-            you can pin and un-pin in one tap from the same surface.
-            MoreSheet still owns address-based anchors. */}
+        {/* Action row — Directions, Save (favorite), Home, Work.
+            The Directions button is the primary action: tapping it
+            hands the station off to SearchSheet in directions mode
+            with this stop preset as the destination, so a rider who
+            opened the panel via map tap or search can plan a trip
+            in one tap instead of retyping the destination. The
+            remaining chips use tap-toggles-self semantics: when
+            active, tapping clears that anchor; when inactive,
+            tapping assigns it. MoreSheet still owns address-based
+            anchors. */}
         <div className="flex items-center gap-2 flex-wrap">
+          {onStartDirections && (
+            <button
+              type="button"
+              onClick={() => onStartDirections(favId)}
+              className="press inline-flex items-center gap-1.5 h-9 px-3.5 rounded-full text-[12px] font-semibold touch-manipulation transition-colors bg-blue-500/90 text-white hover:bg-blue-500 ring-1 ring-blue-400/40"
+              aria-label={`Get directions to ${station.name}`}
+            >
+              <Compass className="w-[15px] h-[15px]" />
+              <span>Directions</span>
+            </button>
+          )}
           <AnchorChip
             label={isFav ? "Saved" : "Save"}
             icon={<Star className={`w-[15px] h-[15px] ${isFav ? "fill-amber-300 text-amber-300" : ""}`} />}
