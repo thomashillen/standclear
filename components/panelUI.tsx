@@ -19,7 +19,13 @@ import {
   Flag,
 } from "lucide-react";
 import type { Arrival } from "@/lib/useTrains";
-import { catchVerdict, walkMinutes, type CatchVerdict, type StationEntry } from "@/lib/stopsIndex";
+import {
+  catchVerdict,
+  formatWalkSummary,
+  walkMinutes,
+  type CatchVerdict,
+  type StationEntry,
+} from "@/lib/stopsIndex";
 import type { CommuteAnchor } from "@/lib/useFavorites";
 import { estimateTripTimeSec, type TripPlan } from "@/lib/commuteRouting";
 import type { WalkingRoute, WalkingStep } from "@/lib/walkingDirections";
@@ -195,7 +201,7 @@ export function StationRow({
           </p>
           {station.meters !== undefined && (
             <p className="text-[11px] text-gray-500 mt-0.5">
-              {fmtDistance(station.meters)} away
+              {formatWalkSummary(station.meters)}
             </p>
           )}
 

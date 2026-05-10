@@ -299,6 +299,30 @@ export function walkMinutes(meters: number): number {
   return Math.max(1, Math.round(seconds / 60));
 }
 
+/**
+ * "5 min walk · 320 m" summary for nearby/search station rows. The
+ * walk-minute estimate uses the same NYC pedestrian model as
+ * `walkMinutes` / `catchVerdict`; meters are right-sized to "X m" or
+ * "Y.Z km" via the same threshold the trip-planner walking legs use.
+ *
+ * For a sub-minute distance (rider standing on top of the entrance,
+ * meters === 0) we fall back to "0 m away" so the row still has a
+ * usable label rather than a misleading "0 min walk · 0 m". Apple
+ * Maps surfaces walking minutes prominently because that's the unit
+ * a NYC rider actually budgets in — meters stay alongside as a
+ * secondary spatial check.
+ */
+export function formatWalkSummary(meters: number): string {
+  if (!Number.isFinite(meters) || meters < 0) return "";
+  const dist =
+    meters < 1000
+      ? `${Math.round(meters)} m`
+      : `${(meters / 1000).toFixed(1)} km`;
+  const min = walkMinutes(meters);
+  if (min <= 0) return `${dist} away`;
+  return `${min} min walk · ${dist}`;
+}
+
 export function catchVerdict(
   distanceMeters: number,
   etaSec: number,
