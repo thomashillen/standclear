@@ -295,3 +295,134 @@ describe("TripPlanRow catch verdict", () => {
     expect(screen.getByText("Updated 4m ago")).toBeTruthy();
   });
 });
+
+describe("TripPlanRow trunk catch verdict (sibling routes)", () => {
+  // Broadway BMT trunk: N/R/W co-run at e.g. Times Sq. The plan's
+  // leg-1 routeId can be any of them — what matters for the render is
+  // that `siblingRouteIds` populates so the per-arrival-bullet trunk
+  // branch fires instead of the single-bullet branch.
+  const trunkOrigin: StationEntry = {
+    stopId: "R16",
+    stopIds: ["R16"],
+    name: "Times Sq-42 St",
+    lat: 40.754672,
+    lng: -73.986754,
+    routes: [
+      { id: "N", routeId: "N", color: "#FCCC0A", textColor: "black" },
+      { id: "R", routeId: "R", color: "#FCCC0A", textColor: "black" },
+      { id: "W", routeId: "W", color: "#FCCC0A", textColor: "black" },
+    ],
+  };
+
+  const trunkPlan: TripPlan = {
+    legs: [
+      {
+        routeId: "N",
+        direction: "S",
+        boardStopId: "R16",
+        alightStopId: "R20",
+        boardComplexId: "R16",
+        alightComplexId: "R20",
+        stopCount: 4,
+        siblingRouteIds: ["R", "W"],
+      },
+    ],
+    totalStops: 4,
+  };
+
+  const trunkRouteColors: RouteColorMap = new Map([
+    ["N", { color: "#FCCC0A", textColor: "black", displayId: "N" }],
+    ["R", { color: "#FCCC0A", textColor: "black", displayId: "R" }],
+    ["W", { color: "#FCCC0A", textColor: "black", displayId: "W" }],
+  ]);
+
+  const trunkStations = new Map<string, StationEntry>([["R16", trunkOrigin]]);
+
+  function trunkArrival(
+    routeId: string,
+    tripId: string,
+    etaOffsetSec: number,
+  ): Arrival {
+    return {
+      routeId,
+      stopId: "R16",
+      direction: "S",
+      eta: NOW_SEC + etaOffsetSec,
+      tripId,
+    };
+  }
+
+  it("strikes through trunk ETAs the rider can't physically catch", () => {
+    // Mix of arrivals across the N/R/W trunk. The 60s N is in the
+    // "miss" band at walkFromMeters=300; the 500s W is "chill".
+    const arrivals = [
+      trunkArrival("N", "trip-miss-N", 60),
+      trunkArrival("W", "trip-chill-W", 500),
+    ];
+    const { container } = render(
+      <TripPlanRow
+        plan={trunkPlan}
+        origin={trunkOrigin}
+        routeColors={trunkRouteColors}
+        stationsByComplexId={trunkStations}
+        arrivals={arrivals}
+        now={NOW_MS}
+        isPrimary={true}
+        walkFromMeters={300}
+      />,
+    );
+    // The trunk branch ALSO renders the "Next:" prefix, but with
+    // per-arrival route bullets — confirm we're in the trunk branch.
+    expect(screen.getByText("Next:")).toBeTruthy();
+    // Verdict tint reached the inline ETA chips.
+    expect(
+      container.querySelectorAll(".line-through").length,
+    ).toBeGreaterThan(0);
+  });
+
+  it("leaves trunk ETAs neutral when walkFromMeters is omitted", () => {
+    // Same arrivals — without the walk, no verdict tinting applies.
+    const arrivals = [
+      trunkArrival("N", "trip-on-platform-N", 60),
+      trunkArrival("R", "trip-on-platform-R", 200),
+    ];
+    const { container } = render(
+      <TripPlanRow
+        plan={trunkPlan}
+        origin={trunkOrigin}
+        routeColors={trunkRouteColors}
+        stationsByComplexId={trunkStations}
+        arrivals={arrivals}
+        now={NOW_MS}
+        isPrimary={true}
+      />,
+    );
+    expect(container.querySelectorAll(".line-through")).toHaveLength(0);
+  });
+
+  it("falls back to stale amber on the trunk when there's no walk verdict", () => {
+    // No walkFromMeters, but the soonest train is soft-stale. The
+    // chip should pick up the amber tint via the stale fallback, even
+    // in the trunk render — matching the non-trunk path's behavior.
+    const arrivals = [trunkArrival("R", "trip-stale-R", 60)];
+    const lastReportedByTripId = new Map<string, number | undefined>([
+      ["trip-stale-R", NOW_SEC - 4 * 60],
+    ]);
+    const { container } = render(
+      <TripPlanRow
+        plan={trunkPlan}
+        origin={trunkOrigin}
+        routeColors={trunkRouteColors}
+        stationsByComplexId={trunkStations}
+        arrivals={arrivals}
+        now={NOW_MS}
+        isPrimary={true}
+        lastReportedByTripId={lastReportedByTripId}
+        generatedAtSec={NOW_SEC}
+      />,
+    );
+    expect(
+      container.querySelectorAll(".text-amber-300").length,
+    ).toBeGreaterThan(0);
+  });
+});
