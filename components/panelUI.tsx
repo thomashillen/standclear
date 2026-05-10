@@ -108,7 +108,10 @@ export const VERDICT_STYLES: Record<
   miss: {
     pill: "bg-gray-700/60 text-gray-400",
     etaCls: "text-gray-500 line-through",
-    label: "miss",
+    // Strikethrough on the ETA already communicates "you missed it" —
+    // a redundant "miss" pill alongside eats horizontal space and
+    // pushes the third arrival to a new line in DirectionArrivalsRow.
+    label: null,
   },
   run: {
     pill: "bg-amber-500/90 text-black font-bold",
