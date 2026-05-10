@@ -154,6 +154,12 @@ interface GoingToCardProps {
    *  another plan's when we expand candidate stations around an
    *  address) and then filters by leg-1 route + direction. */
   arrivalsByStation: Map<string, Arrival[]>;
+  /** Per-trip last-reported VehiclePosition timestamp + snapshot
+   *  generatedAt — threaded straight through to TripPlanRow so the
+   *  inline ETA chips can flip amber once a train slips past the
+   *  90 s freshness floor. */
+  lastReportedByTripId: Map<string, number | undefined>;
+  generatedAtSec: number;
   /** Top trip plans from origin to destination, in display order
    *  (re-ranked by estimated total time). */
   plans: TripPlan[];
@@ -203,6 +209,8 @@ function GoingToCard({
   onTripSelect,
   onSeeAllRoutes,
   selectedTripKey,
+  lastReportedByTripId,
+  generatedAtSec,
 }: GoingToCardProps & {
   onSeeAllRoutes?: (preset: {
     from:
@@ -362,6 +370,8 @@ function GoingToCard({
                   walkToMeters && walkToMeters > 0 ? walkToMeters : undefined
                 }
                 walkToName={destination.address?.name}
+                lastReportedByTripId={lastReportedByTripId}
+                generatedAtSec={generatedAtSec}
               />
             );
           })}
@@ -482,6 +492,19 @@ export default function NearbyPanel({
     }
     return m;
   }, [data, index]);
+
+  // Per-trip last-reported VehiclePosition timestamp lookup. Threaded
+  // through GoingToCard → TripPlanRow so each upcoming-arrival ETA on
+  // the leg-1 boarding station can flip amber once its underlying
+  // train slips past the 90 s freshness floor — same idiom as
+  // StationPanel's ArrivalRow staleness chrome.
+  const lastReportedByTripId = useMemo(() => {
+    const m = new Map<string, number | undefined>();
+    if (!data) return m;
+    for (const t of data.trains) m.set(t.id, t.lastReportedAt);
+    return m;
+  }, [data]);
+  const generatedAtSec = data ? data.generatedAt / 1000 : 0;
 
   const nearbyAll: NearbyStation[] = useMemo(() => {
     if (geo.lng == null || geo.lat == null) return [];
@@ -849,6 +872,8 @@ export default function NearbyPanel({
             onSeeAllRoutes={onSeeAllRoutes}
             stationsByComplexId={stationsByComplexId}
             now={now}
+            lastReportedByTripId={lastReportedByTripId}
+            generatedAtSec={generatedAtSec}
             onSwap={() => {
               setDestAnchor((a) => (a === "home" ? "work" : "home"));
               destAnchorAutoPicked.current = true;

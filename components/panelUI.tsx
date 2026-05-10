@@ -29,6 +29,7 @@ import {
 import type { CommuteAnchor } from "@/lib/useFavorites";
 import { estimateTripTimeSec, type TripPlan } from "@/lib/commuteRouting";
 import type { WalkingRoute, WalkingStep } from "@/lib/walkingDirections";
+import { trainStaleness } from "@/lib/trainStaleness";
 
 // ─── Shared types ───────────────────────────────────────────────────
 
@@ -425,6 +426,8 @@ export function TripPlanRow({
   walkFromName,
   walkToMeters,
   walkToName,
+  lastReportedByTripId,
+  generatedAtSec,
 }: {
   plan: TripPlan;
   origin: StationEntry;
@@ -447,6 +450,19 @@ export function TripPlanRow({
    *  min to <walkToName>" beneath the arrivals. */
   walkToMeters?: number;
   walkToName?: string;
+  /** Per-trip last-reported VehiclePosition timestamp (epoch seconds).
+   *  When provided, each upcoming-arrival ETA is colored amber once
+   *  its train's position slips past the marker-fade threshold (90 s),
+   *  matching ArrivalRow's per-row staleness chrome. Trips that aren't
+   *  in the map are by definition as fresh as the latest poll —
+   *  stop_time_update without a paired VehiclePosition — so no chrome
+   *  changes for them. Optional so call sites that don't have train
+   *  data (early-load, tests) keep working unchanged. */
+  lastReportedByTripId?: Map<string, number | undefined>;
+  /** Snapshot's generatedAt in epoch seconds. Falls in to
+   *  `trainStaleness` when a trip's per-vehicle timestamp is omitted,
+   *  so silent-feed outages still surface. */
+  generatedAtSec?: number;
 }) {
   const leg1 = plan.legs[0];
   const leg2 = plan.legs[1];
@@ -508,6 +524,29 @@ export function TripPlanRow({
       .sort((a, b) => a.eta - b.eta)
       .slice(0, 3);
   }, [arrivals, leg1, leg1ValidRouteIds, now]);
+
+  // Per-upcoming-arrival staleness, parallel to `upcoming`. Each entry
+  // is `null` when the train is fresh OR when its trip has no Train
+  // entry in the snapshot (a stop_time_update without a paired
+  // VehiclePosition is by definition as fresh as the latest poll).
+  // Colors the ETA amber inline + drives the at-glance "Updated Nm
+  // ago" sub-line below — same visual idiom as ArrivalRow.
+  const upcomingStaleness = useMemo(() => {
+    if (!lastReportedByTripId || !generatedAtSec) {
+      return upcoming.map(() => null);
+    }
+    return upcoming.map((a) => {
+      if (!lastReportedByTripId.has(a.tripId)) return null;
+      const ts = lastReportedByTripId.get(a.tripId);
+      const s = trainStaleness(ts, now, generatedAtSec);
+      return s.stale ? s : null;
+    });
+  }, [upcoming, lastReportedByTripId, generatedAtSec, now]);
+  // Soonest stale entry in the list — the train the rider would
+  // typically chase. Surface ITS label as a single sub-line below the
+  // inline ETAs so the rider gets the why-amber explanation without
+  // crowding the per-ETA chips.
+  const leadStale = upcomingStaleness.find((s) => s != null) ?? null;
 
   // Total trip time in minutes — walk + wait (live next-train ETA
   // when known) + travel + transfer + walk. Wraps the row's already
@@ -642,10 +681,13 @@ export function TripPlanRow({
           <span className="text-[13px] text-gray-500 leading-snug">Next:</span>
           {upcoming.map((a, i) => {
             const info = routeColors.get(a.routeId);
+            const stale = upcomingStaleness[i] != null;
             return (
               <span
                 key={`${a.tripId}-${i}`}
-                className="inline-flex items-center gap-1 text-[13px] tabular-nums text-gray-100"
+                className={`inline-flex items-center gap-1 text-[13px] tabular-nums ${
+                  stale ? "text-amber-300" : "text-gray-100"
+                }`}
               >
                 {info && (
                   <RouteBullet
@@ -671,23 +713,47 @@ export function TripPlanRow({
               textColor={leg1Info.textColor}
             />
           )}
-          <span className="text-[13px] tabular-nums text-gray-100 leading-snug">
+          <span className="text-[13px] tabular-nums leading-snug">
             {/* "Next:" prefix instead of "in" — with the route bullet
                 immediately to the left, "[4] in 4m · 11m · 19m" parsed
                 as "the 4 train in 4m" before the eye reached the dot
                 separator. "Next:" makes the list reading unambiguous. */}
             <span className="text-gray-500">Next: </span>
-            {upcoming.map((a, i) => (
-              <span key={`${a.tripId}-${i}`}>
-                {i > 0 && <span className="text-gray-600"> · </span>}
-                <span className="font-semibold">{fmtEta(a.eta, now)}</span>
-              </span>
-            ))}
+            {upcoming.map((a, i) => {
+              const stale = upcomingStaleness[i] != null;
+              return (
+                <span key={`${a.tripId}-${i}`}>
+                  {i > 0 && <span className="text-gray-600"> · </span>}
+                  <span
+                    className={`font-semibold ${
+                      stale ? "text-amber-300" : "text-gray-100"
+                    }`}
+                  >
+                    {fmtEta(a.eta, now)}
+                  </span>
+                </span>
+              );
+            })}
           </span>
           <span className="text-[11px] text-gray-500 ml-0.5 self-center">
             at {origin.name}
           </span>
         </div>
+      )}
+      {leadStale && (
+        // Single sub-line that surfaces WHY a stale ETA is amber:
+        // mirrors ArrivalRow's "Updated Nm ago" / "Stale · Nm" copy
+        // from `trainStaleness.label`. Renders only when at least one
+        // upcoming arrival on this leg is past the marker-fade
+        // threshold; uses the soonest stale train (the one the rider
+        // is most likely to chase) so the band — soft vs. hard stale —
+        // matches what the rider's eye is on.
+        <p
+          className="text-[11px] text-amber-300 leading-tight mt-1 truncate"
+          aria-label={`Soonest train position last updated ${Math.round(leadStale.ageSec / 60)} minutes ago`}
+        >
+          {leadStale.label}
+        </p>
       )}
       {(walkFromMin > 0 || walkToMin > 0) && (
         <div className="flex items-center gap-1.5 text-[11px] text-gray-400 mt-2 flex-wrap">
