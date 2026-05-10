@@ -24,6 +24,7 @@ const ENTRIES: Entry[] = [
     date: "2026-05-09",
     title: "MVP build",
     changes: [
+      { type: "changed", text: "Severe service alerts (full suspensions, 'no service') now auto-expand on the station and line panels so a rider opening a station with a route-wide outage sees the disruption headline without an extra tap. Warning + info alerts stay collapsed by default to keep arrivals visible." },
       { type: "added", text: "Station arrival rows now flag stale predictions — when the underlying train hasn't reported its position in 90 s+, an amber 'Updated 4m ago' sub-line appears under the route so a rider deciding whether to run for a 'next train in 5 min' can tell the prediction is being made off old data." },
       { type: "added", text: "Trip-plan rows carry the same staleness signal: each upcoming-arrival ETA on the boarding-station inline list flips amber when its train hasn't reported in 90 s+, with a single 'Updated Nm ago' / 'Stale · Nm' sub-line beneath the soonest stale entry — same idiom as the station panel, threaded into both the Near-me hero card and the Search directions list." },
       { type: "added", text: "Press kit at /press — boilerplate paragraph, brand assets, screenshot URLs, and a contact link for journalists writing about the project." },
