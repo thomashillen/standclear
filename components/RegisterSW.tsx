@@ -2,6 +2,7 @@
 
 import { useEffect } from "react";
 import { isNative } from "@/lib/native";
+import { captureException } from "@/lib/observability";
 
 declare const process: { env: { NODE_ENV?: string } };
 
@@ -25,7 +26,11 @@ export default function RegisterSW() {
     }
     const onLoad = () => {
       navigator.serviceWorker.register("/sw.js").catch((err) => {
-        console.warn("Service worker registration failed", err);
+        // Route through observability so a failed registration lands
+        // in /api/log alongside other client errors. Riders whose SW
+        // registration silently fails (cache quota, locked storage,
+        // CSP edge case) were previously invisible.
+        captureException(err, { source: "service-worker-registration" });
       });
     };
     if (document.readyState === "complete") onLoad();

@@ -68,15 +68,22 @@ function AlertItem({ alert }: { alert: ServiceAlert }) {
 // state is a single 44px row with count + top severity tint; the
 // rider expands when they want detail.
 //
+// Severe alerts (full suspensions, "no service") break that default —
+// they auto-expand on first mount so the rider sees the disruption
+// headline without an extra tap. Warning + info stay collapsed; their
+// "elevator out", "delays" framing is routine and shouldn't push
+// arrivals off-screen for every station on the line. The 28dvh cap
+// on the expanded list still bounds vertical growth, and the rider
+// can collapse to refocus on arrivals.
+//
 // Parents pass a stable `key` (e.g. lineId / stopId) so a context
-// switch remounts the section and resets the disclosure to collapsed
-// without a setState-in-effect.
+// switch remounts the section — that re-runs the initial-state
+// computation, so switching from a severe-alert station to a
+// quiet-alert station correctly re-collapses without a
+// setState-in-effect.
 export function AlertsSection({ alerts }: { alerts: ServiceAlert[] }) {
-  const [open, setOpen] = useState(false);
-
-  // Highest-severity alert drives the summary-bar color so a
-  // suspension reads as urgent at a glance, distinct from a routine
-  // info-level notice.
+  // Highest-severity alert drives both the summary-bar color and the
+  // initial disclosure state.
   const topSeverity: ServiceAlert["severity"] = alerts.some(
     (a) => a.severity === "severe",
   )
@@ -84,6 +91,7 @@ export function AlertsSection({ alerts }: { alerts: ServiceAlert[] }) {
     : alerts.some((a) => a.severity === "warning")
       ? "warning"
       : "info";
+  const [open, setOpen] = useState(topSeverity === "severe");
   const s = SEVERITY_STYLE[topSeverity];
   const Icon = s.icon;
   const n = alerts.length;

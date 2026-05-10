@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { ArrowUp, ArrowDown, Compass, Star, X } from "lucide-react";
 import { useLines } from "@/lib/subwayData";
 import { useTrains, type Arrival, type Train } from "@/lib/useTrains";
-import { useAlerts, alertsForRoutes } from "@/lib/useAlerts";
+import { useAlerts, alertsForStation } from "@/lib/useAlerts";
 import { useFavorites } from "@/lib/useFavorites";
 import { useNow } from "@/lib/useNow";
 import { buildStationIndex } from "@/lib/stopsIndex";
@@ -460,17 +460,17 @@ export default function StationPanel({ stopId, onClose, onSelectLine, onStartDir
   }, [data]);
   const generatedAtSec = data ? data.generatedAt / 1000 : 0;
 
-  // Active service alerts that touch any of this complex's serving
-  // routes. Same shape as LinePanel's corridor scoping — riders looking
-  // at the station deserve the same heads-up the line view gives them
-  // (e.g. "no Q service downtown this weekend" while planning a trip
-  // from Atlantic-Barclays). The summary bar is collapsed by default;
-  // mounting `key={station.stopId}` ensures swapping stations resets
-  // the disclosure rather than carrying open-state across complexes.
+  // Active service alerts that touch this station complex. Two-tier
+  // filter: alerts with explicit stopIds match only when this complex
+  // is one of them ("No [R] at Cortlandt St" stops being noise at the
+  // other R stations); alerts with route-only scope still surface
+  // line-wide ("F runs express in Brooklyn"). Mounting
+  // `key={station.stopId}` resets the disclosure when the rider
+  // swaps stations rather than carrying open-state across complexes.
   const stationAlerts = useMemo(() => {
     if (!station) return [];
     const routeIds = station.routes.map((r) => r.routeId);
-    return alertsForRoutes(alertsData, routeIds);
+    return alertsForStation(alertsData, station.stopIds, routeIds);
   }, [alertsData, station]);
 
   const { detent, sheetStyle, handlers, contentHandlers, onHandleTap, isDragging } = useSheetDrag({

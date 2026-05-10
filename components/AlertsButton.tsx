@@ -78,8 +78,20 @@ interface AlertItemProps {
   routeInfo: Map<string, { id: string; color: string; textColor: "white" | "black" }>;
 }
 
-function AlertItem({ alert, routeInfo }: AlertItemProps) {
-  const [expanded, setExpanded] = useState(false);
+export function AlertItem({ alert, routeInfo }: AlertItemProps) {
+  // Severe alerts (NO_SERVICE / suspensions) auto-expand on mount: a
+  // rider opening this dialog with a suspended line is here precisely
+  // to read the description of *why*, and a row of collapsed chevrons
+  // makes them tap each card to surface the body. Same severity-driven
+  // disclosure principle as `AlertsSection` on station/line panels —
+  // calm default for warning + info, proactive for severe. The dialog
+  // already groups severe to the top; this just unfolds those cards
+  // so the rider sees the message at a glance.
+  //
+  // Parents pass `key={alert.id}` so a list refresh that drops/replaces
+  // a severe alert remounts the row and re-evaluates this default
+  // without a setState-in-effect.
+  const [expanded, setExpanded] = useState(alert.severity === "severe");
   const s = SEVERITY_STYLE[alert.severity];
   const Icon = s.icon;
   const hasBody = alert.description && alert.description !== alert.header;

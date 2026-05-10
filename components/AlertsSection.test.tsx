@@ -12,6 +12,7 @@ function makeAlert(over: Partial<ServiceAlert> = {}): ServiceAlert {
     severity: "info",
     routeIds: ["F"],
     stopIds: [],
+    selectors: [{ routeId: "F" }],
     startTime: null,
     endTime: null,
     ...over,
@@ -72,6 +73,39 @@ describe("AlertsSection", () => {
     );
     const severeBtn = screen.getByRole("button", { name: /service alerts/i });
     expect(severeBtn.className).toContain("bg-rose-500/15");
+  });
+
+  it("auto-expands on mount when at least one alert is severe so the rider sees the disruption headline without an extra tap", () => {
+    render(
+      <AlertsSection
+        alerts={[
+          makeAlert({ id: "a1", severity: "warning", header: "Elevator out at 14 St" }),
+          makeAlert({ id: "a2", severity: "severe", header: "No F service downtown" }),
+        ]}
+      />,
+    );
+    // Severe headline is in the DOM without a click.
+    expect(screen.getByText("No F service downtown")).toBeTruthy();
+    // The summary button reports the expanded state.
+    expect(screen.getByRole("button", { name: "Hide service alerts" })).toBeTruthy();
+  });
+
+  it("stays collapsed for warning-only and info-only lists so routine notices don't push arrivals off-screen", () => {
+    const { rerender } = render(
+      <AlertsSection
+        alerts={[makeAlert({ id: "a1", severity: "warning", header: "Delays on the F" })]}
+      />,
+    );
+    expect(screen.queryByText("Delays on the F")).toBeNull();
+    expect(screen.getByRole("button", { name: "Show service alerts" })).toBeTruthy();
+
+    rerender(
+      <AlertsSection
+        alerts={[makeAlert({ id: "a1", severity: "info", header: "Planned signal work overnight" })]}
+      />,
+    );
+    expect(screen.queryByText("Planned signal work overnight")).toBeNull();
+    expect(screen.getByRole("button", { name: "Show service alerts" })).toBeTruthy();
   });
 
   it("caps the expanded list to the first 8 alerts to avoid drowning the panel", () => {

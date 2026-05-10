@@ -91,3 +91,72 @@ export function trainStaleness(
     ageSec,
   };
 }
+
+export interface FleetStalenessSummary {
+  /** Trains whose latest report is older than the fresh threshold
+   *  (90 s). Includes the `veryStale` subset. */
+  stale: number;
+  /** Trains whose latest report is past the hard-stale floor (360 s)
+   *  — positions on these vehicles are unreliable. */
+  veryStale: number;
+}
+
+/**
+ * Aggregate per-vehicle staleness across the live fleet so System
+ * Pulse can show "12 trains haven't reported in 90 s+" alongside the
+ * total count. Reuses {@link trainStaleness}'s thresholds so the
+ * fleet-level summary lines up with the per-marker fade and the
+ * arrival-row sub-line riders see elsewhere.
+ *
+ * The snapshot's `generatedAt` is the fallback for vehicles whose
+ * feed entry omits `lastReportedAt` — same behaviour as the per-train
+ * helper, so a silent-feed outage doesn't hide behind missing
+ * per-vehicle timestamps.
+ */
+export function summarizeFleetStaleness(
+  trains: ReadonlyArray<{ lastReportedAt?: number }>,
+  nowMs: number,
+  fallbackSec: number,
+): FleetStalenessSummary {
+  let stale = 0;
+  let veryStale = 0;
+  for (const t of trains) {
+    const r = trainStaleness(t.lastReportedAt, nowMs, fallbackSec);
+    if (r.stale) stale++;
+    if (r.veryStale) veryStale++;
+  }
+  return { stale, veryStale };
+}
+
+// ─── Snapshot staleness ─────────────────────────────────────────────
+// Per-train staleness above is keyed off VehiclePosition.timestamp.
+// `snapshotStaleLabel` is the *snapshot-level* counterpart: how long
+// ago the GTFS-RT aggregate (`data.generatedAt`) itself was assembled.
+//
+// The /api/trains poll cadence is 8 s in healthy steady state, so 30 s
+// is too aggressive a threshold — a single recoverable hiccup
+// would flag every panel as stale for ~10 s and then quietly clear.
+// 60 s matches the SubwayMap live-pill banner and the LiveTrainsPopup
+// "System Pulse" indicator so every snapshot-age affordance crosses
+// the threshold simultaneously, and avoids the false-positive band.
+//
+// Below the threshold we return `null` (calm default, principle #4).
+// At 60–119 s we show whole seconds rounded down to the nearest 10 so
+// the label updates roughly twice a minute rather than jittering each
+// `useNow` tick; past 120 s we switch to rounded minutes — at that
+// scale, second-level precision reads as more confident than the feed
+// warrants.
+const SNAPSHOT_STALE_AT_OR_ABOVE_SEC = 60;
+const SNAPSHOT_MINUTES_AT_OR_ABOVE_SEC = 120;
+
+export function snapshotStaleLabel(ageSec: number): string | null {
+  if (!Number.isFinite(ageSec) || ageSec < SNAPSHOT_STALE_AT_OR_ABOVE_SEC) {
+    return null;
+  }
+  if (ageSec < SNAPSHOT_MINUTES_AT_OR_ABOVE_SEC) {
+    const rounded = Math.floor(ageSec / 10) * 10;
+    return `Stale · ${rounded}s`;
+  }
+  const minutes = Math.round(ageSec / 60);
+  return `Stale · ${minutes}m`;
+}

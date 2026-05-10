@@ -12,6 +12,7 @@ import {
 import { useTrains } from "@/lib/useTrains";
 import { useLines } from "@/lib/subwayData";
 import { useNow } from "@/lib/useNow";
+import { summarizeFleetStaleness } from "@/lib/trainStaleness";
 
 interface Props {
   open: boolean;
@@ -81,6 +82,18 @@ export default function LiveTrainsPopup({ open, onClose }: Props) {
   const ageSec = data ? Math.max(0, Math.round((now - data.generatedAt) / 1000)) : null;
   const fresh = ageSec !== null && ageSec < 30;
   const stale = ageSec !== null && ageSec >= 60;
+
+  // Per-vehicle staleness rolled up across the fleet, separate from
+  // the snapshot-age signal above. The snapshot can be fresh while
+  // individual trains haven't reported in minutes (silent vehicle,
+  // tunnel gap, late-update feed); riders deserve to see that
+  // distinction in the System Pulse rather than have it hide behind
+  // "Live · refreshed 4s ago". Recomputed on the per-second `now`
+  // tick so the summary stays honest while the dialog is open.
+  const fleetStaleness = useMemo(() => {
+    if (!data) return null;
+    return summarizeFleetStaleness(data.trains, now, data.generatedAt);
+  }, [data, now]);
 
   const routeInfo = useMemo(() => {
     const m = new Map<string, { id: string; color: string; textColor: "white" | "black" }>();
@@ -214,6 +227,31 @@ export default function LiveTrainsPopup({ open, onClose }: Props) {
                   {stats.arrivingSoon}
                 </span>{" "}
                 arrivals predicted in the next 5 minutes systemwide.
+              </p>
+            )}
+            {fleetStaleness && fleetStaleness.stale > 0 && (
+              // Surfaces "N trains haven't reported in 90 s+" so the
+              // System Pulse can't read clean while the underlying
+              // positions are aging out. Tinted amber to match the
+              // marker fade and arrival-row sub-line that already
+              // call out per-train staleness elsewhere. Suppressed
+              // entirely when every train is fresh — calm default,
+              // signal only when there's something to say.
+              <p className="mt-2 px-1 text-[11px] text-amber-300/80 leading-relaxed">
+                <span className="font-semibold tabular-nums">
+                  {fleetStaleness.stale}
+                </span>{" "}
+                {fleetStaleness.stale === 1 ? "train hasn’t" : "trains haven’t"}{" "}
+                reported in 90 s+
+                {fleetStaleness.veryStale > 0 && (
+                  <>
+                    {" "}·{" "}
+                    <span className="tabular-nums">
+                      {fleetStaleness.veryStale}
+                    </span>{" "}
+                    stale (6 m+)
+                  </>
+                )}
               </p>
             )}
           </section>
