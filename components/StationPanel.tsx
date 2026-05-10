@@ -4,11 +4,13 @@ import { useEffect, useMemo, useState } from "react";
 import { ArrowUp, ArrowDown, Compass, Star, X } from "lucide-react";
 import { useLines } from "@/lib/subwayData";
 import { useTrains, type Arrival, type Train } from "@/lib/useTrains";
+import { useAlerts, alertsForRoutes } from "@/lib/useAlerts";
 import { useFavorites } from "@/lib/useFavorites";
 import { useNow } from "@/lib/useNow";
 import { buildStationIndex } from "@/lib/stopsIndex";
 import { useSheetDrag } from "@/lib/useSheetDrag";
 import { trainStaleness, type TrainStaleness } from "@/lib/trainStaleness";
+import { AlertsSection } from "./AlertsSection";
 
 interface Props {
   stopId: string;
@@ -225,6 +227,7 @@ export function ArrivalRow({
 export default function StationPanel({ stopId, onClose, onSelectLine, onStartDirections }: Props) {
   const lines = useLines();
   const data = useTrains();
+  const alertsData = useAlerts();
   const { has, toggle } = useFavorites();
   // Live wall-clock so countdowns tick every second AND so the
   // STOPPED_AT recency window can be evaluated during render without
@@ -457,6 +460,19 @@ export default function StationPanel({ stopId, onClose, onSelectLine, onStartDir
   }, [data]);
   const generatedAtSec = data ? data.generatedAt / 1000 : 0;
 
+  // Active service alerts that touch any of this complex's serving
+  // routes. Same shape as LinePanel's corridor scoping — riders looking
+  // at the station deserve the same heads-up the line view gives them
+  // (e.g. "no Q service downtown this weekend" while planning a trip
+  // from Atlantic-Barclays). The summary bar is collapsed by default;
+  // mounting `key={station.stopId}` ensures swapping stations resets
+  // the disclosure rather than carrying open-state across complexes.
+  const stationAlerts = useMemo(() => {
+    if (!station) return [];
+    const routeIds = station.routes.map((r) => r.routeId);
+    return alertsForRoutes(alertsData, routeIds);
+  }, [alertsData, station]);
+
   const { detent, sheetStyle, handlers, contentHandlers, onHandleTap, isDragging } = useSheetDrag({
     halfRestingY: "calc(100dvh - var(--panel-top-rest) - 55dvh)",
     open: true,
@@ -556,6 +572,10 @@ export default function StationPanel({ stopId, onClose, onSelectLine, onStartDir
           </button>
         </div>
       </div>
+
+      {stationAlerts.length > 0 && (
+        <AlertsSection key={station.stopId} alerts={stationAlerts} />
+      )}
 
       <div
         className="flex-1 overflow-y-auto ios-scroll"
