@@ -107,13 +107,15 @@ export default function SubwayMap() {
   // "See all routes" so the rider lands on a fresh "current
   // location → chosen destination" trip instead of inheriting
   // whatever they previously searched. Bumped to a new object on
-  // each open so SearchSheet re-applies the preset cleanly.
+  // each open so SearchSheet re-applies the preset cleanly. Either
+  // side may be omitted — StationPanel's Directions button sets only
+  // the To and lets SearchSheet's home auto-fill resolve the From.
   const [searchPresetTrip, setSearchPresetTrip] = useState<
     | {
-        from:
+        from?:
           | { kind: "station"; stopId: string }
           | { kind: "address"; lng: number; lat: number; name: string };
-        to:
+        to?:
           | { kind: "station"; stopId: string }
           | { kind: "address"; lng: number; lat: number; name: string };
       }
@@ -214,16 +216,17 @@ export default function SubwayMap() {
 
   // Bottom-padding fraction MapView reserves when fitting the
   // selected trip's bounds. Depends on which panel actually sourced
-  // the selection — SearchSheet's plan-list view occupies ~62dvh
-  // (full list scroll), NearbyPanel's half-detent commute card
-  // covers ~50dvh (see halfRestingY in NearbyPanel.tsx), and the
-  // SearchSheet detail view sits at ~38dvh. Using one fraction for
-  // every non-Search source previously cropped the bottom of routes
-  // tapped from NearbyPanel because 0.42 underestimates the half
-  // detent's true coverage by ~8dvh. Computing it here keeps MapView
-  // ignorant of which sheet drove the selection.
+  // the selection — SearchSheet's plan-list view occupies ~48dvh
+  // (matches halfVisibleDvh in SearchSheet.tsx), NearbyPanel's
+  // half-detent commute card covers ~50dvh (see halfRestingY in
+  // NearbyPanel.tsx), and the SearchSheet detail view sits at ~38dvh.
+  // Using one fraction for every non-Search source previously cropped
+  // the bottom of routes tapped from NearbyPanel because 0.42
+  // underestimates the half detent's true coverage by ~8dvh.
+  // Computing it here keeps MapView ignorant of which sheet drove the
+  // selection. Keep these in sync with the panel heights.
   const tripFitBottomDvh = useMemo(() => {
-    if (searchOpen && !tripDetailExpanded) return 0.62;
+    if (searchOpen && !tripDetailExpanded) return 0.5;
     if (nearbyOpen) return 0.52;
     return 0.42;
   }, [searchOpen, tripDetailExpanded, nearbyOpen]);
@@ -343,6 +346,26 @@ export default function SubwayMap() {
     setSelectedLine(null);
     setFocusStopId(undefined);
     setStationStopId(null);
+  };
+
+  // Directions handoff from StationPanel — opens SearchSheet in
+  // directions mode with the tapped station preset as the
+  // destination. The From field is left for SearchSheet's home
+  // auto-fill (or the rider's manual pick) since the station
+  // context doesn't provide a meaningful origin. Closes StationPanel
+  // so the sheet has the full panel slot.
+  const handleStartDirectionsToStation = (destStopId: string) => {
+    setSearchInitialMode("directions");
+    setSearchPresetTrip({
+      to: { kind: "station", stopId: destStopId },
+    });
+    setSearchOpen(true);
+    setStationStopId(null);
+    setNearbyOpen(false);
+    setSelectedLine(null);
+    setFocusStopId(undefined);
+    setMoreOpen(false);
+    clearTripOverlay();
   };
 
   // Set Home / Set Work handoff from MoreSheet — opens SearchSheet in
@@ -774,6 +797,7 @@ export default function SubwayMap() {
             stopId={stationStopId}
             onClose={() => setStationStopId(null)}
             onSelectLine={(routeId) => handleLineSelect(routeId, stationStopId)}
+            onStartDirections={handleStartDirectionsToStation}
           />
         )}
         <NearbyPanel

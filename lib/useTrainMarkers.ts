@@ -12,6 +12,7 @@ import {
   type ShapeMetrics,
   type Trajectory,
 } from "./trainTrajectory";
+import { ringPulsePhase } from "./ringPulse";
 
 // Minimal structural surface of the Mapbox map handle the hook touches —
 // keeps the hook decoupled from the broader MapboxMap shape MapView
@@ -110,8 +111,21 @@ export function useTrainMarkers({
     // route. Computed once per `lines` version and reused across every
     // poll/frame.
     const metricsByRoute = new Map<string, ShapeMetrics>();
+    // Per-route { stopId → stop } lookup, used to snap STOPPED_AT trains to
+    // the parent station's lat/lng. Each route's shape has its nearest-vertex
+    // to a given station at slightly different coordinates, so two trains on
+    // different routes (1/2/3 at 72nd St, 4/5/6 at Union Sq) parked at the
+    // same physical platform end up at slightly different lng/lat and can
+    // fall into different stack buckets — losing the perpendicular fan-out
+    // and leaving visible gaps. The build script writes `lat: parent.lat,
+    // lng: parent.lng` for every stop, so snapping to the stop entry is
+    // identical across routes for the same parent station.
+    const stopsByRoute = new Map<string, Map<string, { lat: number; lng: number }>>();
     for (const line of Object.values(lines)) {
       metricsByRoute.set(line.routeId, computeShapeMetrics(line));
+      const m = new Map<string, { lat: number; lng: number }>();
+      for (const s of line.stops) m.set(s.id, { lat: s.lat, lng: s.lng });
+      stopsByRoute.set(line.routeId, m);
     }
 
     const TICK_MS = 33;
@@ -182,6 +196,23 @@ export function useTrainMarkers({
     let frame = 0;
     let lastTickTime = 0;
     let lastData: TrainsResponse | null = null;
+
+    // Tracked here (rather than on each tick) so toggling the OS-level
+    // reduced-motion preference takes effect on the next frame without
+    // any hook re-mount. The breathing pulse on the open-station
+    // incoming rings is decorative — riders with `prefers-reduced-motion`
+    // see the rings held at their visual midpoint instead of oscillating.
+    // The marker LERP itself is informational (real motion of moving
+    // trains) and intentionally NOT gated on this flag.
+    const motionQuery =
+      typeof window !== "undefined"
+        ? window.matchMedia("(prefers-reduced-motion: reduce)")
+        : null;
+    let prefersReducedMotion = motionQuery?.matches ?? false;
+    const onMotionChange = (e: MediaQueryListEvent) => {
+      prefersReducedMotion = e.matches;
+    };
+    motionQuery?.addEventListener?.("change", onMotionChange);
 
     // Latest rendered (post-stack-offset) position per train, captured
     // each tick where the marker feature is pushed. Used by follow-mode
@@ -348,11 +379,31 @@ export function useTrainMarkers({
         }
 
         seen.add(t.id);
+
+        // STOPPED_AT trains snap to the parent station's lat/lng (shared
+        // across all routes that serve the station) instead of their own
+        // shape's nearest vertex — so a 1, 2, and 3 all parked at 72nd St
+        // share one bucket and fan out perpendicularly together. Without
+        // this, the small per-route shape divergence at express stations
+        // can put them in adjacent buckets, breaking the fan-out and
+        // leaving an obvious "missing slot" gap between markers. The
+        // bearing still comes from the route's own shape so the icon
+        // points the right way. Skipped for in-motion trains so segment
+        // animation continues to track each route's actual track curve.
+        let stackLng = render.lng;
+        let stackLat = render.lat;
+        if (t.status === "STOPPED_AT") {
+          const stop = stopsByRoute.get(t.routeId)?.get(t.prevStopId);
+          if (stop) {
+            stackLng = stop.lng;
+            stackLat = stop.lat;
+          }
+        }
         computed.push({
           trainId: t.id,
           line,
-          lng: render.lng,
-          lat: render.lat,
+          lng: stackLng,
+          lat: stackLat,
           bearing: render.bearing,
           direction: t.direction,
           routeId: line.routeId,
@@ -604,7 +655,9 @@ export function useTrainMarkers({
           }
 
           // Phase: 0→1→0 at ~0.9 Hz — roughly "one breath" per second.
-          const phase = (Math.sin((nowMs / 700) * Math.PI * 2) + 1) / 2;
+          // Held at 0.5 (the wave's mean) when the rider has set
+          // prefers-reduced-motion: see ringPulsePhase for the rationale.
+          const phase = ringPulsePhase(nowMs, prefersReducedMotion);
 
           const ringFeatures: GeoJSON.Feature[] = [];
           for (const f of features) {
@@ -663,7 +716,10 @@ export function useTrainMarkers({
       }
     };
     frame = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(frame);
+    return () => {
+      cancelAnimationFrame(frame);
+      motionQuery?.removeEventListener?.("change", onMotionChange);
+    };
     // getMap is intentionally captured at effect-mount; the parent
     // passes a stable closure over its mapRef so we don't need to
     // re-attach when the function identity changes.
