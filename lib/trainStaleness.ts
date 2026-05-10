@@ -91,3 +91,39 @@ export function trainStaleness(
     ageSec,
   };
 }
+
+export interface FleetStalenessSummary {
+  /** Trains whose latest report is older than the fresh threshold
+   *  (90 s). Includes the `veryStale` subset. */
+  stale: number;
+  /** Trains whose latest report is past the hard-stale floor (360 s)
+   *  — positions on these vehicles are unreliable. */
+  veryStale: number;
+}
+
+/**
+ * Aggregate per-vehicle staleness across the live fleet so System
+ * Pulse can show "12 trains haven't reported in 90 s+" alongside the
+ * total count. Reuses {@link trainStaleness}'s thresholds so the
+ * fleet-level summary lines up with the per-marker fade and the
+ * arrival-row sub-line riders see elsewhere.
+ *
+ * The snapshot's `generatedAt` is the fallback for vehicles whose
+ * feed entry omits `lastReportedAt` — same behaviour as the per-train
+ * helper, so a silent-feed outage doesn't hide behind missing
+ * per-vehicle timestamps.
+ */
+export function summarizeFleetStaleness(
+  trains: ReadonlyArray<{ lastReportedAt?: number }>,
+  nowMs: number,
+  fallbackSec: number,
+): FleetStalenessSummary {
+  let stale = 0;
+  let veryStale = 0;
+  for (const t of trains) {
+    const r = trainStaleness(t.lastReportedAt, nowMs, fallbackSec);
+    if (r.stale) stale++;
+    if (r.veryStale) veryStale++;
+  }
+  return { stale, veryStale };
+}
