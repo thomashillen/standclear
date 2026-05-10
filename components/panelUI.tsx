@@ -554,6 +554,21 @@ export function TripPlanRow({
   // crowding the per-ETA chips.
   const leadStale = upcomingStaleness.find((s) => s != null) ?? null;
 
+  // Per-upcoming-arrival catchability when the rider is walking up
+  // from a non-station origin. Each entry mirrors `upcoming` —
+  // "miss" / "run" / "walk" / "chill" or `null` (no walk distance,
+  // rider already on the platform). Drives the inline ETA tint via
+  // VERDICT_STYLES so a missed train renders strikethrough-gray and
+  // a runnable train renders amber, matching StationRow's idiom on
+  // the same data. Without this signal the rider sees "Next: 2m"
+  // and tries to make a train they can't physically reach.
+  const upcomingVerdicts = useMemo<(CatchVerdict | null)[]>(() => {
+    if (!walkFromMeters || walkFromMeters <= 0) {
+      return upcoming.map(() => null);
+    }
+    return upcoming.map((a) => catchVerdict(walkFromMeters, a.eta, now / 1000));
+  }, [upcoming, walkFromMeters, now]);
+
   // Total trip time in minutes — walk + wait (live next-train ETA
   // when known) + travel + transfer + walk. Wraps the row's already
   // filtered arrivals into a single-entry map keyed on leg-1's
@@ -727,14 +742,21 @@ export function TripPlanRow({
             <span className="text-gray-500">Next: </span>
             {upcoming.map((a, i) => {
               const stale = upcomingStaleness[i] != null;
+              const verdict = upcomingVerdicts[i];
+              // Verdict wins when the rider is walking up — catchability
+              // is the action signal. Stale tinting falls back when
+              // there's no walk (rider on the platform); the leadStale
+              // sub-line still surfaces "updated Nm ago" textually
+              // either way. "miss" carries strikethrough via
+              // VERDICT_STYLES so a missed train is unmistakable even
+              // when several ETAs run together in the inline list.
+              const verdictCls = verdict ? VERDICT_STYLES[verdict].etaCls : null;
+              const tint =
+                verdictCls ?? (stale ? "text-amber-300" : "text-gray-100");
               return (
                 <span key={`${a.tripId}-${i}`}>
                   {i > 0 && <span className="text-gray-600"> · </span>}
-                  <span
-                    className={`font-semibold ${
-                      stale ? "text-amber-300" : "text-gray-100"
-                    }`}
-                  >
+                  <span className={`font-semibold ${tint}`}>
                     {fmtEta(a.eta, now)}
                   </span>
                 </span>
