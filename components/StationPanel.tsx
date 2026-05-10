@@ -8,6 +8,7 @@ import { useFavorites } from "@/lib/useFavorites";
 import { useNow } from "@/lib/useNow";
 import { buildStationIndex } from "@/lib/stopsIndex";
 import { useSheetDrag } from "@/lib/useSheetDrag";
+import { trainStaleness, type TrainStaleness } from "@/lib/trainStaleness";
 
 interface Props {
   stopId: string;
@@ -143,11 +144,32 @@ interface ArrivalRowProps {
   isExpress: boolean;
   terminusName: string | undefined;
   onTapRoute: () => void;
+  /** Per-train freshness for the underlying VehiclePosition. Null when
+   *  fresh (no chrome change) or when the trip has no Train entry in
+   *  this snapshot — typically a stop_time_update without a paired
+   *  VehiclePosition, which is by definition as fresh as the poll
+   *  itself. The `label` is rendered as a small amber sub-line so a
+   *  rider can tell a "5 min" prediction is being made off a 4-minute-
+   *  old position before deciding whether to start running. */
+  staleness?: TrainStaleness | null;
 }
 
-function ArrivalRow({ arrival, now, badge, isExpress, terminusName, onTapRoute }: ArrivalRowProps) {
+// `ArrivalRow` is the single arrival entry in the station panel's
+// per-direction list. Internal to the file but exported here so
+// component tests can mount it directly (see `StationPanel.test.tsx`)
+// without standing up the full panel + useTrains/useLines context.
+export function ArrivalRow({
+  arrival,
+  now,
+  badge,
+  isExpress,
+  terminusName,
+  onTapRoute,
+  staleness,
+}: ArrivalRowProps) {
   const etaStr = fmtEta(arrival.eta, now);
   const isImminent = arrival.eta - now / 1000 < 90;
+  const staleLabel = staleness?.label ?? null;
   return (
     <div className="flex items-center gap-3 px-4 py-2.5 border-b border-white/[0.04] last:border-b-0">
       {badge ? (
@@ -170,6 +192,19 @@ function ArrivalRow({ arrival, now, badge, isExpress, terminusName, onTapRoute }
             </span>
           )}
         </p>
+        {staleLabel && (
+          // Amber sub-line that surfaces only when the underlying
+          // VehiclePosition is past the marker-fade threshold (90 s).
+          // Mirrors FollowCapsule's eyebrow swap so the textual signal
+          // at the row level matches the cinematic-mode capsule a
+          // rider would see if they were already following the train.
+          <p
+            className="text-[11px] text-amber-300 leading-tight mt-0.5 truncate"
+            aria-label={`Position last updated ${Math.round(staleness!.ageSec / 60)} minutes ago`}
+          >
+            {staleLabel}
+          </p>
+        )}
       </div>
       <span
         className={`text-[14px] font-semibold tabular-nums flex-shrink-0 ${
@@ -407,6 +442,21 @@ export default function StationPanel({ stopId, onClose, onSelectLine, onStartDir
     return m;
   }, [lines]);
 
+  // Per-trip last-reported timestamp lookup, keyed off `data.trains`.
+  // Used to drive the amber "Updated Nm ago" sub-line on each arrival
+  // row so a rider deciding whether to run for a "5 min" train can
+  // tell the prediction is coming off a 4-minute-old position. Trips
+  // that appear in stop_time_updates without a paired VehiclePosition
+  // (rare) get no entry — those predictions are by definition as
+  // fresh as the most recent poll, so no staleness is shown.
+  const lastReportedByTripId = useMemo(() => {
+    const m = new Map<string, number | undefined>();
+    if (!data) return m;
+    for (const t of data.trains) m.set(t.id, t.lastReportedAt);
+    return m;
+  }, [data]);
+  const generatedAtSec = data ? data.generatedAt / 1000 : 0;
+
   const { detent, sheetStyle, handlers, contentHandlers, onHandleTap, isDragging } = useSheetDrag({
     halfRestingY: "calc(100dvh - var(--panel-top-rest) - 55dvh)",
     open: true,
@@ -539,6 +589,8 @@ export default function StationPanel({ stopId, onClose, onSelectLine, onStartDir
           terminusByRoute={terminusByRouteAndDir}
           direction="N"
           onSelectLine={onSelectLine}
+          lastReportedByTripId={lastReportedByTripId}
+          generatedAtSec={generatedAtSec}
         />
 
         <DirectionSection
@@ -550,6 +602,8 @@ export default function StationPanel({ stopId, onClose, onSelectLine, onStartDir
           terminusByRoute={terminusByRouteAndDir}
           direction="S"
           onSelectLine={onSelectLine}
+          lastReportedByTripId={lastReportedByTripId}
+          generatedAtSec={generatedAtSec}
         />
       </div>
     </div>
@@ -571,6 +625,8 @@ function DirectionSection({
   terminusByRoute,
   direction,
   onSelectLine,
+  lastReportedByTripId,
+  generatedAtSec,
 }: {
   label: string;
   icon: React.ReactNode;
@@ -580,6 +636,12 @@ function DirectionSection({
   terminusByRoute: Map<string, { N: string; S: string }>;
   direction: "N" | "S";
   onSelectLine: (routeId: string) => void;
+  /** Per-trip last-reported timestamps from `data.trains` so the row
+   *  can flag arrivals whose underlying VehiclePosition is stale. */
+  lastReportedByTripId: Map<string, number | undefined>;
+  /** Snapshot freshness floor in epoch seconds; used as the fallback
+   *  when a trip has no per-vehicle timestamp (silent-feed outages). */
+  generatedAtSec: number;
 }) {
   const [expanded, setExpanded] = useState(false);
 
@@ -622,6 +684,16 @@ function DirectionSection({
             // terminus. `isExpress` then switches the bullet to a diamond
             // and flags the row "Express".
             const { baseRouteId, isExpress } = parseExpress(a.routeId);
+            // Look up the underlying VehiclePosition timestamp for this
+            // trip. If the snapshot doesn't include a Train entry for
+            // the trip the prediction is, by definition, as fresh as
+            // the latest poll — pass null so no staleness chrome
+            // renders. Live ("Now") rows look up the same way and stay
+            // fresh as long as the train keeps reporting STOPPED_AT.
+            const lastReported = lastReportedByTripId.get(a.tripId);
+            const staleness = lastReportedByTripId.has(a.tripId)
+              ? trainStaleness(lastReported, now, generatedAtSec)
+              : null;
             return (
               <ArrivalRow
                 key={`${a.tripId}-${a.stopId}-${i}`}
@@ -631,6 +703,7 @@ function DirectionSection({
                 isExpress={isExpress}
                 terminusName={terminusByRoute.get(baseRouteId)?.[direction]}
                 onTapRoute={() => onSelectLine(baseRouteId)}
+                staleness={staleness}
               />
             );
           })}
