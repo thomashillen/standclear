@@ -1,7 +1,7 @@
 // @vitest-environment node
 
 import { describe, expect, it } from "vitest";
-import { summarizeFleetStaleness, trainStaleness } from "./trainStaleness";
+import { snapshotStaleLabel, summarizeFleetStaleness, trainStaleness } from "./trainStaleness";
 
 const NOW_MS = new Date("2026-05-09T18:00:00Z").getTime();
 const NOW_SEC = NOW_MS / 1000;
@@ -92,5 +92,33 @@ describe("summarizeFleetStaleness", () => {
     expect(
       summarizeFleetStaleness(trains, NOW_MS, NOW_SEC - 600),
     ).toEqual({ stale: 3, veryStale: 3 });
+  });
+});
+
+describe("snapshotStaleLabel", () => {
+  it("returns null for ages below the 60s threshold (calm-default principle)", () => {
+    expect(snapshotStaleLabel(0)).toBeNull();
+    expect(snapshotStaleLabel(8)).toBeNull();
+    expect(snapshotStaleLabel(45)).toBeNull();
+    expect(snapshotStaleLabel(59.9)).toBeNull();
+  });
+
+  it("rounds 60–119s to the nearest 10s so the label doesn't jitter each tick", () => {
+    expect(snapshotStaleLabel(60)).toBe("Stale · 60s");
+    expect(snapshotStaleLabel(65)).toBe("Stale · 60s");
+    expect(snapshotStaleLabel(72)).toBe("Stale · 70s");
+    expect(snapshotStaleLabel(119)).toBe("Stale · 110s");
+  });
+
+  it("switches to rounded minutes at 120s and above", () => {
+    expect(snapshotStaleLabel(120)).toBe("Stale · 2m");
+    expect(snapshotStaleLabel(150)).toBe("Stale · 3m");
+    expect(snapshotStaleLabel(360)).toBe("Stale · 6m");
+    expect(snapshotStaleLabel(1800)).toBe("Stale · 30m");
+  });
+
+  it("returns null for non-finite inputs (defensive against NaN from a missing generatedAt)", () => {
+    expect(snapshotStaleLabel(Number.NaN)).toBeNull();
+    expect(snapshotStaleLabel(Number.POSITIVE_INFINITY)).toBeNull();
   });
 });

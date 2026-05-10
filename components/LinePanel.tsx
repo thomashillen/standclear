@@ -7,6 +7,7 @@ import { useTrains, type Arrival } from "@/lib/useTrains";
 import { useAlerts, alertsForRoutes } from "@/lib/useAlerts";
 import { useNow } from "@/lib/useNow";
 import { useSheetDrag } from "@/lib/useSheetDrag";
+import { snapshotStaleLabel } from "@/lib/trainStaleness";
 import { AlertsSection } from "./AlertsSection";
 
 interface LinePanelProps {
@@ -301,7 +302,13 @@ export default function LinePanel({ lineId, focusStopId, onClose, onStationOpen 
 
   const numStops = line.stops.length;
   const textClass = line.textColor === "black" ? "text-black" : "text-white";
-  const stale = data ? wallNow - data.generatedAt > 30_000 : false;
+  // Snapshot age in the header eyebrow. Threshold (60 s) + numeric
+  // age match the SubwayMap live-pill and LiveTrainsPopup "System
+  // Pulse" indicator so every snapshot-age affordance flips
+  // simultaneously rather than each surface using its own cutoff.
+  const staleLabel = data
+    ? snapshotStaleLabel((wallNow - data.generatedAt) / 1000)
+    : null;
 
   return (
     <div
@@ -343,7 +350,7 @@ export default function LinePanel({ lineId, focusStopId, onClose, onStationOpen 
           <span className="text-[26px] font-black leading-none tracking-tight">{line.id}</span>
           <span className="text-[13px] font-medium opacity-90 tabular-nums">
             {trainCount} train{trainCount !== 1 ? "s" : ""}
-            {stale && <span className="opacity-70"> · stale</span>}
+            {staleLabel && <span className="opacity-70"> · {staleLabel}</span>}
           </span>
         </div>
         <button
