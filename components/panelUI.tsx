@@ -28,7 +28,6 @@ import {
 } from "@/lib/stopsIndex";
 import type { CommuteAnchor } from "@/lib/useFavorites";
 import { estimateTripTimeSec, type TripPlan } from "@/lib/commuteRouting";
-import { pickBalancedArrivals } from "@/lib/topArrivals";
 import type { WalkingRoute, WalkingStep } from "@/lib/walkingDirections";
 import { trainStaleness } from "@/lib/trainStaleness";
 
@@ -124,6 +123,79 @@ export const VERDICT_STYLES: Record<
   chill: { pill: "", etaCls: "text-gray-200", label: null },
 };
 
+// ─── Direction-labeled arrivals row ─────────────────────────────────
+// Single row for one direction at a station: a leading arrow acts as
+// the row's axis label, then up to three (route bullet + ETA + catch
+// verdict) chips. The per-chip arrow is intentionally dropped — once
+// the row owns the direction the rider's eye locks onto ↑ vs ↓ once
+// and reads across, instead of re-parsing direction on every chip.
+// Empty rows render a faint em-dash so both directions stay anchored
+// in the same vertical positions across stations.
+
+function DirectionArrivalsRow({
+  direction,
+  arrivals,
+  routeColors,
+  meters,
+  now,
+}: {
+  direction: "N" | "S";
+  arrivals: Arrival[];
+  routeColors: RouteColorMap;
+  /** Walk distance to this station in meters. Drives the catch-verdict
+   *  pill (miss/run/walk). Undefined for stations without a known
+   *  rider position (e.g. favorites without geolocation). */
+  meters?: number;
+  now: number;
+}) {
+  const Arrow = direction === "N" ? ArrowUp : ArrowDown;
+  return (
+    <div className="flex items-center gap-2">
+      <Arrow
+        className="w-3.5 h-3.5 text-gray-400 flex-shrink-0"
+        aria-label={direction === "N" ? "Northbound" : "Southbound"}
+      />
+      {arrivals.length === 0 ? (
+        <span className="text-[11px] text-gray-600">—</span>
+      ) : (
+        <div className="flex flex-wrap gap-x-3 gap-y-1 min-w-0">
+          {arrivals.map((a, i) => {
+            const info = routeColors.get(a.routeId);
+            if (!info) return null;
+            const verdict: CatchVerdict | null =
+              meters !== undefined
+                ? catchVerdict(meters, a.eta, now / 1000)
+                : null;
+            const style = verdict ? VERDICT_STYLES[verdict] : VERDICT_STYLES.chill;
+            return (
+              <span
+                key={`${a.tripId}-${i}`}
+                className="inline-flex items-center gap-1 text-[11px]"
+              >
+                <RouteBullet
+                  id={info.displayId}
+                  color={info.color}
+                  textColor={info.textColor}
+                />
+                <span className={`font-medium tabular-nums ${style.etaCls}`}>
+                  {fmtEta(a.eta, now)}
+                </span>
+                {style.label && (
+                  <span
+                    className={`ml-0.5 px-1.5 py-[1px] rounded-full text-[9px] leading-none uppercase tracking-wider ${style.pill}`}
+                  >
+                    {style.label}
+                  </span>
+                )}
+              </span>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Station row (search results, favorites, nearby) ────────────────
 
 export interface StationRowProps {
@@ -167,13 +239,22 @@ export function StationRow({
   // not at the parent memo, lets the live `now` tick drive drop-out
   // instantly rather than on the 8s feed poll cadence.
   //
-  // Then balance the three-slot pick across directions: at a busy
-  // station like Times Square the three soonest arrivals can all be
-  // Northbound during rush hour, leaving Southbound silently absent.
-  // pickBalancedArrivals guarantees one per direction when both are
-  // running within ~30 min, otherwise falls back to soonest-by-time.
+  // Then split by direction so the rider can scan one axis at a time
+  // ("when's the next downtown train?") rather than parsing a mixed
+  // list. Each direction gets its own row labeled by an arrow; up to
+  // three trains per row keeps the tile compact while guaranteeing
+  // both directions stay visible at busy stations where the soonest
+  // arrivals would otherwise all be one way.
   const upcoming = arrivals.filter((a) => a.eta - now / 1000 > -5);
-  const topArrivals = pickBalancedArrivals(upcoming, 3, now / 1000);
+  const northbound = upcoming
+    .filter((a) => a.direction === "N")
+    .sort((a, b) => a.eta - b.eta)
+    .slice(0, 3);
+  const southbound = upcoming
+    .filter((a) => a.direction === "S")
+    .sort((a, b) => a.eta - b.eta)
+    .slice(0, 3);
+  const hasAnyArrivals = northbound.length > 0 || southbound.length > 0;
 
   return (
     <div className="border-b border-white/5 last:border-b-0">
@@ -212,44 +293,22 @@ export function StationRow({
             </p>
           )}
 
-          {topArrivals.length > 0 ? (
-            <div className="flex flex-wrap gap-x-3 gap-y-1 mt-2">
-              {topArrivals.map((a, i) => {
-                const info = routeColors.get(a.routeId);
-                if (!info) return null;
-                const verdict: CatchVerdict | null =
-                  station.meters !== undefined
-                    ? catchVerdict(station.meters, a.eta, now / 1000)
-                    : null;
-                const style = verdict ? VERDICT_STYLES[verdict] : VERDICT_STYLES.chill;
-                return (
-                  <span
-                    key={`${a.tripId}-${i}`}
-                    className="inline-flex items-center gap-1 text-[11px]"
-                  >
-                    <RouteBullet
-                      id={info.displayId}
-                      color={info.color}
-                      textColor={info.textColor}
-                    />
-                    {a.direction === "N" ? (
-                      <ArrowUp className="w-3 h-3 text-gray-500" />
-                    ) : (
-                      <ArrowDown className="w-3 h-3 text-gray-500" />
-                    )}
-                    <span className={`font-medium tabular-nums ${style.etaCls}`}>
-                      {fmtEta(a.eta, now)}
-                    </span>
-                    {style.label && (
-                      <span
-                        className={`ml-0.5 px-1.5 py-[1px] rounded-full text-[9px] leading-none uppercase tracking-wider ${style.pill}`}
-                      >
-                        {style.label}
-                      </span>
-                    )}
-                  </span>
-                );
-              })}
+          {hasAnyArrivals ? (
+            <div className="mt-2 space-y-1">
+              <DirectionArrivalsRow
+                direction="N"
+                arrivals={northbound}
+                routeColors={routeColors}
+                meters={station.meters}
+                now={now}
+              />
+              <DirectionArrivalsRow
+                direction="S"
+                arrivals={southbound}
+                routeColors={routeColors}
+                meters={station.meters}
+                now={now}
+              />
             </div>
           ) : (
             <p className="text-[11px] text-gray-600 mt-2">No upcoming trains</p>
