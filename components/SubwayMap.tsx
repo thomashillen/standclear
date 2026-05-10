@@ -8,6 +8,7 @@ import { useLines } from "@/lib/subwayData";
 import { useFeedHealth, useTrains } from "@/lib/useTrains";
 import { useOnline } from "@/lib/useOnline";
 import { legGeometry, type TripPlan } from "@/lib/commuteRouting";
+import { pickDismissTarget } from "@/lib/escDismiss";
 import { buildStationIndex, type StationEntry } from "@/lib/stopsIndex";
 import {
   clearWalkingRouteCache,
@@ -408,6 +409,85 @@ export default function SubwayMap() {
     // which should re-center the camera.
     setFlyToUserSignal((s) => s + 1);
   };
+
+  // ── ESC dismisses the topmost open surface ─────────────────────────
+  // Bottom-sheet panels in this app are custom (not Radix), so they
+  // don't get the Dialog primitive's free escape-to-close. Wire one
+  // window-level listener here that consults pickDismissTarget for
+  // the priority order.
+  //
+  // Radix-managed dialogs (LiveTrainsPopup, MoreSheet's nested
+  // AlertsDialog / AboutDialog, the LinePicker popover) attach their
+  // own ESC listener on the document in capture phase; when that
+  // dismisses the topmost layer it calls event.preventDefault() but
+  // *not* event.stopPropagation() (see
+  // @radix-ui/react-dismissable-layer). Without an explicit guard,
+  // this bubble-phase listener would still fire on the same keypress
+  // and dismiss whichever custom panel is open underneath, breaking
+  // stacked-dismissal semantics. The defaultPrevented short-circuit
+  // is the fix — exactly one layer should respond per ESC.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      // A Radix layer (or any other inner ESC handler) already
+      // claimed this keypress — don't fire a second dismiss on the
+      // panel underneath.
+      if (e.defaultPrevented) return;
+      // IME composition swallows ESC for input candidates; let the
+      // input handle it before we treat ESC as a dismiss.
+      if (e.isComposing) return;
+      const target = pickDismissTarget({
+        searchOpen,
+        stationOpen: !!stationStopId,
+        lineOpen: !!selectedLine,
+        nearbyOpen,
+        moreOpen,
+        followActive: !!followedTrainId,
+      });
+      if (!target) return;
+      e.preventDefault();
+      switch (target) {
+        case "search":
+          setSearchOpen(false);
+          // Mirror SearchSheet's own onClose contract — anchor-pick
+          // mode and the preset trip belong to a single open session.
+          setSearchAnchorPick(null);
+          setSearchPresetTrip(null);
+          clearTripOverlay();
+          return;
+        case "station":
+          setStationStopId(null);
+          return;
+        case "line":
+          setSelectedLine(null);
+          setFocusStopId(undefined);
+          return;
+        case "nearby":
+          setNearbyOpen(false);
+          // Same overlay-cleanup as the Near-me toggle button.
+          clearTripOverlay();
+          return;
+        case "more":
+          setMoreOpen(false);
+          return;
+        case "follow":
+          setFollowedTrainId(null);
+          return;
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [
+    searchOpen,
+    stationStopId,
+    selectedLine,
+    nearbyOpen,
+    moreOpen,
+    followedTrainId,
+    setFollowedTrainId,
+    clearTripOverlay,
+  ]);
 
   const totalTrains = data?.trains.length ?? 0;
   // Slow tick (10s) just for the stale banner — reading Date.now() in
