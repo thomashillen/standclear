@@ -13,7 +13,7 @@ import {
 } from "lucide-react";
 import { useLines } from "@/lib/subwayData";
 import { useTrains, type Arrival } from "@/lib/useTrains";
-import { useGeolocation } from "@/lib/useGeolocation";
+import { useGeolocation, type GeoStatus } from "@/lib/useGeolocation";
 import {
   useFavorites,
   useCommute,
@@ -124,6 +124,124 @@ function resolveCommuteEndpoint(
     displayName: ep.name,
     address: { name: ep.name, lng: ep.lng, lat: ep.lat },
   };
+}
+
+// ─── Empty-state surface for the bottom of the panel ─────────────
+// Renders when nothing more useful is available (no nearby stops,
+// no favorites, no commute card). Driven by the geolocation status so
+// each branch communicates exactly why the panel is otherwise empty.
+//
+// `idle` and `error` give the rider a button to start / retry the
+// fix; `denied` and `unavailable` are dead-ends from the web's point
+// of view and just explain what's wrong. Exported so the regression
+// test in NearbyPanel.test.tsx can drive each branch directly without
+// stubbing the entire panel's hook graph.
+
+export interface NearbyEmptyStateProps {
+  status: GeoStatus;
+  /** True once a fix has landed at least once. Used to suppress the
+   *  "Finding your location…" pre-fix state from re-rendering after a
+   *  brief watch error or re-prompt — if we already had a fix, the
+   *  rest of the panel will keep showing useful content. */
+  hasFix: boolean;
+  onRequest: () => void;
+}
+
+export function NearbyEmptyState({
+  status,
+  hasFix,
+  onRequest,
+}: NearbyEmptyStateProps) {
+  if (status === "idle") {
+    return (
+      <div className="px-6 py-10 text-center">
+        <Navigation className="w-10 h-10 mx-auto mb-3 text-gray-400" />
+        <p className="text-sm text-gray-300 font-medium mb-1">
+          Find stations near you
+        </p>
+        <p className="text-[11px] text-gray-500 mb-4 max-w-[240px] mx-auto">
+          We&apos;ll surface the closest stops and which trains you can
+          still catch.
+        </p>
+        <button
+          onClick={onRequest}
+          className="press inline-flex items-center gap-2 px-4 h-10 rounded-full bg-white text-gray-950 text-[13px] font-semibold shadow-[0_4px_16px_rgba(255,255,255,0.18)]"
+        >
+          <Navigation className="w-4 h-4" />
+          Enable location
+        </button>
+      </div>
+    );
+  }
+  if (status === "prompting" && !hasFix) {
+    return (
+      <div className="px-6 py-10 text-center">
+        <Navigation className="w-10 h-10 mx-auto mb-3 text-gray-500 animate-pulse" />
+        <p className="text-sm text-gray-400">Finding your location…</p>
+      </div>
+    );
+  }
+  if (status === "denied") {
+    return (
+      <div className="px-6 py-10 text-center">
+        <MapPin className="w-10 h-10 mx-auto mb-3 text-gray-600" />
+        <p className="text-sm text-gray-300 font-medium">
+          Location is blocked
+        </p>
+        <p className="text-[11px] text-gray-500 mt-1 max-w-[240px] mx-auto">
+          Enable location access for StandClear in your browser
+          settings, then reopen this panel.
+        </p>
+      </div>
+    );
+  }
+  if (status === "error") {
+    // Watch failed (timeout, POSITION_UNAVAILABLE) after the rider had
+    // already granted permission. Indoor rides + weak GPS fixes are the
+    // common cause — a Try Again button reignites the high-accuracy
+    // watch via the hook's request(), which usually succeeds within a
+    // few seconds once the device sees the network.
+    return (
+      <div className="px-6 py-10 text-center">
+        <Navigation className="w-10 h-10 mx-auto mb-3 text-gray-500" />
+        <p className="text-sm text-gray-300 font-medium mb-1">
+          We couldn&apos;t find your location
+        </p>
+        <p className="text-[11px] text-gray-500 mb-4 max-w-[260px] mx-auto">
+          Your device&apos;s location service didn&apos;t respond in
+          time. This can happen indoors or with a weak signal.
+        </p>
+        <button
+          onClick={onRequest}
+          className="press inline-flex items-center gap-2 px-4 h-10 rounded-full bg-white text-gray-950 text-[13px] font-semibold shadow-[0_4px_16px_rgba(255,255,255,0.18)]"
+        >
+          <Navigation className="w-4 h-4" />
+          Try again
+        </button>
+      </div>
+    );
+  }
+  if (status === "unavailable") {
+    // No Geolocation API at all — old browser, embedded WebView with
+    // location disabled, or an insecure context (HTTP). Nothing to
+    // retry; just point the rider at the manual path. The MoreSheet
+    // hosts Home / Work setup so a rider here can still build a
+    // useful surface without a fix.
+    return (
+      <div className="px-6 py-10 text-center">
+        <MapPin className="w-10 h-10 mx-auto mb-3 text-gray-600" />
+        <p className="text-sm text-gray-300 font-medium">
+          Location isn&apos;t available
+        </p>
+        <p className="text-[11px] text-gray-500 mt-1 max-w-[260px] mx-auto">
+          This browser doesn&apos;t support location, or the page
+          isn&apos;t loaded over HTTPS. Pin Home and Work from More to
+          set up your commute manually.
+        </p>
+      </div>
+    );
+  }
+  return null;
 }
 
 // ─── Going to Work / Going Home — the daily-commute hero card ─────
@@ -968,45 +1086,15 @@ export default function NearbyPanel({
           </div>
         )}
 
-        {/* Empty geo states (no location yet, denied, etc.). Kept at
-            the bottom so the rest of the panel still renders if any
-            useful content exists above. */}
+        {/* Empty geo states (no location yet, denied, watch errored,
+            unavailable). Kept at the bottom so the rest of the panel
+            still renders if any useful content exists above. */}
         {nearby.length === 0 && favStations.length === 0 && !goingTo && (
-          geo.status === "idle" ? (
-            <div className="px-6 py-10 text-center">
-              <Navigation className="w-10 h-10 mx-auto mb-3 text-gray-400" />
-              <p className="text-sm text-gray-300 font-medium mb-1">
-                Find stations near you
-              </p>
-              <p className="text-[11px] text-gray-500 mb-4 max-w-[240px] mx-auto">
-                We&apos;ll surface the closest stops and which trains you can
-                still catch.
-              </p>
-              <button
-                onClick={geo.request}
-                className="press inline-flex items-center gap-2 px-4 h-10 rounded-full bg-white text-gray-950 text-[13px] font-semibold shadow-[0_4px_16px_rgba(255,255,255,0.18)]"
-              >
-                <Navigation className="w-4 h-4" />
-                Enable location
-              </button>
-            </div>
-          ) : geo.status === "prompting" && geo.lng == null ? (
-            <div className="px-6 py-10 text-center">
-              <Navigation className="w-10 h-10 mx-auto mb-3 text-gray-500 animate-pulse" />
-              <p className="text-sm text-gray-400">Finding your location…</p>
-            </div>
-          ) : geo.status === "denied" ? (
-            <div className="px-6 py-10 text-center">
-              <MapPin className="w-10 h-10 mx-auto mb-3 text-gray-600" />
-              <p className="text-sm text-gray-300 font-medium">
-                Location is blocked
-              </p>
-              <p className="text-[11px] text-gray-500 mt-1 max-w-[240px] mx-auto">
-                Enable location access for StandClear in your browser
-                settings, then reopen this panel.
-              </p>
-            </div>
-          ) : null
+          <NearbyEmptyState
+            status={geo.status}
+            hasFix={geo.lng != null}
+            onRequest={geo.request}
+          />
         )}
       </div>
     </div>
