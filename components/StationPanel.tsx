@@ -449,7 +449,7 @@ export default function StationPanel({ stopId, onClose, onSelectLine, onStartDir
         onPointerUp={handlers.onPointerUp}
         onPointerCancel={handlers.onPointerCancel}
       >
-        <div className="flex items-start gap-3">
+        <div className="flex items-start gap-2">
           <div className="flex-1 min-w-0">
             <h2 className="text-[18px] font-black tracking-tight text-white leading-tight">
               {station.name}
@@ -471,6 +471,32 @@ export default function StationPanel({ stopId, onClose, onSelectLine, onStartDir
               })}
             </div>
           </div>
+          {/* Action buttons sit inline with the station name to keep
+              the header compact. Directions is the primary action (blue
+              fill); Save toggles favorite. MoreSheet still owns Home/Work. */}
+          {onStartDirections && (
+            <button
+              type="button"
+              onClick={() => onStartDirections(favId)}
+              className="press w-11 h-11 -mt-0.5 flex items-center justify-center rounded-full bg-blue-500/90 hover:bg-blue-500 ring-1 ring-blue-400/40 text-white touch-manipulation flex-shrink-0"
+              aria-label={`Get directions to ${station.name}`}
+            >
+              <Compass className="w-[18px] h-[18px]" strokeWidth={2.5} />
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => toggle(favId)}
+            aria-pressed={isFav}
+            aria-label={isFav ? "Remove from favorites" : "Add to favorites"}
+            className={`press w-11 h-11 -mt-0.5 flex items-center justify-center rounded-full touch-manipulation flex-shrink-0 transition-colors ${
+              isFav
+                ? "bg-amber-300/15 ring-1 ring-amber-300/40 text-amber-100"
+                : "bg-white/[0.08] hover:bg-white/[0.12] text-white opacity-85 hover:opacity-100"
+            }`}
+          >
+            <Star className={`w-[18px] h-[18px] ${isFav ? "fill-amber-300 text-amber-300" : ""}`} strokeWidth={2.5} />
+          </button>
           <button
             onClick={onClose}
             className="press text-white opacity-85 hover:opacity-100 w-11 h-11 -mt-0.5 flex items-center justify-center rounded-full bg-white/[0.08] hover:bg-white/[0.12] touch-manipulation flex-shrink-0"
@@ -478,35 +504,6 @@ export default function StationPanel({ stopId, onClose, onSelectLine, onStartDir
           >
             <X className="w-[18px] h-[18px]" strokeWidth={2.5} />
           </button>
-        </div>
-
-        {/* Action row — Directions and Save (favorite). The Directions
-            button is the primary action: tapping it hands the station
-            off to SearchSheet in directions mode with this stop preset
-            as the destination, so a rider who opened the panel via
-            map tap or search can plan a trip in one tap instead of
-            retyping the destination. MoreSheet owns Home/Work setup. */}
-        <div className="flex items-center gap-2 flex-wrap">
-          {onStartDirections && (
-            <button
-              type="button"
-              onClick={() => onStartDirections(favId)}
-              className="press inline-flex items-center gap-1.5 h-9 px-3.5 rounded-full text-[12px] font-semibold touch-manipulation transition-colors bg-blue-500/90 text-white hover:bg-blue-500 ring-1 ring-blue-400/40"
-              aria-label={`Get directions to ${station.name}`}
-            >
-              <Compass className="w-[15px] h-[15px]" />
-              <span>Directions</span>
-            </button>
-          )}
-          <AnchorChip
-            label={isFav ? "Saved" : "Save"}
-            icon={<Star className={`w-[15px] h-[15px] ${isFav ? "fill-amber-300 text-amber-300" : ""}`} />}
-            active={isFav}
-            activeRing="ring-amber-300/40"
-            activeBg="bg-amber-300/15 text-amber-100"
-            onClick={() => toggle(favId)}
-            aria-label={isFav ? "Remove from favorites" : "Add to favorites"}
-          />
         </div>
       </div>
 
@@ -556,45 +553,6 @@ export default function StationPanel({ stopId, onClose, onSelectLine, onStartDir
         />
       </div>
     </div>
-  );
-}
-
-// Pill-shaped toggle used in the StationPanel action row. Inactive state
-// is a quiet white-on-glass chip; active state lights up with a tinted
-// background + ring matching the anchor's color (amber/emerald/sky).
-// Keeps tap target ≥ 36px so it stays comfortable on mobile.
-function AnchorChip({
-  label,
-  icon,
-  active,
-  activeRing,
-  activeBg,
-  onClick,
-  "aria-label": ariaLabel,
-}: {
-  label: string;
-  icon: React.ReactNode;
-  active: boolean;
-  activeRing: string;
-  activeBg: string;
-  onClick: () => void;
-  "aria-label": string;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-pressed={active}
-      aria-label={ariaLabel}
-      className={`press inline-flex items-center gap-1.5 h-9 px-3 rounded-full text-[12px] font-semibold touch-manipulation transition-colors ${
-        active
-          ? `${activeBg} ring-1 ${activeRing}`
-          : "bg-white/[0.06] text-gray-200 hover:bg-white/[0.10] border border-white/[0.06]"
-      }`}
-    >
-      {icon}
-      <span>{label}</span>
-    </button>
   );
 }
 
