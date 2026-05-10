@@ -95,10 +95,12 @@ interface Props {
    *  rather than whatever they previously searched. Each endpoint
    *  is either a station (by stopId) or a geocoded place (lng/lat
    *  + name). When this prop changes the sheet re-applies — so
-   *  successive "See all routes" taps reset cleanly. */
+   *  successive "See all routes" taps reset cleanly. Either side
+   *  can be omitted: e.g. StationPanel's Directions button sets
+   *  only `to` and lets the home/work auto-fill resolve the From. */
   presetTrip?: {
-    from: { kind: "station"; stopId: string } | { kind: "address"; lng: number; lat: number; name: string };
-    to: { kind: "station"; stopId: string } | { kind: "address"; lng: number; lat: number; name: string };
+    from?: { kind: "station"; stopId: string } | { kind: "address"; lng: number; lat: number; name: string };
+    to?: { kind: "station"; stopId: string } | { kind: "address"; lng: number; lat: number; name: string };
   } | null;
   /** Resolved street-following walking routes for the selected trip
    *  (origin → board, alight → destination). Owned by SubwayMap so
@@ -404,22 +406,26 @@ export default function SearchSheet({
   // with Work if those anchors are set. Saves the rider the typing
   // for the most common "what's a non-direct version of my commute"
   // case. Doesn't override values the rider has already chosen.
-  // Skipped entirely when a presetTrip is supplied — the parent
-  // explicitly controls From/To in that path (see "See all routes").
+  // Skipped entirely when a presetTrip supplies both sides — the
+  // parent explicitly controls From/To in that path. A partial
+  // presetTrip (e.g. just `to`) lets this effect fill the missing
+  // side from the rider's anchors so the StationPanel "Directions"
+  // hand-off doesn't strand the From field empty when Home is set.
   useEffect(() => {
     if (mode !== "directions") return;
-    if (presetTrip) return;
-    if (tripFrom || tripTo) return;
+    if (presetTrip?.from && presetTrip?.to) return;
+    if (tripFrom && tripTo) return;
     const h = endpointToTrip(home);
     const w = endpointToTrip(work);
     /* eslint-disable react-hooks/set-state-in-effect */
-    if (h) setTripFrom(h);
-    if (w) setTripTo(w);
+    if (!tripFrom && !presetTrip?.from && h) setTripFrom(h);
+    if (!tripTo && !presetTrip?.to && w) setTripTo(w);
     // Land focus on whichever side is still empty so a single tap
-    // brings up the search picker.
-    // null when both pre-filled — plans render straight away rather
-    // than popping the keyboard.
-    setActiveField(!h ? "from" : !w ? "to" : null);
+    // brings up the search picker. Null when both pre-filled — plans
+    // render straight away rather than popping the keyboard.
+    const fromFilled = tripFrom || presetTrip?.from || h;
+    const toFilled = tripTo || presetTrip?.to || w;
+    setActiveField(!fromFilled ? "from" : !toFilled ? "to" : null);
     /* eslint-enable react-hooks/set-state-in-effect */
   }, [mode, home, work, endpointToTrip, tripFrom, tripTo, presetTrip]);
 
@@ -430,7 +436,7 @@ export default function SearchSheet({
   useEffect(() => {
     if (!open || !presetTrip) return;
     const resolveEndpoint = (
-      ep: NonNullable<typeof presetTrip>["from"],
+      ep: NonNullable<NonNullable<typeof presetTrip>["from"]>,
     ): TripEndpoint | null => {
       if (ep.kind === "station") {
         return stationsByComplexId.get(ep.stopId) ?? null;
@@ -449,8 +455,8 @@ export default function SearchSheet({
         },
       };
     };
-    const f = resolveEndpoint(presetTrip.from);
-    const t = resolveEndpoint(presetTrip.to);
+    const f = presetTrip.from ? resolveEndpoint(presetTrip.from) : null;
+    const t = presetTrip.to ? resolveEndpoint(presetTrip.to) : null;
     /* eslint-disable react-hooks/set-state-in-effect */
     if (f) setTripFrom(f);
     if (t) setTripTo(t);
@@ -886,7 +892,16 @@ export default function SearchSheet({
   // walk-only detail view inherits the same treatment for the same
   // reason: the dashed route on the map is the primary content, the
   // step list is supporting context.
-  const halfVisibleDvh = expandedPlan || walkDetailOpen ? 38 : 60;
+  //
+  // The plan-list view sits at 48dvh (was 60). The taller panel was
+  // covering the southern end of routes that span much of NYC — the
+  // rider would tap a plan, see only the top half of the trip
+  // rendered, and have to drag the sheet down before the destination
+  // pin came into view. 48dvh leaves enough vertical room to render a
+  // full city-spanning route with both endpoints visible while still
+  // showing 3-4 plan rows above the fold. Drag-up to "full" remains
+  // available for riders who want the whole list at once.
+  const halfVisibleDvh = expandedPlan || walkDetailOpen ? 38 : 48;
   const { detent, sheetStyle, handlers, contentHandlers, onHandleTap, setDetent, isDragging } = useSheetDrag({
     halfRestingY: `calc(100dvh - var(--panel-top-rest) - ${halfVisibleDvh}dvh)`,
     open,
@@ -1314,15 +1329,11 @@ export default function SearchSheet({
                   <div className="space-y-1">
                     {recents.map((r) => {
                       if (r.kind === "station") {
-                        const s = stationsByComplexId.get(r.stopId);
                         return (
                           <button
                             key={`recent-station-${r.stopId}`}
                             type="button"
-                            onClick={() => {
-                              if (s) startDirectionsTo(s as TripEndpoint);
-                              else onStationOpen(r.stopId);
-                            }}
+                            onClick={() => onStationOpen(r.stopId)}
                             className="press w-full flex items-center gap-3 px-3 py-2.5 rounded-xl bg-white/[0.04] hover:bg-white/[0.08] text-left touch-manipulation"
                           >
                             <span className="w-8 h-8 rounded-full bg-white/[0.08] border border-white/[0.10] flex items-center justify-center flex-shrink-0">
@@ -1411,25 +1422,24 @@ export default function SearchSheet({
                       now={now}
                       isFavorite={has(s.stopId)}
                       onFavoriteToggle={() => toggle(s.stopId)}
-                      // In a search context the dominant rider intent
-                      // is "take me there", so the row body starts
-                      // directions. Anchor-pick mode is the exception —
-                      // the row is a one-tap pin.
+                      // Tapping a station search result opens the
+                      // StationPanel for live arrivals — the panel
+                      // itself carries a Directions button for riders
+                      // who want to navigate there. Matches the map-tap
+                      // and Near-me row behaviour so the rider gets a
+                      // single, consistent destination when picking a
+                      // station, and avoids dropping them into a
+                      // directions form when they were just looking up
+                      // a station. Anchor-pick mode keeps the one-tap
+                      // pin path.
                       onTap={() => {
                         if (anchorPickMode) {
                           assignAnchor(anchorPickMode, s.stopId);
                           onAnchorPicked?.();
                           return;
                         }
-                        startDirectionsTo(s as TripEndpoint);
+                        onStationOpen(s.stopId);
                       }}
-                      // Chevron preserves a one-tap path to the
-                      // station's live arrivals / transfers panel for
-                      // riders who want to glance at trains rather
-                      // than navigate. Hidden in anchor-pick mode.
-                      onOpenInfo={
-                        anchorPickMode ? undefined : () => onStationOpen(s.stopId)
-                      }
                     />
                   ))}
                 </>
