@@ -12,6 +12,7 @@ function makeAlert(over: Partial<ServiceAlert> = {}): ServiceAlert {
     severity: "info",
     routeIds: ["F"],
     stopIds: [],
+    selectors: [{ routeId: "F" }],
     startTime: null,
     endTime: null,
     ...over,
