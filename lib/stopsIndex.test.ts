@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   buildStationIndex,
   catchVerdict,
+  formatWalkSummary,
   haversineMeters,
   nearestStations,
   nearestStationsWithin,
@@ -65,6 +66,34 @@ describe("walkMinutes", () => {
   it("scales roughly linearly with distance", () => {
     // 800m at 1.4 m/s × 1.3 detour ≈ 12.4 min → rounds to 12.
     expect(walkMinutes(800)).toBe(12);
+  });
+});
+
+describe("formatWalkSummary", () => {
+  it("falls back to plain distance when sub-minute (rider on top of entrance)", () => {
+    // walkMinutes(0) === 0, so we keep the "X m away" idiom rather
+    // than rendering the misleading "0 min walk · 0 m".
+    expect(formatWalkSummary(0)).toBe("0 m away");
+  });
+
+  it("renders walk-minute primary and meters secondary for typical distances", () => {
+    // 320m × 1.3 / 1.4 / 60 ≈ 4.95 → 5 min.
+    expect(formatWalkSummary(320)).toBe("5 min walk · 320 m");
+  });
+
+  it("switches the distance unit to km past 1km", () => {
+    // 1500m → 23 min walk · 1.5 km. Mirrors the threshold in
+    // fmtDistance so the two formatters agree visually if both
+    // appear on the same screen.
+    expect(formatWalkSummary(1500)).toBe("23 min walk · 1.5 km");
+  });
+
+  it("returns empty string for non-finite or negative input", () => {
+    // Defensive — render layer expects a string and we never want a
+    // "NaN min walk · NaN m" leaking through to a real rider.
+    expect(formatWalkSummary(Number.NaN)).toBe("");
+    expect(formatWalkSummary(Number.POSITIVE_INFINITY)).toBe("");
+    expect(formatWalkSummary(-50)).toBe("");
   });
 });
 
