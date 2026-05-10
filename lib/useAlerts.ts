@@ -161,3 +161,30 @@ export function alertsForRoutes(
     a.routeIds.some((r: string) => set.has(r)),
   );
 }
+
+// Filter active alerts to those affecting a specific station complex.
+//
+// The MTA tags many alerts with explicit `stopIds` ("No [R] at Cortlandt
+// St this weekend") in addition to the affected routes. Filtering by
+// route alone surfaces those station-scoped alerts at every other R
+// station too — useless noise for a rider opening Times Sq when the
+// outage is downtown. When the alert lists stopIds, treat it as
+// station-scoped and include only when this complex is in the list.
+// When the alert has no stopIds, fall back to route intersection so
+// genuine line-wide notices ("F runs express in Brooklyn") still
+// surface at every F station.
+export function alertsForStation(
+  data: AlertsResponse | null,
+  stationStopIds: Iterable<string>,
+  stationRouteIds: Iterable<string>,
+): ServiceAlert[] {
+  if (!data) return [];
+  const stopSet = new Set(stationStopIds);
+  const routeSet = new Set(stationRouteIds);
+  return data.alerts.filter((a: ServiceAlert) => {
+    if (a.stopIds.length > 0) {
+      return a.stopIds.some((s) => stopSet.has(s));
+    }
+    return a.routeIds.some((r) => routeSet.has(r));
+  });
+}
