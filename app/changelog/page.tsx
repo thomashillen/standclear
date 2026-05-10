@@ -24,6 +24,7 @@ const ENTRIES: Entry[] = [
     date: "2026-05-09",
     title: "MVP build",
     changes: [
+      { type: "added", text: "Severe service alerts auto-expand in the Service Alerts dialog: when the MTA reports a suspension or 'no service' alert, the description body unfolds on mount instead of starting collapsed under a chevron — the rider opening the dialog during a disruption sees the why immediately. Warning and info severities still start collapsed by default." },
       { type: "added", text: "Station arrival rows now flag stale predictions — when the underlying train hasn't reported its position in 90 s+, an amber 'Updated 4m ago' sub-line appears under the route so a rider deciding whether to run for a 'next train in 5 min' can tell the prediction is being made off old data." },
       { type: "added", text: "Trip-plan rows carry the same staleness signal: each upcoming-arrival ETA on the boarding-station inline list flips amber when its train hasn't reported in 90 s+, with a single 'Updated Nm ago' / 'Stale · Nm' sub-line beneath the soonest stale entry — same idiom as the station panel, threaded into both the Near-me hero card and the Search directions list." },
       { type: "added", text: "Press kit at /press — boilerplate paragraph, brand assets, screenshot URLs, and a contact link for journalists writing about the project." },
