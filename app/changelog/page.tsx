@@ -28,7 +28,7 @@ const ENTRIES: Entry[] = [
       { type: "added", text: "Trip-plan rows carry the same staleness signal: each upcoming-arrival ETA on the boarding-station inline list flips amber when its train hasn't reported in 90 s+, with a single 'Updated Nm ago' / 'Stale · Nm' sub-line beneath the soonest stale entry — same idiom as the station panel, threaded into both the Near-me hero card and the Search directions list." },
       { type: "added", text: "Press kit at /press — boilerplate paragraph, brand assets, screenshot URLs, and a contact link for journalists writing about the project." },
       { type: "added", text: "Per-line landing pages at /line/[id] mirror the per-station pages — every train (1–7, A/C/E, B/D/F/M, G, J/Z, L, N/Q/R/W, shuttles, SI) has its own SEO-indexable surface that links straight into the live map." },
-      { type: "added", text: "Per-page Open Graph cards for /about, /pricing, and /changelog so shared marketing links get framed thumbnails instead of the generic site card." },
+      { type: "added", text: "Per-page Open Graph cards for /about, /pricing, /changelog, and every /line/[id] so a tweeted line link gets a custom card with the route bullet, line name, and from/to terminals — instead of the generic site card." },
       { type: "added", text: "Tappable walking card opens turn-by-turn detail at half-detent." },
       { type: "added", text: "Offline shell, cross-tab sync, audit-driven app improvements across the board." },
       { type: "added", text: "iOS-26 Liquid Glass design system with tilt-reactive specular highlights." },
