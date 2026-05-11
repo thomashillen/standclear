@@ -50,10 +50,26 @@ Additional pre-production checklist:
 
 ### A note on `standclear.app`
 
-The codebase defaults to `https://standclear.app` as the canonical URL — that's the brand target, not necessarily the live deploy. Until the domain is registered + DNS-pointed at the Vercel deploy, set `NEXT_PUBLIC_SITE_URL` to the actual deployment URL (the Vercel preview URL is fine) so social previews and the sitemap don't reference a 404. Two places to update if the brand ever pivots away from `StandClear`:
+The codebase defaults to `https://standclear.app` as the canonical URL — that's the brand target, not necessarily the live deploy. Until the domain is registered + DNS-pointed at the Vercel deploy, set `NEXT_PUBLIC_SITE_URL` to the actual deployment URL (the Vercel preview URL is fine) so social previews and the sitemap don't reference a 404. If the brand ever pivots away from `StandClear`, update `SITE_NAME`, `SITE_URL`, `GITHUB_REPO` in `lib/site.ts`.
 
-- `lib/site.ts` — `SITE_NAME`, `SITE_URL`, `GITHUB_REPO`, etc.
-- `capacitor.config.ts` — `appId`, `appName`, `server.url` (then run `npm run cap:sync:ios`).
+### Push notifications (optional)
+
+Push alerts for saved subway lines are opt-in. To enable them, three env vars need to be set in addition to the Mapbox + Site URL ones above:
+
+- **`DATABASE_URL`** — Neon Postgres connection string. Easiest path: Vercel dashboard → Storage → Marketplace → Neon, free tier. Vercel injects this var automatically. Locally, run `npx vercel env pull .env.local` after adding Neon.
+- **`NEXT_PUBLIC_VAPID_KEY`** — public half of a VAPID keypair (client uses it for `pushManager.subscribe()`).
+- **`VAPID_PRIVATE_KEY`** — server-only half (server signs push payloads).
+- **`VAPID_SUBJECT`** — a `mailto:` URL push services use as the abuse-report contact (e.g. `mailto:you@example.com`).
+
+Generate the VAPID keypair once with `npx web-push generate-vapid-keys`.
+
+Then apply the schema:
+
+```bash
+npm run db:migrate
+```
+
+This creates the `push_subscriptions` and `alert_dispatch_log` tables in the connected database. Re-running is safe — the migration ledger tracks applied files and skips them. The push features degrade gracefully when these env vars are missing: the API routes return 500 with a clear message, and the UI hides the opt-in (TBD in a follow-on PR).
 
 ## Project layout
 
@@ -96,6 +112,8 @@ The script picks the longest representative trip + shape per route, snaps each s
 | `npm test`         | Vitest unit tests                             |
 | `npm run test:watch` | Vitest watch mode                           |
 | `npm run build:gtfs` | Regenerate `public/gtfsData.json` from raw GTFS |
+| `npm run db:migrate` | Apply any pending Postgres migrations (push notifications schema) |
+| `npm run db:migrate:list` | Show applied vs pending migration files |
 
 ## Contributing
 

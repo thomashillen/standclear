@@ -119,6 +119,75 @@ async function networkFirstHtml(request) {
   }
 }
 
+// ─── Push notifications ─────────────────────────────────────────────
+// Fires when the push service (Apple/Mozilla/Google) wakes the SW
+// with a payload the dispatch cron sent. Payload shape mirrors what
+// app/api/cron/dispatch-alerts/route.ts emits:
+//
+//   {
+//     title: "Q line — service disruption",
+//     body:  "No Q service in Manhattan until 5 AM Sunday",
+//     url:   "/?line=Q",   // deep link to open on tap
+//     tag:   "alert:<alert_id>"   // dedups stacked banners
+//   }
+//
+// The `tag` is the dedup key the OS uses to coalesce repeated
+// notifications for the same alert — even if the dispatch cron
+// somehow fires twice (network retry, race), the user sees one
+// banner, not two.
+self.addEventListener("push", (event) => {
+  if (!event.data) return;
+  let payload;
+  try {
+    payload = event.data.json();
+  } catch {
+    return;
+  }
+  const title = typeof payload.title === "string" ? payload.title : "StandClear";
+  const body = typeof payload.body === "string" ? payload.body : "";
+  const tag = typeof payload.tag === "string" ? payload.tag : undefined;
+  const url = typeof payload.url === "string" ? payload.url : "/";
+  event.waitUntil(
+    self.registration.showNotification(title, {
+      body,
+      icon: "/icon-192.png",
+      badge: "/icon-192.png",
+      tag,
+      data: { url },
+      // Reuse the same tag-update strategy as our in-app alert
+      // disclosure — when the MTA updates an existing alert (e.g.
+      // service restored), the new banner replaces the old one
+      // instead of stacking.
+      renotify: false,
+    }),
+  );
+});
+
+// Tap a notification → open or focus a window pointed at the deep
+// link the dispatch payload included (line page, station, etc.).
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  const url = event.notification.data?.url ?? "/";
+  event.waitUntil(
+    (async () => {
+      const all = await self.clients.matchAll({
+        type: "window",
+        includeUncontrolled: true,
+      });
+      // If a tab on the same origin is already open, navigate it.
+      // Saves the rider from re-bootstrapping the whole app shell.
+      for (const c of all) {
+        if (new URL(c.url).origin === self.location.origin) {
+          await c.focus();
+          if ("navigate" in c) await c.navigate(url);
+          return;
+        }
+      }
+      await self.clients.openWindow(url);
+    })(),
+  );
+});
+
 self.addEventListener("fetch", (event) => {
   const { request } = event;
   if (request.method !== "GET") return;
