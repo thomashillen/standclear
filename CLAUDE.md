@@ -14,8 +14,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 | `npx vitest run path/to/file.test.ts` | Run a single test file |
 | `npx vitest run -t "name"` | Run a single test by name pattern |
 | `npm run build:gtfs` | Regenerate `public/gtfsData.json` from `data/gtfs/` |
+| `npm run db:migrate` | Apply pending Postgres migrations (push notifications) |
+| `npm run db:migrate:list` | List applied + pending migrations |
 
 `NEXT_PUBLIC_MAPBOX_TOKEN` is required in `.env.local` for the map to render. The MTA GTFS-RT feeds need no key.
+
+Push notifications (opt-in) additionally require `DATABASE_URL` (Neon Postgres via Vercel Marketplace), `NEXT_PUBLIC_VAPID_KEY`, `VAPID_PRIVATE_KEY`, and `VAPID_SUBJECT`. Missing → the `/api/notifications/*` routes 500 with a clear message; the rest of the app works.
 
 ## Architecture
 
@@ -33,6 +37,8 @@ This is a Next.js 16 / React 19 app rendering live NYC subway data on a Mapbox d
 - Client polls every 8s; faster returns identical data, slower causes visible jumps. The hook hydrates from `localStorage` on cold boot before the first poll.
 
 **3. Alerts** (`app/api/alerts/route.ts` → `lib/useAlerts.ts`) — separate poll from trains, severity-classified, scoped per route/station in the UI.
+
+**4. Push notifications** (Postgres via `lib/db.ts`, schema in `migrations/`) — opt-in. Rider subscribes via the browser Push API; server stores `{endpoint, p256dh, auth, subscribed_lines}` keyed by an anonymous client-side UUID. A Vercel cron (TBD in a follow-on PR) polls MTA alerts and fans out to matching subscriptions via `web-push`. The dispatch path uses a GIN index on `subscribed_lines` to avoid full table scans, and an `alert_dispatch_log` primary key dedups so the same alert never fires twice per rider.
 
 ### UI shell
 
