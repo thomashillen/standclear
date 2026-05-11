@@ -11,6 +11,8 @@ import {
 } from "lucide-react";
 import { useAlerts, type ServiceAlert } from "@/lib/useAlerts";
 import { useLines } from "@/lib/subwayData";
+import { formatAlertWindow } from "@/lib/alertWindow";
+import { useNow } from "@/lib/useNow";
 import {
   Dialog,
   DialogContent,
@@ -76,9 +78,15 @@ function MiniRouteBullet({
 interface AlertItemProps {
   alert: ServiceAlert;
   routeInfo: Map<string, { id: string; color: string; textColor: "white" | "black" }>;
+  // Parent-owned ticking clock (ms). One useNow call up at the dialog
+  // drives every AlertItem's window label so we don't pay for a timer
+  // per row; passing `Date.now()` directly here would trip the React 19
+  // purity rule. Tests can pass a literal ms value to pin the label to
+  // a deterministic NYC wall-clock.
+  nowMs: number;
 }
 
-export function AlertItem({ alert, routeInfo }: AlertItemProps) {
+export function AlertItem({ alert, routeInfo, nowMs }: AlertItemProps) {
   // Severe alerts (NO_SERVICE / suspensions) auto-expand on mount: a
   // rider opening this dialog with a suspended line is here precisely
   // to read the description of *why*, and a row of collapsed chevrons
@@ -95,6 +103,14 @@ export function AlertItem({ alert, routeInfo }: AlertItemProps) {
   const s = SEVERITY_STYLE[alert.severity];
   const Icon = s.icon;
   const hasBody = alert.description && alert.description !== alert.header;
+  // Window label refreshes from the parent's useNow tick. Returns
+  // null for indefinite / out-of-horizon windows so the card doesn't
+  // grow a no-op sub-row.
+  const windowLabel = formatAlertWindow({
+    startTime: alert.startTime,
+    endTime: alert.endTime,
+    now: nowMs / 1000,
+  });
 
   // Sort affected routes the way the rider expects to see them: known
   // routes first (in the order from the lines map, which already matches
@@ -123,6 +139,11 @@ export function AlertItem({ alert, routeInfo }: AlertItemProps) {
           <p className={`text-[12.5px] font-semibold ${s.text} leading-snug`}>
             {alert.header || alert.effect.replace(/_/g, " ").toLowerCase()}
           </p>
+          {windowLabel && (
+            <p className={`text-[11px] mt-0.5 ${s.text} opacity-70 tabular-nums`}>
+              {windowLabel}
+            </p>
+          )}
           {(affected.known.length > 0 || affected.unknown.length > 0) && (
             <div className="flex items-center gap-1 mt-1.5 flex-wrap">
               {affected.known.map((r) => (
@@ -175,6 +196,10 @@ export function AlertsDialog({
 }) {
   const data = useAlerts();
   const lines = useLines();
+  // One ticking clock for every AlertItem's "Until …" / "Ends in …"
+  // sub-line. Gated on `open` so a closed dialog doesn't keep a timer
+  // alive in the background.
+  const nowMs = useNow(open, 30_000);
 
   const routeInfo = useMemo(() => {
     const m = new Map<string, { id: string; color: string; textColor: "white" | "black" }>();
@@ -235,7 +260,7 @@ export function AlertsDialog({
               {[0, 1, 2].map((i) => (
                 <div
                   key={i}
-                  className="h-[60px] rounded-xl bg-white/[0.04] animate-pulse"
+                  className="h-[60px] rounded-xl bg-white/[0.04] motion-safe:animate-pulse"
                 />
               ))}
             </div>
@@ -277,7 +302,12 @@ export function AlertsDialog({
                     </div>
                     <div className="space-y-2">
                       {items.map((alert) => (
-                        <AlertItem key={alert.id} alert={alert} routeInfo={routeInfo} />
+                        <AlertItem
+                          key={alert.id}
+                          alert={alert}
+                          routeInfo={routeInfo}
+                          nowMs={nowMs}
+                        />
                       ))}
                     </div>
                   </section>
@@ -298,8 +328,13 @@ export function AlertsDialog({
 }
 
 export default function AlertsButton() {
+  // Controlled open state so we can gate the per-card window-label tick
+  // on dialog visibility. An always-ticking timer would burn battery
+  // even when the dialog is closed and not rendering any AlertItems.
+  const [open, setOpen] = useState(false);
   const data = useAlerts();
   const lines = useLines();
+  const nowMs = useNow(open, 30_000);
 
   // routeId → display info, used by AlertItem to render the affected
   // bullets. Built once per lines change, not per render.
@@ -353,7 +388,7 @@ export default function AlertsButton() {
   const showBadge = totalCount > 0;
 
   return (
-    <Dialog>
+    <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
         <button
           type="button"
@@ -415,7 +450,7 @@ export default function AlertsButton() {
               {[0, 1, 2].map((i) => (
                 <div
                   key={i}
-                  className="h-[60px] rounded-xl bg-white/[0.04] animate-pulse"
+                  className="h-[60px] rounded-xl bg-white/[0.04] motion-safe:animate-pulse"
                 />
               ))}
             </div>
@@ -457,7 +492,12 @@ export default function AlertsButton() {
                     </div>
                     <div className="space-y-2">
                       {items.map((alert) => (
-                        <AlertItem key={alert.id} alert={alert} routeInfo={routeInfo} />
+                        <AlertItem
+                          key={alert.id}
+                          alert={alert}
+                          routeInfo={routeInfo}
+                          nowMs={nowMs}
+                        />
                       ))}
                     </div>
                   </section>

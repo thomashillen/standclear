@@ -3,6 +3,8 @@
 import { useState } from "react";
 import { AlertTriangle, ChevronDown, Info } from "lucide-react";
 import type { ServiceAlert } from "@/lib/useAlerts";
+import { formatAlertWindow } from "@/lib/alertWindow";
+import { useNow } from "@/lib/useNow";
 
 // Severity → tint. Info shifts to the sky palette so a routine
 // "elevator out" card doesn't carry the same weight as a suspension —
@@ -29,11 +31,20 @@ const SEVERITY_STYLE: Record<
   },
 };
 
-function AlertItem({ alert }: { alert: ServiceAlert }) {
+function AlertItem({ alert, nowMs }: { alert: ServiceAlert; nowMs: number }) {
   const [expanded, setExpanded] = useState(false);
   const s = SEVERITY_STYLE[alert.severity];
   const Icon = s.icon;
   const hasBody = alert.description && alert.description !== alert.header;
+  // Window label re-evaluates from the parent's `useNow` tick. The label
+  // only changes on minute boundaries, so a 30 s parent tick is enough
+  // for "Ends in N min" to stay readable. `null` for indefinite /
+  // out-of-horizon windows keeps the card from growing a no-op sub-row.
+  const windowLabel = formatAlertWindow({
+    startTime: alert.startTime,
+    endTime: alert.endTime,
+    now: nowMs / 1000,
+  });
   return (
     <div className={`border rounded-lg px-3 py-2 ${s.bg}`}>
       <button
@@ -46,6 +57,11 @@ function AlertItem({ alert }: { alert: ServiceAlert }) {
           <p className={`text-[12px] font-semibold ${s.text} leading-snug`}>
             {alert.header || alert.effect.replace(/_/g, " ").toLowerCase()}
           </p>
+          {windowLabel && (
+            <p className={`text-[11px] mt-0.5 ${s.text} opacity-70 tabular-nums`}>
+              {windowLabel}
+            </p>
+          )}
         </div>
         {hasBody && (
           <ChevronDown
@@ -95,6 +111,10 @@ export function AlertsSection({ alerts }: { alerts: ServiceAlert[] }) {
   const s = SEVERITY_STYLE[topSeverity];
   const Icon = s.icon;
   const n = alerts.length;
+  // Single ticking clock for all rendered AlertItem rows — they only
+  // need minute-resolution refreshes. Gated on `open` so a collapsed
+  // section doesn't keep a timer alive.
+  const nowMs = useNow(open, 30_000);
 
   return (
     <div className="flex-shrink-0 border-b border-white/[0.06]">
@@ -119,7 +139,7 @@ export function AlertsSection({ alerts }: { alerts: ServiceAlert[] }) {
       {open && (
         <div className="px-3 pb-2 pt-1 space-y-1.5 max-h-[28dvh] sm:max-h-[220px] overflow-y-auto ios-scroll">
           {alerts.slice(0, 8).map((a) => (
-            <AlertItem key={a.id} alert={a} />
+            <AlertItem key={a.id} alert={a} nowMs={nowMs} />
           ))}
         </div>
       )}

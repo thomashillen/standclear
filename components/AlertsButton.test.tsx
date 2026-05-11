@@ -24,12 +24,17 @@ const routeInfo = new Map<
   { id: string; color: string; textColor: "white" | "black" }
 >([["F", { id: "F", color: "#FF6319", textColor: "white" }]]);
 
+// Pin to Sat 2026-05-09 06:00 NYC (EDT, UTC-4) for window-label tests.
+// Using a literal nowMs prop keeps the tests pure — no fake timers.
+const NOW_SAT_MAY_9_6AM_MS = Date.UTC(2026, 4, 9, 10, 0, 0);
+
 describe("AlertsButton AlertItem", () => {
   it("info severity renders collapsed: description not in DOM until tapped", () => {
     render(
       <AlertItem
         alert={makeAlert({ severity: "info", description: "elevator out" })}
         routeInfo={routeInfo}
+        nowMs={NOW_SAT_MAY_9_6AM_MS}
       />,
     );
     expect(screen.queryByText("elevator out")).toBeNull();
@@ -42,6 +47,7 @@ describe("AlertsButton AlertItem", () => {
       <AlertItem
         alert={makeAlert({ severity: "warning", description: "delays in BK" })}
         routeInfo={routeInfo}
+        nowMs={NOW_SAT_MAY_9_6AM_MS}
       />,
     );
     expect(screen.queryByText("delays in BK")).toBeNull();
@@ -55,6 +61,7 @@ describe("AlertsButton AlertItem", () => {
           description: "no F service downtown",
         })}
         routeInfo={routeInfo}
+        nowMs={NOW_SAT_MAY_9_6AM_MS}
       />,
     );
     expect(screen.getByText("no F service downtown")).toBeTruthy();
@@ -70,6 +77,7 @@ describe("AlertsButton AlertItem", () => {
           description: "Suspended",
         })}
         routeInfo={routeInfo}
+        nowMs={NOW_SAT_MAY_9_6AM_MS}
       />,
     );
     expect(screen.getByText("Suspended")).toBeTruthy();
@@ -87,10 +95,50 @@ describe("AlertsButton AlertItem", () => {
           description: "no service",
         })}
         routeInfo={routeInfo}
+        nowMs={NOW_SAT_MAY_9_6AM_MS}
       />,
     );
     expect(screen.getByText("no service")).toBeTruthy();
     fireEvent.click(screen.getByRole("button"));
     expect(screen.queryByText("no service")).toBeNull();
+  });
+
+  describe("window label", () => {
+    it("renders nothing when both timestamps are missing", () => {
+      render(
+        <AlertItem
+          alert={makeAlert({ startTime: null, endTime: null })}
+          routeInfo={routeInfo}
+          nowMs={NOW_SAT_MAY_9_6AM_MS}
+        />,
+      );
+      expect(screen.queryByText(/Until|Ends in|Starts/)).toBeNull();
+    });
+
+    it("renders 'Until <weekday> <time>' for an end within the week", () => {
+      // 5 AM NYC Mon May 11 = 09:00 UTC.
+      const endsAt5amMon = Date.UTC(2026, 4, 11, 9, 0, 0) / 1000;
+      render(
+        <AlertItem
+          alert={makeAlert({ startTime: null, endTime: endsAt5amMon })}
+          routeInfo={routeInfo}
+          nowMs={NOW_SAT_MAY_9_6AM_MS}
+        />,
+      );
+      expect(screen.getByText("Until Mon 5 AM")).toBeTruthy();
+    });
+
+    it("renders 'Ends in N min' when less than an hour remains", () => {
+      // 30 minutes from the pinned `now`.
+      const endsSoon = NOW_SAT_MAY_9_6AM_MS / 1000 + 30 * 60;
+      render(
+        <AlertItem
+          alert={makeAlert({ startTime: null, endTime: endsSoon })}
+          routeInfo={routeInfo}
+          nowMs={NOW_SAT_MAY_9_6AM_MS}
+        />,
+      );
+      expect(screen.getByText("Ends in 30 min")).toBeTruthy();
+    });
   });
 });

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { AlertsSection } from "./AlertsSection";
 import type { ServiceAlert } from "@/lib/useAlerts";
@@ -118,5 +118,57 @@ describe("AlertsSection", () => {
     expect(screen.getByText("alert-7")).toBeTruthy();
     expect(screen.queryByText("alert-8")).toBeNull();
     expect(screen.queryByText("alert-11")).toBeNull();
+  });
+
+  describe("expanded alert window label", () => {
+    // Pin `now` to Sat 2026-05-09 06:00 NYC (EDT) so the window label
+    // formatter resolves deterministic NYC wall-clock strings.
+    beforeEach(() => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date(Date.UTC(2026, 4, 9, 10, 0, 0)));
+    });
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it("shows 'Until <weekday> <time>' beneath the header when endTime is in-horizon", () => {
+      // 5 AM NYC Mon May 11 = 09:00 UTC.
+      const endsAt5amMon = Date.UTC(2026, 4, 11, 9, 0, 0) / 1000;
+      render(
+        <AlertsSection
+          alerts={[
+            makeAlert({
+              header: "No F service downtown",
+              severity: "warning",
+              startTime: null,
+              endTime: endsAt5amMon,
+            }),
+          ]}
+        />,
+      );
+      fireEvent.click(
+        screen.getByRole("button", { name: "Show service alerts" }),
+      );
+      expect(screen.getByText("Until Mon 5 AM")).toBeTruthy();
+    });
+
+    it("renders nothing in place of the window when both timestamps are null", () => {
+      render(
+        <AlertsSection
+          alerts={[
+            makeAlert({
+              header: "No F service downtown",
+              severity: "warning",
+              startTime: null,
+              endTime: null,
+            }),
+          ]}
+        />,
+      );
+      fireEvent.click(
+        screen.getByRole("button", { name: "Show service alerts" }),
+      );
+      expect(screen.queryByText(/Until|Ends in|Starts/)).toBeNull();
+    });
   });
 });

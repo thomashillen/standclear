@@ -176,7 +176,7 @@ export function NearbyEmptyState({
   if (status === "prompting" && !hasFix) {
     return (
       <div className="px-6 py-10 text-center">
-        <Navigation className="w-10 h-10 mx-auto mb-3 text-gray-500 animate-pulse" />
+        <Navigation className="w-10 h-10 mx-auto mb-3 text-gray-500 motion-safe:animate-pulse" />
         <p className="text-sm text-gray-400">Finding your location…</p>
       </div>
     );
