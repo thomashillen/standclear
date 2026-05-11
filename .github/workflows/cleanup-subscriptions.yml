@@ -1,0 +1,41 @@
+name: Cleanup push subscriptions
+
+# Daily janitor: GC stale push_subscriptions + alert_dispatch_log
+# rows. Idempotent — safe to fire multiple times per day if the
+# workflow ever doubles up (it shouldn't, but the concurrency group
+# below makes sure).
+#
+# Schedule chosen for lowest-traffic UTC window so the (cheap) DB
+# work doesn't compete with riders' poll loops. Vercel function
+# cold-start is rare here since the workflow runs daily.
+
+on:
+  schedule:
+    # Once a day, 4:00 UTC = ~midnight ET. NYC subway runs all
+    # night so there's no "true off-peak," but local-midnight ish
+    # is the calmest the DB sees.
+    - cron: "0 4 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: cleanup-subscriptions
+  cancel-in-progress: false
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Fire cleanup endpoint
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          if [ -z "$CRON_SECRET" ]; then
+            echo "CRON_SECRET secret not set in repo — aborting." >&2
+            exit 1
+          fi
+          curl --fail-with-body \
+            --silent --show-error \
+            --max-time 60 \
+            -H "Authorization: Bearer $CRON_SECRET" \
+            https://standclear.vercel.app/api/cron/cleanup-subscriptions

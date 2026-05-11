@@ -72,7 +72,29 @@ npm run db:migrate
 
 This creates the `push_subscriptions` and `alert_dispatch_log` tables in the connected database. Re-running is safe — the migration ledger tracks applied files and skips them. The push features degrade gracefully when these env vars are missing: the API routes return 500 with a clear message, and the UI hides the opt-in.
 
-The dispatch path runs as a Vercel Cron job configured in `vercel.json` (`/api/cron/dispatch-alerts` every 2 min). It polls the MTA alerts feed, filters to severity = "severe", and fans out web-push to every matching subscription. Per-(subscription, alert) dedup via the `alert_dispatch_log` primary key guarantees no double-fires.
+The dispatch path runs as a GitHub Actions cron (every 5 min — Vercel Hobby restricts crons to daily, so we trigger externally). It polls the MTA alerts feed, filters to severity = "severe", and fans out web-push to every matching subscription. Per-(subscription, alert) dedup via the `alert_dispatch_log` primary key guarantees no double-fires. A second GitHub Actions cron (daily, 4am UTC) runs `/api/cron/cleanup-subscriptions` to purge `unsubscribed_at > 30d` rows and trim the dispatch log to 14 days.
+
+**Operator commands** — both gated by `CRON_SECRET`:
+
+```bash
+SECRET=$(grep '^CRON_SECRET=' .env.local | cut -d= -f2- | tr -d '"')
+
+# What's the current subscriber + dispatch volume?
+curl -H "Authorization: Bearer $SECRET" \
+  https://standclear.vercel.app/api/notifications/stats
+
+# Fire the dispatch cron manually (useful right after a severe alert
+# hits the MTA feed if you don't want to wait 5 minutes for the
+# next scheduled GitHub Actions run).
+curl -H "Authorization: Bearer $SECRET" \
+  https://standclear.vercel.app/api/cron/dispatch-alerts
+
+# Fire the cleanup cron manually.
+curl -H "Authorization: Bearer $SECRET" \
+  https://standclear.vercel.app/api/cron/cleanup-subscriptions
+```
+
+Both workflows can also be triggered from the GitHub Actions UI via "Run workflow" (workflow_dispatch).
 
 ## Project layout
 
