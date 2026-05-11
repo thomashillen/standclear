@@ -60,6 +60,7 @@ Push alerts for saved subway lines are opt-in. To enable them, three env vars ne
 - **`NEXT_PUBLIC_VAPID_KEY`** — public half of a VAPID keypair (client uses it for `pushManager.subscribe()`).
 - **`VAPID_PRIVATE_KEY`** — server-only half (server signs push payloads).
 - **`VAPID_SUBJECT`** — a `mailto:` URL push services use as the abuse-report contact (e.g. `mailto:you@example.com`).
+- **`CRON_SECRET`** — random unguessable string (e.g. `openssl rand -hex 32`) that the dispatch cron checks before fanning out pushes. Vercel passes it as `Authorization: Bearer <value>` on every cron invocation.
 
 Generate the VAPID keypair once with `npx web-push generate-vapid-keys`.
 
@@ -69,7 +70,9 @@ Then apply the schema:
 npm run db:migrate
 ```
 
-This creates the `push_subscriptions` and `alert_dispatch_log` tables in the connected database. Re-running is safe — the migration ledger tracks applied files and skips them. The push features degrade gracefully when these env vars are missing: the API routes return 500 with a clear message, and the UI hides the opt-in (TBD in a follow-on PR).
+This creates the `push_subscriptions` and `alert_dispatch_log` tables in the connected database. Re-running is safe — the migration ledger tracks applied files and skips them. The push features degrade gracefully when these env vars are missing: the API routes return 500 with a clear message, and the UI hides the opt-in.
+
+The dispatch path runs as a Vercel Cron job configured in `vercel.json` (`/api/cron/dispatch-alerts` every 2 min). It polls the MTA alerts feed, filters to severity = "severe", and fans out web-push to every matching subscription. Per-(subscription, alert) dedup via the `alert_dispatch_log` primary key guarantees no double-fires.
 
 ## Project layout
 

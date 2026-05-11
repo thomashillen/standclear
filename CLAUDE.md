@@ -19,7 +19,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 `NEXT_PUBLIC_MAPBOX_TOKEN` is required in `.env.local` for the map to render. The MTA GTFS-RT feeds need no key.
 
-Push notifications (opt-in) additionally require `DATABASE_URL` (Neon Postgres via Vercel Marketplace), `NEXT_PUBLIC_VAPID_KEY`, `VAPID_PRIVATE_KEY`, and `VAPID_SUBJECT`. Missing → the `/api/notifications/*` routes 500 with a clear message; the rest of the app works.
+Push notifications (opt-in) additionally require `DATABASE_URL` (Neon Postgres via Vercel Marketplace), `NEXT_PUBLIC_VAPID_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT`, and `CRON_SECRET` (random hex string Vercel passes as `Authorization: Bearer …` on cron invocations). Missing → the `/api/notifications/*` routes 500 with a clear message; the dispatch cron noops; the rest of the app works.
 
 ## Architecture
 
@@ -38,7 +38,7 @@ This is a Next.js 16 / React 19 app rendering live NYC subway data on a Mapbox d
 
 **3. Alerts** (`app/api/alerts/route.ts` → `lib/useAlerts.ts`) — separate poll from trains, severity-classified, scoped per route/station in the UI.
 
-**4. Push notifications** (Postgres via `lib/db.ts`, schema in `migrations/`) — opt-in. Rider subscribes via the browser Push API; server stores `{endpoint, p256dh, auth, subscribed_lines}` keyed by an anonymous client-side UUID. A Vercel cron (TBD in a follow-on PR) polls MTA alerts and fans out to matching subscriptions via `web-push`. The dispatch path uses a GIN index on `subscribed_lines` to avoid full table scans, and an `alert_dispatch_log` primary key dedups so the same alert never fires twice per rider.
+**4. Push notifications** (Postgres via `lib/db.ts`, schema in `migrations/`) — opt-in. Rider subscribes via the browser Push API (`lib/usePushSubscription.ts` + the MoreSheet "Notifications" row); server stores `{endpoint, p256dh, auth, subscribed_lines}` keyed by an anonymous client-side UUID. A Vercel Cron at `/api/cron/dispatch-alerts` runs every 2 min (`vercel.json`), calls `lib/pushDispatch.ts::dispatchAlerts()` which polls the MTA alerts feed via `lib/mtaAlerts.ts::fetchActiveAlerts()`, filters to severity = "severe", and fans out to matching subscriptions via `web-push`. The GIN index on `subscribed_lines` keeps the per-tick fanout O(matching subs), and the `alert_dispatch_log` primary key (subscription_id, alert_id) dedups so the same alert never fires twice per rider. Empty `subscribed_lines = '{}'` is the v1 sentinel — "fire on every severe alert regardless of routes"; non-empty arrays restrict to overlapping routes (forward-compat with v2 per-line opt-ins).
 
 ### UI shell
 
