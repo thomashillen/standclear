@@ -155,9 +155,10 @@ function endpointPosition(
   };
 }
 
-// Compass bearing (0=N, 90=E, …) from a→b, accounting for lat
-// distortion of longitude. Mirrors the helper inside useTrains so we
-// stay consistent across modules.
+// Compass bearing (0=N, 90=E, 180=S, 270=W) from a→b, accounting for lat
+// distortion of longitude. Good enough for drawing arrowheads at NYC scale.
+// Shared by useTrains (per-train marker bearings) and the trajectory
+// builder here (waypoint orientation for parked trains).
 export function bearingDeg(
   a: [number, number],
   b: [number, number],

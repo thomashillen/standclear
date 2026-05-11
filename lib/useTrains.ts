@@ -5,6 +5,7 @@ import type { TrainsResponse, Train, Arrival } from "@/app/api/trains/route";
 import { isOnline, subscribeOnline } from "./useOnline";
 import type { SubwayLine } from "./subwayData";
 import { captureException } from "./observability";
+import { bearingDeg } from "./trainTrajectory";
 
 export type { Train, Arrival, TrainsResponse };
 
@@ -309,15 +310,6 @@ export function useFeedHealth(): FeedHealth {
     () => health,
     () => SERVER_HEALTH,
   );
-}
-
-// Compass bearing (0=N, 90=E, 180=S, 270=W) from a→b, accounting for lat
-// distortion of longitude. Good enough for drawing arrowheads at NYC scale.
-function bearingDeg(a: [number, number], b: [number, number]): number {
-  const dLng = (b[0] - a[0]) * Math.cos(((a[1] + b[1]) * Math.PI) / 360);
-  const dLat = b[1] - a[1];
-  if (dLng === 0 && dLat === 0) return 0;
-  return ((Math.atan2(dLng, dLat) * 180) / Math.PI + 360) % 360;
 }
 
 // Linear-distance interpolation along the line's shape between two stops.
