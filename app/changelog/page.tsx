@@ -24,6 +24,7 @@ const ENTRIES: Entry[] = [
     date: "2026-05-09",
     title: "MVP build",
     changes: [
+      { type: "changed", text: "Decorative 'live-feed' ping rings (floating header pill, System Pulse popup, /status page) now respect prefers-reduced-motion: the colored dot + glow still carries the state signal, but the outward pulse animation only runs for riders who haven't asked the OS to reduce motion." },
       { type: "added", text: "System Pulse aggregates per-vehicle staleness: when one or more trains in service haven't reported in 90 s+, an amber footer line under the status grid spells out the count (and the hard-stale subset past 6 m+), so a rider checking system health can tell apart a fresh feed from a feed full of aging vehicles." },
       { type: "changed", text: "Severe service alerts (full suspensions, 'no service') now auto-expand on the station and line panels so a rider opening a station with a route-wide outage sees the disruption headline without an extra tap. Warning + info alerts stay collapsed by default to keep arrivals visible." },
       { type: "added", text: "Severe service alerts auto-expand in the Service Alerts dialog: when the MTA reports a suspension or 'no service' alert, the description body unfolds on mount instead of starting collapsed under a chevron — the rider opening the dialog during a disruption sees the why immediately. Warning and info severities still start collapsed by default." },

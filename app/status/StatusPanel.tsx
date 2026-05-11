@@ -109,7 +109,11 @@ export default function StatusPanel() {
           <span className="relative flex w-2.5 h-2.5">
             <span className="absolute inset-0 rounded-full bg-current opacity-90" />
             {data.status === "ok" && (
-              <span className="absolute inset-0 rounded-full bg-current opacity-50 animate-ping" />
+              // motion-safe gate: the underlying opacity-90 dot
+              // already reads as the status indicator; the ring
+              // pulse is decorative reassurance. Riders with
+              // `prefers-reduced-motion` keep the dot, lose the ping.
+              <span className="absolute inset-0 rounded-full bg-current opacity-50 motion-safe:animate-ping" />
             )}
           </span>
           <div>

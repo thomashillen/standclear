@@ -131,7 +131,10 @@ export default function LiveTrainsPopup({ open, onClose }: Props) {
                 }}
               />
               {fresh && (
-                <span className="absolute inset-0 rounded-full bg-emerald-400 animate-ping opacity-60" />
+                // motion-safe gate: see SubwayMap live-feed pill —
+                // the static dot + glow carries the state signal;
+                // the ring pulse is decorative emphasis only.
+                <span className="absolute inset-0 rounded-full bg-emerald-400 motion-safe:animate-ping opacity-60" />
               )}
             </span>
             System Pulse
