@@ -24,6 +24,8 @@ const ENTRIES: Entry[] = [
     date: "2026-05-09",
     title: "MVP build",
     changes: [
+      { type: "changed", text: "Search empty-state now reads as one calm Apple-Maps-style list: Favorites (Commute / Home / Work) sit above Nearby Stations (the three closest, with route bullets) above Recent. Replaces the previous mix of a big Quick-Commute card, two small Home/Work pills, and the Recent list — three competing visual idioms for the same intent." },
+      { type: "fixed", text: "Station-row arrivals now fit three trains per direction even when both miss and walk verdicts are present — dropped the 'miss' verdict pill since the strikethrough on the ETA already communicates 'you missed it'." },
       { type: "added", text: "System Pulse aggregates per-vehicle staleness: when one or more trains in service haven't reported in 90 s+, an amber footer line under the status grid spells out the count (and the hard-stale subset past 6 m+), so a rider checking system health can tell apart a fresh feed from a feed full of aging vehicles." },
       { type: "changed", text: "Severe service alerts (full suspensions, 'no service') now auto-expand on the station and line panels so a rider opening a station with a route-wide outage sees the disruption headline without an extra tap. Warning + info alerts stay collapsed by default to keep arrivals visible." },
       { type: "added", text: "Severe service alerts auto-expand in the Service Alerts dialog: when the MTA reports a suspension or 'no service' alert, the description body unfolds on mount instead of starting collapsed under a chevron — the rider opening the dialog during a disruption sees the why immediately. Warning and info severities still start collapsed by default." },

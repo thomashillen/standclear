@@ -30,6 +30,7 @@ import {
 } from "@/lib/commuteRouting";
 import {
   buildStationIndex,
+  formatWalkSummary,
   haversineMeters,
   nearestStations,
   nearestStationsWithin,
@@ -306,6 +307,17 @@ export default function SearchSheet({
     for (const s of index) m.set(s.stopId, s);
     return m;
   }, [index]);
+
+  // Top three nearest complexes for the search empty-state "Nearby
+  // stations" section. Recomputed only when the rider's read-only
+  // location materially moves — the index itself is large but stable.
+  // Empty when geo isn't resolved yet; the section short-circuits in
+  // that case so first-time visitors don't see a flash of an empty
+  // header before the geolocation permission resolves.
+  const nearbyStations = useMemo(() => {
+    if (geo.lat == null || geo.lng == null || index.length === 0) return [];
+    return nearestStations(index, geo.lng, geo.lat, 3);
+  }, [geo.lat, geo.lng, index]);
 
   // Wall-clock tick for live countdowns + catch verdicts. Pause
   // entirely when the sheet is closed.
@@ -1229,97 +1241,179 @@ export default function SearchSheet({
       >
         {mode === "search" ? (
           searchResults === null && searchPlaceResults.length === 0 ? (
-            // Empty + idle state. When the rider has both Home and
-            // Work anchored we surface a quick-action card to plan
-            // that commute right now — covers the most common
-            // "Directions from scratch" entry point now that the
-            // segmented control is gone. Suppressed in anchor-pick
-            // mode: the rider is choosing a Home/Work pin, not
-            // navigating, so a "Quick commute Home → Work" card
-            // here is irrelevant noise (and would conflict with
-            // what they're trying to do — set one of those anchors).
-            <div className="px-3 py-3 space-y-3">
-              {!anchorPickMode &&
-                (() => {
-                  const h = endpointToTrip(home);
-                  const w = endpointToTrip(work);
-                  if (!h || !w) return null;
-                  return (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setMode("directions");
-                        setQuery("");
-                        setSearchPlaceResults([]);
-                        setTripFrom(h);
-                        setTripTo(w);
-                        setActiveField(null);
-                      }}
-                      className="press w-full flex items-center gap-3 p-3 rounded-2xl bg-white/[0.05] hover:bg-white/[0.08] border border-white/[0.08] touch-manipulation text-left"
-                    >
-                      <span className="flex items-center justify-center w-9 h-9 rounded-full bg-emerald-300/15 text-emerald-200 ring-1 ring-emerald-300/30">
-                        <Compass className="w-4 h-4" />
-                      </span>
-                      <span className="flex-1 min-w-0">
-                        <span className="block text-[11px] uppercase tracking-wider font-semibold text-gray-400">
-                          Quick commute
-                        </span>
-                        <span className="block text-[14px] font-semibold text-gray-100 truncate">
-                          Home → Work
-                        </span>
-                        <span className="block text-[11px] text-gray-500 truncate">
-                          {(home?.kind === "address" ? home.name : h.name)}{" "}
-                          →{" "}
-                          {(work?.kind === "address" ? work.name : w.name)}
-                        </span>
-                      </span>
-                    </button>
-                  );
-                })()}
-
-              {/* Saved-anchor shortcut chips — one tap to start
-                  directions to Home / Work from current location.
-                  Replaces the prior "Search for a station, address,
-                  or place." helper text: when the rider has actually
-                  pinned an anchor, surfacing those anchors as
-                  one-tap targets is more useful than a generic
-                  prompt. Suppressed in anchor-pick mode (the rider
-                  is mid-set, not navigating). */}
+            // Empty + idle state. Three sections, all rendered as
+            // flat row lists so the rider gets a uniform Apple-Maps-
+            // style scan: Favorites (Commute / Home / Work) → Nearby
+            // stations → Recent. The previous layout fought for
+            // hierarchy — a big Quick-Commute card crowned over two
+            // small Home/Work pills crowned over a Recent list, three
+            // different visual idioms — even though all three boil
+            // down to the same intent ("one-tap shortcut to a place").
+            // Flattening them removes the redundancy between the big
+            // card (Home→Work as a commute) and the small Home pill
+            // (current→Home), and frees vertical space for the new
+            // Nearby section which uses the read-only geolocation we
+            // already have. Suppressed in anchor-pick mode: the
+            // rider is choosing a Home/Work pin, not navigating —
+            // none of these "directions to" shortcuts are
+            // relevant, and the Commute row would conflict with
+            // what they're trying to do.
+            <div className="px-3 py-3 space-y-5">
               {!anchorPickMode && (home || work) && (
-                <div className="flex items-center gap-2 px-1">
-                  {home &&
-                    (() => {
+                <section>
+                  <h3 className="px-2 pb-1.5 text-[10px] font-semibold uppercase tracking-wider text-gray-500">
+                    Favorites
+                  </h3>
+                  <div className="space-y-1">
+                    {/* Commute — only renders when BOTH anchors are
+                        set. Tapping plans an explicit Home→Work trip
+                        from the rider's current location's nearest
+                        station; the Home/Work rows below cover the
+                        single-endpoint case. */}
+                    {home && work && (() => {
+                      const h = endpointToTrip(home);
+                      const w = endpointToTrip(work);
+                      if (!h || !w) return null;
+                      return (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setMode("directions");
+                            setQuery("");
+                            setSearchPlaceResults([]);
+                            setTripFrom(h);
+                            setTripTo(w);
+                            setActiveField(null);
+                          }}
+                          className="press w-full flex items-center gap-3 px-3 py-2.5 rounded-xl bg-white/[0.04] hover:bg-white/[0.08] text-left touch-manipulation"
+                        >
+                          <span className="flex items-center justify-center w-9 h-9 rounded-full bg-emerald-300/15 text-emerald-200 ring-1 ring-emerald-300/30 flex-shrink-0">
+                            <Compass className="w-4 h-4" />
+                          </span>
+                          <span className="flex-1 min-w-0">
+                            <span className="block text-[13px] font-semibold text-gray-100 truncate">
+                              Commute
+                            </span>
+                            <span className="block text-[11px] text-gray-500 truncate">
+                              Home → Work
+                            </span>
+                          </span>
+                          <ChevronRight className="w-4 h-4 text-gray-500 flex-shrink-0" />
+                        </button>
+                      );
+                    })()}
+                    {home && (() => {
                       const h = endpointToTrip(home);
                       if (!h) return null;
+                      const sub =
+                        home.kind === "address"
+                          ? home.name
+                          : stationsByComplexId.get(home.stopId)?.name ??
+                            "Pinned station";
                       return (
                         <button
                           type="button"
                           onClick={() => startDirectionsTo(h)}
                           aria-label="Directions to Home"
-                          className="press flex items-center gap-1.5 h-8 px-3 rounded-full bg-emerald-300/10 hover:bg-emerald-300/15 ring-1 ring-emerald-300/30 text-emerald-100 text-[12px] font-semibold touch-manipulation"
+                          className="press w-full flex items-center gap-3 px-3 py-2.5 rounded-xl bg-white/[0.04] hover:bg-white/[0.08] text-left touch-manipulation"
                         >
-                          <Home className="w-3.5 h-3.5 flex-shrink-0" />
-                          Home
+                          <span className="flex items-center justify-center w-9 h-9 rounded-full bg-emerald-300/15 text-emerald-200 ring-1 ring-emerald-300/30 flex-shrink-0">
+                            <Home className="w-4 h-4" />
+                          </span>
+                          <span className="flex-1 min-w-0">
+                            <span className="block text-[13px] font-semibold text-gray-100 truncate">
+                              Home
+                            </span>
+                            <span className="block text-[11px] text-gray-500 truncate">
+                              {sub}
+                            </span>
+                          </span>
+                          <ChevronRight className="w-4 h-4 text-gray-500 flex-shrink-0" />
                         </button>
                       );
                     })()}
-                  {work &&
-                    (() => {
+                    {work && (() => {
                       const w = endpointToTrip(work);
                       if (!w) return null;
+                      const sub =
+                        work.kind === "address"
+                          ? work.name
+                          : stationsByComplexId.get(work.stopId)?.name ??
+                            "Pinned station";
                       return (
                         <button
                           type="button"
                           onClick={() => startDirectionsTo(w)}
                           aria-label="Directions to Work"
-                          className="press flex items-center gap-1.5 h-8 px-3 rounded-full bg-sky-300/10 hover:bg-sky-300/15 ring-1 ring-sky-300/30 text-sky-100 text-[12px] font-semibold touch-manipulation"
+                          className="press w-full flex items-center gap-3 px-3 py-2.5 rounded-xl bg-white/[0.04] hover:bg-white/[0.08] text-left touch-manipulation"
                         >
-                          <Briefcase className="w-3.5 h-3.5 flex-shrink-0" />
-                          Work
+                          <span className="flex items-center justify-center w-9 h-9 rounded-full bg-sky-300/15 text-sky-200 ring-1 ring-sky-300/30 flex-shrink-0">
+                            <Briefcase className="w-4 h-4" />
+                          </span>
+                          <span className="flex-1 min-w-0">
+                            <span className="block text-[13px] font-semibold text-gray-100 truncate">
+                              Work
+                            </span>
+                            <span className="block text-[11px] text-gray-500 truncate">
+                              {sub}
+                            </span>
+                          </span>
+                          <ChevronRight className="w-4 h-4 text-gray-500 flex-shrink-0" />
                         </button>
                       );
                     })()}
-                </div>
+                  </div>
+                </section>
+              )}
+
+              {/* Nearby stations — three closest complexes when geo
+                  is known. Anchor-pick mode keeps this surface so a
+                  rider Setting Home can pin the nearest station with
+                  one tap; the underlying StationRow tap handler
+                  routes through `assignAnchor` in that mode. */}
+              {nearbyStations.length > 0 && (
+                <section>
+                  <h3 className="px-2 pb-1.5 text-[10px] font-semibold uppercase tracking-wider text-gray-500">
+                    Nearby stations
+                  </h3>
+                  <div className="space-y-1">
+                    {nearbyStations.map((s) => (
+                      <button
+                        key={`nearby-${s.stopId}`}
+                        type="button"
+                        onClick={() => {
+                          if (anchorPickMode) {
+                            assignAnchor(anchorPickMode, s.stopId);
+                            onAnchorPicked?.();
+                            return;
+                          }
+                          onStationOpen(s.stopId);
+                        }}
+                        className="press w-full flex items-center gap-3 px-3 py-2.5 rounded-xl bg-white/[0.04] hover:bg-white/[0.08] text-left touch-manipulation"
+                      >
+                        <span className="flex items-center gap-1 flex-shrink-0">
+                          {s.routes.slice(0, 3).map((r) => (
+                            <RouteBullet
+                              key={r.id}
+                              id={r.id}
+                              color={r.color}
+                              textColor={r.textColor}
+                            />
+                          ))}
+                        </span>
+                        <span className="flex-1 min-w-0">
+                          <span className="block text-[13px] font-semibold text-gray-100 truncate">
+                            {s.name}
+                          </span>
+                          <span className="block text-[11px] text-gray-500 truncate">
+                            {formatWalkSummary(s.meters)}
+                          </span>
+                        </span>
+                        <ChevronRight className="w-4 h-4 text-gray-500 flex-shrink-0" />
+                      </button>
+                    ))}
+                  </div>
+                </section>
               )}
 
               {/* Recent searches — last 10 places the rider tapped
@@ -1328,7 +1422,7 @@ export default function SearchSheet({
                   hidden entirely when empty so the empty state stays
                   clean for first-time users. */}
               {recents.length > 0 && (
-                <div className="pt-2">
+                <section>
                   <div className="flex items-center justify-between px-2 pb-1.5">
                     <h3 className="text-[10px] font-semibold uppercase tracking-wider text-gray-500">
                       Recent
@@ -1412,7 +1506,7 @@ export default function SearchSheet({
                       );
                     })}
                   </div>
-                </div>
+                </section>
               )}
             </div>
           ) : (searchResults?.length ?? 0) === 0 &&
