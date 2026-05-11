@@ -7,6 +7,7 @@ import {
   nearestStations,
   nearestStationsWithin,
   searchStations,
+  stationNameByStopId,
   walkMinutes,
   type StationEntry,
 } from "./stopsIndex";
@@ -280,5 +281,42 @@ describe("nearestStationsWithin", () => {
   it("respects the limit", () => {
     const r = nearestStationsWithin(SAMPLE_INDEX, HERALD_SQ.lng, HERALD_SQ.lat, 10_000, 2);
     expect(r).toHaveLength(2);
+  });
+});
+
+describe("stationNameByStopId", () => {
+  const lines: Lines = {
+    "6": makeLine({
+      id: "6", routeId: "6", stops: [
+        { id: "635", name: "14 St-Union Sq", lat: 40.7349, lng: -73.9904, shapeIdx: 0 },
+        { id: "640", name: "Astor Pl", lat: 40.7301, lng: -73.9911, shapeIdx: 0 },
+      ],
+    }),
+    "L": makeLine({
+      id: "L", routeId: "L", stops: [
+        { id: "L03", name: "14 St-Union Sq", lat: 40.7349, lng: -73.9905, shapeIdx: 0 },
+      ],
+    }),
+  };
+
+  it("returns the stop name when the stopId is present on a line", () => {
+    expect(stationNameByStopId(lines, "635")).toBe("14 St-Union Sq");
+    expect(stationNameByStopId(lines, "640")).toBe("Astor Pl");
+  });
+
+  it("resolves a stopId that only appears on a non-first line", () => {
+    expect(stationNameByStopId(lines, "L03")).toBe("14 St-Union Sq");
+  });
+
+  it("returns null for an unknown stopId so callers can render a placeholder", () => {
+    expect(stationNameByStopId(lines, "Z99")).toBeNull();
+  });
+
+  it("returns null when lines have not loaded yet (cold-boot path)", () => {
+    expect(stationNameByStopId(null, "635")).toBeNull();
+  });
+
+  it("returns null for an empty stopId rather than the first stop name", () => {
+    expect(stationNameByStopId(lines, "")).toBeNull();
   });
 });
