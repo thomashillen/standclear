@@ -8,6 +8,7 @@ import {
 } from "@/lib/stations.server";
 import { findLineBySlug, lineSlug } from "@/lib/lineSlug";
 import { stationSlug } from "@/lib/stationSlug";
+import { getInterchanges } from "@/lib/lineInterchanges";
 import { SITE_NAME, SITE_URL } from "@/lib/site";
 import type { StationEntry } from "@/lib/stopsIndex";
 
@@ -170,21 +171,39 @@ export default async function LinePage({ params }: Params) {
           From {first.name} to {last.name}, in route order:
         </p>
       )}
+      {/* Each row used to lead with the current line's own bullet,
+          repeated 30+ times — redundant since the page header already
+          establishes which line we're on. Surface the *transfer*
+          bullets instead (Apple Maps / Google Maps transit idiom): a
+          rider scanning the stop list is planning transfers off this
+          line, not confirming they're still on it. Rows for single-
+          line stops carry no trailing bullets; rows for hub complexes
+          (Times Sq, Union Sq, Atlantic-Barclays) flex-wrap their
+          transfer-strip when the count is high. */}
       <ul className="not-prose space-y-2">
         {line.stops.map((s) => {
           const entry = stopIdToStation.get(s.id);
           const slug = entry ? stationSlug(entry) : null;
+          const interchanges = getInterchanges(entry, line.routeId);
           const inner = (
-            <span className="flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl bg-white/[0.04] hover:bg-white/[0.08] transition-colors">
-              <span
-                className="inline-flex flex-shrink-0 items-center justify-center w-5 h-5 rounded-full text-[10px] font-black"
-                style={{ background: line.color, color: line.textColor }}
-              >
-                {line.id}
-              </span>
-              <span className="text-[14px] text-gray-100 truncate">
+            <span className="flex items-center justify-between gap-3 px-3.5 py-2.5 rounded-xl bg-white/[0.04] hover:bg-white/[0.08] transition-colors">
+              <span className="text-[14px] text-gray-100 truncate min-w-0">
                 {s.name}
               </span>
+              {interchanges.length > 0 && (
+                <span className="flex flex-wrap items-center justify-end gap-1 flex-shrink-0">
+                  {interchanges.map((r) => (
+                    <span
+                      key={r.routeId}
+                      className="inline-flex flex-shrink-0 items-center justify-center w-5 h-5 rounded-full text-[10px] font-black"
+                      style={{ background: r.color, color: r.textColor }}
+                      aria-label={`Transfer to ${r.id} train`}
+                    >
+                      {r.id}
+                    </span>
+                  ))}
+                </span>
+              )}
             </span>
           );
           return (

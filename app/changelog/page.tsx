@@ -24,6 +24,7 @@ const ENTRIES: Entry[] = [
     date: "2026-05-09",
     title: "MVP build",
     changes: [
+      { type: "changed", text: "Per-line landing pages (/line/A, /line/4, etc.) now surface transfer-line bullets next to each station instead of the same redundant current-line bullet on every row — a rider scanning the stop list is planning where to switch off this line, and the Apple/Google Maps transit idiom is to show interchange routes. Single-line stops render no bullets; hub complexes (Times Sq, Union Sq, Atlantic-Barclays) flex-wrap a strip of every transfer at the complex." },
       { type: "changed", text: "Search empty-state now reads as one calm Apple-Maps-style list: Favorites (Commute / Home / Work) sit above Nearby Stations (the three closest, with route bullets) above Recent. Replaces the previous mix of a big Quick-Commute card, two small Home/Work pills, and the Recent list — three competing visual idioms for the same intent." },
       { type: "fixed", text: "Station-row arrivals now fit three trains per direction even when both miss and walk verdicts are present — dropped the 'miss' verdict pill since the strikethrough on the ETA already communicates 'you missed it'." },
       { type: "added", text: "System Pulse aggregates per-vehicle staleness: when one or more trains in service haven't reported in 90 s+, an amber footer line under the status grid spells out the count (and the hard-stale subset past 6 m+), so a rider checking system health can tell apart a fresh feed from a feed full of aging vehicles." },
