@@ -24,6 +24,7 @@ const ENTRIES: Entry[] = [
     date: "2026-05-09",
     title: "MVP build",
     changes: [
+      { type: "added", text: "Service-alert cards now surface their active window — a compact 'Until Sun 5 AM' / 'Ends in 45 min' sub-line under the headline so a rider reading 'No [Q] service' knows when service returns without having to expand the description or open a separate page. Hidden for indefinite or out-of-horizon windows so the card doesn't grow a no-op row." },
       { type: "changed", text: "Search empty-state now reads as one calm Apple-Maps-style list: Favorites (Commute / Home / Work) sit above Nearby Stations (the three closest, with route bullets) above Recent. Replaces the previous mix of a big Quick-Commute card, two small Home/Work pills, and the Recent list — three competing visual idioms for the same intent." },
       { type: "fixed", text: "Station-row arrivals now fit three trains per direction even when both miss and walk verdicts are present — dropped the 'miss' verdict pill since the strikethrough on the ETA already communicates 'you missed it'." },
       { type: "added", text: "System Pulse aggregates per-vehicle staleness: when one or more trains in service haven't reported in 90 s+, an amber footer line under the status grid spells out the count (and the hard-stale subset past 6 m+), so a rider checking system health can tell apart a fresh feed from a feed full of aging vehicles." },
