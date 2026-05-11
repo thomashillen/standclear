@@ -64,7 +64,7 @@ const MapView = dynamic(() => import("./MapView"), {
   ssr: false,
   loading: () => (
     <div className="flex-1 bg-gray-950 flex items-center justify-center">
-      <div className="text-gray-500 text-sm animate-pulse">Loading map…</div>
+      <div className="text-gray-500 text-sm motion-safe:animate-pulse">Loading map…</div>
     </div>
   ),
 });
