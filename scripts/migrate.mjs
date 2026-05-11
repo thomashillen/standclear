@@ -75,16 +75,34 @@ function pendingMigrations(applied) {
     .map((f) => ({ name: f, sql: readFileSync(join(dir, f), "utf8") }));
 }
 
+// Strip `-- …` line comments + split on `;` so the Neon HTTP driver
+// (which only accepts one statement per prepared call) can run a
+// multi-statement migration file. Statements that end up empty after
+// trimming are skipped — they're whitespace between real ones.
+function splitStatements(body) {
+  const noComments = body
+    .split("\n")
+    .map((l) => l.replace(/--.*$/, ""))
+    .join("\n");
+  return noComments
+    .split(";")
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+}
+
 async function applyOne(name, body) {
-  // Neon's HTTP driver doesn't support multi-statement transactions;
-  // we use the .query method to send the file as a single batch and
-  // record the ledger row in a separate call. If a migration partially
-  // applies, fix the SQL and re-run — the IF NOT EXISTS guards in
-  // each statement make our migrations idempotent on retry.
+  // If a migration partially applies (statement N succeeds, N+1
+  // fails), fix the SQL and re-run — the IF NOT EXISTS guards in
+  // each statement make our migrations idempotent on retry. The
+  // ledger row only goes in after every statement succeeds, so a
+  // partial apply doesn't mark the file as done.
   console.log(`→ applying ${name}`);
-  await sql.query(body);
+  const statements = splitStatements(body);
+  for (const stmt of statements) {
+    await sql.query(stmt);
+  }
   await sql`INSERT INTO _migrations (name) VALUES (${name})`;
-  console.log(`✓ ${name}`);
+  console.log(`✓ ${name} (${statements.length} statement${statements.length === 1 ? "" : "s"})`);
 }
 
 async function main() {
