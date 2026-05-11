@@ -73,10 +73,13 @@ export default function SubwayMap() {
   const [selectedLine, setSelectedLine] = useState<string | null>(null);
   const [focusStopId, setFocusStopId] = useState<string | undefined>();
   const [stationStopId, setStationStopId] = useState<string | null>(null);
-  // Open on first load so nearby stations surface before any interaction.
-  // Mounting the panel also subscribes to geolocation, which on iOS Safari
-  // gives the permission prompt a cold-start path. Users can dismiss.
-  const [nearbyOpen, setNearbyOpen] = useState(true);
+  // Closed on first load so the rider's first impression is the live
+  // map — every train moving across the city — instead of half the
+  // viewport covered by a panel asking for geolocation permission. The
+  // Near-me button in the floating header opens it on tap, which is
+  // also when iOS Safari is happiest to grant the geolocation prompt
+  // (user-activated request, not cold-mount).
+  const [nearbyOpen, setNearbyOpen] = useState(false);
   // SearchSheet state. Mutually exclusive with the other panels; the
   // handler below closes them when search opens. `searchInitialMode`
   // controls which pane the sheet lands in — the header Search button

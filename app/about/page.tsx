@@ -2,7 +2,9 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import MarketingShell from "@/components/marketing/MarketingShell";
 import {
+  AUTHOR_HANDLE,
   AUTHOR_NAME,
+  GITHUB_REPO,
   GITHUB_URL,
   SITE_DESCRIPTION,
   SITE_NAME,
@@ -104,6 +106,31 @@ export default function AboutPage() {
         ; everything else is straight from the MTA.
       </p>
 
+      <h2>Free forever</h2>
+      <p>
+        {SITE_NAME} is free, and that&rsquo;s the plan. No accounts, no
+        ads, no sponsored stations, no data resale. The infrastructure
+        cost today is a few dollars a month — Vercel bandwidth plus
+        Mapbox tiles on the free tier — easy to absorb, and the tool is
+        more useful when there&rsquo;s no friction between you and live
+        arrivals.
+      </p>
+      <p>
+        If the project ever outgrows hobby hosting, an opt-in Pro layer
+        will pay for the infrastructure with features for power riders
+        (push alerts on your saved lines, &ldquo;leave at X&rdquo;
+        reminders, Apple Watch). The baseline experience stays free for
+        everyone, indefinitely.
+      </p>
+      <p>
+        Self-host it if you prefer: the source is{" "}
+        <a href={GITHUB_URL} target="_blank" rel="noopener noreferrer">
+          MIT-licensed
+        </a>
+        . Fork it, deploy it, modify it — your only running cost is your
+        own Mapbox token, since the MTA feeds are free.
+      </p>
+
       <h2>The honest part</h2>
       <p>
         {SITE_NAME} is unaffiliated with the MTA. Train data can lag the
@@ -134,6 +161,67 @@ export default function AboutPage() {
         </a>{" "}
         or read the <Link href="/privacy">privacy policy</Link> and{" "}
         <Link href="/terms">terms of service</Link>.
+      </p>
+
+      <h2>For press &amp; fact-checks</h2>
+      <p>
+        Quotable boilerplate, paraphrase freely:
+      </p>
+      <blockquote
+        className="not-prose my-4 rounded-2xl border border-white/[0.08] bg-white/[0.04] px-5 py-4 text-[15px] text-gray-200 leading-relaxed"
+      >
+        <p>
+          {SITE_NAME} is a free, real-time tracker for the New York City
+          subway. Every train on every line is animated live on a dark
+          map, with seconds-precise arrival countdowns at every station,
+          severity-classified service alerts, and address-to-address
+          trip planning that includes street-level walking directions
+          and transfer routing. There&rsquo;s no account, no app store
+          download required, and no advertising — the source code is
+          MIT-licensed on GitHub. Built by {AUTHOR_NAME} (
+          <a
+            href={`https://github.com/${AUTHOR_HANDLE}`}
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            @{AUTHOR_HANDLE}
+          </a>
+          ); data streams straight from the MTA&rsquo;s public
+          GTFS-Realtime feeds. {SITE_NAME} is unaffiliated with the MTA.
+        </p>
+      </blockquote>
+      <p>
+        Brand assets:{" "}
+        <a href="/icon-512.png" target="_blank" rel="noopener noreferrer">
+          512×512 app icon
+        </a>
+        ,{" "}
+        <a href="/icon-192.png" target="_blank" rel="noopener noreferrer">
+          192×192
+        </a>
+        ,{" "}
+        <a
+          href="/apple-touch-icon.png"
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          180×180 Apple touch icon
+        </a>
+        . Every public page emits an{" "}
+        <code>og:image</code> at <code>/opengraph-image</code> for
+        framed social-share thumbnails. Press inquiries route through{" "}
+        <a
+          href={`${GITHUB_URL}/issues/new?labels=press&title=Press%3A%20`}
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          GitHub
+        </a>{" "}
+        until a direct press inbox lands. Source repo:{" "}
+        <a href={GITHUB_URL} target="_blank" rel="noopener noreferrer">
+          github.com/{GITHUB_REPO}
+        </a>
+        .
       </p>
     </MarketingShell>
   );

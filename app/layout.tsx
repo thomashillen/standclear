@@ -93,8 +93,8 @@ export default function RootLayout({
 }: Readonly<{ children: React.ReactNode }>) {
   // body uses min-h-dvh + overscroll-none rather than a fixed dvh
   // height with overflow-hidden — the latter blocked the marketing
-  // routes (/about, /privacy, /terms, /changelog, /pricing, /status)
-  // from scrolling. The map page itself locks the viewport with its
+  // routes (/about, /privacy, /terms, /changelog, /status) from
+  // scrolling. The map page itself locks the viewport with its
   // own `<div className="h-dvh w-screen overflow-hidden">` wrapper
   // (see app/page.tsx), so removing the body lock doesn't change
   // anything for that route.

@@ -9,10 +9,10 @@ import {
 } from "@/lib/site";
 
 // Shared chrome for the public marketing routes (/about /privacy /terms
-// /changelog /pricing /status). The map app at "/" intentionally has
-// no chrome — these pages do, so visitors arriving from a search
-// result, a tweet, or a back-link get a coherent product surface
-// rather than a single-page tool dropped on a static page.
+// /changelog /status). The map app at "/" intentionally has no chrome
+// — these pages do, so visitors arriving from a search result, a
+// tweet, or a back-link get a coherent product surface rather than a
+// single-page tool dropped on a static page.
 
 interface Props {
   /** Page title (rendered as <h1>). */
@@ -55,12 +55,6 @@ export default function MarketingShell({
               className="hidden sm:inline px-2 py-1 rounded hover:text-white transition-colors"
             >
               Changelog
-            </Link>
-            <Link
-              href="/pricing"
-              className="hidden sm:inline px-2 py-1 rounded hover:text-white transition-colors"
-            >
-              Pricing
             </Link>
             <a
               href={GITHUB_URL}
@@ -119,12 +113,6 @@ export default function MarketingShell({
               About
             </Link>
             <Link
-              href="/pricing"
-              className="hover:text-white transition-colors"
-            >
-              Pricing
-            </Link>
-            <Link
               href="/changelog"
               className="hover:text-white transition-colors"
             >
@@ -132,9 +120,6 @@ export default function MarketingShell({
             </Link>
             <Link href="/status" className="hover:text-white transition-colors">
               Status
-            </Link>
-            <Link href="/press" className="hover:text-white transition-colors">
-              Press
             </Link>
             <Link
               href="/privacy"
