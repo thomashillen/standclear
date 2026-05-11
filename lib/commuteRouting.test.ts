@@ -461,6 +461,98 @@ describe("estimateTripTimeSec", () => {
     const walkSec = 300 * (1.3 / 1.4);
     expect(t).toBeCloseTo(walkSec + FALLBACK_WAIT_S + 1 * TRAVEL_PER_STOP_S, 6);
   });
+
+  it("uses live transfer-station arrivals for the leg-2 wait", () => {
+    // Two-leg plan: L from 8 Av (L01) → Union Sq, transfer to 4 →
+    // Wall St. Rider boards leg 1 immediately (live "0s" arrival),
+    // travels 1 stop (90s), walks the transfer (180s) → reaches the
+    // 4 platform at Union Sq at T = 0 + 90 + 180 = 270s. The leg-2
+    // arrival at "635" is at eta=330s, so the leg-2 wait should be
+    // 330 − 270 = 60s — not the 240s fallback.
+    const arrivals = new Map<string, Arrival[]>([
+      ["L01", [
+        { routeId: "L", stopId: "L01", direction: "S", eta: 0, tripId: "leg1-soon" },
+      ]],
+      ["635", [
+        { routeId: "4", stopId: "635", direction: "S", eta: 330, tripId: "leg2-good" },
+      ]],
+    ]);
+    const t = estimateTripTimeSec(TWO_LEG_PLAN, {
+      arrivalsByStation: arrivals,
+      nowSec: 0,
+    });
+    // 0 (leg1 wait) + 90 (leg1 travel) + 180 (transfer) + 60 (leg2
+    // wait) + 180 (leg2 travel)
+    expect(t).toBe(0 + TRAVEL_PER_STOP_S + TRANSFER_S + 60 + 2 * TRAVEL_PER_STOP_S);
+  });
+
+  it("falls back to FALLBACK_WAIT_S on leg 2 when no transfer-station arrival is reachable", () => {
+    // Leg-2 arrival at the transfer (eta=100s) is BEFORE the rider
+    // physically reaches the transfer platform (T=270s). It's
+    // already left from the rider's perspective and should be
+    // ignored — wait reverts to the schedule-fallback constant.
+    const arrivals = new Map<string, Arrival[]>([
+      ["L01", [
+        { routeId: "L", stopId: "L01", direction: "S", eta: 0, tripId: "leg1-soon" },
+      ]],
+      ["635", [
+        { routeId: "4", stopId: "635", direction: "S", eta: 100, tripId: "leg2-already-left" },
+      ]],
+    ]);
+    const t = estimateTripTimeSec(TWO_LEG_PLAN, {
+      arrivalsByStation: arrivals,
+      nowSec: 0,
+    });
+    expect(t).toBe(0 + TRAVEL_PER_STOP_S + TRANSFER_S + FALLBACK_WAIT_S + 2 * TRAVEL_PER_STOP_S);
+  });
+
+  it("counts a sibling route's transfer-station arrival toward the leg-2 wait", () => {
+    // Leg 2 nominally takes the 4 but lists the 5 as a sibling
+    // (Lex Av trunk). A sibling arrival at the transfer counts —
+    // rider takes whichever pulls in first.
+    const planSiblingLeg2: TripPlan = {
+      legs: [
+        TWO_LEG_PLAN.legs[0],
+        { ...TWO_LEG_PLAN.legs[1], siblingRouteIds: ["5"] },
+      ],
+      totalStops: TWO_LEG_PLAN.totalStops,
+      transferComplexId: TWO_LEG_PLAN.transferComplexId,
+    };
+    const arrivals = new Map<string, Arrival[]>([
+      ["L01", [
+        { routeId: "L", stopId: "L01", direction: "S", eta: 0, tripId: "leg1-soon" },
+      ]],
+      ["635", [
+        { routeId: "4", stopId: "635", direction: "S", eta: 600, tripId: "late-4" },
+        { routeId: "5", stopId: "635", direction: "S", eta: 330, tripId: "soon-5" },
+      ]],
+    ]);
+    const t = estimateTripTimeSec(planSiblingLeg2, {
+      arrivalsByStation: arrivals,
+      nowSec: 0,
+    });
+    // Same math as the live-transfer test: 0+90+180+60+180.
+    expect(t).toBe(0 + TRAVEL_PER_STOP_S + TRANSFER_S + 60 + 2 * TRAVEL_PER_STOP_S);
+  });
+
+  it("ignores transfer-station arrivals on the wrong route or direction", () => {
+    // The transfer station has plenty of arrivals — but none for the
+    // route + direction the leg actually needs. Wait should fall back.
+    const arrivals = new Map<string, Arrival[]>([
+      ["L01", [
+        { routeId: "L", stopId: "L01", direction: "S", eta: 0, tripId: "leg1-soon" },
+      ]],
+      ["635", [
+        { routeId: "6", stopId: "635", direction: "S", eta: 300, tripId: "wrong-route" },
+        { routeId: "4", stopId: "635", direction: "N", eta: 300, tripId: "wrong-direction" },
+      ]],
+    ]);
+    const t = estimateTripTimeSec(TWO_LEG_PLAN, {
+      arrivalsByStation: arrivals,
+      nowSec: 0,
+    });
+    expect(t).toBe(0 + TRAVEL_PER_STOP_S + TRANSFER_S + FALLBACK_WAIT_S + 2 * TRAVEL_PER_STOP_S);
+  });
 });
 
 // ─── rankPlansByTime ───────────────────────────────────────────────
