@@ -11,6 +11,7 @@ import { buildStationIndex } from "@/lib/stopsIndex";
 import { useSheetDrag } from "@/lib/useSheetDrag";
 import { trainStaleness, type TrainStaleness } from "@/lib/trainStaleness";
 import { AlertsSection } from "./AlertsSection";
+import { DragHandle } from "./DragHandle";
 
 interface Props {
   stopId: string;
@@ -499,14 +500,10 @@ export default function StationPanel({ stopId, onClose, onSelectLine, onStartDir
       style={sheetStyle}
       data-glass-active={isDragging || undefined}
     >
-      <button
-        type="button"
-        className="sm:hidden flex items-start justify-center h-7 pt-1.5 flex-shrink-0 touch-none w-full"
-        onClick={onHandleTap}
-        aria-label={detent === "half" ? "Expand panel" : "Collapse panel"}
-      >
-        <div className="w-9 h-[5px] rounded-full bg-white/25" />
-      </button>
+      <DragHandle
+        onTap={onHandleTap}
+        ariaLabel={detent === "half" ? "Expand panel" : "Collapse panel"}
+      />
 
       <div
         className="flex flex-col gap-3 px-4 pt-2 pb-3 flex-shrink-0 border-b border-white/[0.06] sm:cursor-auto cursor-grab active:cursor-grabbing touch-none"

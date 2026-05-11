@@ -53,6 +53,7 @@ import {
   WalkingDetail,
   type RouteColorMap,
 } from "./panelUI";
+import { DragHandle } from "./DragHandle";
 
 interface Props {
   open: boolean;
@@ -980,14 +981,10 @@ export default function SearchSheet({
           gets a proper tap target (h-7 = 28px) for the tap-to-toggle
           gesture. Visual rhythm matches NearbyPanel / StationPanel /
           LinePanel. */}
-      <button
-        type="button"
-        className="sm:hidden flex items-start justify-center h-7 pt-1.5 flex-shrink-0 touch-none w-full"
-        onClick={onHandleTap}
-        aria-label={detent === "half" ? "Expand panel" : "Collapse panel"}
-      >
-        <div className="w-9 h-[5px] rounded-full bg-white/25" />
-      </button>
+      <DragHandle
+        onTap={onHandleTap}
+        ariaLabel={detent === "half" ? "Expand panel" : "Collapse panel"}
+      />
 
       {/* Title row — drag-zone for the panel. */}
       <div
