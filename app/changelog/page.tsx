@@ -24,6 +24,7 @@ const ENTRIES: Entry[] = [
     date: "2026-05-09",
     title: "MVP build",
     changes: [
+      { type: "changed", text: "Loading-skeleton pulses (Service Alerts list placeholders, station and line live-arrivals shimmer, the geolocation 'Finding you…' icon, the map's first-paint label, LinePicker bullet grid) now respect prefers-reduced-motion: the gray placeholder shapes still hold the layout, but the breathing animation only runs for riders who haven't asked the OS to reduce motion." },
       { type: "changed", text: "Search empty-state now reads as one calm Apple-Maps-style list: Favorites (Commute / Home / Work) sit above Nearby Stations (the three closest, with route bullets) above Recent. Replaces the previous mix of a big Quick-Commute card, two small Home/Work pills, and the Recent list — three competing visual idioms for the same intent." },
       { type: "fixed", text: "Station-row arrivals now fit three trains per direction even when both miss and walk verdicts are present — dropped the 'miss' verdict pill since the strikethrough on the ETA already communicates 'you missed it'." },
       { type: "changed", text: "Decorative 'live-feed' ping rings (floating header pill, System Pulse popup, /status page) now respect prefers-reduced-motion: the colored dot + glow still carries the state signal, but the outward pulse animation only runs for riders who haven't asked the OS to reduce motion." },

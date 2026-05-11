@@ -276,7 +276,7 @@ export default function LinePicker({ lines, selectedLine, onSelect }: LinePicker
                       <div
                         key={id}
                         aria-hidden="true"
-                        className="aspect-square rounded-full bg-white/[0.06] animate-pulse"
+                        className="aspect-square rounded-full bg-white/[0.06] motion-safe:animate-pulse"
                       />
                     );
                   }

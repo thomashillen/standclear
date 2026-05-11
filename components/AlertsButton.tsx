@@ -235,7 +235,7 @@ export function AlertsDialog({
               {[0, 1, 2].map((i) => (
                 <div
                   key={i}
-                  className="h-[60px] rounded-xl bg-white/[0.04] animate-pulse"
+                  className="h-[60px] rounded-xl bg-white/[0.04] motion-safe:animate-pulse"
                 />
               ))}
             </div>
@@ -415,7 +415,7 @@ export default function AlertsButton() {
               {[0, 1, 2].map((i) => (
                 <div
                   key={i}
-                  className="h-[60px] rounded-xl bg-white/[0.04] animate-pulse"
+                  className="h-[60px] rounded-xl bg-white/[0.04] motion-safe:animate-pulse"
                 />
               ))}
             </div>

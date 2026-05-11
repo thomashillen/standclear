@@ -389,7 +389,7 @@ export default function LinePanel({ lineId, focusStopId, onClose, onStationOpen 
         onTouchCancel={contentHandlers.onTouchCancel}
       >
         {!data && (
-          <div className="text-center text-xs text-gray-500 py-8 animate-pulse">
+          <div className="text-center text-xs text-gray-500 py-8 motion-safe:animate-pulse">
             Loading live arrivals…
           </div>
         )}
