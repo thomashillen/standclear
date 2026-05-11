@@ -133,8 +133,15 @@ export default function StatusPanel() {
   }, []);
 
   if (error && !data) {
+    // role="alert" → assertive announcement: a rider on a screen
+    // reader who hit /status to confirm whether the app is healthy
+    // shouldn't have to wait for a polite region to flush before
+    // hearing that the endpoint itself is unreachable.
     return (
-      <div className="not-prose mt-2 mb-6 px-4 py-4 rounded-xl bg-rose-500/10 ring-1 ring-rose-500/30 text-rose-200 text-[14px]">
+      <div
+        role="alert"
+        className="not-prose mt-2 mb-6 px-4 py-4 rounded-xl bg-rose-500/10 ring-1 ring-rose-500/30 text-rose-200 text-[14px]"
+      >
         Failed to reach the health endpoint: {error}
       </div>
     );
@@ -146,14 +153,20 @@ export default function StatusPanel() {
     // reason instead of pretending we're checking.
     if (!online) {
       return (
-        <div className="not-prose mt-2 mb-6 px-4 py-4 rounded-xl bg-white/[0.04] text-gray-300 text-[14px]">
+        <div
+          role="status"
+          className="not-prose mt-2 mb-6 px-4 py-4 rounded-xl bg-white/[0.04] text-gray-300 text-[14px]"
+        >
           Offline — health checks paused. They&rsquo;ll resume the moment
           your device reconnects.
         </div>
       );
     }
     return (
-      <div className="not-prose mt-2 mb-6 px-4 py-4 rounded-xl bg-white/[0.04] text-gray-400 text-[14px] animate-pulse">
+      <div
+        role="status"
+        className="not-prose mt-2 mb-6 px-4 py-4 rounded-xl bg-white/[0.04] text-gray-400 text-[14px] motion-safe:animate-pulse"
+      >
         Checking systems…
       </div>
     );
@@ -177,7 +190,13 @@ export default function StatusPanel() {
               <span className="absolute inset-0 rounded-full bg-current opacity-50 motion-safe:animate-ping" />
             )}
           </span>
-          <div>
+          {/* role="status" → polite announcement: when the rollup
+              flips ok → degraded → down (or back), screen-reader
+              riders hear the headline + tone label re-read as one
+              atomic block. Scoped tight (just the headline pair) so
+              the per-15s timestamp + version updates in the sibling
+              div don't trigger noisy repeat reads. */}
+          <div role="status">
             <div className="text-[15px] font-bold tracking-tight">
               {data.status === "ok"
                 ? "All systems operational"
