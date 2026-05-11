@@ -1,0 +1,57 @@
+name: Dispatch alerts cron
+
+# Fires the /api/cron/dispatch-alerts endpoint every 5 minutes.
+# Vercel Cron on the Hobby plan only allows daily schedules, so we
+# trigger from GitHub Actions instead — free, 5-min minimum cadence,
+# good enough for severe-alert latency (the alerts themselves last
+# hours; a few minutes of polling jitter is invisible to riders).
+#
+# The endpoint is gated by Bearer CRON_SECRET. The secret lives in
+# this repo's Actions secrets (synced from Vercel env via
+# `gh secret set CRON_SECRET --body "$value"`). If the value rotates
+# in Vercel, re-sync it here too — they have to match.
+#
+# workflow_dispatch lets a developer fire the cron manually from
+# the Actions UI for testing without waiting for the next scheduled
+# tick.
+
+on:
+  schedule:
+    # Every 5 minutes. GitHub may delay by ~5-15 min during heavy
+    # load; that's still well inside the freshness window for an
+    # MTA service-disruption alert that typically lasts hours.
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+# Prevent overlapping invocations if a prior tick is still running
+# (unlikely at our scale — the endpoint usually returns in <2s —
+# but cheap insurance).
+concurrency:
+  group: dispatch-alerts
+  cancel-in-progress: false
+
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Fire dispatch endpoint
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          if [ -z "$CRON_SECRET" ]; then
+            echo "CRON_SECRET secret not set in repo — aborting." >&2
+            exit 1
+          fi
+          # --fail-with-body so a 401 / 500 fails the workflow run
+          # (visible in GH UI as a red ✕). Capture the JSON summary
+          # in the run log for post-mortem; metrics surface later
+          # via the telemetry PR.
+          #
+          # URL points at the Vercel production deployment. Switch
+          # to https://standclear.app once that domain is wired up.
+          curl --fail-with-body \
+            --silent --show-error \
+            --max-time 60 \
+            -H "Authorization: Bearer $CRON_SECRET" \
+            https://standclear.vercel.app/api/cron/dispatch-alerts
