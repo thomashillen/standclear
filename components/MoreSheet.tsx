@@ -23,7 +23,6 @@ import { GithubIcon } from "@/components/marketing/GithubIcon";
 import {
   FEEDBACK_URL,
   GITHUB_URL,
-  ISSUES_URL,
   VERSION_LABEL,
 } from "@/lib/site";
 import { useAlerts } from "@/lib/useAlerts";
@@ -558,63 +557,14 @@ function AboutDialog({
             </div>
           </section>
 
-          {/* Legal + community footer. Opens out-of-app links in a new
-              tab so the rider's live map context isn't blown away. The
-              in-app /privacy and /terms routes use plain anchors (not
-              Next <Link/>) to sidestep the SPA boundary — those pages
-              own their own scroll layout, and a same-tab navigation
-              from the dialog is the right intent there. */}
-          <section className="px-1 pt-2 border-t border-white/[0.06]">
-            <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1.5 text-[11.5px] text-gray-400">
-              <a
-                href="/about"
-                className="hover:text-white transition-colors"
-              >
-                About
-              </a>
-              <span aria-hidden className="text-gray-700">
-                ·
-              </span>
-              <a
-                href="/changelog"
-                className="hover:text-white transition-colors"
-              >
-                Changelog
-              </a>
-              <span aria-hidden className="text-gray-700">
-                ·
-              </span>
-              <a
-                href="/privacy"
-                className="hover:text-white transition-colors"
-              >
-                Privacy
-              </a>
-              <span aria-hidden className="text-gray-700">
-                ·
-              </span>
-              <a
-                href="/terms"
-                className="hover:text-white transition-colors"
-              >
-                Terms
-              </a>
-              <span aria-hidden className="text-gray-700">
-                ·
-              </span>
-              <a
-                href={ISSUES_URL}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="hover:text-white transition-colors"
-              >
-                Feedback
-              </a>
-            </div>
-            <p className="mt-3 text-center text-[11px] text-gray-500 tabular-nums">
-              {VERSION_LABEL} · build
-            </p>
-          </section>
+          {/* Version footer. The About / Feedback / GitHub rows above
+              already cover the rider-relevant identity surface, and
+              Privacy / Terms live on the marketing site footer for
+              riders who land there from search results — duplicating
+              them in the in-app overflow was clutter. */}
+          <p className="pt-2 text-center text-[11px] text-gray-500 tabular-nums border-t border-white/[0.06]">
+            {VERSION_LABEL} · build
+          </p>
         </div>
       </DialogContent>
     </Dialog>
