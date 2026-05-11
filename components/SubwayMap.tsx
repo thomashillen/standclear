@@ -1005,7 +1005,11 @@ export default function SubwayMap() {
               }}
             />
             {online && data && !stale && !feedDegraded && (
-              <span className="absolute inset-0 rounded-full bg-emerald-400 animate-ping opacity-60" />
+              // motion-safe gate: the ring pulse is purely decorative
+              // emphasis on "live" — the colored dot + glow underneath
+              // already carries the state signal. A rider with
+              // `prefers-reduced-motion` gets the static dot, no ping.
+              <span className="absolute inset-0 rounded-full bg-emerald-400 motion-safe:animate-ping opacity-60" />
             )}
           </span>
           {/* Train glyph next to the count so a first-time visitor
