@@ -40,6 +40,7 @@ import {
   TripPlanRow,
   type RouteColorMap,
 } from "./panelUI";
+import { DragHandle } from "./DragHandle";
 
 interface Props {
   open: boolean;
@@ -886,14 +887,10 @@ export default function NearbyPanel({
           gesture. The 5px pill stays at the top edge of the panel
           via items-start + pt-1.5 so visual rhythm matches StationPanel
           / LinePanel. */}
-      <button
-        type="button"
-        className="sm:hidden flex items-start justify-center h-7 pt-1.5 flex-shrink-0 touch-none w-full"
-        onClick={onHandleTap}
-        aria-label={detent === "half" ? "Expand panel" : "Collapse panel"}
-      >
-        <div className="w-9 h-[5px] rounded-full bg-white/25" />
-      </button>
+      <DragHandle
+        onTap={onHandleTap}
+        ariaLabel={detent === "half" ? "Expand panel" : "Collapse panel"}
+      />
 
       {/* Title row — drag-zone for the panel. */}
       <div

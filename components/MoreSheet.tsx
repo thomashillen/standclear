@@ -37,6 +37,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { AlertsDialog } from "./AlertsButton";
+import { DragHandle } from "./DragHandle";
 import {
   isGlassTiltGated,
   isGlassTiltGranted,
@@ -155,14 +156,7 @@ export default function MoreSheet({ open, onClose, onSetHome, onSetWork }: Props
         style={sheetStyle}
         data-glass-active={isDragging || undefined}
       >
-        <button
-          type="button"
-          className="sm:hidden flex items-start justify-center h-7 pt-1.5 flex-shrink-0 touch-none w-full"
-          onClick={onHandleTap}
-          aria-label="Drag to dismiss"
-        >
-          <div className="w-9 h-[5px] rounded-full bg-white/25" />
-        </button>
+        <DragHandle onTap={onHandleTap} ariaLabel="Drag to dismiss" />
 
         <div
           className="flex items-center justify-between px-4 pt-1.5 pb-2.5 flex-shrink-0 sm:cursor-auto cursor-grab active:cursor-grabbing touch-none sm:pt-4 sm:pb-3"

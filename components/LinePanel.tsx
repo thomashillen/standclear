@@ -9,6 +9,7 @@ import { useNow } from "@/lib/useNow";
 import { useSheetDrag } from "@/lib/useSheetDrag";
 import { snapshotStaleLabel } from "@/lib/trainStaleness";
 import { AlertsSection } from "./AlertsSection";
+import { DragHandle } from "./DragHandle";
 
 interface LinePanelProps {
   lineId: string; // routeId (e.g. "1", "A", "GS")
@@ -327,14 +328,10 @@ export default function LinePanel({ lineId, focusStopId, onClose, onStationOpen 
           dismiss. Hit area is h-11 (44px, the iOS minimum tap target) so a
           finger landing anywhere near the top of the sheet catches the
           gesture, not just the 5px pill. */}
-      <button
-        type="button"
-        className="sm:hidden flex items-start justify-center h-7 pt-1.5 flex-shrink-0 touch-none w-full"
-        onClick={onHandleTap}
-        aria-label={detent === "half" ? "Expand panel" : "Collapse panel"}
-      >
-        <div className="w-9 h-[5px] rounded-full bg-white/25" />
-      </button>
+      <DragHandle
+        onTap={onHandleTap}
+        ariaLabel={detent === "half" ? "Expand panel" : "Collapse panel"}
+      />
 
       <div
         className={`flex items-center justify-between px-4 py-3 flex-shrink-0 ${textClass} relative sm:cursor-auto cursor-grab active:cursor-grabbing touch-none`}
