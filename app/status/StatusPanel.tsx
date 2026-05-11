@@ -1,10 +1,19 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { isOnline, subscribeOnline, useOnline } from "@/lib/useOnline";
 
 // Client-side polling status panel. Hits /api/health every 15s and
 // renders a per-check pill plus an overall rollup. Plain client
 // component — no need for the larger useTrains-style external store.
+//
+// Mirrors the pause-on-hidden + pause-on-offline pattern useTrains
+// and useAlerts already use: a backgrounded tab or an airplane-mode
+// device shouldn't burn battery firing into the void every 15s, and
+// the page is useless data-wise when the rider can't reach the
+// origin anyway. Resume on visibilitychange or `online` event fires
+// an immediate tick so the rider sees fresh data the moment they
+// come back.
 
 type Status = "ok" | "degraded" | "down";
 
@@ -53,10 +62,18 @@ export default function StatusPanel() {
   const [data, setData] = useState<HealthResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loadedAt, setLoadedAt] = useState<number | null>(null);
+  // `online` drives the rendered "Offline" badge; the poller itself
+  // reads the module-level `isOnline()` so its lifecycle doesn't
+  // depend on this hook re-rendering.
+  const online = useOnline();
 
   useEffect(() => {
     let cancelled = false;
+    let intervalId: ReturnType<typeof setInterval> | null = null;
+
     const tick = async () => {
+      if (typeof document !== "undefined" && document.hidden) return;
+      if (!isOnline()) return;
       try {
         const res = await fetch("/api/health", { cache: "no-store" });
         // /api/health returns 503 on critical failures but the body
@@ -74,11 +91,44 @@ export default function StatusPanel() {
         }
       }
     };
-    tick();
-    const id = setInterval(tick, POLL_MS);
+
+    const start = () => {
+      if (intervalId) return;
+      if (typeof document !== "undefined" && document.hidden) return;
+      if (!isOnline()) return;
+      tick();
+      intervalId = setInterval(tick, POLL_MS);
+    };
+
+    const stop = () => {
+      if (!intervalId) return;
+      clearInterval(intervalId);
+      intervalId = null;
+    };
+
+    start();
+
+    const onVisibility = () => {
+      if (typeof document === "undefined") return;
+      if (document.hidden) stop();
+      else start();
+    };
+    if (typeof document !== "undefined") {
+      document.addEventListener("visibilitychange", onVisibility);
+    }
+
+    const unsubOnline = subscribeOnline(() => {
+      if (isOnline()) start();
+      else stop();
+    });
+
     return () => {
       cancelled = true;
-      clearInterval(id);
+      stop();
+      if (typeof document !== "undefined") {
+        document.removeEventListener("visibilitychange", onVisibility);
+      }
+      unsubOnline();
     };
   }, []);
 
@@ -91,6 +141,17 @@ export default function StatusPanel() {
   }
 
   if (!data) {
+    // Cold-start offline: the poller pauses while !isOnline(), so the
+    // placeholder would otherwise spin forever. Surface the real
+    // reason instead of pretending we're checking.
+    if (!online) {
+      return (
+        <div className="not-prose mt-2 mb-6 px-4 py-4 rounded-xl bg-white/[0.04] text-gray-300 text-[14px]">
+          Offline — health checks paused. They&rsquo;ll resume the moment
+          your device reconnects.
+        </div>
+      );
+    }
     return (
       <div className="not-prose mt-2 mb-6 px-4 py-4 rounded-xl bg-white/[0.04] text-gray-400 text-[14px] animate-pulse">
         Checking systems…
@@ -125,7 +186,11 @@ export default function StatusPanel() {
         </div>
         <div className="text-[11.5px] text-gray-400 tabular-nums sm:text-right">
           v{data.version} ·{" "}
-          {loadedAt ? new Date(loadedAt).toLocaleTimeString() : "—"}
+          {!online
+            ? "Offline · paused"
+            : loadedAt
+              ? new Date(loadedAt).toLocaleTimeString()
+              : "—"}
         </div>
       </div>
 
