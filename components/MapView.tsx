@@ -226,7 +226,6 @@ function makeTrainIcon(color: string): ImageData {
   const bodyY = (H - BODY_H) / 2;
   const bodyR = 6;
   const bodyRight = bodyX + BODY_W;
-  const bodyMidY = bodyY + BODY_H / 2;
 
   const bodyPath = () => {
     ctx.beginPath();

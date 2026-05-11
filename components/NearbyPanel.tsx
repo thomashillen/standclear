@@ -29,11 +29,9 @@ import {
 } from "@/lib/commuteRouting";
 import {
   buildStationIndex,
-  catchVerdict,
   haversineMeters,
   nearestStations,
   nearestStationsWithin,
-  type CatchVerdict,
   type NearbyStation,
   type StationEntry,
 } from "@/lib/stopsIndex";
