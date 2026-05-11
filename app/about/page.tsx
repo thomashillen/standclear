@@ -7,7 +7,6 @@ import {
   SITE_DESCRIPTION,
   SITE_NAME,
   SITE_TAGLINE,
-  SITE_TITLE,
 } from "@/lib/site";
 
 export const metadata: Metadata = {
