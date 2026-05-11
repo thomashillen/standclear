@@ -36,7 +36,7 @@ This is a Next.js 16 / React 19 app rendering live NYC subway data on a Mapbox d
 
 ### UI shell
 
-`app/page.tsx` mounts a single `SubwayMap` (client component, dynamic-imported `MapView` so Mapbox stays out of SSR). Bottom-sheet panels (`StationPanel`, `NearbyPanel`, `LinePanel`, `SearchSheet`, `MoreSheet`, `LiveTrainsPopup`) are mutually exclusive — opening one closes the others; that orchestration lives in `SubwayMap.tsx`. `NearbyPanel` is open on first load to surface the iOS Safari geolocation prompt.
+`app/page.tsx` mounts a single `SubwayMap` (client component, dynamic-imported `MapView` so Mapbox stays out of SSR). Bottom-sheet panels (`StationPanel`, `NearbyPanel`, `LinePanel`, `SearchSheet`, `MoreSheet`, `LiveTrainsPopup`) are mutually exclusive — opening one closes the others; that orchestration lives in `SubwayMap.tsx`. All panels start closed; the live map is the cold-boot hero. The Near-me button in the floating header is the user-tap path that triggers iOS Safari's geolocation prompt.
 
 ### Routing & station model
 
@@ -50,21 +50,6 @@ This is a Next.js 16 / React 19 app rendering live NYC subway data on a Mapbox d
 Vitest config (`vitest.config.ts`) defaults to `jsdom` so hook tests get `window`/`localStorage`. Pure-logic and Node-only tests opt out via a `// @vitest-environment node` directive at the top of the file (e.g. `app/api/trains/route.test.ts`, `lib/stopsIndex.test.ts`). Match this pattern when adding tests.
 
 `@/` resolves to the repo root in both Next and Vitest.
-
-## Native (iOS / Android via Capacitor)
-
-The same web app ships as a native iOS (and later Android) app via Capacitor. The native shell loads `https://standclear.app` in a WebView with native plugins layered on top. Full setup, build, and submission docs live in [`NATIVE.md`](./NATIVE.md).
-
-Key pieces:
-
-- `capacitor.config.ts` — bundle ID `app.standclear`, server URL pointed at production, splash + status-bar config.
-- `ios/` — committed Xcode project. Open `App.xcworkspace` (not `.xcodeproj`) after running `pod install`.
-- `native-shell/` — small offline-fallback HTML used as a `webDir` placeholder.
-- `lib/native.ts` — `isNative()` runtime check + Capacitor lifecycle helpers. Use this to gate code that should only run in the native shell.
-- `components/NativeBoot.tsx` — mounted in `app/layout.tsx`; hides splash and sets status bar style on first mount.
-- `RegisterSW` and `InstallPrompt` short-circuit when `isNative()` is true.
-
-Day-to-day: web-only changes need no native rebuild — they ship via Vercel and the native WebView picks them up on next launch. Native rebuilds are only needed when `capacitor.config.ts`, `ios/App/`, or a Capacitor plugin changes.
 
 ## Conventions
 
