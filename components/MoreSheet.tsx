@@ -37,6 +37,7 @@ import {
 } from "@/components/ui/dialog";
 import { AlertsDialog } from "./AlertsButton";
 import { DragHandle } from "./DragHandle";
+import { NotificationsRow } from "./NotificationsRow";
 import {
   isGlassTiltGated,
   isGlassTiltGranted,
@@ -242,6 +243,13 @@ export default function MoreSheet({ open, onClose, onSetHome, onSetWork }: Props
               <ChevronRight className="w-4 h-4 text-gray-500 flex-shrink-0" />
             </button>
           </section>
+
+          {/* ─── Notifications ─── */}
+          {/* NotificationsRow renders its own <section> + heading
+              when push is supported, and returns null on unsupported
+              browsers — so no stranded heading on platforms that
+              can't receive push. */}
+          <NotificationsRow />
 
           {/* ─── Commute anchors ─── */}
           <section>
