@@ -82,13 +82,39 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   url.searchParams.set("steps", "true");
   url.searchParams.set("language", "en");
 
-  const upstream = await fetch(url.toString(), { signal: req.signal });
+  // Normalized failure modes — mirrors the proxy helper in /api/geocode:
+  //   • AbortError → 499 with null body, no log (client cancelled).
+  //   • Network rejection → 502, logged so clustered upstream incidents
+  //     surface in the operator log sink.
+  //   • Malformed JSON → 502, logged. Mapbox 5xx HTML pages and dropped
+  //     partial responses both land here.
+  //   • Upstream non-2xx → status preserved so the client's cache-drop
+  //     logic still trips on 401 / 429.
+  let upstream: Response;
+  try {
+    upstream = await fetch(url.toString(), { signal: req.signal });
+  } catch (err) {
+    if (err instanceof Error && err.name === "AbortError") {
+      return NextResponse.json(null, { status: 499 });
+    }
+    captureWarning("Mapbox directions fetch failed", {
+      detail: err instanceof Error ? err.message : String(err),
+    });
+    return NextResponse.json(null, { status: 502 });
+  }
   if (!upstream.ok) {
     logEvent("warn", "Mapbox directions upstream error", { status: upstream.status });
     // Preserve the status so the client's cache-drop logic on non-2xx fires.
     return NextResponse.json(null, { status: upstream.status });
   }
 
-  const data: unknown = await upstream.json();
-  return NextResponse.json(data);
+  try {
+    const data: unknown = await upstream.json();
+    return NextResponse.json(data);
+  } catch (err) {
+    captureWarning("Mapbox directions malformed JSON", {
+      detail: err instanceof Error ? err.message : String(err),
+    });
+    return NextResponse.json(null, { status: 502 });
+  }
 }
