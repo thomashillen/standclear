@@ -138,4 +138,50 @@ describe("StatusPanel", () => {
     });
     expect(screen.getByText(/Offline · paused/)).toBeTruthy();
   });
+
+  it("wraps the rollup headline in a polite live region", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => HEALTH_OK,
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const { default: StatusPanel } = await freshImport();
+    render(<StatusPanel />);
+    const headline = await screen.findByText(/All systems operational/);
+    // The headline is wrapped in a role="status" container so screen
+    // readers re-read the rollup when the status transitions
+    // (ok → degraded → down). The wrapper sits on the *inner* pair so
+    // the per-15s timestamp update on the sibling node doesn't trigger
+    // noisy repeat announcements.
+    const liveRegion = headline.closest('[role="status"]');
+    expect(liveRegion).not.toBeNull();
+    expect(liveRegion?.textContent).toContain("All systems operational");
+    expect(liveRegion?.textContent).toContain("Operational");
+  });
+
+  it("announces the offline placeholder as a status", async () => {
+    setNavigatorOnline(false);
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const { default: StatusPanel } = await freshImport();
+    render(<StatusPanel />);
+    // Cold-start offline: the only thing on the page is the
+    // paused-health placeholder. Should sit inside a role="status"
+    // region so a screen-reader rider hears the reason instead of
+    // landing on a silent page.
+    const placeholder = screen.getByText(/Offline — health checks paused/);
+    expect(placeholder.closest('[role="status"]')).not.toBeNull();
+  });
+
+  it("announces a fetch failure as an alert", async () => {
+    const fetchMock = vi.fn().mockRejectedValue(new Error("boom"));
+    vi.stubGlobal("fetch", fetchMock);
+    const { default: StatusPanel } = await freshImport();
+    render(<StatusPanel />);
+    // role="alert" → assertive: a rider hitting /status to confirm
+    // health needs to hear "endpoint unreachable" without waiting
+    // for a polite queue to flush.
+    const errorEl = await screen.findByText(/Failed to reach the health endpoint/);
+    expect(errorEl.closest('[role="alert"]')).not.toBeNull();
+  });
 });

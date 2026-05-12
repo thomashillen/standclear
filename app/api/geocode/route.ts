@@ -96,13 +96,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       if (val) url.searchParams.set(key, val);
     }
 
-    const upstream = await fetch(url.toString(), { signal: req.signal });
-    if (!upstream.ok) {
-      logEvent("warn", "Mapbox suggest upstream error", { status: upstream.status });
-      return NextResponse.json({ suggestions: [] }, { status: upstream.status });
-    }
-    const data: unknown = await upstream.json();
-    return NextResponse.json(data);
+    return await proxyMapbox(url.toString(), { suggestions: [] }, "suggest", req);
   }
 
   if (action === "retrieve") {
@@ -118,14 +112,58 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     const sessionToken = searchParams.get("session_token");
     if (sessionToken) url.searchParams.set("session_token", sessionToken);
 
-    const upstream = await fetch(url.toString(), { signal: req.signal });
-    if (!upstream.ok) {
-      logEvent("warn", "Mapbox retrieve upstream error", { status: upstream.status });
-      return NextResponse.json({ features: [] }, { status: upstream.status });
-    }
-    const data: unknown = await upstream.json();
-    return NextResponse.json(data);
+    return await proxyMapbox(url.toString(), { features: [] }, "retrieve", req);
   }
 
   return NextResponse.json({ error: "unknown action" }, { status: 400 });
+}
+
+// Forwards a Mapbox upstream call and normalizes the failure modes the
+// raw `await fetch` chain would otherwise let escape:
+//   • `AbortError` from `req.signal` — fires when the client cancels
+//     mid-flight (typeahead keystroke aborting the previous suggest).
+//     Returns 499 with the empty shape; no log entry, the client has
+//     already moved on and noisy operator logs would obscure real
+//     upstream incidents.
+//   • Network rejection — DNS, TCP, TLS, or upstream-timeout. Returns
+//     502 with the empty shape; logs the cause via captureWarning so
+//     the operator sees clustered failures.
+//   • Malformed JSON body — Mapbox 5xx pages return HTML, and a
+//     mid-deploy edge can drop a partial body. Returns 502 with the
+//     empty shape; logs.
+//   • Upstream non-2xx — preserved status (so the client's typeahead
+//     cache-drop logic still fires on 401 / 429), empty body.
+async function proxyMapbox(
+  upstreamUrl: string,
+  emptyShape: Record<string, unknown>,
+  label: "suggest" | "retrieve",
+  req: NextRequest,
+): Promise<NextResponse> {
+  let upstream: Response;
+  try {
+    upstream = await fetch(upstreamUrl, { signal: req.signal });
+  } catch (err) {
+    if (err instanceof Error && err.name === "AbortError") {
+      return NextResponse.json(emptyShape, { status: 499 });
+    }
+    captureWarning(`Mapbox ${label} fetch failed`, {
+      detail: err instanceof Error ? err.message : String(err),
+    });
+    return NextResponse.json(emptyShape, { status: 502 });
+  }
+  if (!upstream.ok) {
+    logEvent("warn", `Mapbox ${label} upstream error`, {
+      status: upstream.status,
+    });
+    return NextResponse.json(emptyShape, { status: upstream.status });
+  }
+  try {
+    const data: unknown = await upstream.json();
+    return NextResponse.json(data);
+  } catch (err) {
+    captureWarning(`Mapbox ${label} malformed JSON`, {
+      detail: err instanceof Error ? err.message : String(err),
+    });
+    return NextResponse.json(emptyShape, { status: 502 });
+  }
 }

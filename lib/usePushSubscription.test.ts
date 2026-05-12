@@ -290,5 +290,100 @@ describe("usePushSubscription", () => {
     // been rolled back via .unsubscribe().
     const createdSub = await subscribeSpy.mock.results[0].value;
     expect(createdSub.unsubscribe).toHaveBeenCalled();
+    // And the rider sees a surface-ready error.
+    expect(result.current.error).toBe(
+      "Couldn't enable notifications. Try again.",
+    );
+  });
+
+  it("starts with error = null and clears it on the next attempt", async () => {
+    setNotificationPermission("default", "granted");
+    mockPushManager();
+    mockServiceWorker(null);
+    setUserAgent("Mozilla/5.0 (X11; Linux x86_64)");
+    setStandaloneFalse();
+
+    const { result } = renderHook(() => usePushSubscription());
+    await waitFor(() => expect(result.current.state).toBe("default"));
+    expect(result.current.error).toBeNull();
+
+    // First attempt: fail.
+    fetchSpy.mockResolvedValueOnce({ ok: false, status: 503 });
+    await act(async () => {
+      await result.current.subscribe();
+    });
+    expect(result.current.error).toBe(
+      "Couldn't enable notifications. Try again.",
+    );
+
+    // Second attempt: success. Error must clear before the new
+    // attempt completes; here we just assert the final state.
+    fetchSpy.mockResolvedValueOnce({ ok: true });
+    await act(async () => {
+      await result.current.subscribe();
+    });
+    expect(result.current.error).toBeNull();
+    expect(result.current.state).toBe("granted-subscribed");
+  });
+
+  it("surfaces a configuration error when VAPID key is missing", async () => {
+    const originalKey = process.env.NEXT_PUBLIC_VAPID_KEY;
+    delete process.env.NEXT_PUBLIC_VAPID_KEY;
+    try {
+      setNotificationPermission("default", "granted");
+      mockPushManager();
+      mockServiceWorker(null);
+      setUserAgent("Mozilla/5.0 (X11; Linux x86_64)");
+      setStandaloneFalse();
+
+      const { result } = renderHook(() => usePushSubscription());
+      await waitFor(() => expect(result.current.state).toBe("default"));
+
+      await act(async () => {
+        await result.current.subscribe();
+      });
+
+      expect(result.current.error).toBe(
+        "Notifications aren't set up on this deploy.",
+      );
+      // No POST should have fired — we bailed before serializing
+      // the subscription.
+      expect(fetchSpy).not.toHaveBeenCalled();
+    } finally {
+      // Restore so subsequent tests see the original env shape.
+      if (originalKey !== undefined)
+        process.env.NEXT_PUBLIC_VAPID_KEY = originalKey;
+    }
+  });
+
+  it("does not flip to unsubscribed when the server delete fails", async () => {
+    setNotificationPermission("granted");
+    mockPushManager();
+    const existing = {
+      endpoint: "https://x.example/sub",
+      unsubscribe: vi.fn().mockResolvedValue(true),
+    };
+    mockServiceWorker(existing);
+    setUserAgent("Mozilla/5.0 (X11; Linux x86_64)");
+    setStandaloneFalse();
+    fetchSpy.mockResolvedValueOnce({ ok: false, status: 500 });
+
+    const { result } = renderHook(() => usePushSubscription());
+    await waitFor(() =>
+      expect(result.current.state).toBe("granted-subscribed"),
+    );
+
+    await act(async () => {
+      await result.current.unsubscribe();
+    });
+
+    // Server-side row still exists (delete failed) → we must NOT
+    // claim the rider is unsubscribed, otherwise the next severe
+    // alert would still ping them while the UI says it's off.
+    expect(result.current.state).toBe("granted-subscribed");
+    expect(existing.unsubscribe).not.toHaveBeenCalled();
+    expect(result.current.error).toBe(
+      "Couldn't disable notifications. Try again.",
+    );
   });
 });
