@@ -9,7 +9,11 @@ import {
 import { findStationBySlug, stationSlug } from "@/lib/stationSlug";
 import { lineSlug } from "@/lib/lineSlug";
 import { SITE_NAME, SITE_TITLE, SITE_URL } from "@/lib/site";
-import { haversineMeters, type StationEntry } from "@/lib/stopsIndex";
+import {
+  formatWalkSummary,
+  haversineMeters,
+  type StationEntry,
+} from "@/lib/stopsIndex";
 
 interface Params {
   params: Promise<{ slug: string }>;
@@ -256,8 +260,15 @@ export default async function StationPage({ params }: Params) {
       <h2>Nearby stations</h2>
       <p>
         Walking-distance stations within a few blocks of {station.name},
-        ranked by straight-line distance:
+        ranked by distance:
       </p>
+      {/* Right-hand label uses the same `formatWalkSummary` helper the
+          in-app NearbyPanel renders below each station row, so the SEO
+          surface and the live app agree on the unit a NYC rider
+          budgets in: minutes first, meters as a secondary spatial
+          check. Same 1.3× grid-detour factor as the trip planner +
+          catchVerdict; sort order is unchanged (walkMinutes is
+          monotonic in haversine meters at constant grid factor). */}
       <ul className="not-prose space-y-2">
         {neighbors.map(({ entry, meters }) => (
           <li key={entry.stopId}>
@@ -282,7 +293,7 @@ export default async function StationPage({ params }: Params) {
                 </span>
               </span>
               <span className="flex-shrink-0 text-[12px] text-gray-500 tabular-nums">
-                {Math.round(meters)} m
+                {formatWalkSummary(meters)}
               </span>
             </Link>
           </li>
