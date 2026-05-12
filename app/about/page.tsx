@@ -71,6 +71,12 @@ export default function AboutPage() {
           buries the alert for the line you&rsquo;re actually on.
         </li>
         <li>
+          <strong>Push notifications for severe disruptions</strong> are
+          opt-in from the More sheet — full suspensions and other
+          severity-{`"`}severe{`"`} alerts in the MTA feed ping you on
+          your phone or laptop without {SITE_NAME} needing to be open.
+        </li>
+        <li>
           <strong>Install it as an app</strong> on iOS or Android —
           standalone window, dynamic-island clearance, offline shell.
         </li>
@@ -118,9 +124,11 @@ export default function AboutPage() {
       <p>
         If the project ever outgrows hobby hosting, an opt-in Pro layer
         will pay for the infrastructure with features for power riders
-        (push alerts on your saved lines, &ldquo;leave at X&rdquo;
-        reminders, Apple Watch). The baseline experience stays free for
-        everyone, indefinitely.
+        (per-line opt-ins layered over the free severe-alert pushes,
+        &ldquo;leave at X&rdquo; reminders, Apple Watch). The baseline
+        experience — live map, every station, every line, address-to-
+        address planning, and opt-in pushes for severe service alerts —
+        stays free for everyone, indefinitely.
       </p>
       <p>
         Self-host it if you prefer: the source is{" "}
