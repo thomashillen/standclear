@@ -30,8 +30,10 @@ export default function StatusPage() {
         </li>
         <li>
           <strong>Static data</strong> — the baked GTFS line and
-          station blob shipped with the app. Sentinel today; future
-          checks will probe the edge cache.
+          station blob shipped with the app. We probe the file on the
+          deployed instance for presence and minimum size (≥&nbsp;100&nbsp;KB),
+          so a deploy that dropped the build step flips this check
+          instead of silently rendering empty panels on the live map.
         </li>
         <li>
           <strong>Runtime</strong> — that the {SITE_NAME} server itself
