@@ -7,6 +7,7 @@ import {
   getLinesServer,
 } from "@/lib/stations.server";
 import { findStationBySlug, stationSlug } from "@/lib/stationSlug";
+import { lineSlug } from "@/lib/lineSlug";
 import { SITE_NAME, SITE_URL } from "@/lib/site";
 import { haversineMeters, type StationEntry } from "@/lib/stopsIndex";
 
@@ -84,10 +85,17 @@ export default async function StationPage({ params }: Params) {
   const lines = getLinesServer();
 
   const neighbors = neighborStations(stations, station);
+  // The Lines record is keyed by GTFS routeId, not the display id —
+  // they diverge for the three shuttles (GS/FS/H all render as "S" on
+  // the badge but key the lookup as their routeId). The same routeId
+  // is also the URL slug source for /line/[id]. Looking up by r.id
+  // here used to silently return undefined for every shuttle-station
+  // row, dropping the line name from the description string.
   const inboundLines = station.routes.map((r) => {
-    const line = lines[r.id];
+    const line = lines[r.routeId];
     return {
       id: r.id,
+      routeId: r.routeId,
       color: r.color,
       textColor: r.textColor,
       name: line?.name ?? "",
@@ -134,16 +142,24 @@ export default async function StationPage({ params }: Params) {
         dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
       />
 
+      {/* Header-row bullets deep-link into the per-line landing page
+          (the same /line/[id] surface /line/[id] links *out* to from
+          its station list). Symmetric internal linking keeps both SEO
+          surfaces from being dead-ends — a reader arriving at a
+          station page can follow any of its trains to the line's
+          full route, and PageRank flows in both directions. */}
       <div className="not-prose flex flex-wrap items-center gap-2 -mt-2">
         {inboundLines.map((l) => (
-          <span
-            key={l.id}
-            className="inline-flex items-center justify-center w-9 h-9 rounded-full text-[15px] font-black tracking-tight ring-1 ring-white/10"
+          <Link
+            key={l.routeId}
+            href={`/line/${lineSlug(l.routeId)}`}
+            className="inline-flex items-center justify-center w-9 h-9 rounded-full text-[15px] font-black tracking-tight ring-1 ring-white/10 hover:ring-white/30 transition-shadow no-underline"
             style={{ background: l.color, color: l.textColor }}
-            title={l.name || `${l.id} train`}
+            title={l.name ? `${l.name}` : `${l.id} train`}
+            aria-label={`Open ${l.id} train page`}
           >
             {l.id}
-          </span>
+          </Link>
         ))}
       </div>
 
@@ -179,11 +195,30 @@ export default async function StationPage({ params }: Params) {
       </p>
 
       <h2>Lines at this station</h2>
-      <ul>
+      {/* Row visual mirrors the Nearby-stations list below — bullet
+          on the left, description on the right, full-row hover state
+          to signal the link affordance for keyboard + pointer users.
+          Each row drops into the per-line landing page (full route,
+          terminals, station count). */}
+      <ul className="not-prose space-y-2">
         {inboundLines.map((l) => (
-          <li key={l.id}>
-            <strong>{l.id}</strong>
-            {l.name && ` — ${l.name}`}
+          <li key={l.routeId}>
+            <Link
+              href={`/line/${lineSlug(l.routeId)}`}
+              className="flex items-center gap-3 px-3.5 py-2.5 rounded-xl bg-white/[0.04] hover:bg-white/[0.08] transition-colors no-underline"
+            >
+              <span
+                className="inline-flex flex-shrink-0 items-center justify-center w-7 h-7 rounded-full text-[12px] font-black tracking-tight"
+                style={{ background: l.color, color: l.textColor }}
+                aria-hidden
+              >
+                {l.id}
+              </span>
+              <span className="text-[14px] text-gray-100 min-w-0 truncate">
+                <strong className="font-semibold">{l.id} train</strong>
+                {l.name && <span className="text-gray-400"> — {l.name}</span>}
+              </span>
+            </Link>
           </li>
         ))}
       </ul>
