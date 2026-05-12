@@ -21,6 +21,12 @@ import { isRateLimited, callerKey } from "@/lib/rateLimit";
 //   • Rate-limited per IP. A run-away client (e.g. a render loop that
 //     captures the same exception every frame) hits the limit and
 //     stops costing us function invocations.
+//   • Caller IP is used **in-memory only** for the rate-limiter's
+//     sliding window — it is never written into the persisted log
+//     line. The Map in `lib/rateLimit.ts` resets on cold start and
+//     never reaches the operator's log sink, so an IP-keyed abuse
+//     defense doesn't compromise the /privacy promise that no
+//     identifier tied to a rider is persisted on our servers.
 //   • Body size capped (~4 KB) so a single request can't fill a log
 //     line with a multi-megabyte stack.
 //   • Always answers 204 on accepted writes. We never expose whether a
@@ -169,10 +175,15 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   }
 
   const message = sanitizeString(payload.message);
+  // `ip` stays scoped to this function — it drove the rate-limit
+  // decision above and is dropped on the way out. We deliberately do
+  // NOT include it in the persisted record: the rate-limiter's
+  // in-memory window already handles abuse, and the /privacy page
+  // promises no rider-identifying data is stored on our servers.
+  void ip;
   const fields: Record<string, unknown> = {
     ...sanitizeFields(payload.fields),
     source: "client-forward",
-    forwardedFromIp: ip,
   };
   if (payload.href) fields.href = sanitizeString(payload.href);
   if (payload.userAgent) {

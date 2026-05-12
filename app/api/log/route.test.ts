@@ -121,6 +121,33 @@ describe("/api/log", () => {
     expect(lastStatus).toBe(429);
   });
 
+  it("does not persist the caller IP in the log record", async () => {
+    // Privacy invariant: the rate-limiter's in-memory window may key
+    // off caller IP, but nothing IP-shaped should land in the field
+    // bag re-emitted through logEvent / captureWarning — the operator's
+    // log sink is the one place a persisted-PII regression would matter,
+    // and the /privacy page promises this won't happen.
+    const POST = await loadPost();
+    const ip = "203.0.113.42";
+    await POST(
+      makeReq(
+        { severity: "error", message: "x", fields: { component: "Map" } },
+        ip,
+      ),
+    );
+    expect(logEventSpy).toHaveBeenCalledTimes(1);
+    const fields = logEventSpy.mock.calls[0][2] as Record<string, unknown>;
+    // Spot the canonical name first (catches a literal re-introduction),
+    // then a structural sweep for any value that looks IP-shaped.
+    expect(fields).not.toHaveProperty("forwardedFromIp");
+    expect(fields).not.toHaveProperty("ip");
+    expect(fields).not.toHaveProperty("callerIp");
+    for (const v of Object.values(fields)) {
+      if (typeof v !== "string") continue;
+      expect(v).not.toMatch(/\b203\.0\.113\.42\b/);
+    }
+  });
+
   it("truncates and caps fields", async () => {
     const POST = await loadPost();
     // 18 keys: first one carries a >1 KB value to exercise the
