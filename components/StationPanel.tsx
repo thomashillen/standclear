@@ -488,7 +488,14 @@ export default function StationPanel({ stopId, onClose, onSelectLine, onStartDir
   const isFav = has(favId);
 
   return (
+    // `role="region"` + `aria-label` gives the panel a landmark a
+    // screen-reader rider can jump to and away from. Not `dialog` —
+    // the panel is non-modal (the map underneath stays interactive)
+    // and doesn't trap focus; claiming dialog semantics without
+    // those would mislead AT users.
     <div
+      role="region"
+      aria-label={`${station.name} station`}
       className="
         absolute z-20 overflow-hidden flex flex-col
         inset-x-0 bottom-0 top-[var(--panel-top-rest)] rounded-t-[28px] border-t border-white/[0.08]
