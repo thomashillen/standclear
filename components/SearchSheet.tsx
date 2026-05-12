@@ -1844,7 +1844,12 @@ export default function SearchSheet({
               {/* Refresh strip — pulls fresh live arrivals so the
                   next-train ETAs and total-time estimates re-rank
                   with the latest feed. Spins the icon while a
-                  refresh is in flight for tactile feedback. */}
+                  refresh is in flight for tactile feedback; gated
+                  on motion-safe so a rider with
+                  prefers-reduced-motion sees the static icon and
+                  picks up the refresh from the re-ranked list
+                  underneath, consistent with the rest of the
+                  motion-safe animation idiom (PRs #82/#83). */}
               <div className="flex items-center justify-between px-1 -mt-1 mb-1">
                 <span className="text-[10px] font-semibold uppercase tracking-wider text-gray-500">
                   {tripPlans.length} route{tripPlans.length === 1 ? "" : "s"}
@@ -1868,7 +1873,7 @@ export default function SearchSheet({
                   className="press inline-flex items-center gap-1.5 h-7 px-2.5 rounded-full bg-white/[0.06] hover:bg-white/[0.12] text-gray-200 text-[11px] font-semibold touch-manipulation"
                 >
                   <RefreshCw
-                    className={`w-3.5 h-3.5 ${refreshing ? "animate-spin" : ""}`}
+                    className={`w-3.5 h-3.5 ${refreshing ? "motion-safe:animate-spin" : ""}`}
                   />
                   Refresh
                 </button>
