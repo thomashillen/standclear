@@ -16,7 +16,8 @@ import { usePushSubscription } from "@/lib/usePushSubscription";
 // over an empty space).
 
 export function NotificationsRow() {
-  const { state, pending, subscribe, unsubscribe } = usePushSubscription();
+  const { state, pending, error, subscribe, unsubscribe } =
+    usePushSubscription();
 
   if (state === "unsupported") return null;
 
@@ -30,6 +31,20 @@ export function NotificationsRow() {
         Notifications
       </h3>
       {inner}
+      {/* role="alert" (implicit aria-live="assertive") so a SR rider
+          hears the failure without waiting for a polite queue — the
+          tap they just made appeared to do nothing. The region exists
+          even when empty so React preserves its identity across
+          re-renders; some AT pairs only announce subsequent text
+          updates inside a live region that mounted before the text. */}
+      <p
+        role="alert"
+        className={`px-3 pt-2 text-[12px] text-rose-300 leading-snug ${
+          error ? "" : "sr-only"
+        }`}
+      >
+        {error ?? ""}
+      </p>
     </section>
   );
 }

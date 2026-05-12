@@ -129,11 +129,28 @@ async function resolveInitialState(): Promise<PushState> {
   }
 }
 
+// Rider-facing error copy. Operator detail goes to captureException;
+// these strings are what shows up under the row. Kept generic on
+// purpose — "try again" is the only action a rider can take, and
+// HTTP status / VAPID-misconfig framing belongs in the function log,
+// not the panel.
+const ERR_SUBSCRIBE = "Couldn't enable notifications. Try again.";
+const ERR_UNSUBSCRIBE = "Couldn't disable notifications. Try again.";
+const ERR_NOT_CONFIGURED = "Notifications aren't set up on this deploy.";
+
 export function usePushSubscription(): {
   state: PushState;
   /** True while subscribe() / unsubscribe() is mid-flight. UI uses
    *  this to disable the button + show a spinner. */
   pending: boolean;
+  /** Last subscribe/unsubscribe failure surface-ready for the row.
+   *  Null when the operation succeeded or hasn't been attempted; set
+   *  on fetch reject, non-2xx, missing VAPID, or thrown push API
+   *  errors. Cleared at the start of the next attempt. The hook
+   *  intentionally treats user-dismissed permission prompts (perm =
+   *  "default") as not-an-error — the rider explicitly declined, so
+   *  the [Enable] affordance stays as the next step. */
+  error: string | null;
   subscribe: () => Promise<void>;
   unsubscribe: () => Promise<void>;
 } {
@@ -143,6 +160,7 @@ export function usePushSubscription(): {
   // pre-mount renders.
   const [state, setState] = useState<PushState>("unsupported");
   const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -158,6 +176,7 @@ export function usePushSubscription(): {
   const subscribe = useCallback(async () => {
     if (pending) return;
     setPending(true);
+    setError(null);
     try {
       // Permission prompt. Must run from a user-gesture chain — the
       // calling component invokes subscribe() from an onClick, which
@@ -180,6 +199,7 @@ export function usePushSubscription(): {
         captureException(new Error("VAPID public key not configured"), {
           source: "usePushSubscription",
         });
+        setError(ERR_NOT_CONFIGURED);
         return;
       }
 
@@ -202,6 +222,7 @@ export function usePushSubscription(): {
         captureException(new Error("PushSubscription missing fields"), {
           source: "usePushSubscription",
         });
+        setError(ERR_SUBSCRIBE);
         return;
       }
 
@@ -227,11 +248,13 @@ export function usePushSubscription(): {
         // Roll back the browser-side subscription so a future retry
         // doesn't think we're already subscribed.
         await sub.unsubscribe().catch(() => {});
+        setError(ERR_SUBSCRIBE);
         return;
       }
       setState("granted-subscribed");
     } catch (err) {
       captureException(err, { source: "usePushSubscription:subscribe" });
+      setError(ERR_SUBSCRIBE);
     } finally {
       setPending(false);
     }
@@ -240,19 +263,38 @@ export function usePushSubscription(): {
   const unsubscribe = useCallback(async () => {
     if (pending) return;
     setPending(true);
+    setError(null);
+    // Track whether the server-side delete actually landed. A failed
+    // unsubscribe shouldn't claim the rider is unsubscribed, otherwise
+    // a transient 500 would silently leave them subscribed on the
+    // server while the UI flips to off.
+    let serverOk = false;
     try {
       const anonymousId = getOrMintAnonymousId();
       // Server-side first — if this fails we're still subscribed
       // browser-side, which is recoverable on the rider's next
       // subscribe tap. The reverse order would leave a zombie
       // server-side row pointing at a dead browser endpoint.
-      await fetch("/api/notifications/unsubscribe", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ anonymousId }),
-      }).catch((err) => {
+      try {
+        const res = await fetch("/api/notifications/unsubscribe", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ anonymousId }),
+        });
+        serverOk = res.ok;
+        if (!res.ok) {
+          captureException(new Error(`Unsubscribe HTTP ${res.status}`), {
+            source: "usePushSubscription",
+          });
+        }
+      } catch (err) {
         captureException(err, { source: "usePushSubscription:unsubscribe" });
-      });
+      }
+
+      if (!serverOk) {
+        setError(ERR_UNSUBSCRIBE);
+        return;
+      }
 
       const reg = await navigator.serviceWorker.ready;
       const sub = await reg.pushManager.getSubscription();
@@ -266,10 +308,11 @@ export function usePushSubscription(): {
       );
     } catch (err) {
       captureException(err, { source: "usePushSubscription:unsubscribe" });
+      setError(ERR_UNSUBSCRIBE);
     } finally {
       setPending(false);
     }
   }, [pending]);
 
-  return { state, pending, subscribe, unsubscribe };
+  return { state, pending, error, subscribe, unsubscribe };
 }
