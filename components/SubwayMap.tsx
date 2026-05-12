@@ -11,6 +11,10 @@ import { legGeometry, type TripPlan } from "@/lib/commuteRouting";
 import { pickDismissTarget } from "@/lib/escDismiss";
 import { buildStationIndex, type StationEntry } from "@/lib/stopsIndex";
 import {
+  deriveLiveFeedState,
+  liveFeedAnnouncement,
+} from "@/lib/liveFeedState";
+import {
   clearWalkingRouteCache,
   fetchWalkingRoute,
   type WalkingRoute,
@@ -508,6 +512,18 @@ export default function SubwayMap() {
   // (the device dropped its own connection).
   const feedHealth = useFeedHealth();
   const feedDegraded = online && feedHealth.degraded;
+  // Single source of truth for the live-pill's state — feeds both the
+  // visual chrome chain below and the parallel `role="status"` live
+  // region that announces transitions to screen readers. Mirrors the
+  // pattern PR #94 introduced on /status: the pill's `aria-label`
+  // only fires when focus lands on it, so a rider with VoiceOver / SR
+  // active never heard the feed flip from live → stale → offline.
+  const liveFeedState = deriveLiveFeedState(
+    online,
+    Boolean(data),
+    feedDegraded,
+    stale,
+  );
 
   // ─── Deep-link bootstrap ──────────────────────────────────────────
   // Per-station SEO pages link back here as `/?station=<stopId>`,
@@ -1037,6 +1053,20 @@ export default function SubwayMap() {
             </>
           )}
         </button>
+
+        {/* Screen-reader announcement for live-feed state transitions.
+            The pill above has an `aria-label` that fires only when
+            focus lands on the button — a rider whose SR focus is
+            elsewhere never hears the feed flip from live → stale →
+            offline. This sibling `role="status"` (implicit
+            aria-live=polite, aria-atomic=true) re-reads the state
+            sentence whenever it changes. Train count is deliberately
+            excluded from the announcement string — see
+            `lib/liveFeedState.ts::liveFeedAnnouncement` — so the
+            region doesn't fire on every 8 s poll tick. */}
+        <span role="status" className="sr-only">
+          {liveFeedAnnouncement(liveFeedState)}
+        </span>
 
         {/* Search & directions — Apple-Maps-style sheet for finding a
             station or planning a trip. Mutually exclusive with the

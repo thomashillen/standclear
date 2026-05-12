@@ -152,11 +152,13 @@ export function directRoutesBetween(
  *   • Single transfer max. Real NYC trips occasionally need two (e.g.
  *     Brooklyn outer to Bronx outer), but >95% of intra-borough trips
  *     are direct or single-transfer.
- *   • Doesn't yet penalize for transfer time. A transfer that's fast
- *     in real life (cross-platform L↔M at Lorimer) ranks the same as
- *     a slow one (deep tunnel walks at Times Sq). Real arrival times
- *     on leg 2 would let us refine this; for now we trust the rider
- *     to choose between alternatives.
+ *   • Transfer-walk overhead is a single constant (TRANSFER_S). A
+ *     fast cross-platform transfer (L↔M at Lorimer) is modeled the
+ *     same as a slow deep-tunnel one (Times Sq); we trust the rider
+ *     to choose between alternatives. The leg-2 wait, however, IS
+ *     live-data-aware: when arrivals at the transfer station are
+ *     known, `estimateTripTimeSec` measures the next reachable train
+ *     from the rider's modeled arrival on that platform.
  *   • Express vs local share track on some segments but have different
  *     stop lists. We treat each route's stop list as authoritative —
  *     so an "express" plan that skips local stops shows fewer total
@@ -217,6 +219,16 @@ export interface RankPlanOptions {
  * + (optional) transfer (TRANSFER_S) + second-leg wait + travel
  * + walk to destination
  *
+ * The leg-1 wait uses any matching live arrival at the boarding
+ * complex; the leg-2 (and beyond) wait does the same lookup at the
+ * TRANSFER station, but measures the next reachable train from the
+ * rider's modeled arrival on that platform — the prior legs' wait,
+ * travel, and the TRANSFER_S walk are tracked in `arrivalAtBoardSec`.
+ * That lets the planner distinguish a fast transfer (next train
+ * arrives 1 min after rider gets to the platform) from a slow one
+ * (next train is 12 min out) when both share the same nominal stop
+ * count, which matters for ranking via `rankPlansByTime`.
+ *
  * Does NOT model weekend/late-night frequency dropoff or service
  * changes; the live wait term is the strongest correction we can
  * apply with the data we have today.
@@ -264,20 +276,33 @@ export function estimateTripTimeSec(
   }
 
   let total = walkFromMeters * WALK_S_PER_M;
+  // Rider's modeled wall-clock (epoch seconds) when they reach the
+  // current leg's boarding platform. Tracked across legs so the
+  // transfer-leg wait calculation can find the next reachable train
+  // at the transfer station relative to the rider's arrival there
+  // — not relative to "now". Initialized to nowSec for leg 0 (the
+  // leg-0 wait still uses eta-from-now semantics because the walk
+  // model upstream double-counts walk time into total separately;
+  // see the leg-0 branch below for why we keep that as-is).
+  let arrivalAtBoardSec = typeof nowSec === "number" ? nowSec : 0;
+  const haveLive = !!arrivalsByStation && typeof nowSec === "number";
 
   for (let i = 0; i < plan.legs.length; i++) {
     const leg = plan.legs[i];
+
+    // Transfer walk runs BEFORE waiting at the new board: the rider
+    // physically walks from the prior leg's alight platform to this
+    // leg's board, THEN waits for the next train. Adding it to
+    // arrivalAtBoardSec here means the live-wait lookup below uses
+    // the rider's actual modeled clock at the transfer station.
+    if (i > 0) {
+      total += TRANSFER_S;
+      arrivalAtBoardSec += TRANSFER_S;
+    }
+
     // Wait time for THIS leg's first train.
     let waitSec = FALLBACK_WAIT_S;
-    if (
-      i === 0 &&
-      arrivalsByStation &&
-      typeof nowSec === "number"
-    ) {
-      // Look up the soonest upcoming arrival at the boarding complex
-      // matching this leg's route + direction. The arrivals lookup
-      // is keyed on canonical complex stopId; the leg already
-      // carries that.
+    if (haveLive) {
       // Co-running routes (siblingRouteIds — N/R/W on Broadway BMT
       // etc.) count as the same option from the rider's perspective:
       // they share the platform, traverse the same complexes, so
@@ -288,43 +313,54 @@ export function estimateTripTimeSec(
       if (leg.siblingRouteIds) {
         for (const sib of leg.siblingRouteIds) validRoutes.add(sib);
       }
-      const arrivals = arrivalsByStation.get(leg.boardComplexId);
+      const arrivals = arrivalsByStation!.get(leg.boardComplexId);
       if (arrivals) {
         let earliest = Infinity;
         for (const a of arrivals) {
           if (!validRoutes.has(a.routeId)) continue;
           if (a.direction !== leg.direction) continue;
-          if (a.eta < nowSec - 5) continue; // already left
-          // When the rider is walking up from a non-station origin,
-          // skip arrivals they can't physically catch. catchVerdict's
-          // "miss" band means even running won't make it (eta − now <
-          // runnable + entry buffer); anything less stays in. Without
-          // this guard, a 60-second arrival would drive `totalMin`
-          // even when the rider is a 4-minute walk away — contradicting
-          // the strikethrough on TripPlanRow's "Next:" inline ETA chip
-          // and undercounting the actual wait. `walkFromMeters === 0`
-          // (rider already on the platform) leaves behavior unchanged.
-          if (
-            walkFromMeters > 0 &&
-            catchVerdict(walkFromMeters, a.eta, nowSec) === "miss"
-          ) {
-            continue;
+          if (i === 0) {
+            // Leg-1 wait keeps existing semantics: eta is measured
+            // from `nowSec`, and `catchVerdict` filters trains the
+            // walk-up rider can't physically catch. Walk time has
+            // already been added to `total` separately above; the
+            // wait below is a "ETA from right now" value rather
+            // than "ETA from when the rider gets to the platform"
+            // — preserving the math the TripPlanRow ETA chips and
+            // existing test expectations are calibrated for.
+            if (a.eta < nowSec! - 5) continue;
+            if (
+              walkFromMeters > 0 &&
+              catchVerdict(walkFromMeters, a.eta, nowSec!) === "miss"
+            ) {
+              continue;
+            }
+          } else {
+            // Transfer leg: rider has a modeled clock at this
+            // leg's board (prior wait + travel + TRANSFER_S walk).
+            // Trains that depart before they reach the platform
+            // are unreachable; the next-train wait is measured
+            // from `arrivalAtBoardSec`, not from `nowSec`. This
+            // is what lets the planner distinguish a fast L → 4
+            // (4 arriving 1 min after rider gets to Union Sq)
+            // from a slow L → 4 (next 4 is 12 min out).
+            if (a.eta < arrivalAtBoardSec - 5) continue;
           }
           if (a.eta < earliest) earliest = a.eta;
         }
         if (Number.isFinite(earliest)) {
-          waitSec = Math.max(0, earliest - nowSec);
+          waitSec =
+            i === 0
+              ? Math.max(0, earliest - nowSec!)
+              : Math.max(0, earliest - arrivalAtBoardSec);
         }
       }
-    } else if (i > 0) {
-      // Transfer wait — we don't have live data for the rider's
-      // arrival time at the transfer station, so use a constant.
-      // The TRANSFER_S walk is added separately below.
-      waitSec = FALLBACK_WAIT_S;
     }
+
     total += waitSec;
-    if (i > 0) total += TRANSFER_S;
+    arrivalAtBoardSec += waitSec;
     total += leg.stopCount * TRAVEL_PER_STOP_S;
+    arrivalAtBoardSec += leg.stopCount * TRAVEL_PER_STOP_S;
   }
 
   total += walkToMeters * WALK_S_PER_M;

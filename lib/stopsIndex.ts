@@ -173,6 +173,29 @@ export function buildStationIndex(lines: Lines): StationEntry[] {
   return complexes;
 }
 
+// Resolve a stopId to the underlying station's display name without
+// building the full station index. MoreSheet's commute anchor rows
+// need just the name for a single pinned stopId; paying for the full
+// complex-merge + route-badge pipeline of buildStationIndex on every
+// open of the sheet would be wasteful. ~30 lines × ~30 stops each
+// (≤1k iterations) is well under a millisecond.
+//
+// Returns null when `lines` is still loading or the stopId is not
+// found in any line's stops — callers should fall back to a calm
+// placeholder so the UI doesn't flash a string mid-hydration.
+export function stationNameByStopId(
+  lines: Lines | null,
+  stopId: string,
+): string | null {
+  if (!lines || !stopId) return null;
+  for (const line of Object.values(lines)) {
+    for (const stop of line.stops) {
+      if (stop.id === stopId) return stop.name;
+    }
+  }
+  return null;
+}
+
 // Simple multi-term substring search over station names. The MTA station
 // list is small (~470) and names are short, so a full-text library would
 // be overkill. Splitting by whitespace means "union sq" matches "14 St-

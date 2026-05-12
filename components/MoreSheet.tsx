@@ -25,6 +25,8 @@ import {
   GITHUB_URL,
   VERSION_LABEL,
 } from "@/lib/site";
+import { stationNameByStopId } from "@/lib/stopsIndex";
+import { useLines } from "@/lib/subwayData";
 import { useAlerts } from "@/lib/useAlerts";
 import { useCommute } from "@/lib/useFavorites";
 import { useSheetDrag } from "@/lib/useSheetDrag";
@@ -72,18 +74,23 @@ interface Props {
 
 function endpointLabel(
   ep: ReturnType<typeof useCommute>["home"] | ReturnType<typeof useCommute>["work"],
+  lines: ReturnType<typeof useLines>,
 ): string | null {
   if (!ep) return null;
   if (ep.kind === "address") return ep.name;
-  // Station endpoints store the stopId, not a friendly name. Without
-  // looking up the station index here we can show "Pinned station" as
-  // a placeholder; when the rider opens SearchSheet they'll see the
-  // actual station name on the row.
-  return "Pinned station";
+  // Station endpoints store the stopId, not a friendly name. Resolve
+  // it against the live `lines` map so the rider sees the actual
+  // station ("14 St-Union Sq") instead of a generic "Pinned station"
+  // placeholder. Falls back to the placeholder only during the
+  // cold-boot window before /public/gtfsData.json has loaded, or for
+  // a stopId that's no longer in the network (an MTA station closure
+  // mid-rider-pin, say) — both states are recoverable.
+  return stationNameByStopId(lines, ep.stopId) ?? "Pinned station";
 }
 
 export default function MoreSheet({ open, onClose, onSetHome, onSetWork }: Props) {
   const data = useAlerts();
+  const lines = useLines();
   const { home, work, setAnchor } = useCommute();
   const [alertsOpen, setAlertsOpen] = useState(false);
   const [aboutOpen, setAboutOpen] = useState(false);
@@ -120,8 +127,8 @@ export default function MoreSheet({ open, onClose, onSetHome, onSetWork }: Props
         ? "info"
         : null;
 
-  const homeLabel = endpointLabel(home);
-  const workLabel = endpointLabel(work);
+  const homeLabel = endpointLabel(home, lines);
+  const workLabel = endpointLabel(work, lines);
 
   // Drag-to-dismiss only — no half/full detents (the menu is short
   // enough that a fixed full-height sheet works). Both rests sit at

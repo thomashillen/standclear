@@ -90,6 +90,94 @@ describe("/api/geocode token resolution", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  // ───── Upstream failure modes ─────────────────────────────────────
+  //
+  // Each path below verifies one branch of the proxy's normalized
+  // error handling. Without these, a Mapbox 5xx page (HTML body), a
+  // client tab close mid-fetch (AbortError), or a network rejection
+  // would throw out of the route handler and surface to the rider as
+  // a generic Next.js 500.
+
+  it("returns 499 + empty shape on client AbortError without logging", async () => {
+    vi.stubEnv("MAPBOX_TOKEN", "secret");
+    fetchMock.mockImplementation(() => {
+      const e = new Error("aborted");
+      e.name = "AbortError";
+      return Promise.reject(e);
+    });
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const GET = await loadGet();
+    const req = makeRequest("action=suggest&q=cancelled&session_token=t-abort");
+    const res = await GET(req);
+
+    expect(res.status).toBe(499);
+    expect(await res.json()).toEqual({ suggestions: [] });
+    // AbortError is normal client behavior (typeahead keystroke cancels
+    // the previous suggest); logging would just be noise.
+    const aborts = warnSpy.mock.calls.filter((args) =>
+      typeof args[0] === "string" && args[0].includes("fetch failed"),
+    );
+    expect(aborts.length).toBe(0);
+  });
+
+  it("returns 502 + empty shape + warns when fetch rejects (network down)", async () => {
+    vi.stubEnv("MAPBOX_TOKEN", "secret");
+    fetchMock.mockRejectedValue(new Error("ENOTFOUND api.mapbox.com"));
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const GET = await loadGet();
+    const req = makeRequest("action=suggest&q=net-fail&session_token=t-net");
+    const res = await GET(req);
+
+    expect(res.status).toBe(502);
+    expect(await res.json()).toEqual({ suggestions: [] });
+    const failures = warnSpy.mock.calls.filter((args) =>
+      typeof args[0] === "string" && args[0].includes("Mapbox suggest fetch failed"),
+    );
+    expect(failures.length).toBe(1);
+  });
+
+  it("returns 502 + empty shape + warns when Mapbox replies with malformed JSON", async () => {
+    vi.stubEnv("MAPBOX_TOKEN", "secret");
+    // Mapbox 5xx pages occasionally come back as HTML; the body parses
+    // as text fine but .json() throws.
+    fetchMock.mockResolvedValue(
+      new Response("<html>Service Unavailable</html>", {
+        status: 200,
+        headers: { "Content-Type": "text/html" },
+      }),
+    );
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const GET = await loadGet();
+    const req = makeRequest("action=retrieve&mapbox_id=abc&session_token=t-malformed");
+    const res = await GET(req);
+
+    expect(res.status).toBe(502);
+    expect(await res.json()).toEqual({ features: [] });
+    const malformed = warnSpy.mock.calls.filter((args) =>
+      typeof args[0] === "string" && args[0].includes("Mapbox retrieve malformed JSON"),
+    );
+    expect(malformed.length).toBe(1);
+  });
+
+  it("preserves upstream non-2xx status (e.g. 429) with the empty shape", async () => {
+    vi.stubEnv("MAPBOX_TOKEN", "secret");
+    fetchMock.mockResolvedValue(
+      new Response("rate limited", { status: 429 }),
+    );
+
+    const GET = await loadGet();
+    const req = makeRequest("action=suggest&q=throttled&session_token=t-429");
+    const res = await GET(req);
+
+    // Client's typeahead drops its cache on non-2xx; the status has to
+    // round-trip rather than be flattened to 502.
+    expect(res.status).toBe(429);
+    expect(await res.json()).toEqual({ suggestions: [] });
+  });
+
   // captureWarning forwards to console.warn and doesn't dedupe; without
   // a module-level latch the per-request fallback warning would flood
   // operator logs under real traffic. Caught in PR #51 review by Codex.
