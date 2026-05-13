@@ -43,7 +43,10 @@ export default function MarketingShell({
             </span>
             <span>{SITE_NAME}</span>
           </Link>
-          <nav className="flex items-center gap-1 sm:gap-3 text-[13px] text-gray-400">
+          <nav
+            aria-label="Primary"
+            className="flex items-center gap-1 sm:gap-3 text-[13px] text-gray-400"
+          >
             <Link
               href="/about"
               className="hidden sm:inline px-2 py-1 rounded hover:text-white transition-colors"
@@ -108,7 +111,13 @@ export default function MarketingShell({
               · {SITE_TAGLINE} · {VERSION_LABEL}
             </span>
           </div>
-          <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5">
+          {/* Distinct landmark from the header <nav>: a screen-reader
+              rider using the rotor sees "Primary" vs "Footer" and can
+              jump to either without scanning every link in the page. */}
+          <nav
+            aria-label="Footer"
+            className="flex flex-wrap items-center gap-x-4 gap-y-1.5"
+          >
             <Link href="/about" className="hover:text-white transition-colors">
               About
             </Link>
@@ -138,7 +147,7 @@ export default function MarketingShell({
             >
               GitHub
             </a>
-          </div>
+          </nav>
         </div>
       </footer>
     </div>
