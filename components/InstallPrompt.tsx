@@ -111,12 +111,19 @@ export default function InstallPrompt() {
   };
 
   return (
+    // Non-modal banner: role="region", not role="dialog". The prompt
+    // doesn't trap focus, doesn't move focus on mount, and has no
+    // ESC-to-dismiss — claiming dialog semantics without focus
+    // management would mislead AT users worse than no role at all
+    // (same posture as the bottom-sheet panels, PR #110). True
+    // modals in the app use Radix's <Dialog> primitives which wire
+    // focus trap + ESC + scrim for free.
     <div
       className="
         pointer-events-none fixed inset-x-0 z-40 px-3
         bottom-[calc(env(safe-area-inset-bottom)+1rem)]
       "
-      role="dialog"
+      role="region"
       aria-label="Install StandClear"
     >
       <div
