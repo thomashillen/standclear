@@ -8,7 +8,7 @@ import {
 } from "@/lib/stations.server";
 import { findStationBySlug, stationSlug } from "@/lib/stationSlug";
 import { lineSlug } from "@/lib/lineSlug";
-import { SITE_NAME, SITE_URL } from "@/lib/site";
+import { SITE_NAME, SITE_TITLE, SITE_URL } from "@/lib/site";
 import { haversineMeters, type StationEntry } from "@/lib/stopsIndex";
 
 interface Params {
@@ -127,6 +127,32 @@ export default async function StationPage({ params }: Params) {
     isAccessibleForFree: true,
   };
 
+  // BreadcrumbList: tells Google the slug → display-name mapping for
+  // the SERP. Without this, results render the raw URL slug
+  // ("14-st-union-sq-635") as the breadcrumb path; with it, the
+  // station's actual name + the site home replace the slug-derived
+  // crumbs. Flat two-level — there is no /stations index page to
+  // act as an intermediate, and Google still uses two-item lists for
+  // the breadcrumb SERP enhancement.
+  const breadcrumbJsonLd = {
+    "@context": "https://schema.org",
+    "@type": "BreadcrumbList",
+    itemListElement: [
+      {
+        "@type": "ListItem",
+        position: 1,
+        name: SITE_TITLE,
+        item: SITE_URL,
+      },
+      {
+        "@type": "ListItem",
+        position: 2,
+        name: station.name,
+        item: `${SITE_URL}/station/${slug}`,
+      },
+    ],
+  };
+
   return (
     <MarketingShell
       eyebrow="Station"
@@ -140,6 +166,10 @@ export default async function StationPage({ params }: Params) {
       <script
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
+      />
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(breadcrumbJsonLd) }}
       />
 
       {/* Header-row bullets deep-link into the per-line landing page

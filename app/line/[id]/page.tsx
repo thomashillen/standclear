@@ -9,7 +9,7 @@ import {
 import { findLineBySlug, lineSlug } from "@/lib/lineSlug";
 import { stationSlug } from "@/lib/stationSlug";
 import { getInterchanges } from "@/lib/lineInterchanges";
-import { SITE_NAME, SITE_URL } from "@/lib/site";
+import { SITE_NAME, SITE_TITLE, SITE_URL } from "@/lib/site";
 import type { StationEntry } from "@/lib/stopsIndex";
 
 interface Params {
@@ -121,6 +121,30 @@ export default async function LinePage({ params }: Params) {
     },
   };
 
+  // BreadcrumbList: SERP-only enhancement that replaces the raw URL
+  // slug in the breadcrumb path with the line's display label. Flat
+  // two-level — no /lines index page to act as a category-level
+  // crumb, and Google still uses two-item lists for the breadcrumb
+  // rich result. Mirrors the same block on /station/[slug].
+  const breadcrumbJsonLd = {
+    "@context": "https://schema.org",
+    "@type": "BreadcrumbList",
+    itemListElement: [
+      {
+        "@type": "ListItem",
+        position: 1,
+        name: SITE_TITLE,
+        item: SITE_URL,
+      },
+      {
+        "@type": "ListItem",
+        position: 2,
+        name: `${line.id} train`,
+        item: `${SITE_URL}/line/${slug}`,
+      },
+    ],
+  };
+
   return (
     <MarketingShell
       eyebrow="Line"
@@ -130,6 +154,10 @@ export default async function LinePage({ params }: Params) {
       <script
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
+      />
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(breadcrumbJsonLd) }}
       />
 
       <div className="not-prose flex flex-wrap items-center gap-3 -mt-2">
