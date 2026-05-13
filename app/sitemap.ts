@@ -47,12 +47,11 @@ export default function sitemap(): MetadataRoute.Sitemap {
       changeFrequency: "weekly",
       priority: 0.6,
     },
-    {
-      url: `${SITE_URL}/status`,
-      lastModified: now,
-      changeFrequency: "daily",
-      priority: 0.5,
-    },
+    // /status is intentionally omitted — `app/status/page.tsx` sets
+    // `robots: { index: false }` because the page reflects transient
+    // health and would clutter the search index. Listing it here would
+    // send Google a conflicting "please index" signal and the URL
+    // would show up in Search Console as "Submitted URL marked 'noindex'".
     {
       url: `${SITE_URL}/privacy`,
       lastModified: now,

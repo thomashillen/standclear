@@ -5,6 +5,9 @@ export default defineConfig({
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "."),
+      // `server-only` is a Next.js bundler hint with no real package
+      // on disk — see `vitest.server-only-stub.ts`.
+      "server-only": path.resolve(__dirname, "vitest.server-only-stub.ts"),
     },
   },
   test: {
