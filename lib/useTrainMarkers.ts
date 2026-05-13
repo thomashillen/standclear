@@ -13,6 +13,7 @@ import {
   type Trajectory,
 } from "./trainTrajectory";
 import { ringPulsePhase } from "./ringPulse";
+import { staleOpacityMul } from "./trainStaleness";
 
 // Minimal structural surface of the Mapbox map handle the hook touches —
 // keeps the hook decoupled from the broader MapboxMap shape MapView
@@ -480,26 +481,19 @@ export function useTrainMarkers({
       // failing — useful for outages, useless for the rider whose
       // train is stuck on a 4-minute-old position right now.
       //
-      // Curve, applied to per-train age:
-      //   < 90s old:    full opacity (1.0)
-      //   90–360s:     linear fade to 0.4
-      //   > 360s:      floor at 0.4
-      // 90s lead-in matches typical NYCT vehicle-report cadence
-      // (most cars report every 30–60s, so anything tighter would
-      // dim healthy trains in steady state). 360s ≈ two missed
-      // report windows + tunnel buffer; past that, the rendered
-      // position is genuinely unreliable.
+      // Curve + thresholds live in `lib/trainStaleness.ts::staleOpacityMul`
+      // so the visual fade and the textual "Updated 2m ago" / "Stale · 6m"
+      // label share a single source of truth — a tweak to the 90 s / 360 s
+      // boundaries moves both signals together instead of letting them
+      // drift apart.
       //
-      // Falls back to the snapshot's generatedAt when a feed omits
-      // both per-vehicle and header timestamps — preserves the
-      // outage-detection floor.
+      // Falls back to the snapshot's generatedAt when a feed omits the
+      // per-vehicle timestamp — preserves the outage-detection floor.
       const generatedAtSec = d.generatedAt / 1000;
       const staleMulFor = (lastReportedAt: number | undefined): number => {
         const tsSec = lastReportedAt ?? generatedAtSec;
         const ageSec = Math.max(0, (nowMs / 1000) - tsSec);
-        if (ageSec <= 90) return 1;
-        const t = Math.min(1, (ageSec - 90) / 270);
-        return 1 - 0.6 * t;
+        return staleOpacityMul(ageSec);
       };
 
       const features: GeoJSON.Feature[] = [];

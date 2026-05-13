@@ -43,6 +43,36 @@ export interface TrainStaleness {
 const FRESH_AT_OR_BELOW_SEC = 90;
 const HARD_STALE_ABOVE_SEC = 360;
 
+/**
+ * Marker-fade opacity multiplier shared with the train markers in
+ * `lib/useTrainMarkers.ts`. Co-located with {@link trainStaleness} so
+ * the visual + textual signals read off the same constants — a tweak
+ * to `FRESH_AT_OR_BELOW_SEC` or `HARD_STALE_ABOVE_SEC` moves both
+ * together, instead of the two drifting silently.
+ *
+ *   age <= 90 s          → 1.0   (full opacity; fresh)
+ *   90 < age <= 360 s    → linear fade 1.0 → 0.4 over the 270 s span
+ *   age > 360 s          → 0.4   (floor — keeps the marker visible but
+ *                                  unmistakably dim)
+ *
+ * The 0.4 floor is deliberate. A vanished marker reads as "this train
+ * no longer exists", which is wrong for a vehicle still in service but
+ * silent through a tunnel (NYCT trains routinely go silent between
+ * platforms). 0.4 reads as "ghost — last known position", which is
+ * accurate and lets the rider judge trust themselves.
+ *
+ * Defensive against non-finite inputs: NaN / ±Infinity collapse to 1
+ * rather than crashing the marker layer. The only way `ageSec` could
+ * be non-finite is upstream clock skew (already clamped to 0 at every
+ * production callsite), so this is a belt-and-braces guard.
+ */
+export function staleOpacityMul(ageSec: number): number {
+  if (!Number.isFinite(ageSec) || ageSec <= FRESH_AT_OR_BELOW_SEC) return 1;
+  const span = HARD_STALE_ABOVE_SEC - FRESH_AT_OR_BELOW_SEC;
+  const t = Math.min(1, (ageSec - FRESH_AT_OR_BELOW_SEC) / span);
+  return 1 - 0.6 * t;
+}
+
 function fmtAge(ageSec: number): string {
   // Below the fresh threshold the helper returns `null`, so we don't
   // need a sub-minute branch — every callsite that hits fmtAge has

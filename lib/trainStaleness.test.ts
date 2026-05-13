@@ -1,7 +1,12 @@
 // @vitest-environment node
 
 import { describe, expect, it } from "vitest";
-import { snapshotStaleLabel, summarizeFleetStaleness, trainStaleness } from "./trainStaleness";
+import {
+  snapshotStaleLabel,
+  staleOpacityMul,
+  summarizeFleetStaleness,
+  trainStaleness,
+} from "./trainStaleness";
 
 const NOW_MS = new Date("2026-05-09T18:00:00Z").getTime();
 const NOW_SEC = NOW_MS / 1000;
@@ -120,5 +125,88 @@ describe("snapshotStaleLabel", () => {
   it("returns null for non-finite inputs (defensive against NaN from a missing generatedAt)", () => {
     expect(snapshotStaleLabel(Number.NaN)).toBeNull();
     expect(snapshotStaleLabel(Number.POSITIVE_INFINITY)).toBeNull();
+  });
+});
+
+describe("staleOpacityMul", () => {
+  it("returns full opacity for fresh ages (calm default for trustworthy trains)", () => {
+    expect(staleOpacityMul(0)).toBe(1);
+    expect(staleOpacityMul(30)).toBe(1);
+    expect(staleOpacityMul(89.999)).toBe(1);
+  });
+
+  it("treats exactly 90s as fresh (boundary matches trainStaleness `ageSec <= 90`)", () => {
+    // The textual label flips at the same boundary — co-located so a
+    // future tweak can't drift the two apart.
+    expect(staleOpacityMul(90)).toBe(1);
+  });
+
+  it("decays linearly from 1.0 to 0.4 across the 90–360s window", () => {
+    // Sub-second past the boundary should be just shy of 1.0.
+    expect(staleOpacityMul(91)).toBeGreaterThan(0.99);
+    expect(staleOpacityMul(91)).toBeLessThan(1);
+    // Halfway through the fade window (225s = midpoint of 90..360).
+    expect(staleOpacityMul(225)).toBeCloseTo(0.7, 5);
+    // One full minute into the fade window.
+    expect(staleOpacityMul(150)).toBeCloseTo(1 - 0.6 * (60 / 270), 5);
+  });
+
+  it("hits the 0.4 floor at exactly 360s and holds it past the hard-stale boundary", () => {
+    expect(staleOpacityMul(360)).toBeCloseTo(0.4, 5);
+    expect(staleOpacityMul(361)).toBeCloseTo(0.4, 5);
+    expect(staleOpacityMul(600)).toBeCloseTo(0.4, 5);
+    expect(staleOpacityMul(3600)).toBeCloseTo(0.4, 5);
+  });
+
+  it("never drops below the 0.4 floor (vanished marker reads as 'no longer exists', which is wrong)", () => {
+    // A range of hard-stale ages should all sit at the floor, never
+    // below — the floor is load-bearing for the "ghost — last known
+    // position" semantic.
+    for (const age of [360, 600, 1800, 3600, 86_400]) {
+      expect(staleOpacityMul(age)).toBeGreaterThanOrEqual(0.4);
+      expect(staleOpacityMul(age)).toBeLessThanOrEqual(0.4 + 1e-9);
+    }
+  });
+
+  it("returns full opacity for non-finite inputs (defensive against NaN / Infinity)", () => {
+    // Upstream clamps clock skew to 0 already, but a malformed input
+    // shouldn't crash the marker layer or hide a train under opacity 0.
+    expect(staleOpacityMul(Number.NaN)).toBe(1);
+    expect(staleOpacityMul(Number.POSITIVE_INFINITY)).toBe(1);
+    expect(staleOpacityMul(Number.NEGATIVE_INFINITY)).toBe(1);
+  });
+
+  it("treats negative ages as fresh (defensive against clock skew not pre-clamped upstream)", () => {
+    expect(staleOpacityMul(-5)).toBe(1);
+    expect(staleOpacityMul(-3600)).toBe(1);
+  });
+
+  it("agrees with trainStaleness on the fresh/stale boundary at 90s", () => {
+    // Cross-helper invariant: a single rider-perceived boundary
+    // governs both the marker fade and the label flip. If a future
+    // refactor moves the threshold, this test trips first.
+    const NOW = NOW_MS;
+    const SEC = NOW_SEC;
+    // At ageSec = 90: textual = fresh (no label), visual = 1.0.
+    expect(trainStaleness(SEC - 90, NOW, SEC).label).toBeNull();
+    expect(staleOpacityMul(90)).toBe(1);
+    // At ageSec = 91: textual flips to a label, visual drops below 1.
+    expect(trainStaleness(SEC - 91, NOW, SEC).label).not.toBeNull();
+    expect(staleOpacityMul(91)).toBeLessThan(1);
+  });
+
+  it("agrees with trainStaleness on the hard-stale boundary at 360s", () => {
+    // At ageSec = 360: textual = soft-stale ("Updated 6m ago"),
+    // visual = 0.4 (the floor — they coincide at the boundary so
+    // the marker doesn't continue fading past it).
+    const r360 = trainStaleness(NOW_SEC - 360, NOW_MS, NOW_SEC);
+    expect(r360.stale).toBe(true);
+    expect(r360.veryStale).toBe(false);
+    expect(staleOpacityMul(360)).toBeCloseTo(0.4, 5);
+    // At ageSec = 361: textual flips to hard-stale ("Stale · …"),
+    // visual stays at the floor.
+    const r361 = trainStaleness(NOW_SEC - 361, NOW_MS, NOW_SEC);
+    expect(r361.veryStale).toBe(true);
+    expect(staleOpacityMul(361)).toBeCloseTo(0.4, 5);
   });
 });
