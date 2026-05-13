@@ -870,7 +870,11 @@ export default function NearbyPanel({
   if (!open) return null;
 
   return (
+    // Landmark for AT users — see StationPanel for the role/aria-label
+    // rationale (region, not dialog: non-modal, no focus trap).
     <div
+      role="region"
+      aria-label="Near me"
       className="
         absolute z-20 overflow-hidden flex flex-col
         inset-x-0 bottom-0 top-[var(--panel-top-rest)] rounded-t-[28px] border-t border-white/[0.08]

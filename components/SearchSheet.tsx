@@ -965,7 +965,11 @@ export default function SearchSheet({
     mode === "directions" && plannerQuery.trim().length >= 2;
 
   return (
+    // Landmark for AT users — see StationPanel for the role/aria-label
+    // rationale (region, not dialog: non-modal, no focus trap).
     <div
+      role="region"
+      aria-label="Search and directions"
       className="
         absolute z-20 overflow-hidden flex flex-col
         inset-x-0 bottom-0 top-[var(--panel-top-rest)] rounded-t-[28px] border-t border-white/[0.08]
