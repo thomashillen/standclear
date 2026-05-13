@@ -12,7 +12,9 @@ import {
 } from "@/lib/site";
 
 export const metadata: Metadata = {
-  title: `About · ${SITE_NAME}`,
+  // Plain section name; the root layout's title template appends
+  // ` · ${SITE_NAME}`. Including the suffix here would double it.
+  title: "About",
   description: SITE_DESCRIPTION,
   alternates: { canonical: "/about" },
   openGraph: {

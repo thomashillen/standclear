@@ -4,7 +4,9 @@ import MarketingShell from "@/components/marketing/MarketingShell";
 import { SITE_NAME } from "@/lib/site";
 
 export const metadata: Metadata = {
-  title: `Privacy · ${SITE_NAME}`,
+  // Plain section name; the root layout's title template appends
+  // ` · ${SITE_NAME}`. Including the suffix here would double it.
+  title: "Privacy",
   description: `How ${SITE_NAME} handles your data: no accounts, no tracking pixels, no third-party advertising.`,
   alternates: { canonical: "/privacy" },
 };
