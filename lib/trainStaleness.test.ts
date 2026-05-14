@@ -1,7 +1,12 @@
 // @vitest-environment node
 
 import { describe, expect, it } from "vitest";
-import { snapshotStaleLabel, summarizeFleetStaleness, trainStaleness } from "./trainStaleness";
+import {
+  markerOpacityMul,
+  snapshotStaleLabel,
+  summarizeFleetStaleness,
+  trainStaleness,
+} from "./trainStaleness";
 
 const NOW_MS = new Date("2026-05-09T18:00:00Z").getTime();
 const NOW_SEC = NOW_MS / 1000;
@@ -92,6 +97,70 @@ describe("summarizeFleetStaleness", () => {
     expect(
       summarizeFleetStaleness(trains, NOW_MS, NOW_SEC - 600),
     ).toEqual({ stale: 3, veryStale: 3 });
+  });
+});
+
+describe("markerOpacityMul", () => {
+  it("returns 1 for fresh ages (no fade)", () => {
+    expect(markerOpacityMul(0)).toBe(1);
+    expect(markerOpacityMul(30)).toBe(1);
+    expect(markerOpacityMul(89)).toBe(1);
+  });
+
+  it("treats exactly 90s as fresh (boundary inclusive, matches trainStaleness)", () => {
+    // Pin the boundary together with `trainStaleness` so the visual
+    // fade and the textual label can't drift to different ages.
+    expect(markerOpacityMul(90)).toBe(1);
+    const txt = trainStaleness(NOW_SEC - 90, NOW_MS, NOW_SEC);
+    expect(txt.label).toBeNull();
+  });
+
+  it("ramps linearly from 1.0 at 90s to 0.4 at 360s", () => {
+    // Midpoint (225s) should land at the average of 1.0 and 0.4 = 0.7.
+    expect(markerOpacityMul(225)).toBeCloseTo(0.7, 10);
+    // Quarter-way through the ramp (~157.5s) = 1.0 - 0.6 * 0.25 = 0.85.
+    expect(markerOpacityMul(157.5)).toBeCloseTo(0.85, 10);
+    // Three-quarters through (~292.5s) = 1.0 - 0.6 * 0.75 = 0.55.
+    expect(markerOpacityMul(292.5)).toBeCloseTo(0.55, 10);
+  });
+
+  it("just past 90s starts to fade (continuity with the fresh band)", () => {
+    // The function is continuous at the boundary — 91s should be
+    // ~negligibly below 1, not a sudden drop to 0.85+.
+    const mul = markerOpacityMul(91);
+    expect(mul).toBeLessThan(1);
+    expect(mul).toBeGreaterThan(0.99);
+  });
+
+  it("floors at 0.4 from 360s onward (never invisible)", () => {
+    // Floor is deliberately above zero so a hard-stale marker is
+    // still tappable — the rider keeps the option to inspect the
+    // trip even when its position is unreliable.
+    expect(markerOpacityMul(360)).toBe(0.4);
+    expect(markerOpacityMul(600)).toBe(0.4);
+    expect(markerOpacityMul(36_000)).toBe(0.4);
+  });
+
+  it("returns 1 for non-finite ageSec (defensive against NaN from a missing timestamp)", () => {
+    // A caller that fails to clamp clock skew or passes Number.NaN
+    // from an arithmetic-on-undefined should not produce an
+    // unrenderable marker — fall back to "trust as fresh."
+    expect(markerOpacityMul(Number.NaN)).toBe(1);
+    expect(markerOpacityMul(Number.POSITIVE_INFINITY)).toBe(1);
+  });
+
+  it("agrees with the `stale` flag from trainStaleness at every band", () => {
+    // Cross-check: anywhere `trainStaleness().stale` is true, the
+    // opacity should be < 1; anywhere it's false, opacity should be 1.
+    for (const ageSec of [0, 30, 89, 90, 91, 200, 359, 360, 720]) {
+      const txt = trainStaleness(NOW_SEC - ageSec, NOW_MS, NOW_SEC);
+      const mul = markerOpacityMul(ageSec);
+      if (txt.stale) {
+        expect(mul).toBeLessThan(1);
+      } else {
+        expect(mul).toBe(1);
+      }
+    }
   });
 });
 
