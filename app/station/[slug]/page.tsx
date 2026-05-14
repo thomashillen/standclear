@@ -8,7 +8,8 @@ import {
 } from "@/lib/stations.server";
 import { findStationBySlug, stationSlug } from "@/lib/stationSlug";
 import { lineSlug } from "@/lib/lineSlug";
-import { SITE_NAME, SITE_TITLE, SITE_URL } from "@/lib/site";
+import { SITE_NAME } from "@/lib/site";
+import { stationBreadcrumbJsonLd, stationJsonLd } from "@/lib/seoSchemas";
 import {
   formatWalkSummary,
   haversineMeters,
@@ -108,54 +109,12 @@ export default async function StationPage({ params }: Params) {
 
   const liveLink = `/?station=${encodeURIComponent(station.stopId)}`;
 
-  // JSON-LD: TouristAttraction with geo + sameAs back to /. Google
-  // surfaces transit-station rich results from this when paired with
-  // a clear name + geo block.
-  const jsonLd = {
-    "@context": "https://schema.org",
-    "@type": "TrainStation",
-    name: station.name,
-    url: `${SITE_URL}/station/${slug}`,
-    geo: {
-      "@type": "GeoCoordinates",
-      latitude: station.lat,
-      longitude: station.lng,
-    },
-    address: {
-      "@type": "PostalAddress",
-      addressLocality: "New York",
-      addressRegion: "NY",
-      addressCountry: "US",
-    },
-    publicTransportClosures: false,
-    isAccessibleForFree: true,
-  };
-
-  // BreadcrumbList: tells Google the slug → display-name mapping for
-  // the SERP. Without this, results render the raw URL slug
-  // ("14-st-union-sq-635") as the breadcrumb path; with it, the
-  // station's actual name + the site home replace the slug-derived
-  // crumbs. Flat two-level — there is no /stations index page to
-  // act as an intermediate, and Google still uses two-item lists for
-  // the breadcrumb SERP enhancement.
-  const breadcrumbJsonLd = {
-    "@context": "https://schema.org",
-    "@type": "BreadcrumbList",
-    itemListElement: [
-      {
-        "@type": "ListItem",
-        position: 1,
-        name: SITE_TITLE,
-        item: SITE_URL,
-      },
-      {
-        "@type": "ListItem",
-        position: 2,
-        name: station.name,
-        item: `${SITE_URL}/station/${slug}`,
-      },
-    ],
-  };
+  // schema.org JSON-LD lives in `lib/seoSchemas.ts` alongside the
+  // homepage WebApplication entry — keeping the per-page TrainStation
+  // shape and the brand entity in one source of truth so a refactor
+  // to either is caught by one test suite.
+  const jsonLd = stationJsonLd(station, slug);
+  const breadcrumbJsonLd = stationBreadcrumbJsonLd(station, slug);
 
   return (
     <MarketingShell

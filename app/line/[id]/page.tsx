@@ -9,7 +9,8 @@ import {
 import { findLineBySlug, lineSlug } from "@/lib/lineSlug";
 import { stationSlug } from "@/lib/stationSlug";
 import { aggregateInterchanges, getInterchanges } from "@/lib/lineInterchanges";
-import { SITE_NAME, SITE_TITLE, SITE_URL } from "@/lib/site";
+import { SITE_NAME } from "@/lib/site";
+import { lineBreadcrumbJsonLd, lineJsonLd } from "@/lib/seoSchemas";
 import type { StationEntry } from "@/lib/stopsIndex";
 
 interface Params {
@@ -114,46 +115,12 @@ export default async function LinePage({ params }: Params) {
   const first = line.stops[0];
   const last = line.stops[line.stops.length - 1];
 
-  // schema.org has no SubwayLine type; BusOrSubwayRoute is the
-  // closest published mapping for "a named transit route through a
-  // city," and surfaces transit rich-results when paired with name +
-  // operator.
-  const jsonLd = {
-    "@context": "https://schema.org",
-    "@type": "BusOrSubwayRoute",
-    name: `${line.id} train — ${line.name}`,
-    url: `${SITE_URL}/line/${slug}`,
-    description: line.name,
-    provider: {
-      "@type": "Organization",
-      name: "Metropolitan Transportation Authority",
-      url: "https://www.mta.info",
-    },
-  };
-
-  // BreadcrumbList: SERP-only enhancement that replaces the raw URL
-  // slug in the breadcrumb path with the line's display label. Flat
-  // two-level — no /lines index page to act as a category-level
-  // crumb, and Google still uses two-item lists for the breadcrumb
-  // rich result. Mirrors the same block on /station/[slug].
-  const breadcrumbJsonLd = {
-    "@context": "https://schema.org",
-    "@type": "BreadcrumbList",
-    itemListElement: [
-      {
-        "@type": "ListItem",
-        position: 1,
-        name: SITE_TITLE,
-        item: SITE_URL,
-      },
-      {
-        "@type": "ListItem",
-        position: 2,
-        name: `${line.id} train`,
-        item: `${SITE_URL}/line/${slug}`,
-      },
-    ],
-  };
+  // schema.org JSON-LD lives in `lib/seoSchemas.ts` alongside the
+  // station + homepage entries — keeping all three schemas in one
+  // source of truth so a refactor to the shape, the MTA-provider
+  // block, or the breadcrumb depth is caught by one test suite.
+  const jsonLd = lineJsonLd(line, slug);
+  const breadcrumbJsonLd = lineBreadcrumbJsonLd(line, slug);
 
   return (
     <MarketingShell
