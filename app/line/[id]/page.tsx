@@ -8,7 +8,7 @@ import {
 } from "@/lib/stations.server";
 import { findLineBySlug, lineSlug } from "@/lib/lineSlug";
 import { stationSlug } from "@/lib/stationSlug";
-import { getInterchanges } from "@/lib/lineInterchanges";
+import { aggregateInterchanges, getInterchanges } from "@/lib/lineInterchanges";
 import { SITE_NAME, SITE_TITLE, SITE_URL } from "@/lib/site";
 import type { StationEntry } from "@/lib/stopsIndex";
 
@@ -90,6 +90,16 @@ export default async function LinePage({ params }: Params) {
 
   const stations = getAllStationsServer();
   const stopIdToStation = buildStopIdToStation(stations);
+
+  // Union of every other route a rider can transfer to somewhere on
+  // this line — drives the "Direct transfers" overview block between
+  // the narrative paragraph and the per-stop station list. Computed
+  // here once so both the SEO body copy ("X other lines along the
+  // route") and the pill row stay aligned to the same source.
+  const transfers = aggregateInterchanges(
+    line.stops.map((s) => stopIdToStation.get(s.id)),
+    line.routeId,
+  );
 
   // The deep-link bootstrap in SubwayMap does a direct
   // `lines[selectedLine]` lookup, where the Lines record is keyed by
@@ -192,6 +202,37 @@ export default async function LinePage({ params }: Params) {
         four trains in each direction with seconds-precise countdowns, plus
         active service alerts scoped to this route.
       </p>
+
+      {transfers.length > 0 && (
+        <>
+          <h2>Direct transfers</h2>
+          <p>
+            Riders can transfer between the {line.id} train and{" "}
+            {transfers.length} other line{transfers.length === 1 ? "" : "s"} at
+            one or more stops along the route. Each bullet opens that
+            line&rsquo;s landing page.
+          </p>
+          {/* Pill style matches the /station/[slug] header bullet row
+              (w-9 h-9 ring/hover) so the cross-link affordance reads the
+              same on both surfaces. Order follows first-appearance along
+              the route — the dedup happens by routeId inside
+              aggregateInterchanges, so shuttle pages correctly never see
+              their own bullet here. */}
+          <div className="not-prose -mt-2 flex flex-wrap items-center gap-2">
+            {transfers.map((r) => (
+              <Link
+                key={r.routeId}
+                href={`/line/${lineSlug(r.routeId)}`}
+                className="inline-flex items-center justify-center w-9 h-9 rounded-full text-[15px] font-black tracking-tight ring-1 ring-white/10 hover:ring-white/30 transition-shadow no-underline"
+                style={{ background: r.color, color: r.textColor }}
+                aria-label={`Open ${r.id} train page`}
+              >
+                {r.id}
+              </Link>
+            ))}
+          </div>
+        </>
+      )}
 
       <h2>Stations on this line</h2>
       {first && last && (
