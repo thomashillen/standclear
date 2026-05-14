@@ -1,19 +1,20 @@
-// Per-train data freshness, expressed as a textual indicator rather
-// than a marker fade.
+// Per-train data freshness — both the visual half (marker opacity
+// fade) and the textual half (glanceable "Updated Nm ago" / "Stale
+// · Nm" label) live here so the two signals can't drift.
 //
-// `lib/useTrainMarkers.ts` already fades each train's icon opacity
-// once its `lastReportedAt` slips past 90 s old, on a curve that
-// floors at 0.4 by 6 minutes. That's the visual half of "trust this
-// position less". This helper is the textual half: when a rider is
-// committed to one specific train (cinematic follow-mode is the only
-// surface today, but a station arrival row is the obvious next),
-// they should be able to read *why* the marker is dim — i.e. how
+// `lib/useTrainMarkers.ts` imports `markerOpacityMul` to fade each
+// train's icon opacity once its `lastReportedAt` slips past 90 s old,
+// on a curve that floors at 0.4 by 6 minutes. `trainStaleness` is
+// the textual counterpart: when a rider is committed to one specific
+// train (cinematic follow-mode, the StationPanel arrival rows, the
+// LinePanel arrivals — every surface where a single trip is named)
+// they should be able to read *why* the marker is dim, i.e. how
 // stale the underlying GTFS-RT VehiclePosition.timestamp is.
 //
-// Thresholds match the marker fade so the visual + textual signals
-// agree at the boundary — the marker keeps full opacity through
-// `ageSec <= 90` (see `useTrainMarkers.ts`), so this helper uses the
-// same inclusive bound to flip the label:
+// Both halves share the same boundaries so the visual + textual
+// signals agree at the boundary — the marker keeps full opacity
+// through `ageSec <= 90`, so the label also stays null until just
+// past 90 s:
 //   ageSec <= 90 s  → fresh, no indicator (calm default; principle #4)
 //   90 < age <= 360 → "Updated Nm ago", warn tone
 //   ageSec > 360 s  → "Stale · Nm", warn tone
@@ -42,6 +43,12 @@ export interface TrainStaleness {
 
 const FRESH_AT_OR_BELOW_SEC = 90;
 const HARD_STALE_ABOVE_SEC = 360;
+// Floor for `markerOpacityMul`. At or past `HARD_STALE_ABOVE_SEC`,
+// the marker can't fade further — it stays visible (so the rider
+// can still tap into the trip detail) but at this opacity it reads
+// as "trust me less than the rest of the fleet." 0.4 is below the
+// "dim but legible" threshold; tested against the Mapbox dark style.
+const MARKER_OPACITY_FLOOR = 0.4;
 
 function fmtAge(ageSec: number): string {
   // Below the fresh threshold the helper returns `null`, so we don't
@@ -126,6 +133,34 @@ export function summarizeFleetStaleness(
     if (r.veryStale) veryStale++;
   }
   return { stale, veryStale };
+}
+
+// ─── Marker opacity curve ───────────────────────────────────────────
+// Per-marker icon-opacity multiplier shared between `useTrainMarkers`
+// (which feeds it into the Mapbox icon/text opacity expression) and
+// the open-station "incoming" rings (which fold it into the pulse
+// opacity so an "incoming in 30s" ring stops shouting urgency when
+// the underlying vehicle hasn't reported in minutes).
+//
+// Boundaries deliberately mirror `trainStaleness`'s thresholds — the
+// visual fade kicks in at exactly the same age the textual indicator
+// flips to "Updated Nm ago", so a rider seeing a dim marker can read
+// the corresponding label and the two signals agree:
+//   ageSec <= 90  → 1.0  (fresh; calm default)
+//   90 < age < 360 → linear ramp 1.0 → MARKER_OPACITY_FLOOR
+//   ageSec >= 360 → MARKER_OPACITY_FLOOR
+//
+// Caller passes raw `ageSec` (already clamped against clock skew) so
+// the curve stays a pure scalar function — useful in the rAF hot
+// path, where allocating a `TrainStaleness` object per train per
+// frame would create real GC pressure at 30fps × hundreds of trains.
+export function markerOpacityMul(ageSec: number): number {
+  if (!Number.isFinite(ageSec) || ageSec <= FRESH_AT_OR_BELOW_SEC) return 1;
+  if (ageSec >= HARD_STALE_ABOVE_SEC) return MARKER_OPACITY_FLOOR;
+  const t =
+    (ageSec - FRESH_AT_OR_BELOW_SEC) /
+    (HARD_STALE_ABOVE_SEC - FRESH_AT_OR_BELOW_SEC);
+  return 1 - (1 - MARKER_OPACITY_FLOOR) * t;
 }
 
 // ─── Snapshot staleness ─────────────────────────────────────────────
