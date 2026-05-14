@@ -4,7 +4,9 @@ import MarketingShell from "@/components/marketing/MarketingShell";
 import { GITHUB_URL, SITE_NAME, SITE_URL } from "@/lib/site";
 
 export const metadata: Metadata = {
-  title: `Terms · ${SITE_NAME}`,
+  // Plain section name; the root layout's title template appends
+  // ` · ${SITE_NAME}`. Including the suffix here would double it.
+  title: "Terms",
   description: `Terms of service for ${SITE_NAME}.`,
   alternates: { canonical: "/terms" },
 };
