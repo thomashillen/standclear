@@ -31,15 +31,35 @@ export type TripSelection = {
   walkFrom?: { lng: number; lat: number; name?: string };
   walkTo?: { lng: number; lat: number; name?: string };
 };
-import FollowCapsule from "./FollowCapsule";
-import InstallPrompt from "./InstallPrompt";
-import LinePanel from "./LinePanel";
+// LinePicker stays a static import — it's part of the always-visible
+// floating header and renders on first paint, so deferring it would
+// blank out the primary nav until a chunk lands. The rest of the
+// panels render only after a user interaction (or in InstallPrompt's
+// case, after a 60s timer), so we ship them in their own chunks and
+// pay the parse/eval cost lazily. Numbers from the build below — main
+// chunk drops materially without these in it.
 import LinePicker from "./LinePicker";
-import LiveTrainsPopup from "./LiveTrainsPopup";
-import MoreSheet from "./MoreSheet";
-import NearbyPanel from "./NearbyPanel";
-import SearchSheet from "./SearchSheet";
-import StationPanel from "./StationPanel";
+
+// Bottom-sheet / overlay panels. All `ssr: false` because they're
+// purely interactive and the static HTML for an unopened sheet would
+// just be empty divs — no SEO or first-paint benefit to rendering them
+// on the server, and skipping SSR avoids hydration mismatch headaches
+// with portal-based primitives (Radix Dialog in MoreSheet /
+// LiveTrainsPopup, custom sheet-drag in the rest).
+const FollowCapsule = dynamic(() => import("./FollowCapsule"), {
+  ssr: false,
+});
+const InstallPrompt = dynamic(() => import("./InstallPrompt"), {
+  ssr: false,
+});
+const LinePanel = dynamic(() => import("./LinePanel"), { ssr: false });
+const LiveTrainsPopup = dynamic(() => import("./LiveTrainsPopup"), {
+  ssr: false,
+});
+const MoreSheet = dynamic(() => import("./MoreSheet"), { ssr: false });
+const NearbyPanel = dynamic(() => import("./NearbyPanel"), { ssr: false });
+const SearchSheet = dynamic(() => import("./SearchSheet"), { ssr: false });
+const StationPanel = dynamic(() => import("./StationPanel"), { ssr: false });
 import type { SelectedTrip } from "./MapView";
 import { useNow } from "@/lib/useNow";
 
