@@ -7,6 +7,7 @@
 import { NextResponse } from "next/server";
 import { cleanupSubscriptions } from "@/lib/pushCleanup";
 import { captureException } from "@/lib/observability";
+import { isCronAuthorized } from "@/lib/cronAuth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -15,14 +16,8 @@ export const dynamic = "force-dynamic";
 // Hobby ceiling and leaves plenty of headroom.
 export const maxDuration = 30;
 
-function isAuthorized(req: Request): boolean {
-  const expected = process.env.CRON_SECRET;
-  if (!expected) return false;
-  return req.headers.get("authorization") === `Bearer ${expected}`;
-}
-
 export async function GET(req: Request) {
-  if (!isAuthorized(req)) {
+  if (!isCronAuthorized(req)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
   try {
