@@ -5,7 +5,9 @@ import StatusPanel from "./StatusPanel";
 import { SITE_NAME } from "@/lib/site";
 
 export const metadata: Metadata = {
-  title: `Status · ${SITE_NAME}`,
+  // Plain section name; the root layout's title template appends
+  // ` · ${SITE_NAME}`. Including the suffix here would double it.
+  title: "Status",
   description: `Live status of ${SITE_NAME} services and the upstream MTA feeds.`,
   alternates: { canonical: "/status" },
   // Don't index the status page — it's transient and a search-result

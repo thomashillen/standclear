@@ -5,6 +5,7 @@ import { ArrowUp, ArrowDown, X } from "lucide-react";
 import type { Lines } from "@/lib/subwayData";
 import type { TrainsResponse } from "@/lib/useTrains";
 import { trainStaleness } from "@/lib/trainStaleness";
+import { formatEtaCountdown } from "@/lib/etaFormat";
 
 interface Props {
   trainId: string;
@@ -12,15 +13,6 @@ interface Props {
   lines: Lines | null;
   now: number;
   onExit: () => void;
-}
-
-// Compact countdown — same scheme as the rest of the app: seconds
-// inside the final minute (urgency window), rounded minutes above.
-function fmtEta(etaSec: number, nowSec: number): string {
-  const secs = Math.round(etaSec - nowSec);
-  if (secs <= 5) return "Now";
-  if (secs < 60) return `${secs} sec`;
-  return `${Math.round(secs / 60)} min`;
 }
 
 /**
@@ -134,7 +126,7 @@ export default function FollowCapsule({
           left a feed (rare) similarly lack one. */}
       {arrival && train.status !== "STOPPED_AT" && (
         <span className="text-[13px] font-bold tabular-nums text-gray-100 flex-shrink-0">
-          {fmtEta(arrival.eta, now / 1000)}
+          {formatEtaCountdown(arrival.eta, now)}
         </span>
       )}
 

@@ -10,6 +10,7 @@ import { useNow } from "@/lib/useNow";
 import { buildStationIndex } from "@/lib/stopsIndex";
 import { useSheetDrag } from "@/lib/useSheetDrag";
 import { trainStaleness, type TrainStaleness } from "@/lib/trainStaleness";
+import { formatEtaCountdown } from "@/lib/etaFormat";
 import { AlertsSection } from "./AlertsSection";
 import { DragHandle } from "./DragHandle";
 
@@ -33,15 +34,6 @@ interface Props {
 // its eta.
 type LiveArrival = Arrival & { live?: boolean };
 
-// Live countdown for the station detail rows. Seconds in the final
-// minute (urgency window), rounded minutes above that. The string
-// re-renders every tick of the parent's now-clock.
-function fmtEta(eta: number, now: number): string {
-  const secs = Math.round(eta - now / 1000);
-  if (secs <= 5) return "Now";
-  if (secs < 60) return `${secs} sec`;
-  return `${Math.round(secs / 60)} min`;
-}
 
 // MTA signage uses circles for local service and diamonds for express
 // variants — the "<6>", "<7>", and peak-only <F>, <Q>, etc. The realtime
@@ -170,7 +162,7 @@ export function ArrivalRow({
   onTapRoute,
   staleness,
 }: ArrivalRowProps) {
-  const etaStr = fmtEta(arrival.eta, now);
+  const etaStr = formatEtaCountdown(arrival.eta, now);
   const isImminent = arrival.eta - now / 1000 < 90;
   const staleLabel = staleness?.label ?? null;
   return (
