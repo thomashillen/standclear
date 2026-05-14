@@ -7,7 +7,7 @@ import { useTrains, type Arrival } from "@/lib/useTrains";
 import { useAlerts, alertsForRoutes } from "@/lib/useAlerts";
 import { useNow } from "@/lib/useNow";
 import { useSheetDrag } from "@/lib/useSheetDrag";
-import { snapshotStaleLabel } from "@/lib/trainStaleness";
+import { snapshotStaleLabel, trainStaleness, type TrainStaleness } from "@/lib/trainStaleness";
 import { AlertsSection } from "./AlertsSection";
 import { DragHandle } from "./DragHandle";
 
@@ -40,6 +40,16 @@ interface StopRowProps {
   sEtaStr?: string;
   nBadge?: RouteBadge;
   sBadge?: RouteBadge;
+  /** Per-direction freshness for the train predicting this row's
+   *  ETA. `null` when fresh OR when the underlying trip has no paired
+   *  VehiclePosition (in which case the prediction is implicitly as
+   *  fresh as the snapshot itself). When `.label` is non-null, the
+   *  ETA flips amber so the rider sees the same "trust this less"
+   *  signal that fades the matching train marker on the map and
+   *  surfaces the eyebrow swap in StationPanel's ArrivalRow + the
+   *  follow-mode capsule. */
+  nStaleness?: TrainStaleness | null;
+  sStaleness?: TrainStaleness | null;
   trainHere: boolean;
   hasData: boolean;
   showConnector: boolean;
@@ -123,7 +133,34 @@ function Bullet({ badge }: { badge: RouteBadge }) {
   );
 }
 
-const StopRow = memo(function StopRow({
+// Per-chip amber tint when the underlying train's VehiclePosition has
+// slipped past the 90 s freshness floor. The marker on the map fades
+// in parallel (see `markerOpacityMul` in lib/trainStaleness), so the
+// textual + visual halves of the signal flip at the same boundary —
+// no surface can claim "fresh" while another shows "stale" for the
+// same trip.
+function etaChipClass(staleness: TrainStaleness | null | undefined): string {
+  const base = "font-medium ml-1";
+  return staleness?.label
+    ? `${base} text-amber-300/90 tabular-nums`
+    : `${base} text-gray-200`;
+}
+
+function etaChipAria(
+  direction: "Northbound" | "Southbound",
+  etaStr: string,
+  staleness: TrainStaleness | null | undefined,
+): string {
+  if (!staleness?.label) return `${direction} ${etaStr}`;
+  const mins = Math.max(1, Math.round(staleness.ageSec / 60));
+  return `${direction} ${etaStr}, position last updated ${mins} ${mins === 1 ? "minute" : "minutes"} ago`;
+}
+
+// Exported for component tests — see `LinePanel.test.tsx`. Mounting
+// the inner row directly lets the staleness-chrome assertions skip
+// the panel's useLines/useTrains setup, mirroring the
+// `export function ArrivalRow` pattern in StationPanel.
+export const StopRow = memo(function StopRow({
   stopId,
   stopName,
   lineColor,
@@ -131,6 +168,8 @@ const StopRow = memo(function StopRow({
   sEtaStr,
   nBadge,
   sBadge,
+  nStaleness,
+  sStaleness,
   trainHere,
   hasData,
   showConnector,
@@ -169,17 +208,23 @@ const StopRow = memo(function StopRow({
         </p>
         <div className="flex gap-3 text-[11px] text-gray-400 mt-1">
           {nEtaStr && (
-            <span className="inline-flex items-center">
+            <span
+              className="inline-flex items-center"
+              aria-label={etaChipAria("Northbound", nEtaStr, nStaleness)}
+            >
               {nBadge && <Bullet badge={nBadge} />}
               <span className="opacity-60">N</span>
-              <span className="text-gray-200 font-medium ml-1">{nEtaStr}</span>
+              <span className={etaChipClass(nStaleness)}>{nEtaStr}</span>
             </span>
           )}
           {sEtaStr && (
-            <span className="inline-flex items-center">
+            <span
+              className="inline-flex items-center"
+              aria-label={etaChipAria("Southbound", sEtaStr, sStaleness)}
+            >
               {sBadge && <Bullet badge={sBadge} />}
               <span className="opacity-60">S</span>
-              <span className="text-gray-200 font-medium ml-1">{sEtaStr}</span>
+              <span className={etaChipClass(sStaleness)}>{sEtaStr}</span>
             </span>
           )}
           {!nEtaStr && !sEtaStr && hasData && (
@@ -223,6 +268,25 @@ export default function LinePanel({ lineId, focusStopId, onClose, onStationOpen 
       if (a.direction === "N") { if (!entry.n) entry.n = a; }
       else if (!entry.s) entry.s = a;
       m.set(a.stopId, entry);
+    }
+    return m;
+  }, [data, corridorSet]);
+
+  // tripId → underlying VehiclePosition.timestamp for every train in
+  // the corridor. Threaded into each StopRow so a per-direction ETA
+  // chip can flip amber once its train's last position report slips
+  // past the 90 s freshness floor — same wire as StationPanel's
+  // ArrivalRow chrome. Map.has() distinguishes "no paired vehicle
+  // (arrivals-only trip, implicitly fresh as the snapshot)" from
+  // "paired vehicle that's stale", matching the precedent set by
+  // StationPanel + NearbyPanel + SearchSheet so the four surfaces
+  // can't disagree on a given trip's freshness.
+  const lastReportedByTripId = useMemo(() => {
+    const m = new Map<string, number | undefined>();
+    if (!data || !corridorSet) return m;
+    for (const t of data.trains) {
+      if (!corridorSet.has(t.routeId)) continue;
+      m.set(t.id, t.lastReportedAt);
     }
     return m;
   }, [data, corridorSet]);
@@ -405,6 +469,20 @@ export default function LinePanel({ lineId, focusStopId, onClose, onStationOpen 
             if (!l) return undefined;
             return { id: l.id, color: l.color, textColor: l.textColor };
           };
+          // Compute per-direction staleness only when the predicting
+          // trip is paired with a VehiclePosition in this snapshot.
+          // Arrivals-only trips (stop_time_update without a paired
+          // vehicle) keep the default gray chip — they're as fresh as
+          // the snapshot itself, same precedent as StationPanel.
+          const staleFor = (a: Arrival | undefined): TrainStaleness | null => {
+            if (!a || !data) return null;
+            if (!lastReportedByTripId.has(a.tripId)) return null;
+            return trainStaleness(
+              lastReportedByTripId.get(a.tripId),
+              wallNow,
+              data.generatedAt,
+            );
+          };
           return (
             <StopRow
               key={stop.id}
@@ -415,6 +493,8 @@ export default function LinePanel({ lineId, focusStopId, onClose, onStationOpen 
               sEtaStr={arr?.s ? fmtEta(arr.s.eta, now) : undefined}
               nBadge={badgeFor(arr?.n?.routeId)}
               sBadge={badgeFor(arr?.s?.routeId)}
+              nStaleness={staleFor(arr?.n)}
+              sStaleness={staleFor(arr?.s)}
               trainHere={trainsAtStop.has(stop.id)}
               hasData={!!data}
               showConnector={idx < numStops - 1}
