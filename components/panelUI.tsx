@@ -12,11 +12,7 @@ import {
   ChevronRight,
   Compass,
   Footprints,
-  MapPin,
   TrainFront,
-  CornerUpLeft,
-  CornerUpRight,
-  Flag,
 } from "lucide-react";
 import type { Arrival } from "@/lib/useTrains";
 import {
@@ -28,7 +24,7 @@ import {
 } from "@/lib/stopsIndex";
 import type { CommuteAnchor } from "@/lib/useFavorites";
 import { estimateTripTimeSec, type TripPlan } from "@/lib/commuteRouting";
-import type { WalkingRoute, WalkingStep } from "@/lib/walkingDirections";
+import type { WalkingRoute } from "@/lib/walkingDirections";
 import { trainStaleness } from "@/lib/trainStaleness";
 
 // ─── Shared types ───────────────────────────────────────────────────
@@ -1271,108 +1267,3 @@ export function TripPlanDetail({
   );
 }
 
-// ─── Walking-only detail (turn-by-turn) ─────────────────────────────
-// Shown when walking is the fastest option and the rider taps the
-// "Walking is faster" card. The route on the map is already visible;
-// this panel surfaces the same Mapbox steps the trip detail uses for
-// its walk segments, but as a standalone view (no subway legs).
-
-function maneuverIcon(step: WalkingStep): React.ReactNode {
-  const m = step.maneuver;
-  if (m === "depart") return <Footprints className="w-3.5 h-3.5" />;
-  if (m === "arrive") return <Flag className="w-3.5 h-3.5" />;
-  if (step.modifier?.includes("left"))
-    return <CornerUpLeft className="w-3.5 h-3.5" />;
-  if (step.modifier?.includes("right"))
-    return <CornerUpRight className="w-3.5 h-3.5" />;
-  return <ArrowUp className="w-3.5 h-3.5" />;
-}
-
-interface WalkingDetailProps {
-  /** Resolved street-following route. Null while the Mapbox call is
-   *  in flight or after a network failure — the component renders a
-   *  one-row fallback with the crow-flies estimate so the rider
-   *  always sees something useful. */
-  route: WalkingRoute | null;
-  /** Crow-flies fallback (meters) when `route` hasn't resolved yet. */
-  fallbackMeters: number;
-  fallbackMin: number;
-  fromName: string;
-  toName: string;
-}
-
-export function WalkingDetail({
-  route,
-  fallbackMeters,
-  fallbackMin,
-  fromName,
-  toName,
-}: WalkingDetailProps) {
-  const totalMin = route
-    ? Math.max(1, Math.round(route.duration / 60))
-    : fallbackMin;
-  const totalMeters = route?.distance ?? fallbackMeters;
-
-  return (
-    <div className="px-3 pb-6">
-      <div className="flex items-center gap-3 mb-4">
-        <div className="flex-shrink-0 w-9 h-9 rounded-full bg-emerald-300/20 text-emerald-200 flex items-center justify-center">
-          <Footprints className="w-[18px] h-[18px]" />
-        </div>
-        <div className="flex items-baseline gap-1.5 min-w-0">
-          <span className="text-[22px] font-bold tabular-nums text-gray-100 leading-none">
-            {totalMin}
-          </span>
-          <span className="text-[13px] text-gray-400">min walk</span>
-          {totalMeters > 0 && (
-            <span className="text-[13px] text-gray-500 tabular-nums">
-              · {fmtStepDistance(totalMeters)}
-            </span>
-          )}
-        </div>
-      </div>
-
-      <ol className="px-1">
-        <TimelineRow
-          icon={<MapPin className="w-3.5 h-3.5" />}
-          iconBg="bg-emerald-300/20 text-emerald-200"
-          title={
-            <>
-              Start at <span className="font-semibold">{fromName}</span>
-            </>
-          }
-          showConnector
-        />
-
-        {route?.steps?.map((step, i) => {
-          const isLast = i === route.steps.length - 1;
-          const meta =
-            step.distance > 0
-              ? fmtStepDistance(step.distance)
-              : undefined;
-          return (
-            <TimelineRow
-              key={`walk-step-${i}`}
-              icon={maneuverIcon(step)}
-              iconBg="bg-white/[0.08] text-gray-200"
-              title={step.instruction}
-              meta={meta}
-              showConnector={!isLast}
-            />
-          );
-        })}
-
-        <TimelineRow
-          icon={<Flag className="w-3.5 h-3.5" />}
-          iconBg="bg-sky-300/20 text-sky-200"
-          title={
-            <>
-              Arrive at <span className="font-semibold">{toName}</span>
-            </>
-          }
-          showConnector={false}
-        />
-      </ol>
-    </div>
-  );
-}
