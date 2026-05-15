@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import Link from "next/link";
 import {
   Bell,
   BellRing,
@@ -13,6 +14,7 @@ import { useAlerts, type ServiceAlert } from "@/lib/useAlerts";
 import { useLines } from "@/lib/subwayData";
 import { formatAlertWindow } from "@/lib/alertWindow";
 import { useNow } from "@/lib/useNow";
+import { lineSlug } from "@/lib/lineSlug";
 import {
   Dialog,
   DialogContent,
@@ -53,28 +55,6 @@ const SEVERITY_STYLE: Record<
   },
 };
 
-// Compact route bullet for showing which lines an alert affects. Smaller
-// than the StationPanel/LinePanel bullets — alerts can affect 5+ lines
-// and a row of full-size bullets blows out the layout.
-function MiniRouteBullet({
-  id,
-  color,
-  textColor,
-}: {
-  id: string;
-  color: string;
-  textColor: "white" | "black";
-}) {
-  return (
-    <span
-      className="nyc-bullet inline-flex items-center justify-center w-[18px] h-[18px] rounded-full text-[11px] leading-none flex-shrink-0"
-      style={{ backgroundColor: color, color: textColor === "black" ? "#000" : "#fff" }}
-    >
-      {id}
-    </span>
-  );
-}
-
 interface AlertItemProps {
   alert: ServiceAlert;
   routeInfo: Map<string, { id: string; color: string; textColor: "white" | "black" }>;
@@ -84,9 +64,15 @@ interface AlertItemProps {
   // purity rule. Tests can pass a literal ms value to pin the label to
   // a deterministic NYC wall-clock.
   nowMs: number;
+  // Fired when the rider taps an affected-route bullet. Used by the
+  // containing dialog to close itself in lockstep with the navigation —
+  // without it the Radix portal stays mounted for a frame after Next's
+  // soft-nav unmounts the underlying surface, which paints a stale
+  // dialog over the destination's first frame.
+  onLineNav?: () => void;
 }
 
-export function AlertItem({ alert, routeInfo, nowMs }: AlertItemProps) {
+export function AlertItem({ alert, routeInfo, nowMs, onLineNav }: AlertItemProps) {
   // Severe alerts (NO_SERVICE / suspensions) auto-expand on mount: a
   // rider opening this dialog with a suspended line is here precisely
   // to read the description of *why*, and a row of collapsed chevrons
@@ -114,17 +100,26 @@ export function AlertItem({ alert, routeInfo, nowMs }: AlertItemProps) {
 
   // Sort affected routes the way the rider expects to see them: known
   // routes first (in the order from the lines map, which already matches
-  // signage groupings), unknown route ids appended at the end.
+  // signage groupings), unknown route ids appended at the end. The
+  // routeId is preserved alongside the display info so the bullet's
+  // /line/[slug] link uses the canonical id ("GS" → /line/gs, rendered
+  // as the display "S" bullet).
   const affected = useMemo(() => {
-    const known: { id: string; color: string; textColor: "white" | "black" }[] = [];
+    const known: {
+      routeId: string;
+      id: string;
+      color: string;
+      textColor: "white" | "black";
+    }[] = [];
     const unknown: string[] = [];
     for (const r of alert.routeIds) {
       const info = routeInfo.get(r);
-      if (info) known.push(info);
+      if (info) known.push({ routeId: r, ...info });
       else unknown.push(r);
     }
     return { known, unknown };
   }, [alert.routeIds, routeInfo]);
+  const hasAffected = affected.known.length > 0 || affected.unknown.length > 0;
 
   return (
     <div className={`border rounded-xl px-3 py-2.5 ${s.bg}`}>
@@ -144,26 +139,6 @@ export function AlertItem({ alert, routeInfo, nowMs }: AlertItemProps) {
               {windowLabel}
             </p>
           )}
-          {(affected.known.length > 0 || affected.unknown.length > 0) && (
-            <div className="flex items-center gap-1 mt-1.5 flex-wrap">
-              {affected.known.map((r) => (
-                <MiniRouteBullet
-                  key={r.id}
-                  id={r.id}
-                  color={r.color}
-                  textColor={r.textColor}
-                />
-              ))}
-              {affected.unknown.map((r) => (
-                <span
-                  key={r}
-                  className="inline-flex items-center justify-center px-1.5 h-[18px] rounded-full text-[9px] font-bold bg-white/[0.10] text-gray-300"
-                >
-                  {r}
-                </span>
-              ))}
-            </div>
-          )}
         </div>
         {hasBody && (
           <ChevronDown
@@ -173,6 +148,41 @@ export function AlertItem({ alert, routeInfo, nowMs }: AlertItemProps) {
           />
         )}
       </button>
+      {hasAffected && (
+        // Affected-route bullets are lifted out of the toggle button so
+        // each known route can be a navigable Link to its /line/[id]
+        // page (the rider seeing "No [F] service downtown" naturally
+        // taps the F bullet to check the F's live state). Nested
+        // interactive content (<a> inside <button>) is invalid HTML, so
+        // the bullets render as a sibling row beneath the toggle. The
+        // pl-6 keeps the bullets aligned with the header text past the
+        // 16-px icon + 8-px gap.
+        <div className="flex items-center gap-1 mt-1.5 flex-wrap pl-6">
+          {affected.known.map((r) => (
+            <Link
+              key={r.routeId}
+              href={`/line/${lineSlug(r.routeId)}`}
+              onClick={onLineNav}
+              aria-label={`Open ${r.id} line`}
+              className="nyc-bullet inline-flex items-center justify-center w-[18px] h-[18px] rounded-full text-[11px] leading-none flex-shrink-0 transition-opacity hover:opacity-80 active:opacity-60 touch-manipulation"
+              style={{
+                backgroundColor: r.color,
+                color: r.textColor === "black" ? "#000" : "#fff",
+              }}
+            >
+              {r.id}
+            </Link>
+          ))}
+          {affected.unknown.map((r) => (
+            <span
+              key={r}
+              className="inline-flex items-center justify-center px-1.5 h-[18px] rounded-full text-[9px] font-bold bg-white/[0.10] text-gray-300"
+            >
+              {r}
+            </span>
+          ))}
+        </div>
+      )}
       {hasBody && expanded && (
         <p className="mt-2 text-[11.5px] leading-relaxed text-gray-300 whitespace-pre-line">
           {alert.description}
@@ -200,6 +210,10 @@ export function AlertsDialog({
   // sub-line. Gated on `open` so a closed dialog doesn't keep a timer
   // alive in the background.
   const nowMs = useNow(open, 30_000);
+  // Fired when an affected-route bullet is tapped — closes the dialog
+  // in lockstep with the soft-nav so the Radix portal doesn't paint
+  // over the destination's first frame.
+  const closeOnNav = () => onOpenChange(false);
 
   const routeInfo = useMemo(() => {
     const m = new Map<string, { id: string; color: string; textColor: "white" | "black" }>();
@@ -307,6 +321,7 @@ export function AlertsDialog({
                           alert={alert}
                           routeInfo={routeInfo}
                           nowMs={nowMs}
+                          onLineNav={closeOnNav}
                         />
                       ))}
                     </div>
@@ -335,6 +350,7 @@ export default function AlertsButton() {
   const data = useAlerts();
   const lines = useLines();
   const nowMs = useNow(open, 30_000);
+  const closeOnNav = () => setOpen(false);
 
   // routeId → display info, used by AlertItem to render the affected
   // bullets. Built once per lines change, not per render.
@@ -497,6 +513,7 @@ export default function AlertsButton() {
                           alert={alert}
                           routeInfo={routeInfo}
                           nowMs={nowMs}
+                          onLineNav={closeOnNav}
                         />
                       ))}
                     </div>
