@@ -50,7 +50,6 @@ import {
   PlannerField,
   TripPlanRow,
   TripPlanDetail,
-  WalkingDetail,
   type RouteColorMap,
 } from "./panelUI";
 import { DragHandle } from "./DragHandle";
@@ -253,12 +252,6 @@ export default function SearchSheet({
   // tripKey because the row's onSelect already has the plan in hand
   // — no need to round-trip through the parent.
   const [expandedPlan, setExpandedPlan] = useState<TripPlan | null>(null);
-  // Expanded walking-only detail. Mirrors `expandedPlan` but for the
-  // walk-is-fastest path: when set, the directions pane swaps the
-  // recommendation card for a turn-by-turn timeline. Boolean rather
-  // than a captured route because the resolved walk lives in
-  // `walkOnlyRoute` already and refreshes on endpoint change.
-  const [walkDetailOpen, setWalkDetailOpen] = useState(false);
   // Tick that bumps when the rider taps the refresh button. Forces
   // tripPlans / arrivals to recompute even if the live feed hasn't
   // produced a new arrivals timestamp yet (it polls every 8s but a
@@ -390,7 +383,6 @@ export default function SearchSheet({
       setTripTo(null);
       setActiveField("from");
       setExpandedPlan(null);
-      setWalkDetailOpen(false);
       /* eslint-enable react-hooks/set-state-in-effect */
     }
   }, [open, initialMode]);
@@ -638,10 +630,6 @@ export default function SearchSheet({
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- clearing the resolved walk route when endpoints change keeps stale geometry off the map until the new fetch lands.
     setWalkOnlyRoute(null);
-    // A fresh trip means the walk-detail view (if any) was rendering
-    // steps for the previous endpoints; close it so the rider doesn't
-    // see stale instructions during the refetch.
-    setWalkDetailOpen(false);
   }, [tripFrom, tripTo]);
 
   useEffect(() => {
@@ -711,7 +699,16 @@ export default function SearchSheet({
   useEffect(() => {
     if (!open) return;
     if (mode !== "directions") return;
-    if (!onTripSelect || selectedTripKey || tripPlans.length === 0) return;
+    if (!onTripSelect) return;
+    // Walking wins: there's no subway pick to paint. Clear any
+    // selection that was made before the walk-comparison resolved,
+    // otherwise a red subway line stays drawn underneath the
+    // "Walking is faster" card.
+    if (walkIsBest) {
+      if (selectedTripKey) onTripSelect(null);
+      return;
+    }
+    if (selectedTripKey || tripPlans.length === 0) return;
     const plan = tripPlans[0];
     onTripSelect({
       plan,
@@ -730,7 +727,7 @@ export default function SearchSheet({
           }
         : undefined,
     });
-  }, [open, mode, tripPlans, selectedTripKey, onTripSelect, tripFrom, tripTo]);
+  }, [open, mode, tripPlans, selectedTripKey, onTripSelect, tripFrom, tripTo, walkIsBest]);
 
   // ── Picker results (when a directions field needs filling).
   const plannerSearchResults = useMemo<StationEntry[] | null>(() => {
@@ -929,7 +926,7 @@ export default function SearchSheet({
   // full city-spanning route with both endpoints visible while still
   // showing 3-4 plan rows above the fold. Drag-up to "full" remains
   // available for riders who want the whole list at once.
-  const halfVisibleDvh = expandedPlan || walkDetailOpen ? 38 : 48;
+  const halfVisibleDvh = expandedPlan ? 38 : 48;
   const { detent, sheetStyle, handlers, contentHandlers, onHandleTap, setDetent, isDragging } = useSheetDrag({
     halfRestingY: `calc(100dvh - var(--panel-top-rest) - ${halfVisibleDvh}dvh)`,
     open,
@@ -947,14 +944,6 @@ export default function SearchSheet({
       setDetent("full");
     }
   }, [open, initialMode, setDetent]);
-
-  // Walk-detail view is a "supporting" panel — the dashed route on
-  // the map carries the primary information, so we collapse to the
-  // half detent when the rider opens it. Mirrors how a tap on a trip
-  // plan in the list pulls the sheet down to make room for the route.
-  useEffect(() => {
-    if (walkDetailOpen) setDetent("half");
-  }, [walkDetailOpen, setDetent]);
 
   if (!open) return null;
 
@@ -1022,21 +1011,13 @@ export default function SearchSheet({
                   onFocusLeg?.(null);
                   return;
                 }
-                if (walkDetailOpen) {
-                  setWalkDetailOpen(false);
-                  return;
-                }
                 setMode("search");
                 setPlannerQuery("");
                 setPlannerPlaceResults([]);
                 onTripSelect?.(null);
               }}
               aria-label={
-                expandedPlan
-                  ? "Back to route options"
-                  : walkDetailOpen
-                    ? "Back to route options"
-                    : "Back to search"
+                expandedPlan ? "Back to route options" : "Back to search"
               }
               className="press w-8 h-8 -ml-1 flex items-center justify-center rounded-full bg-white/[0.08] hover:bg-white/[0.14] touch-manipulation flex-shrink-0"
             >
@@ -1053,9 +1034,7 @@ export default function SearchSheet({
               ? "Search"
               : expandedPlan
                 ? "Route details"
-                : walkDetailOpen
-                  ? "Walking directions"
-                  : "Directions"}
+                : "Directions"}
           </span>
         </div>
         <button
@@ -1098,7 +1077,7 @@ export default function SearchSheet({
             )}
           </div>
         </div>
-      ) : expandedPlan || walkDetailOpen ? null : (
+      ) : expandedPlan ? null : (
         <div className="px-3 pb-2.5 flex-shrink-0 border-b border-white/[0.06]">
           {/* Inline search: the active field IS the input. Tapping
               an inactive field activates it, focuses an embedded
@@ -1767,67 +1746,39 @@ export default function SearchSheet({
               );
             })()
           ) : walkIsBest && directWalk ? (
-            walkDetailOpen ? (
-              <WalkingDetail
-                route={walkOnlyRoute}
-                fallbackMeters={directWalk.meters}
-                fallbackMin={directWalk.min}
-                fromName={
-                  tripFrom?.address?.name ??
-                  tripFrom?.displayName ??
-                  tripFrom?.name ??
-                  "your starting point"
-                }
-                toName={
-                  tripTo?.address?.name ??
-                  tripTo?.displayName ??
-                  tripTo?.name ??
-                  "your destination"
-                }
-              />
-            ) : (
-              <div className="px-3 pt-3 pb-8">
-                <p className="text-[10px] font-semibold uppercase tracking-wider text-gray-500 mb-2 px-1">
-                  {fastestPlanMin === null
-                    ? "No subway route found"
-                    : "Fastest option"}
-                </p>
-                {/* Tappable: opens the turn-by-turn detail view, which
-                    snaps the sheet to the half detent so the dashed
-                    map route stays visible. Mirrors how a TripPlanRow
-                    expands into TripPlanDetail. */}
-                <button
-                  type="button"
-                  onClick={() => setWalkDetailOpen(true)}
-                  aria-label="Show walking directions"
-                  className="press w-full text-left rounded-2xl bg-emerald-300/10 ring-1 ring-emerald-300/30 hover:bg-emerald-300/15 px-4 py-3 touch-manipulation transition-colors"
-                >
-                  <div className="flex items-center gap-3">
-                    <div className="flex-shrink-0 w-9 h-9 rounded-full bg-emerald-300/20 text-emerald-200 flex items-center justify-center">
-                      <Footprints className="w-[18px] h-[18px]" />
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <p className="text-[13px] font-semibold text-gray-100">
-                        Walking is faster
-                      </p>
-                      <p className="text-[12px] text-gray-300 tabular-nums">
-                        {directWalk.min} min ·{" "}
-                        {directWalk.meters >= 1000
-                          ? `${(directWalk.meters / 1000).toFixed(1)} km`
-                          : `${Math.round(directWalk.meters)} m`}
-                        {fastestPlanMin !== null
-                          ? ` · subway ${fastestPlanMin} min`
-                          : ""}
-                      </p>
-                    </div>
-                    <ChevronRight className="w-4 h-4 text-gray-400 flex-shrink-0" />
+            // Walking won the comparison: render the recommendation as
+            // plain info. The map already shows the resolved pedestrian
+            // path via `walkOnlyOverlay`, which is the answer to "how
+            // do I get there" — riders asked us not to bury that path
+            // behind an extra tap into a turn-by-turn timeline.
+            <div className="px-3 pt-3 pb-8">
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-gray-500 mb-2 px-1">
+                {fastestPlanMin === null
+                  ? "No subway route found"
+                  : "Fastest option"}
+              </p>
+              <div className="w-full rounded-2xl bg-emerald-300/10 ring-1 ring-emerald-300/30 px-4 py-3">
+                <div className="flex items-center gap-3">
+                  <div className="flex-shrink-0 w-9 h-9 rounded-full bg-emerald-300/20 text-emerald-200 flex items-center justify-center">
+                    <Footprints className="w-[18px] h-[18px]" />
                   </div>
-                </button>
-                <p className="text-[11px] text-gray-500 mt-3 px-1">
-                  Tap for turn-by-turn directions.
-                </p>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-[13px] font-semibold text-gray-100">
+                      Walking is faster
+                    </p>
+                    <p className="text-[12px] text-gray-300 tabular-nums">
+                      {directWalk.min} min ·{" "}
+                      {directWalk.meters >= 1000
+                        ? `${(directWalk.meters / 1000).toFixed(1)} km`
+                        : `${Math.round(directWalk.meters)} m`}
+                      {fastestPlanMin !== null
+                        ? ` · subway ${fastestPlanMin} min`
+                        : ""}
+                    </p>
+                  </div>
+                </div>
               </div>
-            )
+            </div>
           ) : tripPlans.length === 0 ? (
             <div className="px-6 py-10 text-center">
               <Compass className="w-10 h-10 mx-auto mb-3 text-gray-600" />
