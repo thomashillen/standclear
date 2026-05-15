@@ -1877,6 +1877,7 @@ export default function SearchSheet({
                     }
                     now={now}
                     isPrimary={i === 0}
+                    isFastest={i === 0 && tripPlans.length > 1}
                     isSelected={isSelected}
                     onSelect={
                       onTripSelect
