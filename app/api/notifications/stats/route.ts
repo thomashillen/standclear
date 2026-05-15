@@ -13,6 +13,7 @@
 import { NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
 import { captureException } from "@/lib/observability";
+import { isCronAuthorized } from "@/lib/cronAuth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -33,14 +34,8 @@ interface StatsResponse {
   generatedAt: number;
 }
 
-function isAuthorized(req: Request): boolean {
-  const expected = process.env.CRON_SECRET;
-  if (!expected) return false;
-  return req.headers.get("authorization") === `Bearer ${expected}`;
-}
-
 export async function GET(req: Request) {
-  if (!isAuthorized(req)) {
+  if (!isCronAuthorized(req)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
   try {
