@@ -1059,6 +1059,8 @@ export default function NearbyPanel({
                 onFavoriteToggle={() => toggle(s.stopId)}
                 onTap={() => onStationOpen(s.stopId)}
                 anchor={anchorOf(s.stopId)}
+                lastReportedByTripId={lastReportedByTripId}
+                generatedAtSec={generatedAtSec}
               />
             ))}
           </div>
@@ -1080,6 +1082,8 @@ export default function NearbyPanel({
                 onFavoriteToggle={() => toggle(s.stopId)}
                 onTap={() => onStationOpen(s.stopId)}
                 anchor={anchorOf(s.stopId)}
+                lastReportedByTripId={lastReportedByTripId}
+                generatedAtSec={generatedAtSec}
               />
             ))}
           </div>

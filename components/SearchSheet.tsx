@@ -1529,6 +1529,8 @@ export default function SearchSheet({
                         }
                         onStationOpen(s.stopId);
                       }}
+                      lastReportedByTripId={lastReportedByTripId}
+                      generatedAtSec={generatedAtSec}
                     />
                   ))}
                 </>
