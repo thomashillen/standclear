@@ -130,11 +130,17 @@ export default function FollowCapsule({
         </span>
       )}
 
+      {/* 44px hit target (principle #3): this is the only control in
+          cinematic follow-mode and the rider taps it on a moving
+          train — the one place a sub-44px target bites hardest. The
+          glyph stays 16px; the button grows to the HIG minimum. It
+          fits the h-12 (48px) capsule with 2px of vertical clearance
+          under `items-center`. */}
       <button
         type="button"
         onClick={onExit}
         aria-label="Stop following train"
-        className="press w-9 h-9 flex items-center justify-center rounded-full bg-white/[0.10] hover:bg-white/[0.18] text-gray-100 touch-manipulation flex-shrink-0"
+        className="press w-11 h-11 flex items-center justify-center rounded-full bg-white/[0.10] hover:bg-white/[0.18] text-gray-100 touch-manipulation flex-shrink-0"
       >
         <X className="w-[16px] h-[16px]" strokeWidth={2.5} />
       </button>
