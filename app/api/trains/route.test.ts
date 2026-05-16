@@ -119,6 +119,40 @@ describe("GET /api/trains", () => {
     expect(body.trains[0].progress).toBe(1);
   });
 
+  it("mirrors destStopId onto Train (drives the synthesized 'Now' row label)", async () => {
+    // A 6 STOPPED_AT a Bronx platform, short-turning at Parkchester
+    // (619) — its last stopTimeUpdate is 619N, not Pelham Bay (601).
+    // The station panel synthesizes the at-platform "Now" row from
+    // `trains`, not `arrivals`, so Train must carry the same dest or
+    // the row regresses to the static line terminus at the most
+    // actionable moment.
+    const entity = {
+      id: "T8",
+      tripUpdate: {
+        trip: { tripId: "T8", routeId: "6" },
+        stopTimeUpdate: [
+          { stopId: "624N", arrival: { time: 1_700_000_600 } },
+          { stopId: "619N", arrival: { time: 1_700_000_900 } },
+        ],
+      },
+      vehicle: {
+        trip: { tripId: "T8", routeId: "6" },
+        stopId: "624N",
+        currentStatus: 1, // STOPPED_AT
+      },
+    };
+    fetchMock.mockResolvedValue(feedResponse(feed([entity])));
+
+    const body = (await (await GET()).json()) as TrainsResponse;
+    expect(body.trains).toHaveLength(1);
+    expect(body.trains[0].destStopId).toBe("619");
+    // And the value is identical to what the trip's arrivals carry —
+    // a single source (destByTrip) feeds both, they must not diverge.
+    for (const a of body.arrivals.filter((x) => x.tripId === "T8")) {
+      expect(a.destStopId).toBe("619");
+    }
+  });
+
   it("emits arrivals filtered to those still in the future, sorted ascending", async () => {
     // Two trips on the same stop; one ETA already past should be dropped.
     const entityFuture = {

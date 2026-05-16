@@ -381,6 +381,12 @@ export default function StationPanel({ stopId, onClose, onSelectLine, onStartDir
         direction: t.direction,
         eta: nowSec,
         tripId: t.id,
+        // Carry the trip's realtime destination so a short-turn train
+        // sitting at the platform reads its true terminus, not the
+        // static line end (the at-platform moment is when it matters
+        // most). `Train.destStopId` is the same value `Arrival`
+        // carries — see route.ts destByTrip.
+        destStopId: t.destStopId,
         live: true,
       };
       seen.add(`${t.id}|${t.prevStopId}`);
@@ -401,6 +407,10 @@ export default function StationPanel({ stopId, onClose, onSelectLine, onStartDir
         direction: t.direction,
         eta: nowSec,
         tripId,
+        // Same realtime-destination carry as the live-snapshot branch
+        // above — a recently-departed short-turn must not regress to
+        // the static terminus during its grace window.
+        destStopId: t.destStopId,
         live: true,
       };
       seen.add(`${tripId}|${entry.stopId}`);

@@ -33,6 +33,16 @@ export type Train = {
    *  failing." Optional because GTFS-RT lets both timestamps be
    *  blank, in which case the client falls back to `generatedAt`. */
   lastReportedAt?: number;
+  /** Parent stop id of the trip's final stopTimeUpdate — same realtime
+   *  destination carried on `Arrival.destStopId`, mirrored here so the
+   *  station panel can label a synthesized "Now" row (a train sitting
+   *  STOPPED_AT the platform) with its true short-turn terminus. That
+   *  row is built from `trains`, not `arrivals` — and the at-platform
+   *  moment is exactly when the destination matters most — so without
+   *  this field it would fall back to the static line terminus and
+   *  re-introduce the very mislabel this exists to fix. Omitted only
+   *  for a degenerate trip update with no stop ids. */
+  destStopId?: string;
 };
 
 export type Arrival = {
@@ -89,6 +99,18 @@ function dirFromStop(id: string): "N" | "S" {
   return id.endsWith("S") ? "S" : "N";
 }
 
+// The trip's realtime destination is its last future stop. Scan from
+// the tail for the last entry that actually carries a stopId — a
+// trailing entry with a null id must not erase the destination for
+// the whole trip.
+function destFromUpdates(updates: StopUpdate[]): string | undefined {
+  for (let i = updates.length - 1; i >= 0; i--) {
+    const sid = updates[i].stopId;
+    if (sid) return parentStop(sid);
+  }
+  return undefined;
+}
+
 // Cross-poll memory of where each trip was last seen. MTA's GTFS-RT
 // stopTimeUpdate only lists FUTURE stops, so an in-transit vehicle's
 // `idx` in the update array is 0 and the prior stop is unrecoverable
@@ -142,6 +164,16 @@ async function fetchFeed(url: string): Promise<{ trains: Train[]; arrivals: Arri
       if (tu.trip.routeId) routeByTrip.set(tu.trip.tripId, tu.trip.routeId);
     }
   }
+
+  // Resolve each trip's destination once. Keyed by tripId so both the
+  // vehicle loop (Train) and the stop-time loop (Arrival) stamp the
+  // identical value — the synthesized "Now" row is built off Train, so
+  // the two must not diverge.
+  const destByTrip = new Map<string, string>();
+  updatesByTrip.forEach((updates, tripId) => {
+    const dest = destFromUpdates(updates);
+    if (dest) destByTrip.set(tripId, dest);
+  });
 
   const nowMs = Date.now();
   const now = Math.floor(nowMs / 1000);
@@ -245,24 +277,14 @@ async function fetchFeed(url: string): Promise<{ trains: Train[]; arrivals: Arri
       nextStopId,
       status,
       ...(vehicleTs != null ? { lastReportedAt: vehicleTs } : {}),
+      ...(destByTrip.has(tripId) ? { destStopId: destByTrip.get(tripId) } : {}),
     });
   }
 
   updatesByTrip.forEach((updates, tripId) => {
     const routeId = routeByTrip.get(tripId) || "";
     if (!routeId) return;
-    // The trip's realtime destination is its last future stop. Scan
-    // from the tail for the last entry that actually carries a stopId
-    // (a trailing entry with a null id would otherwise erase the
-    // destination for the whole trip).
-    let destStopId: string | undefined;
-    for (let i = updates.length - 1; i >= 0; i--) {
-      const sid = updates[i].stopId;
-      if (sid) {
-        destStopId = parentStop(sid);
-        break;
-      }
-    }
+    const destStopId = destByTrip.get(tripId);
     for (const u of updates) {
       if (!u.stopId) continue;
       const eta = toSec(u.arrival?.time) ?? toSec(u.departure?.time);
