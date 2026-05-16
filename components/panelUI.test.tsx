@@ -1,6 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
-import { TripPlanRow, type RouteColorMap } from "./panelUI";
+import {
+  TripPlanRow,
+  StationRow,
+  type RouteColorMap,
+  type StationRowProps,
+} from "./panelUI";
 import type { Arrival } from "@/lib/useTrains";
 import type { TripPlan } from "@/lib/commuteRouting";
 import type { StationEntry } from "@/lib/stopsIndex";
@@ -424,5 +429,61 @@ describe("TripPlanRow trunk catch verdict (sibling routes)", () => {
     expect(
       container.querySelectorAll(".text-amber-300").length,
     ).toBeGreaterThan(0);
+  });
+});
+
+// StationRow renders the compact arrival chips a rider scans in search
+// results, the favorites list, and the nearest-stations list. On a cold
+// first visit the live feed is still `null` until the first /api/trains
+// poll resolves, so `arrivals` is `[]` because the data is *unknown* —
+// not because the station is dead. Rendering the definitive "No
+// upcoming trains" there is a false negative on exactly the
+// zero-onboarding rider the product is built to win. `hasData` gates
+// that copy, mirroring the same fix on StationPanel's DirectionSection
+// (#168) and LinePanel's StopRow.
+describe("StationRow loading vs empty", () => {
+  const noop = () => {};
+  function row(props: Partial<StationRowProps> = {}) {
+    return render(
+      <StationRow
+        station={{ ...origin }}
+        arrivals={[]}
+        routeColors={routeColors}
+        now={NOW_MS}
+        isFavorite={false}
+        onFavoriteToggle={noop}
+        onTap={noop}
+        {...props}
+      />,
+    );
+  }
+
+  it("shows the negative copy when hasData is omitted (legacy / favorites-only default)", () => {
+    // Backward-compat: the prop defaults to true so call sites and
+    // tests that never thread it keep the prior empty-state behavior.
+    row();
+    expect(screen.getByText("No upcoming trains")).toBeTruthy();
+  });
+
+  it("suppresses the negative copy while the feed is still loading (hasData=false)", () => {
+    row({ hasData: false });
+    expect(screen.queryByText("No upcoming trains")).toBeNull();
+    // The row keeps its identity — name + route bullets still render
+    // and it stays tappable into the full StationPanel.
+    expect(screen.getByText(origin.name)).toBeTruthy();
+  });
+
+  it("shows the negative copy once the feed has loaded and the station is genuinely empty (hasData=true)", () => {
+    row({ hasData: true });
+    expect(screen.getByText("No upcoming trains")).toBeTruthy();
+  });
+
+  it("ACCURACY-FIRST: hasData gates only the empty-state copy and never hides a real arrival", () => {
+    // Guards a future refactor that might short-circuit the whole
+    // arrivals block on !hasData — a loaded arrival must always render
+    // regardless of the loading flag's value.
+    row({ hasData: false, arrivals: [makeArrival("trip-x", 3 * 60)] });
+    expect(screen.queryByText("No upcoming trains")).toBeNull();
+    expect(screen.getByText("3m")).toBeTruthy();
   });
 });
