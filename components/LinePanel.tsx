@@ -151,9 +151,15 @@ function etaChipAria(
   etaStr: string,
   staleness: TrainStaleness | null | undefined,
 ): string {
-  if (!staleness?.label) return `${direction} ${etaStr}`;
-  const mins = Math.max(1, Math.round(staleness.ageSec / 60));
-  return `${direction} ${etaStr}, position last updated ${mins} ${mins === 1 ? "minute" : "minutes"} ago`;
+  // The spoken age phrase is single-sourced in `trainStaleness`
+  // (`ariaLabel`) so it can't drift from the visible chip label or
+  // from StationPanel's equivalent arrival-row sub-line, which speaks
+  // the identical sentence. `ariaLabel` is non-null exactly when
+  // `label` is, so this gate is equivalent to the old `?.label` check;
+  // the rounded-minute count and the singular/plural wording now come
+  // straight from the helper instead of being re-derived here.
+  if (!staleness?.ariaLabel) return `${direction} ${etaStr}`;
+  return `${direction} ${etaStr}, ${staleness.ariaLabel}`;
 }
 
 // Exported for component tests — see `LinePanel.test.tsx`. Mounting

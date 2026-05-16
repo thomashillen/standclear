@@ -68,6 +68,36 @@ describe("ArrivalRow staleness label", () => {
     expect(screen.getByText("Stale · 10m")).toBeTruthy();
   });
 
+  it("speaks the single-sourced `trainStaleness.ariaLabel` on the stale sub-line", () => {
+    // The sub-line's accessible name must be exactly what
+    // `trainStaleness` produced — not a separately re-derived
+    // "Position last updated …" string (the old inline path, which
+    // also drifted from LinePanel's lowercase phrasing). Pin both that
+    // the helper builds the spelled-out form and that ArrivalRow
+    // echoes it verbatim.
+    const softStale = trainStaleness(NOW_SEC - 4 * 60, NOW_MS, NOW_SEC);
+    expect(softStale.ariaLabel).toBe("position last updated 4 minutes ago");
+    render(
+      <ArrivalRow
+        arrival={baseArrival}
+        now={NOW_MS}
+        badge={badge}
+        isExpress={false}
+        terminusName="Coney Island"
+        onTapRoute={vi.fn()}
+        staleness={softStale}
+      />,
+    );
+    // Visible compact label and the spoken long form both present,
+    // both off the same age — and the old capitalized "Position …"
+    // wording is gone.
+    expect(screen.getByText("Updated 4m ago")).toBeTruthy();
+    expect(
+      screen.getByLabelText("position last updated 4 minutes ago"),
+    ).toBeTruthy();
+    expect(screen.queryByLabelText(/^Position last updated/)).toBeNull();
+  });
+
   it("renders no staleness sub-line when staleness is null (no Train entry for the trip)", () => {
     // Mirrors the StationPanel branch where lastReportedByTripId.has(tripId)
     // is false — the trip showed up in stop_time_updates without a paired
