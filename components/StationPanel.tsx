@@ -607,6 +607,7 @@ export default function StationPanel({ stopId, onClose, onSelectLine, onStartDir
           onSelectLine={onSelectLine}
           lastReportedByTripId={lastReportedByTripId}
           generatedAtSec={generatedAtSec}
+          hasData={!!data}
         />
 
         <DirectionSection
@@ -620,6 +621,7 @@ export default function StationPanel({ stopId, onClose, onSelectLine, onStartDir
           onSelectLine={onSelectLine}
           lastReportedByTripId={lastReportedByTripId}
           generatedAtSec={generatedAtSec}
+          hasData={!!data}
         />
       </div>
     </div>
@@ -632,7 +634,7 @@ export default function StationPanel({ stopId, onClose, onSelectLine, onStartDir
 // without expand intent anyway.
 const DEFAULT_ARRIVALS_PER_DIRECTION = 4;
 
-function DirectionSection({
+export function DirectionSection({
   label,
   icon,
   arrivals,
@@ -643,6 +645,7 @@ function DirectionSection({
   onSelectLine,
   lastReportedByTripId,
   generatedAtSec,
+  hasData,
 }: {
   label: string;
   icon: React.ReactNode;
@@ -658,6 +661,14 @@ function DirectionSection({
   /** Snapshot freshness floor in epoch seconds; used as the fallback
    *  when a trip has no per-vehicle timestamp (silent-feed outages). */
   generatedAtSec: number;
+  /** False until the first /api/trains payload lands (cold boot with no
+   *  localStorage cache — the brand-new first visit). An empty arrivals
+   *  list during that window means "not loaded yet," NOT "no trains";
+   *  rendering the definitive "No upcoming trains in the next 45 min."
+   *  there contradicts the parent's "Loading live arrivals…" line and
+   *  tells a first-time rider the station is dead when we simply don't
+   *  know yet. Mirrors LinePanel's hasData-gated negative copy. */
+  hasData: boolean;
 }) {
   const [expanded, setExpanded] = useState(false);
 
@@ -685,13 +696,19 @@ function DirectionSection({
           {label}
         </span>
         <span className="text-[11px] text-gray-600 ml-auto tabular-nums">
-          {visible.length > 0 ? `${visible.length} upcoming` : "—"}
+          {!hasData ? "" : visible.length > 0 ? `${visible.length} upcoming` : "—"}
         </span>
       </div>
       {visible.length === 0 ? (
-        <div className="px-4 pb-3 text-[12px] text-gray-600">
-          No upcoming trains in the next 45 min.
-        </div>
+        // While loading (no payload yet) the parent already renders a
+        // single "Loading live arrivals…" line; suppressing the negative
+        // copy here keeps the cold-boot view from claiming the station is
+        // dead before the first poll resolves.
+        !hasData ? null : (
+          <div className="px-4 pb-3 text-[12px] text-gray-600">
+            No upcoming trains in the next 45 min.
+          </div>
+        )
       ) : (
         <div>
           {shown.map((a, i) => {
