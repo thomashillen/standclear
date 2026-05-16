@@ -6,6 +6,7 @@ import { useTrains } from "@/lib/useTrains";
 import { useGeolocationState } from "@/lib/useGeolocation";
 import { buildStationIndex } from "@/lib/stopsIndex";
 import { useTrainMarkers } from "@/lib/useTrainMarkers";
+import { INITIAL_MAP_VIEW } from "@/lib/mapView";
 import "mapbox-gl/dist/mapbox-gl.css";
 
 interface MapViewProps {
@@ -508,8 +509,8 @@ export default function MapView({ selectedLine, stationStopId, onLineSelect, onS
       const map = new mapboxgl.default.Map({
         container: containerRef.current,
         style: "mapbox://styles/mapbox/dark-v11",
-        center: [-73.9857, 40.7484],
-        zoom: 11,
+        center: INITIAL_MAP_VIEW.center,
+        zoom: INITIAL_MAP_VIEW.zoom,
         minZoom: 9,
         maxZoom: 15,
         // Mobile Safari aggressively kills tabs under memory pressure.
@@ -1538,8 +1539,9 @@ export default function MapView({ selectedLine, stationStopId, onLineSelect, onS
   // Reset-to-Manhattan fly. Driven by flyToDefaultSignal — the Near-me
   // panel bumps it when an out-of-NYC rider taps "Preview the map" so
   // the camera lands somewhere useful regardless of where the user
-  // happens to be. Mirrors the map's initial center/zoom so the
-  // viewport returns to the same canonical frame the page first paints.
+  // happens to be. Reuses INITIAL_MAP_VIEW so the viewport returns to
+  // exactly the same canonical frame the page first paints (see the
+  // module-level note for why this is single-sourced, not duplicated).
   const lastDefaultSignalRef = useRef(0);
   useEffect(() => {
     const sig = flyToDefaultSignal ?? 0;
@@ -1547,8 +1549,8 @@ export default function MapView({ selectedLine, stationStopId, onLineSelect, onS
     lastDefaultSignalRef.current = sig;
     if (!mapLoaded || !mapRef.current) return;
     mapRef.current.flyTo({
-      center: [-73.9857, 40.7484],
-      zoom: 11,
+      center: INITIAL_MAP_VIEW.center,
+      zoom: INITIAL_MAP_VIEW.zoom,
       duration: 900,
     });
   }, [flyToDefaultSignal, mapLoaded]);
