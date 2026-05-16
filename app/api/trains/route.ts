@@ -41,6 +41,21 @@ export type Arrival = {
   direction: "N" | "S";
   eta: number;
   tripId: string;
+  /** Parent stop id of the trip's final stopTimeUpdate — the actual
+   *  realtime destination for THIS run, not the static line terminus.
+   *  They diverge on short-turns (a 6 ending at Parkchester instead of
+   *  Pelham Bay Park — ~40% of northbound 6 trains at peak) and branch
+   *  services (a 5 to Dyre Av vs Nereid Av). The static line geometry
+   *  only knows one representative terminus per route, so labeling
+   *  every train with it is an accuracy-first violation: a rider told
+   *  "to Pelham Bay Park" who boards a Parkchester short-turn gets
+   *  kicked off mid-route. MTA's NYCT feed carries the *complete*
+   *  remaining trip (validated against the live 1/2/3/4/5/6 feed —
+   *  never truncated to a sliding window), so the tail stop is the
+   *  true terminus for this run. Omitted only for a degenerate trip
+   *  update with no stop ids; the client falls back to the static
+   *  line terminus then. */
+  destStopId?: string;
 };
 
 export type TrainsResponse = {
@@ -236,6 +251,18 @@ async function fetchFeed(url: string): Promise<{ trains: Train[]; arrivals: Arri
   updatesByTrip.forEach((updates, tripId) => {
     const routeId = routeByTrip.get(tripId) || "";
     if (!routeId) return;
+    // The trip's realtime destination is its last future stop. Scan
+    // from the tail for the last entry that actually carries a stopId
+    // (a trailing entry with a null id would otherwise erase the
+    // destination for the whole trip).
+    let destStopId: string | undefined;
+    for (let i = updates.length - 1; i >= 0; i--) {
+      const sid = updates[i].stopId;
+      if (sid) {
+        destStopId = parentStop(sid);
+        break;
+      }
+    }
     for (const u of updates) {
       if (!u.stopId) continue;
       const eta = toSec(u.arrival?.time) ?? toSec(u.departure?.time);
@@ -246,6 +273,7 @@ async function fetchFeed(url: string): Promise<{ trains: Train[]; arrivals: Arri
         direction: dirFromStop(u.stopId),
         eta,
         tripId,
+        destStopId,
       });
     }
   });

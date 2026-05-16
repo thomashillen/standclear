@@ -153,6 +153,51 @@ describe("GET /api/trains", () => {
     expect(arrivalsAt631[0].direction).toBe("S");
   });
 
+  it("tags every arrival with destStopId = parent of the trip's last future stop (short-turn aware)", async () => {
+    // A 6 short-turning at Parkchester (619): its last stopTimeUpdate
+    // is 619N, NOT the full-line terminus Pelham Bay Park (601). Every
+    // arrival emitted for the trip must carry the short-turn id so the
+    // client labels it "to Parkchester", not "to Pelham Bay Park".
+    const shortTurn = {
+      id: "T6",
+      tripUpdate: {
+        trip: { tripId: "T6", routeId: "6" },
+        stopTimeUpdate: [
+          { stopId: "627N", arrival: { time: 1_700_000_600 } },
+          { stopId: "621N", arrival: { time: 1_700_000_800 } },
+          { stopId: "619N", arrival: { time: 1_700_001_000 } },
+        ],
+      },
+    };
+    // A trailing entry with no stopId must not erase the destination —
+    // the scan walks back to the last entry that actually has an id.
+    const trailingNull = {
+      id: "T7",
+      tripUpdate: {
+        trip: { tripId: "T7", routeId: "6" },
+        stopTimeUpdate: [
+          { stopId: "619S", arrival: { time: 1_700_000_700 } },
+          { stopId: "640S", arrival: { time: 1_700_000_900 } },
+          { arrival: { time: 1_700_001_100 } },
+        ],
+      },
+    };
+    fetchMock.mockResolvedValue(feedResponse(feed([shortTurn, trailingNull])));
+
+    const body = (await (await GET()).json()) as TrainsResponse;
+    const t6 = body.arrivals.filter((a) => a.tripId === "T6");
+    expect(t6.length).toBe(3);
+    // Parent stop, suffix stripped, identical across every row of the
+    // trip — and pointedly different from each row's own stopId.
+    for (const a of t6) {
+      expect(a.destStopId).toBe("619");
+      expect(a.stopId).not.toBe(undefined);
+    }
+    const t7 = body.arrivals.filter((a) => a.tripId === "T7");
+    expect(t7.length).toBe(2);
+    for (const a of t7) expect(a.destStopId).toBe("640");
+  });
+
   it("dedupes duplicate trips by tripId across multiple feeds", async () => {
     // The base feed and a route-specific feed both echo trip T5.
     // FEEDS sets the route-specific feed AFTER the base feed, so

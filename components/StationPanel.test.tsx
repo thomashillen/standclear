@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
-import { ArrivalRow } from "./StationPanel";
+import { ArrivalRow, resolveDestinationName } from "./StationPanel";
 import { trainStaleness } from "@/lib/trainStaleness";
 
 const NOW_MS = new Date("2026-05-10T00:00:00Z").getTime();
@@ -86,5 +86,59 @@ describe("ArrivalRow staleness label", () => {
     );
     expect(screen.queryByText(/Updated/)).toBeNull();
     expect(screen.queryByText(/Stale/)).toBeNull();
+  });
+});
+
+describe("resolveDestinationName", () => {
+  const names = new Map<string, string>([
+    ["619", "Parkchester"],
+    ["601", "Pelham Bay Park"],
+  ]);
+
+  it("prefers the realtime destination over the static line terminus", () => {
+    // The accuracy case: a 6 short-turning at Parkchester. Static
+    // geometry says "to Pelham Bay Park"; the feed says 619. The rider
+    // must see the short-turn so they don't board a train that quits
+    // mid-route.
+    expect(resolveDestinationName("619", names, "Pelham Bay Park")).toBe(
+      "Parkchester",
+    );
+  });
+
+  it("falls back to the static terminus when the feed omitted a destination", () => {
+    expect(resolveDestinationName(undefined, names, "Pelham Bay Park")).toBe(
+      "Pelham Bay Park",
+    );
+  });
+
+  it("falls back to the static terminus when the dest stop isn't in any loaded line", () => {
+    // A future MTA destination we don't carry on any representative
+    // shape must degrade to the static label, never a bare stop id.
+    expect(resolveDestinationName("999", names, "Pelham Bay Park")).toBe(
+      "Pelham Bay Park",
+    );
+  });
+
+  it("returns undefined when neither realtime nor static is available", () => {
+    expect(resolveDestinationName(undefined, names, undefined)).toBeUndefined();
+    expect(resolveDestinationName("999", names, undefined)).toBeUndefined();
+  });
+
+  it("renders the resolved realtime terminus through ArrivalRow", () => {
+    // End-to-end at the row: a short-turning arrival shows the live
+    // destination, not the static one.
+    render(
+      <ArrivalRow
+        arrival={{ ...baseArrival, routeId: "6", destStopId: "619" }}
+        now={NOW_MS}
+        badge={{ id: "6", color: "#00933C", textColor: "white" }}
+        isExpress={false}
+        terminusName={resolveDestinationName("619", names, "Pelham Bay Park")}
+        onTapRoute={vi.fn()}
+        staleness={null}
+      />,
+    );
+    expect(screen.getByText("to Parkchester")).toBeTruthy();
+    expect(screen.queryByText("to Pelham Bay Park")).toBeNull();
   });
 });

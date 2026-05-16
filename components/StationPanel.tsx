@@ -132,6 +132,28 @@ function parseExpress(routeId: string): { baseRouteId: string; isExpress: boolea
   return { baseRouteId: routeId, isExpress: false };
 }
 
+// Pick the destination label for an arrival row. The realtime trip
+// destination (parent stop of the trip's last stopTimeUpdate, attached
+// server-side as `destStopId`) wins over the static line terminus: the
+// static endpoint is the *full line's* end, so it mislabels short-turns
+// (a 6 ending at Parkchester, not Pelham Bay Park) and branch services
+// (a 5 to Dyre Av). Fall back to the static terminus when the feed
+// omitted a destination, or when the dest stop isn't present in any
+// loaded line's representative shape (so we never render a bare stop
+// id or, worse, nothing at all). Exported for direct unit coverage —
+// this is the accuracy-critical bit, not the JSX around it.
+export function resolveDestinationName(
+  destStopId: string | undefined,
+  stopNameById: Map<string, string>,
+  staticTerminusName: string | undefined,
+): string | undefined {
+  if (destStopId) {
+    const realtime = stopNameById.get(destStopId);
+    if (realtime) return realtime;
+  }
+  return staticTerminusName;
+}
+
 interface ArrivalRowProps {
   arrival: Arrival;
   now: number;
@@ -425,6 +447,22 @@ export default function StationPanel({ stopId, onClose, onSelectLine, onStartDir
     return m;
   }, [lines]);
 
+  // Parent-stop-id → station name, unioned across every loaded line's
+  // representative shape. Resolves the realtime `destStopId` on each
+  // arrival to a human terminus ("619" → "Parkchester"). Union (not
+  // per-route) so a short-turn point that's a regular stop on a
+  // *different* line still resolves — and so a future MTA destination
+  // we don't have on this route's shape degrades to the static label
+  // instead of a bare id. Same `lines` dependency as the terminus map.
+  const stopNameById = useMemo(() => {
+    const m = new Map<string, string>();
+    if (!lines) return m;
+    for (const line of Object.values(lines)) {
+      for (const s of line.stops) if (!m.has(s.id)) m.set(s.id, s.name);
+    }
+    return m;
+  }, [lines]);
+
   const routeInfo = useMemo(() => {
     const m = new Map<string, { id: string; color: string; textColor: "white" | "black" }>();
     if (!lines) return m;
@@ -603,6 +641,7 @@ export default function StationPanel({ stopId, onClose, onSelectLine, onStartDir
           now={now}
           routeInfo={routeInfo}
           terminusByRoute={terminusByRouteAndDir}
+          stopNameById={stopNameById}
           direction="N"
           onSelectLine={onSelectLine}
           lastReportedByTripId={lastReportedByTripId}
@@ -616,6 +655,7 @@ export default function StationPanel({ stopId, onClose, onSelectLine, onStartDir
           now={now}
           routeInfo={routeInfo}
           terminusByRoute={terminusByRouteAndDir}
+          stopNameById={stopNameById}
           direction="S"
           onSelectLine={onSelectLine}
           lastReportedByTripId={lastReportedByTripId}
@@ -639,6 +679,7 @@ function DirectionSection({
   now,
   routeInfo,
   terminusByRoute,
+  stopNameById,
   direction,
   onSelectLine,
   lastReportedByTripId,
@@ -650,6 +691,9 @@ function DirectionSection({
   now: number;
   routeInfo: Map<string, { id: string; color: string; textColor: "white" | "black" }>;
   terminusByRoute: Map<string, { N: string; S: string }>;
+  /** Parent-stop-id → station name, for resolving each arrival's
+   *  realtime `destStopId` to a human terminus. */
+  stopNameById: Map<string, string>;
   direction: "N" | "S";
   onSelectLine: (routeId: string) => void;
   /** Per-trip last-reported timestamps from `data.trains` so the row
@@ -717,7 +761,11 @@ function DirectionSection({
                 now={now}
                 badge={routeInfo.get(baseRouteId)}
                 isExpress={isExpress}
-                terminusName={terminusByRoute.get(baseRouteId)?.[direction]}
+                terminusName={resolveDestinationName(
+                  a.destStopId,
+                  stopNameById,
+                  terminusByRoute.get(baseRouteId)?.[direction],
+                )}
                 onTapRoute={() => onSelectLine(baseRouteId)}
                 staleness={staleness}
               />
