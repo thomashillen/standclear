@@ -33,6 +33,16 @@ export type Train = {
    *  failing." Optional because GTFS-RT lets both timestamps be
    *  blank, in which case the client falls back to `generatedAt`. */
   lastReportedAt?: number;
+  /** Parent stop id of the trip's final stopTimeUpdate — same realtime
+   *  destination carried on `Arrival.destStopId`, mirrored here so the
+   *  station panel can label a synthesized "Now" row (a train sitting
+   *  STOPPED_AT the platform) with its true short-turn terminus. That
+   *  row is built from `trains`, not `arrivals` — and the at-platform
+   *  moment is exactly when the destination matters most — so without
+   *  this field it would fall back to the static line terminus and
+   *  re-introduce the very mislabel this exists to fix. Omitted only
+   *  for a degenerate trip update with no stop ids. */
+  destStopId?: string;
 };
 
 export type Arrival = {
@@ -41,6 +51,21 @@ export type Arrival = {
   direction: "N" | "S";
   eta: number;
   tripId: string;
+  /** Parent stop id of the trip's final stopTimeUpdate — the actual
+   *  realtime destination for THIS run, not the static line terminus.
+   *  They diverge on short-turns (a 6 ending at Parkchester instead of
+   *  Pelham Bay Park — ~40% of northbound 6 trains at peak) and branch
+   *  services (a 5 to Dyre Av vs Nereid Av). The static line geometry
+   *  only knows one representative terminus per route, so labeling
+   *  every train with it is an accuracy-first violation: a rider told
+   *  "to Pelham Bay Park" who boards a Parkchester short-turn gets
+   *  kicked off mid-route. MTA's NYCT feed carries the *complete*
+   *  remaining trip (validated against the live 1/2/3/4/5/6 feed —
+   *  never truncated to a sliding window), so the tail stop is the
+   *  true terminus for this run. Omitted only for a degenerate trip
+   *  update with no stop ids; the client falls back to the static
+   *  line terminus then. */
+  destStopId?: string;
 };
 
 export type TrainsResponse = {
@@ -72,6 +97,18 @@ function parentStop(id: string): string {
 
 function dirFromStop(id: string): "N" | "S" {
   return id.endsWith("S") ? "S" : "N";
+}
+
+// The trip's realtime destination is its last future stop. Scan from
+// the tail for the last entry that actually carries a stopId — a
+// trailing entry with a null id must not erase the destination for
+// the whole trip.
+function destFromUpdates(updates: StopUpdate[]): string | undefined {
+  for (let i = updates.length - 1; i >= 0; i--) {
+    const sid = updates[i].stopId;
+    if (sid) return parentStop(sid);
+  }
+  return undefined;
 }
 
 // Cross-poll memory of where each trip was last seen. MTA's GTFS-RT
@@ -127,6 +164,16 @@ async function fetchFeed(url: string): Promise<{ trains: Train[]; arrivals: Arri
       if (tu.trip.routeId) routeByTrip.set(tu.trip.tripId, tu.trip.routeId);
     }
   }
+
+  // Resolve each trip's destination once. Keyed by tripId so both the
+  // vehicle loop (Train) and the stop-time loop (Arrival) stamp the
+  // identical value — the synthesized "Now" row is built off Train, so
+  // the two must not diverge.
+  const destByTrip = new Map<string, string>();
+  updatesByTrip.forEach((updates, tripId) => {
+    const dest = destFromUpdates(updates);
+    if (dest) destByTrip.set(tripId, dest);
+  });
 
   const nowMs = Date.now();
   const now = Math.floor(nowMs / 1000);
@@ -230,12 +277,14 @@ async function fetchFeed(url: string): Promise<{ trains: Train[]; arrivals: Arri
       nextStopId,
       status,
       ...(vehicleTs != null ? { lastReportedAt: vehicleTs } : {}),
+      ...(destByTrip.has(tripId) ? { destStopId: destByTrip.get(tripId) } : {}),
     });
   }
 
   updatesByTrip.forEach((updates, tripId) => {
     const routeId = routeByTrip.get(tripId) || "";
     if (!routeId) return;
+    const destStopId = destByTrip.get(tripId);
     for (const u of updates) {
       if (!u.stopId) continue;
       const eta = toSec(u.arrival?.time) ?? toSec(u.departure?.time);
@@ -246,6 +295,7 @@ async function fetchFeed(url: string): Promise<{ trains: Train[]; arrivals: Arri
         direction: dirFromStop(u.stopId),
         eta,
         tripId,
+        destStopId,
       });
     }
   });
