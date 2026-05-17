@@ -1,7 +1,8 @@
 "use client";
 
 import { useMemo } from "react";
-import { Activity, ArrowDown, ArrowUp, Radio, Train } from "lucide-react";
+import Link from "next/link";
+import { Activity, ArrowDown, ArrowUp, ChevronRight, Radio, Train } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -12,6 +13,7 @@ import {
 import { useTrains } from "@/lib/useTrains";
 import { useLines } from "@/lib/subwayData";
 import { useNow } from "@/lib/useNow";
+import { lineSlug } from "@/lib/lineSlug";
 import { summarizeFleetStaleness } from "@/lib/trainStaleness";
 
 interface Props {
@@ -262,19 +264,26 @@ export default function LiveTrainsPopup({ open, onClose }: Props) {
           {/* Per-line breakdown — bullets ordered by current train
               count, with a thin bar to encode the spread. The 7 and L
               regularly top this list during rush; B / Z trail at off
-              hours. */}
+              hours. Each row is a Link to /line/[slug] so a rider
+              tapping the busiest line lands on its live page (mirrors
+              the AlertsButton bullet-nav idiom). onClose fires in
+              lockstep with the soft-nav so the Radix portal doesn't
+              paint over the destination's first frame. */}
           <section>
             <SectionLabel>Lines running</SectionLabel>
-            <div className="rounded-2xl bg-white/[0.04] border border-white/[0.06] divide-y divide-white/[0.04]">
+            <div className="rounded-2xl bg-white/[0.04] border border-white/[0.06] divide-y divide-white/[0.04] overflow-hidden">
               {stats?.lineRows.length ? (
                 stats.lineRows.map(({ routeId, count }) => {
                   const info = routeInfo.get(routeId);
                   if (!info) return null;
                   const pct = (count / maxLineCount) * 100;
                   return (
-                    <div
+                    <Link
                       key={routeId}
-                      className="flex items-center gap-3 px-3 py-2"
+                      href={`/line/${lineSlug(routeId)}`}
+                      onClick={onClose}
+                      aria-label={`Open ${info.id} line · ${count} train${count === 1 ? "" : "s"} in service`}
+                      className="press flex items-center gap-3 px-3 py-2 transition-colors hover:bg-white/[0.04] active:bg-white/[0.06] touch-manipulation"
                     >
                       <span
                         className="nyc-bullet inline-flex items-center justify-center w-6 h-6 rounded-full text-[12px] flex-shrink-0"
@@ -300,7 +309,11 @@ export default function LiveTrainsPopup({ open, onClose }: Props) {
                       <span className="text-[13px] font-semibold tabular-nums text-gray-100 flex-shrink-0 w-7 text-right">
                         {count}
                       </span>
-                    </div>
+                      <ChevronRight
+                        className="w-3.5 h-3.5 text-gray-500 flex-shrink-0 -mr-1"
+                        aria-hidden
+                      />
+                    </Link>
                   );
                 })
               ) : (
