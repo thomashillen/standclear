@@ -195,7 +195,12 @@ export function ArrivalRow({
           // rider would see if they were already following the train.
           <p
             className="text-[11px] text-amber-300 leading-tight mt-0.5 truncate"
-            aria-label={`Position last updated ${Math.round(staleness!.ageSec / 60)} minutes ago`}
+            // Spoken age phrase is single-sourced in `trainStaleness`
+            // (`ariaLabel`) so it can't drift from the visible label
+            // here or from LinePanel's per-direction ETA chip, which
+            // speaks the identical sentence. Non-null whenever `label`
+            // is, so it's a string here (the `staleLabel &&` gate).
+            aria-label={staleness!.ariaLabel ?? undefined}
           >
             {staleLabel}
           </p>

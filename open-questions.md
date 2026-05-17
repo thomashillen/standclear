@@ -41,3 +41,12 @@ commute schedule an acceptable privacy trade, and does it require a
 `/privacy` rewrite + explicit opt-in copy? Trust decision for the human;
 gates the Option B schema. The foreground-only Option A is unblocked and
 can ship without this answer. · (branch claude/leave-at-research-2026-05-15)
+
+2026-05-16 · `components/panelUI.tsx:851` (TripPlanRow `leadStale` sub-line) is the
+third inline re-derivation of the spoken staleness phrase — `Soonest train
+position last updated ${Math.round(leadStale.ageSec / 60)} minutes ago`. It was
+left out of the `trainStaleness.ariaLabel` single-source pass because panelUI.tsx
+is heavily churned by open PRs #153 and #155; folding it in now would conflict.
+Once those land, swap it to `leadStale.ariaLabel` (prefixed with "Soonest train ")
+so all three surfaces speak the identical, single-sourced sentence. · (branch
+claude/keen-goldberg-Yf3aT)
