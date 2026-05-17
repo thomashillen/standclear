@@ -100,6 +100,27 @@ describe("manifest()", () => {
     expect(result.scope).toBe("/");
   });
 
+  it("declares an explicit, stable `id` decoupled from start_url", () => {
+    // Per the W3C spec `id` defaults to `start_url`. If we ever ship
+    // a deep-linked start_url (campaign param, `/nearby`, etc.)
+    // without a pinned `id`, every installed home-screen app is
+    // treated as a new app — duplicate icon, broken update channel.
+    // The constant must therefore NOT be derived from start_url so a
+    // future start_url change can't drag identity with it; assert it
+    // independently rather than against result.start_url.
+    expect(result.id).toBe("/");
+  });
+
+  it("declares manifest language + base direction", () => {
+    // Drives how the OS install prompt and app-store wrapper listing
+    // localize/lay out the name + description strings. Kept in lockstep
+    // with the root <html lang="en"> and the OpenGraph en_US locale —
+    // a drift here would render the install entry in the wrong
+    // language/direction on a localized device.
+    expect(result.lang).toBe("en-US");
+    expect(result.dir).toBe("ltr");
+  });
+
   it("display is 'standalone' (required for app-store wrapper eligibility)", () => {
     // Capacitor / PWA Builder require display=standalone to package
     // for the Apple App Store and Play Store. A "browser" or
