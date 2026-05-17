@@ -25,6 +25,30 @@ export const SITE_DESCRIPTION =
 export const SITE_URL =
   process.env.NEXT_PUBLIC_SITE_URL ?? "https://standclear.app";
 
+// Display host derived from SITE_URL (scheme + path + trailing slash
+// stripped). The OG card footers print this, so a deploy that points
+// NEXT_PUBLIC_SITE_URL at a Vercel preview URL gets a social card
+// whose footer matches where the card is actually served instead of
+// advertising the not-yet-provisioned brand domain — the exact reason
+// SITE_URL is env-overridable in the first place (see the block
+// above). Without this the footer was the one surface that ignored
+// the override and kept lying about the host.
+//
+// The try/catch is load-bearing, not defensive boilerplate: this
+// module is imported by every route and by the build-time OG image
+// generation, so an unguarded `new URL()` on a schemeless operator
+// typo in NEXT_PUBLIC_SITE_URL ("standclear.app" instead of
+// "https://standclear.app") would throw at module-eval time and fail
+// the entire production build rather than just degrading one footer.
+function deriveSiteHost(url: string): string {
+  try {
+    return new URL(url).host;
+  } catch {
+    return url.replace(/^https?:\/\//, "").replace(/\/.*$/, "");
+  }
+}
+export const SITE_HOST = deriveSiteHost(SITE_URL);
+
 // Source repository.
 export const GITHUB_REPO = "thomashillen/standclear";
 export const GITHUB_URL = `https://github.com/${GITHUB_REPO}`;

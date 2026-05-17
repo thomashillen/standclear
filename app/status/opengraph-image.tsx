@@ -1,5 +1,5 @@
 import { ImageResponse } from "next/og";
-import { SITE_NAME } from "@/lib/site";
+import { SITE_NAME, SITE_HOST } from "@/lib/site";
 
 // ─── /status OG card ──────────────────────────────────────────────────
 // Per-page card so a /status link previewed in chat/social gets a card
@@ -170,7 +170,7 @@ export default async function Image() {
             />
             <span>Streaming MTA GTFS-Realtime</span>
           </div>
-          <div>standclear.app/status</div>
+          <div>{`${SITE_HOST}/status`}</div>
         </div>
       </div>
     ),
