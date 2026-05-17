@@ -1,6 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
-import { TripPlanRow, type RouteColorMap } from "./panelUI";
+import {
+  TripPlanRow,
+  StationRow,
+  type RouteColorMap,
+  type StationRowProps,
+} from "./panelUI";
 import type { Arrival } from "@/lib/useTrains";
 import type { TripPlan } from "@/lib/commuteRouting";
 import type { StationEntry } from "@/lib/stopsIndex";
@@ -424,5 +429,110 @@ describe("TripPlanRow trunk catch verdict (sibling routes)", () => {
     expect(
       container.querySelectorAll(".text-amber-300").length,
     ).toBeGreaterThan(0);
+  });
+});
+
+// StationRow (search results / favorites / nearest) shares
+// DirectionArrivalsRow with the chips a rider scans before tapping in.
+// Until now its ETAs were the last named-trip surface that could show
+// a confident "3m" off a VehiclePosition the map marker was already
+// fading — every other named-trip surface (marker fade, StationPanel
+// ArrivalRow, LinePanel StopRow, FollowCapsule, TripPlanRow) carries
+// the 90 s staleness signal. These pin the same rule here.
+describe("StationRow staleness", () => {
+  const noop = () => {};
+  function row(props: Partial<StationRowProps> = {}) {
+    return render(
+      <StationRow
+        station={{ ...origin }}
+        arrivals={[makeArrival("trip-x", 3 * 60)]}
+        routeColors={routeColors}
+        now={NOW_MS}
+        isFavorite={false}
+        onFavoriteToggle={noop}
+        onTap={noop}
+        {...props}
+      />,
+    );
+  }
+
+  it("stays calm when the staleness props are omitted (favorites / early load)", () => {
+    const { container } = row();
+    expect(container.querySelectorAll(".text-amber-300")).toHaveLength(0);
+    expect(
+      container.querySelector('[aria-label*="position last updated"]'),
+    ).toBeNull();
+  });
+
+  it("tints a stale ETA amber + adds the age aria note when there's no walk distance", () => {
+    // Favorites case: station.meters undefined → no catch verdict, so
+    // the ETA is the calm gray default. A 200 s-old paired vehicle must
+    // flip it amber rather than read as a confident fresh "3m".
+    const { container } = row({
+      arrivals: [makeArrival("trip-stale", 3 * 60)],
+      lastReportedByTripId: new Map([["trip-stale", NOW_SEC - 200]]),
+      generatedAtSec: NOW_SEC,
+    });
+    expect(
+      container.querySelectorAll(".text-amber-300").length,
+    ).toBeGreaterThan(0);
+    expect(
+      container.querySelector(
+        '[aria-label="3m, position last updated 3 minutes ago"]',
+      ),
+    ).toBeTruthy();
+  });
+
+  it("leaves a trip with no paired VehiclePosition entry calm", () => {
+    // The map has *other* trips but not this one — an arrivals-only
+    // stop_time_update is as fresh as the latest poll, so no chrome.
+    const { container } = row({
+      arrivals: [makeArrival("trip-untracked", 3 * 60)],
+      lastReportedByTripId: new Map([["some-other-trip", NOW_SEC - 500]]),
+      generatedAtSec: NOW_SEC,
+    });
+    expect(container.querySelectorAll(".text-amber-300")).toHaveLength(0);
+    expect(
+      container.querySelector('[aria-label*="position last updated"]'),
+    ).toBeNull();
+  });
+
+  it("keeps the verdict color when the rider is walking up but still carries staleness in the aria note", () => {
+    // station.meters=300 + eta 60 s → "miss" band (strikethrough gray).
+    // The verdict is the actionable signal and wins the color; the
+    // stale age must not be lost to AT, so it still rides the aria-label
+    // — same precedent as TripPlanRow's verdict-wins/leadStale split.
+    const { container } = row({
+      station: { ...origin, meters: 300 },
+      arrivals: [makeArrival("trip-miss-stale", 60)],
+      lastReportedByTripId: new Map([["trip-miss-stale", NOW_SEC - 200]]),
+      generatedAtSec: NOW_SEC,
+    });
+    expect(
+      container.querySelectorAll(".line-through").length,
+    ).toBeGreaterThan(0);
+    expect(container.querySelectorAll(".text-amber-300")).toHaveLength(0);
+    expect(
+      container.querySelector(
+        '[aria-label="1m, position last updated 3 minutes ago"]',
+      ),
+    ).toBeTruthy();
+  });
+
+  it("falls back to the snapshot generatedAt when the per-vehicle timestamp is absent", () => {
+    // Feed omitted VehiclePosition.timestamp → tripId maps to undefined;
+    // staleness must still surface off the snapshot age so a silent
+    // outage doesn't hide behind a missing per-vehicle timestamp.
+    const { container } = row({
+      arrivals: [makeArrival("trip-no-ts", 3 * 60)],
+      lastReportedByTripId: new Map([["trip-no-ts", undefined]]),
+      generatedAtSec: NOW_SEC - 200,
+    });
+    expect(
+      container.querySelectorAll(".text-amber-300").length,
+    ).toBeGreaterThan(0);
+    expect(
+      container.querySelector('[aria-label*="position last updated 3 minutes ago"]'),
+    ).toBeTruthy();
   });
 });
