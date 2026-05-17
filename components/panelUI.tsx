@@ -553,6 +553,7 @@ export function TripPlanRow({
   arrivals,
   now,
   isPrimary,
+  isFastest,
   isSelected,
   onSelect,
   walkFromMeters,
@@ -569,6 +570,14 @@ export function TripPlanRow({
   arrivals: Arrival[];
   now: number;
   isPrimary: boolean;
+  /** This is the time-ranked winner (rankPlansByTime puts the lowest
+   *  estimated-total-time plan at index 0). Renders a "Fastest" tag in
+   *  the ribbon so the rider can read *why* this option leads the list
+   *  instead of inferring it from the subtly-brighter primary ring —
+   *  the Apple/Google/Transit idiom of labeling the recommended route.
+   *  Caller gates this on "more than one plan" so a lone option doesn't
+   *  carry a comparative label with nothing to compare against. */
+  isFastest?: boolean;
   /** Visual highlight when this is the trip currently shown on the map. */
   isSelected?: boolean;
   /** Tap handler — typically toggles map overlay for this plan. */
@@ -784,6 +793,17 @@ export function TripPlanRow({
               />
             ))}
           </>
+        )}
+        {isFastest && (
+          // Sits between the route identity and the stop-count so the
+          // rider's eye binds "this line ↔ fastest" before scanning the
+          // rest of the ribbon. Emerald reuses the same recommendation
+          // color the "Walking is faster" card already speaks in this
+          // file, so the visual vocabulary stays consistent. flex-shrink-0
+          // so it never collapses when the ribbon wraps on a 2-leg trip.
+          <span className="flex-shrink-0 inline-flex items-center px-1.5 h-[18px] rounded-full bg-emerald-300/10 ring-1 ring-emerald-300/30 text-emerald-200 text-[10px] font-bold uppercase tracking-wide">
+            Fastest
+          </span>
         )}
         <span className="text-[11px] text-gray-400 ml-1.5 truncate min-w-0">
           {plan.totalStops} stop{plan.totalStops === 1 ? "" : "s"}

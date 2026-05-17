@@ -536,3 +536,74 @@ describe("StationRow staleness", () => {
     ).toBeTruthy();
   });
 });
+
+describe("TripPlanRow fastest tag", () => {
+  it("renders the Fastest tag when isFastest is set", () => {
+    render(
+      <TripPlanRow
+        plan={directLPlan}
+        origin={origin}
+        routeColors={routeColors}
+        stationsByComplexId={stationsByComplexId}
+        arrivals={[]}
+        now={NOW_MS}
+        isPrimary={true}
+        isFastest={true}
+      />,
+    );
+    expect(screen.getByText("Fastest")).toBeTruthy();
+  });
+
+  it("omits the tag when isFastest is explicitly false", () => {
+    render(
+      <TripPlanRow
+        plan={directLPlan}
+        origin={origin}
+        routeColors={routeColors}
+        stationsByComplexId={stationsByComplexId}
+        arrivals={[]}
+        now={NOW_MS}
+        isPrimary={true}
+        isFastest={false}
+      />,
+    );
+    expect(screen.queryByText("Fastest")).toBeNull();
+  });
+
+  it("omits the tag when isFastest is omitted (NearbyPanel single-plan + legacy call sites)", () => {
+    // The prop is optional so the Near-me hero card (one plan, Apple
+    // Today-widget pattern) and any pre-existing caller render exactly
+    // as before — no comparative label on a lone recommendation.
+    render(
+      <TripPlanRow
+        plan={directLPlan}
+        origin={origin}
+        routeColors={routeColors}
+        stationsByComplexId={stationsByComplexId}
+        arrivals={[]}
+        now={NOW_MS}
+        isPrimary={true}
+      />,
+    );
+    expect(screen.queryByText("Fastest")).toBeNull();
+  });
+
+  it("decouples the tag from isPrimary — a primary row without isFastest stays untagged", () => {
+    // isPrimary drives the brighter ring; isFastest drives the label.
+    // A future caller that highlights a row for a different reason
+    // must not accidentally claim it's the fastest.
+    render(
+      <TripPlanRow
+        plan={directLPlan}
+        origin={origin}
+        routeColors={routeColors}
+        stationsByComplexId={stationsByComplexId}
+        arrivals={[]}
+        now={NOW_MS}
+        isPrimary={true}
+        isFastest={false}
+      />,
+    );
+    expect(screen.queryByText("Fastest")).toBeNull();
+  });
+});
