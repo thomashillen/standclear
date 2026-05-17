@@ -253,6 +253,17 @@ function DirectionArrivalsRow({
 export interface StationRowProps {
   station: StationEntry & { meters?: number };
   arrivals: Arrival[];
+  /** Whether the live `/api/trains` feed has produced at least one
+   *  response yet. On a cold first visit (no localStorage cache, before
+   *  the first poll resolves) `arrivals` is `[]` because the data is
+   *  *unknown*, not because the station is dead — rendering the
+   *  definitive "No upcoming trains" there is a false negative on
+   *  exactly the zero-onboarding rider the product is built to win.
+   *  Optional, defaults to `true` so favorites-only / test call sites
+   *  that don't thread it keep the prior behavior. Mirrors the
+   *  `hasData` gate StationPanel's DirectionSection and LinePanel's
+   *  StopRow already apply to the same empty-state copy. */
+  hasData?: boolean;
   routeColors: RouteColorMap;
   now: number;
   isFavorite: boolean;
@@ -287,6 +298,7 @@ export interface StationRowProps {
 export function StationRow({
   station,
   arrivals,
+  hasData = true,
   routeColors,
   now,
   isFavorite,
@@ -378,8 +390,18 @@ export function StationRow({
                 generatedAtSec={generatedAtSec}
               />
             </div>
-          ) : (
+          ) : hasData ? (
             <p className="text-[11px] text-gray-600 mt-2">No upcoming trains</p>
+          ) : (
+            // Feed still loading (cold boot, no cache, pre-first-poll):
+            // an empty list is unknown, not "no trains". The row's name
+            // + route bullets + distance already carry its identity and
+            // it stays tappable into the full StationPanel (which runs
+            // its own "Loading live arrivals…" line), so suppressing the
+            // negative copy here keeps the list calm without a noisy
+            // per-row spinner. ACCURACY FIRST — same rule #168 applied to
+            // StationPanel DirectionSection and LinePanel StopRow.
+            null
           )}
         </button>
 

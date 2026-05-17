@@ -1507,6 +1507,7 @@ export default function SearchSheet({
                       key={`search-${s.stopId}`}
                       station={s}
                       arrivals={arrivalsByStation.get(s.stopId) ?? []}
+                      hasData={!!data}
                       routeColors={routeColors}
                       now={now}
                       isFavorite={has(s.stopId)}
