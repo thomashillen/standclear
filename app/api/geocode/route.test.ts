@@ -178,6 +178,62 @@ describe("/api/geocode token resolution", () => {
     expect(await res.json()).toEqual({ suggestions: [] });
   });
 
+  // ───── Suggest query trimming ─────────────────────────────────────
+  //
+  // The server's "minimum searchable query" gate must mirror the
+  // client's documented `query.trim()` contract (lib/geocoding.ts):
+  // trimmed length ≥ 2. Our own UI always trims first, so these guard
+  // a direct / abusive API hit — a whitespace-only or -padded `q`
+  // must not clear the gate and burn a billed Mapbox suggest call,
+  // and a query that does proceed must be forwarded trimmed (a
+  // trailing space only degrades the upstream prefix ranking).
+
+  it("treats a whitespace-only q as below the minimum (no upstream call)", async () => {
+    vi.stubEnv("MAPBOX_TOKEN", "secret");
+
+    const GET = await loadGet();
+    // %20%20 = two spaces; decodes to "  " which trims to "".
+    const req = makeRequest("action=suggest&q=%20%20&session_token=t-ws");
+    const res = await GET(req);
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ suggestions: [] });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("treats a padded single character as below the minimum (no upstream call)", async () => {
+    vi.stubEnv("MAPBOX_TOKEN", "secret");
+
+    const GET = await loadGet();
+    // " a " trims to "a" — length 1, still under the 2-char floor.
+    const req = makeRequest("action=suggest&q=%20a%20&session_token=t-pad1");
+    const res = await GET(req);
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ suggestions: [] });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("forwards the trimmed query to Mapbox, not the padded input", async () => {
+    vi.stubEnv("MAPBOX_TOKEN", "secret");
+    fetchMock.mockResolvedValue(
+      new Response(JSON.stringify({ suggestions: [] }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+
+    const GET = await loadGet();
+    // "  br  " trims to "br" — clears the gate, must forward "br".
+    const req = makeRequest("action=suggest&q=%20%20br%20%20&session_token=t-pad2");
+    const res = await GET(req);
+
+    expect(res.status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const upstream = new URL(String(fetchMock.mock.calls[0][0]));
+    expect(upstream.searchParams.get("q")).toBe("br");
+  });
+
   // captureWarning forwards to console.warn and doesn't dedupe; without
   // a module-level latch the per-request fallback warning would flood
   // operator logs under real traffic. Caught in PR #51 review by Codex.
