@@ -142,6 +142,7 @@ function renderSection(opts: {
       onSelectLine={vi.fn()}
       lastReportedByTripId={new Map()}
       generatedAtSec={NOW_SEC}
+      stopNameById={new Map()}
       hasData={opts.hasData}
     />,
   );
@@ -228,6 +229,8 @@ describe("DirectionSection disclosure button", () => {
         onSelectLine={vi.fn()}
         lastReportedByTripId={new Map()}
         generatedAtSec={NOW_SEC}
+        stopNameById={new Map()}
+        hasData={true}
       />,
     );
   }
