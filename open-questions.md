@@ -7,3 +7,12 @@ The run that logs an item should also leave a note on the PR thread if applicabl
 
 <!-- template: YYYY-MM-DD · <description> · (PR #NNN or branch) -->
 2026-05-15 · `LiveTrainsPopup` passes `data.generatedAt` (ms) to `summarizeFleetStaleness`'s `fallbackSec` parameter (seconds per the JSDoc, `lib/trainStaleness.test.ts:72` confirms). When a train omits per-vehicle `lastReportedAt`, the helper computes `nowMs/1000 - generatedAtMs ≈ -1.7e9 → capped to 0 → "fresh"`, so a silent-feed outage (header timestamp old, no per-vehicle reports) never lights up the "N trains haven't reported in 90 s+" sub-line. Fix is a one-character change (`data.generatedAt / 1000`), but the right scope is a follow-up that also pins the contract with a regression test against the silent-feed path. · branch (logged from claude/system-pulse-line-nav-2026-05-15)
+
+2026-05-15 · Cinematic follow-train mode is only reachable by tapping a moving
+train marker on the Mapbox GL canvas (`SubwayMap.tsx:821` → `MapView.tsx:1184`);
+there is no non-map entry point, so the feature is effectively undiscoverable to
+a rider who doesn't already know to tap a dot. A "Follow this train" affordance
+on the StationPanel arrival row / LiveTrainsPopup would (a) make it discoverable
+and (b) make the e2e flow-3 test hermetic without a CI Mapbox token. Product
+question — needs a design call on placement + the iOS-glass idiom. ·
+(docs/research/playwright-e2e-2026-05-15.md)
