@@ -70,6 +70,29 @@ export function homepageJsonLd() {
   } as const;
 }
 
+// WebSite entry for the homepage. Google's "Site names" Search
+// feature reads a top-level WebSite entity (name + url) to decide the
+// site name printed above the result URL; without one it falls back
+// to inferring the name from <title> / og:site_name, which can drift
+// from the brand. This is a *distinct* signal from the
+// WebApplication rich-result card above — Google consumes them for
+// different SERP surfaces — so the homepage emits both. `name` is the
+// bare brand (SITE_NAME, "StandClear") rather than the descriptive
+// SITE_TITLE so the SERP site name reads as the brand, not the page
+// title. `publisher` mirrors homepageJsonLd's exact Person shape so
+// the brand-author entity can't fork across the two homepage blocks.
+export function websiteJsonLd() {
+  return {
+    "@context": "https://schema.org",
+    "@type": "WebSite",
+    name: SITE_NAME,
+    url: SITE_URL,
+    description: SITE_DESCRIPTION,
+    inLanguage: "en-US",
+    publisher: { "@type": "Person", name: AUTHOR_NAME, url: GITHUB_URL },
+  } as const;
+}
+
 // TrainStation entry for /station/[slug]. Google reads this to render
 // transit-station rich results — name + geo + operator (provider) is
 // the minimum the SERP card wants. `publicAccess: true` is the
