@@ -6,6 +6,7 @@ import { useTrains } from "@/lib/useTrains";
 import { useGeolocationState } from "@/lib/useGeolocation";
 import { buildStationIndex } from "@/lib/stopsIndex";
 import { useTrainMarkers } from "@/lib/useTrainMarkers";
+import { iconSizeByZoomExpression } from "@/lib/iconScale";
 import "mapbox-gl/dist/mapbox-gl.css";
 
 interface MapViewProps {
@@ -924,13 +925,12 @@ export default function MapView({ selectedLine, stationStopId, onLineSelect, onS
         //                       letter inside the body
         // Slightly larger than the prior pill so the windshield and
         // rear markers don't disappear into pixel noise.
-        const iconSizeByZoom: MapboxExpression = [
-          "interpolate", ["linear"], ["zoom"],
-          10, 0.29,
-          11.5, 0.50,
-          13, 0.74,
-          14, 1.03,
-        ];
+        //
+        // The zoom→scale stops live in lib/iconScale.ts so this Mapbox
+        // expression and the JS `iconScaleAtZoom` useTrainMarkers uses
+        // for the perpendicular stack-offset can't drift apart — see
+        // that module's header for why the two must agree.
+        const iconSizeByZoom = iconSizeByZoomExpression() as MapboxExpression;
 
         map.addLayer({
           id: "subway-trains-icon",
