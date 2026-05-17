@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { ArrivalRow, DirectionSection } from "./StationPanel";
 import { trainStaleness } from "@/lib/trainStaleness";
 
@@ -189,5 +189,72 @@ describe("DirectionSection loading vs. empty", () => {
     // asserts the gate's scope, not a reachable state.)
     renderSection({ arrivals: [baseArrival], hasData: false });
     expect(screen.getByText("to Coney Island")).toBeTruthy();
+  });
+});
+
+describe("DirectionSection disclosure button", () => {
+  const routeInfo = new Map([
+    ["F", { id: "F", color: "#FF6319", textColor: "white" as const }],
+  ]);
+  const terminusByRoute = new Map([
+    ["F", { N: "Jamaica-179 St", S: "Coney Island" }],
+  ]);
+
+  function makeArrivals(n: number) {
+    return Array.from({ length: n }, (_, i) => ({
+      routeId: "F",
+      stopId: "F18",
+      direction: "S" as const,
+      // Strictly future so none are dropped by the eta-expiry filter.
+      eta: NOW_SEC + (i + 1) * 60,
+      tripId: `trip-${i}`,
+    }));
+  }
+
+  function renderSection(n: number) {
+    return render(
+      <DirectionSection
+        label="Southbound"
+        icon={<span />}
+        arrivals={makeArrivals(n)}
+        now={NOW_MS}
+        routeInfo={routeInfo}
+        terminusByRoute={terminusByRoute}
+        direction="S"
+        onSelectLine={vi.fn()}
+        lastReportedByTripId={new Map()}
+        generatedAtSec={NOW_SEC}
+      />,
+    );
+  }
+
+  // The route bullets render their own buttons, so the disclosure
+  // control is always queried by its visible accessible name.
+  const disclosure = () =>
+    screen.queryByRole("button", { name: /show all|show less/i });
+
+  it("renders no disclosure button when arrivals fit the default cap", () => {
+    renderSection(3);
+    expect(disclosure()).toBeNull();
+    expect(screen.getAllByText("to Coney Island")).toHaveLength(3);
+  });
+
+  it("collapsed disclosure advertises aria-expanded=false and the overflow count", () => {
+    renderSection(6);
+    const btn = disclosure()!;
+    expect(btn).toBeTruthy();
+    expect(btn.textContent).toBe("Show all (2 more)");
+    expect(btn.getAttribute("aria-expanded")).toBe("false");
+    // Default cap is 4 — the extra two stay hidden until expansion.
+    expect(screen.getAllByText("to Coney Island")).toHaveLength(4);
+  });
+
+  it("flips aria-expanded to true and reveals every row when expanded", () => {
+    renderSection(6);
+    fireEvent.click(disclosure()!);
+    const btn = disclosure()!;
+    expect(btn.textContent).toBe("Show less");
+    expect(btn.getAttribute("aria-expanded")).toBe("true");
+    expect(screen.getAllByText("to Coney Island")).toHaveLength(6);
   });
 });

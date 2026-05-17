@@ -639,6 +639,9 @@ export default function StationPanel({ stopId, onClose, onSelectLine, onStartDir
 // without expand intent anyway.
 const DEFAULT_ARRIVALS_PER_DIRECTION = 4;
 
+// Exported so component tests can mount a single direction's list
+// directly (see `StationPanel.test.tsx`) without standing up the full
+// panel + useTrains/useLines context — same rationale as `ArrivalRow`.
 export function DirectionSection({
   label,
   icon,
@@ -749,6 +752,14 @@ export function DirectionSection({
             <button
               type="button"
               onClick={() => setExpanded((x) => !x)}
+              // Disclosure button: announce the collapsed/expanded state so
+              // a screen-reader rider knows tapping reveals more arrivals
+              // and isn't a navigation. Matches the AlertsButton /
+              // AlertsSection disclosures, which already carry this. The
+              // visible label ("Show all (2 more)" / "Show less") stays the
+              // accessible name — no aria-label override, since the count is
+              // more informative than a generic verb.
+              aria-expanded={expanded}
               className="press w-full px-4 py-2.5 text-[12px] font-semibold text-gray-300 hover:text-white hover:bg-white/[0.04] active:bg-white/[0.06] border-t border-white/[0.04] touch-manipulation"
             >
               {expanded ? "Show less" : `Show all (${overflow} more)`}
