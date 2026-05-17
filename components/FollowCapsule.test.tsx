@@ -302,6 +302,30 @@ describe("FollowCapsule", () => {
     expect(bullet.getAttribute("style")).toMatch(/color:\s*rgb\(0,\s*0,\s*0\)/);
   });
 
+  it("sizes the close button to the 44px touch-target minimum", () => {
+    // Principle #3: touch targets >= 44px, no actions that require
+    // accuracy under jostle. This is the sole control in cinematic
+    // follow-mode and the rider taps it on a moving train, so the
+    // hit area must hold the HIG minimum. Pin the w-11/h-11 (44px)
+    // sizing the same way the eyebrow test pins text-amber-300 —
+    // jsdom has no CSS engine, so a class assertion is the contract.
+    render(
+      <FollowCapsule
+        trainId="trip-1"
+        data={makeData()}
+        lines={lines}
+        now={NOW_MS}
+        onExit={vi.fn()}
+      />,
+    );
+    const close = screen.getByLabelText("Stop following train");
+    expect(close.className).toMatch(/\bw-11\b/);
+    expect(close.className).toMatch(/\bh-11\b/);
+    // Guard the regression directly: no sub-44px sizing utility lingers.
+    expect(close.className).not.toMatch(/\bw-9\b/);
+    expect(close.className).not.toMatch(/\bh-9\b/);
+  });
+
   it("invokes onExit exactly once when the close button is tapped", () => {
     const onExit = vi.fn();
     render(
