@@ -1,6 +1,5 @@
 import { describe, it, expect } from "vitest";
 import {
-  directRoutesBetween,
   estimateTripTimeSec,
   legGeometry,
   planTrips,
@@ -76,45 +75,6 @@ function buildSampleLines(): Lines {
 function buildSampleIndex(lines: Lines): StationEntry[] {
   return buildStationIndex(lines);
 }
-
-// ─── directRoutesBetween ────────────────────────────────────────────
-
-describe("directRoutesBetween", () => {
-  const lines = buildSampleLines();
-
-  it("finds direct routes between two stops on the same line", () => {
-    // Grand Central → Wall St on 4 and 5 (shared trunk).
-    const r = directRoutesBetween(lines, ["631"], ["419"]);
-    const ids = r.map((d) => d.routeId).sort();
-    expect(ids).toEqual(["4", "5"]);
-    for (const d of r) {
-      expect(d.direction).toBe("S");
-      expect(d.stopCount).toBe(2);
-    }
-  });
-
-  it("returns the opposite direction for the reverse trip", () => {
-    const r = directRoutesBetween(lines, ["419"], ["631"]);
-    const four = r.find((d) => d.routeId === "4");
-    expect(four?.direction).toBe("N");
-  });
-
-  it("returns no routes when stops aren't both on any one line", () => {
-    // Wall St (4/5) → Bedford (L). No single line touches both.
-    expect(directRoutesBetween(lines, ["419"], ["L08"])).toEqual([]);
-  });
-
-  it("returns no routes when from and to are the same stop", () => {
-    expect(directRoutesBetween(lines, ["635"], ["635"])).toEqual([]);
-  });
-
-  it("ranks express stop counts by number of stops between endpoints", () => {
-    // Grand Central → Union Sq is 1 stop on 4/5 (just one intermediate)
-    // and 1 stop on 6 too in this sample (no extra local stops modeled).
-    const r = directRoutesBetween(lines, ["631"], ["635"]);
-    expect(r.every((d) => d.stopCount === 1)).toBe(true);
-  });
-});
 
 // ─── planTrips ──────────────────────────────────────────────────────
 

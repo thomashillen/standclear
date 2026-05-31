@@ -93,7 +93,11 @@ function persistToStorage(data: TrainsResponse) {
 // NOT dedup STOPPED_AT trains by (routeId|direction|stopId) — at
 // terminus stations the MTA queues multiple trains STOPPED_AT
 // awaiting departure, and that's not a phantom, that's the schedule.
-function dedupeResponse(data: TrainsResponse): TrainsResponse {
+// Exported so the (routeId,direction,stopId,status)-must-not-collapse
+// invariant is CI-pinned rather than comment-only — a future "helpful"
+// compound dedup added here would silently undercount terminus trains,
+// and the server-side dedup test wouldn't catch the client backstop.
+export function dedupeResponse(data: TrainsResponse): TrainsResponse {
   const byId = new Map<string, Train>();
   for (const t of data.trains) byId.set(t.id, t);
   return { ...data, trains: Array.from(byId.values()) };

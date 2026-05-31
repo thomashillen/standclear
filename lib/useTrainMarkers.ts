@@ -15,6 +15,7 @@ import {
 import { ringPulsePhase } from "./ringPulse";
 import { markerOpacityMul } from "./trainStaleness";
 import { formatRingEta } from "./ringEta";
+import { iconScaleAtZoom } from "./iconScale";
 
 // Minimal structural surface of the Mapbox map handle the hook touches —
 // keeps the hook decoupled from the broader MapboxMap shape MapView
@@ -184,16 +185,11 @@ export function useTrainMarkers({
     const STACK_BUCKET_DEG = 0.0002; // ≈ 22 m at NYC latitude
     const STACK_SPACING_PX = 14;
 
-    // Mirrors the iconSizeByZoom Mapbox expression so perpendicular
-    // stack offsets scale with rendered icon size — keeps the visual
-    // gap between stacked trains consistent at every zoom.
-    const iconScaleAtZoom = (z: number): number => {
-      if (z <= 10) return 0.29;
-      if (z <= 11.5) return 0.29 + ((z - 10) / 1.5) * 0.21;
-      if (z <= 13) return 0.50 + ((z - 11.5) / 1.5) * 0.24;
-      if (z <= 14) return 0.74 + (z - 13) * 0.29;
-      return 1.03;
-    };
+    // `iconScaleAtZoom` (shared with MapView's `icon-size` Mapbox
+    // expression via lib/iconScale.ts) scales the perpendicular stack
+    // offset below so the gap between fanned-out trains tracks their
+    // rendered icon size at every zoom. Both derive from one stop
+    // table so the curve can't drift between the two.
 
     let frame = 0;
     let lastTickTime = 0;

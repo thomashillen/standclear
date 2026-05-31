@@ -5,7 +5,7 @@ import {
   getLinesServer,
 } from "@/lib/stations.server";
 import { findStationBySlug, stationSlug } from "@/lib/stationSlug";
-import { SITE_NAME } from "@/lib/site";
+import { SITE_NAME, SITE_HOST } from "@/lib/site";
 
 // ─── Per-station OG card ─────────────────────────────────────────────
 // One image per station slug, rendered at build time alongside the
@@ -207,7 +207,7 @@ export default async function Image({ params }: Params) {
             />
             <span>Streaming MTA GTFS-Realtime</span>
           </div>
-          <div>standclear.app</div>
+          <div>{SITE_HOST}</div>
         </div>
       </div>
     ),

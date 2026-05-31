@@ -132,6 +132,28 @@ function parseExpress(routeId: string): { baseRouteId: string; isExpress: boolea
   return { baseRouteId: routeId, isExpress: false };
 }
 
+// Pick the destination label for an arrival row. The realtime trip
+// destination (parent stop of the trip's last stopTimeUpdate, attached
+// server-side as `destStopId`) wins over the static line terminus: the
+// static endpoint is the *full line's* end, so it mislabels short-turns
+// (a 6 ending at Parkchester, not Pelham Bay Park) and branch services
+// (a 5 to Dyre Av). Fall back to the static terminus when the feed
+// omitted a destination, or when the dest stop isn't present in any
+// loaded line's representative shape (so we never render a bare stop
+// id or, worse, nothing at all). Exported for direct unit coverage —
+// this is the accuracy-critical bit, not the JSX around it.
+export function resolveDestinationName(
+  destStopId: string | undefined,
+  stopNameById: Map<string, string>,
+  staticTerminusName: string | undefined,
+): string | undefined {
+  if (destStopId) {
+    const realtime = stopNameById.get(destStopId);
+    if (realtime) return realtime;
+  }
+  return staticTerminusName;
+}
+
 interface ArrivalRowProps {
   arrival: Arrival;
   now: number;
@@ -195,7 +217,12 @@ export function ArrivalRow({
           // rider would see if they were already following the train.
           <p
             className="text-[11px] text-amber-300 leading-tight mt-0.5 truncate"
-            aria-label={`Position last updated ${Math.round(staleness!.ageSec / 60)} minutes ago`}
+            // Spoken age phrase is single-sourced in `trainStaleness`
+            // (`ariaLabel`) so it can't drift from the visible label
+            // here or from LinePanel's per-direction ETA chip, which
+            // speaks the identical sentence. Non-null whenever `label`
+            // is, so it's a string here (the `staleLabel &&` gate).
+            aria-label={staleness!.ariaLabel ?? undefined}
           >
             {staleLabel}
           </p>
@@ -359,6 +386,12 @@ export default function StationPanel({ stopId, onClose, onSelectLine, onStartDir
         direction: t.direction,
         eta: nowSec,
         tripId: t.id,
+        // Carry the trip's realtime destination so a short-turn train
+        // sitting at the platform reads its true terminus, not the
+        // static line end (the at-platform moment is when it matters
+        // most). `Train.destStopId` is the same value `Arrival`
+        // carries — see route.ts destByTrip.
+        destStopId: t.destStopId,
         live: true,
       };
       seen.add(`${t.id}|${t.prevStopId}`);
@@ -379,6 +412,10 @@ export default function StationPanel({ stopId, onClose, onSelectLine, onStartDir
         direction: t.direction,
         eta: nowSec,
         tripId,
+        // Same realtime-destination carry as the live-snapshot branch
+        // above — a recently-departed short-turn must not regress to
+        // the static terminus during its grace window.
+        destStopId: t.destStopId,
         live: true,
       };
       seen.add(`${tripId}|${entry.stopId}`);
@@ -421,6 +458,22 @@ export default function StationPanel({ stopId, onClose, onSelectLine, onStartDir
         N: firstIsNorth ? first.name : last.name,
         S: firstIsNorth ? last.name : first.name,
       });
+    }
+    return m;
+  }, [lines]);
+
+  // Parent-stop-id → station name, unioned across every loaded line's
+  // representative shape. Resolves the realtime `destStopId` on each
+  // arrival to a human terminus ("619" → "Parkchester"). Union (not
+  // per-route) so a short-turn point that's a regular stop on a
+  // *different* line still resolves — and so a future MTA destination
+  // we don't have on this route's shape degrades to the static label
+  // instead of a bare id. Same `lines` dependency as the terminus map.
+  const stopNameById = useMemo(() => {
+    const m = new Map<string, string>();
+    if (!lines) return m;
+    for (const line of Object.values(lines)) {
+      for (const s of line.stops) if (!m.has(s.id)) m.set(s.id, s.name);
     }
     return m;
   }, [lines]);
@@ -603,10 +656,12 @@ export default function StationPanel({ stopId, onClose, onSelectLine, onStartDir
           now={now}
           routeInfo={routeInfo}
           terminusByRoute={terminusByRouteAndDir}
+          stopNameById={stopNameById}
           direction="N"
           onSelectLine={onSelectLine}
           lastReportedByTripId={lastReportedByTripId}
           generatedAtSec={generatedAtSec}
+          hasData={!!data}
         />
 
         <DirectionSection
@@ -616,10 +671,12 @@ export default function StationPanel({ stopId, onClose, onSelectLine, onStartDir
           now={now}
           routeInfo={routeInfo}
           terminusByRoute={terminusByRouteAndDir}
+          stopNameById={stopNameById}
           direction="S"
           onSelectLine={onSelectLine}
           lastReportedByTripId={lastReportedByTripId}
           generatedAtSec={generatedAtSec}
+          hasData={!!data}
         />
       </div>
     </div>
@@ -632,17 +689,22 @@ export default function StationPanel({ stopId, onClose, onSelectLine, onStartDir
 // without expand intent anyway.
 const DEFAULT_ARRIVALS_PER_DIRECTION = 4;
 
-function DirectionSection({
+// Exported so component tests can mount a single direction's list
+// directly (see `StationPanel.test.tsx`) without standing up the full
+// panel + useTrains/useLines context — same rationale as `ArrivalRow`.
+export function DirectionSection({
   label,
   icon,
   arrivals,
   now,
   routeInfo,
   terminusByRoute,
+  stopNameById,
   direction,
   onSelectLine,
   lastReportedByTripId,
   generatedAtSec,
+  hasData,
 }: {
   label: string;
   icon: React.ReactNode;
@@ -650,6 +712,9 @@ function DirectionSection({
   now: number;
   routeInfo: Map<string, { id: string; color: string; textColor: "white" | "black" }>;
   terminusByRoute: Map<string, { N: string; S: string }>;
+  /** Parent-stop-id → station name, for resolving each arrival's
+   *  realtime `destStopId` to a human terminus. */
+  stopNameById: Map<string, string>;
   direction: "N" | "S";
   onSelectLine: (routeId: string) => void;
   /** Per-trip last-reported timestamps from `data.trains` so the row
@@ -658,6 +723,14 @@ function DirectionSection({
   /** Snapshot freshness floor in epoch seconds; used as the fallback
    *  when a trip has no per-vehicle timestamp (silent-feed outages). */
   generatedAtSec: number;
+  /** False until the first /api/trains payload lands (cold boot with no
+   *  localStorage cache — the brand-new first visit). An empty arrivals
+   *  list during that window means "not loaded yet," NOT "no trains";
+   *  rendering the definitive "No upcoming trains in the next 45 min."
+   *  there contradicts the parent's "Loading live arrivals…" line and
+   *  tells a first-time rider the station is dead when we simply don't
+   *  know yet. Mirrors LinePanel's hasData-gated negative copy. */
+  hasData: boolean;
 }) {
   const [expanded, setExpanded] = useState(false);
 
@@ -685,13 +758,19 @@ function DirectionSection({
           {label}
         </span>
         <span className="text-[11px] text-gray-600 ml-auto tabular-nums">
-          {visible.length > 0 ? `${visible.length} upcoming` : "—"}
+          {!hasData ? "" : visible.length > 0 ? `${visible.length} upcoming` : "—"}
         </span>
       </div>
       {visible.length === 0 ? (
-        <div className="px-4 pb-3 text-[12px] text-gray-600">
-          No upcoming trains in the next 45 min.
-        </div>
+        // While loading (no payload yet) the parent already renders a
+        // single "Loading live arrivals…" line; suppressing the negative
+        // copy here keeps the cold-boot view from claiming the station is
+        // dead before the first poll resolves.
+        !hasData ? null : (
+          <div className="px-4 pb-3 text-[12px] text-gray-600">
+            No upcoming trains in the next 45 min.
+          </div>
+        )
       ) : (
         <div>
           {shown.map((a, i) => {
@@ -717,7 +796,11 @@ function DirectionSection({
                 now={now}
                 badge={routeInfo.get(baseRouteId)}
                 isExpress={isExpress}
-                terminusName={terminusByRoute.get(baseRouteId)?.[direction]}
+                terminusName={resolveDestinationName(
+                  a.destStopId,
+                  stopNameById,
+                  terminusByRoute.get(baseRouteId)?.[direction],
+                )}
                 onTapRoute={() => onSelectLine(baseRouteId)}
                 staleness={staleness}
               />
@@ -727,6 +810,14 @@ function DirectionSection({
             <button
               type="button"
               onClick={() => setExpanded((x) => !x)}
+              // Disclosure button: announce the collapsed/expanded state so
+              // a screen-reader rider knows tapping reveals more arrivals
+              // and isn't a navigation. Matches the AlertsButton /
+              // AlertsSection disclosures, which already carry this. The
+              // visible label ("Show all (2 more)" / "Show less") stays the
+              // accessible name — no aria-label override, since the count is
+              // more informative than a generic verb.
+              aria-expanded={expanded}
               className="press w-full px-4 py-2.5 text-[12px] font-semibold text-gray-300 hover:text-white hover:bg-white/[0.04] active:bg-white/[0.06] border-t border-white/[0.04] touch-manipulation"
             >
               {expanded ? "Show less" : `Show all (${overflow} more)`}

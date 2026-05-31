@@ -1,6 +1,13 @@
 // @vitest-environment node
 import { describe, it, expect } from "vitest";
-import { nextArrivals, trainLatLng, trainsForLine, type Arrival, type Train } from "./useTrains";
+import {
+  dedupeResponse,
+  nextArrivals,
+  trainLatLng,
+  trainsForLine,
+  type Arrival,
+  type Train,
+} from "./useTrains";
 import type { SubwayLine } from "./subwayData";
 import type { TrainsResponse } from "@/app/api/trains/route";
 
@@ -138,5 +145,75 @@ describe("nextArrivals", () => {
 
   it("returns [] when data is null", () => {
     expect(nextArrivals(null, "4", "631")).toEqual([]);
+  });
+});
+
+// dedupeResponse is the client-side backstop mirror of the API's
+// tripId-only dedup. The (routeId,direction,stopId,status) axis is an
+// ABSOLUTE GUARDRAIL: at terminus stations the MTA legitimately queues
+// multiple distinct trips STOPPED_AT the same platform awaiting
+// departure (J at Broad St, 1 at South Ferry). Collapsing those would
+// undercount the terminus and is the documented undercounting incident.
+// The server route has its own dedup test; this pins the client
+// backstop independently so a "helpful" compound dedup added here can't
+// slip through with the server test still green.
+describe("dedupeResponse", () => {
+  const arrivals: Arrival[] = [
+    { routeId: "J", stopId: "M23", direction: "S", eta: 90, tripId: "a" },
+  ];
+  function resp(trains: Train[]): TrainsResponse {
+    return { generatedAt: 1_700_000_000_000, trains, arrivals };
+  }
+
+  it("GUARDRAIL: keeps multiple distinct trips STOPPED_AT the same terminus platform", () => {
+    // J at Broad St: two different trips, identical route/direction/
+    // stop/status. tripId is the ONLY dedup axis, so both survive.
+    const out = dedupeResponse(
+      resp([
+        train({ id: "J-trip-a", routeId: "J", direction: "S", prevStopId: "M23", nextStopId: "M23", status: "STOPPED_AT" }),
+        train({ id: "J-trip-b", routeId: "J", direction: "S", prevStopId: "M23", nextStopId: "M23", status: "STOPPED_AT" }),
+      ]),
+    );
+    expect(out.trains.map((t) => t.id).sort()).toEqual(["J-trip-a", "J-trip-b"]);
+  });
+
+  it("collapses a repeated tripId, last write wins", () => {
+    // Same trip reported twice in one snapshot — the later record is
+    // the fresher position, so it must be the survivor.
+    const out = dedupeResponse(
+      resp([
+        train({ id: "dup", progress: 0.1, status: "IN_TRANSIT_TO" }),
+        train({ id: "dup", progress: 0.9, status: "STOPPED_AT" }),
+      ]),
+    );
+    expect(out.trains).toHaveLength(1);
+    expect(out.trains[0].progress).toBe(0.9);
+    expect(out.trains[0].status).toBe("STOPPED_AT");
+  });
+
+  it("preserves first-seen order across distinct trips", () => {
+    // Marker + list rendering keys off array order; a non-order-
+    // preserving rewrite (e.g. Set-of-values) would churn the map.
+    const out = dedupeResponse(
+      resp([
+        train({ id: "x" }),
+        train({ id: "y" }),
+        train({ id: "x", progress: 0.7 }),
+        train({ id: "z" }),
+      ]),
+    );
+    expect(out.trains.map((t) => t.id)).toEqual(["x", "y", "z"]);
+  });
+
+  it("passes generatedAt + arrivals through untouched", () => {
+    const out = dedupeResponse(resp([train({ id: "only" })]));
+    expect(out.generatedAt).toBe(1_700_000_000_000);
+    expect(out.arrivals).toEqual(arrivals);
+  });
+
+  it("handles an empty train list without throwing", () => {
+    const out = dedupeResponse(resp([]));
+    expect(out.trains).toEqual([]);
+    expect(out.arrivals).toEqual(arrivals);
   });
 });

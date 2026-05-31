@@ -76,17 +76,25 @@ async function checkMta(): Promise<CheckResult> {
   const timeout = setTimeout(() => ctrl.abort(), MTA_CHECK_TIMEOUT_MS);
   const start = Date.now();
   try {
-    // HEAD avoids transferring the full protobuf payload. Some MTA
-    // endpoints don't honor HEAD perfectly — fall back to GET with a
-    // short range if HEAD returns a non-success status.
-    let res = await fetch(MTA_CHECK_URL, {
+    // Fast path: HEAD avoids transferring the full protobuf payload.
+    // But HEAD is advisory — the CDN/origin proxies in front of the
+    // MTA feed variously reject it with 405 (Method Not Allowed), 501
+    // (Not Implemented), or even 403/400 while a plain GET serves the
+    // feed fine. Reporting any non-2xx HEAD as "feed degraded" would
+    // page operators and paint the rider-facing /status page red for
+    // an upstream that is actually healthy — a false alarm that erodes
+    // trust exactly like a stale train rendered on-time would. So a
+    // failed HEAD never classifies on its own: on ANY non-success we
+    // fall back to a 1-byte ranged GET, which is the authoritative
+    // answer to "can we reach the GTFS-RT feed?" A real outage fails
+    // the GET too, so this only corrects false negatives.
+    const head = await fetch(MTA_CHECK_URL, {
       method: "HEAD",
       signal: ctrl.signal,
       cache: "no-store",
     });
-    if (!res.ok && res.status !== 405) {
-      // Fall through; the status is reflected below.
-    } else if (res.status === 405) {
+    let res = head;
+    if (!head.ok) {
       res = await fetch(MTA_CHECK_URL, {
         method: "GET",
         headers: { Range: "bytes=0-0" },

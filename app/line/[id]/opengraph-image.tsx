@@ -2,7 +2,7 @@ import { ImageResponse } from "next/og";
 import { notFound } from "next/navigation";
 import { getLinesServer } from "@/lib/stations.server";
 import { findLineBySlug, lineSlug } from "@/lib/lineSlug";
-import { SITE_NAME } from "@/lib/site";
+import { SITE_NAME, SITE_HOST } from "@/lib/site";
 
 // ─── Per-line OG card ────────────────────────────────────────────────
 // One image per subway line, rendered at build time alongside the
@@ -192,7 +192,7 @@ export default async function Image({ params }: Params) {
             />
             <span>Streaming MTA GTFS-Realtime</span>
           </div>
-          <div>standclear.app</div>
+          <div>{SITE_HOST}</div>
         </div>
       </div>
     ),
