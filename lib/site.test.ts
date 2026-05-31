@@ -139,6 +139,65 @@ describe("SITE_URL env override", () => {
   });
 });
 
+describe("SITE_HOST derivation", () => {
+  const original = process.env.NEXT_PUBLIC_SITE_URL;
+
+  afterEach(() => {
+    if (original === undefined) delete process.env.NEXT_PUBLIC_SITE_URL;
+    else process.env.NEXT_PUBLIC_SITE_URL = original;
+  });
+
+  it("defaults to the bare brand host (no scheme) when unset", async () => {
+    delete process.env.NEXT_PUBLIC_SITE_URL;
+    const { SITE_HOST } = await loadFresh();
+    expect(SITE_HOST).toBe("standclear.app");
+  });
+
+  it("strips the scheme from a Vercel-preview override — the footer must name where the card is actually served", async () => {
+    // The whole reason SITE_URL is env-overridable is so a preview
+    // deploy's OG card doesn't advertise the not-yet-provisioned
+    // brand domain. The footer host has to track the override too.
+    process.env.NEXT_PUBLIC_SITE_URL =
+      "https://standclear-git-claude-keen.vercel.app";
+    const { SITE_HOST } = await loadFresh();
+    expect(SITE_HOST).toBe("standclear-git-claude-keen.vercel.app");
+  });
+
+  it("trims a trailing slash (URL.host has none) so the footer never reads `host./path`", async () => {
+    process.env.NEXT_PUBLIC_SITE_URL = "https://example.com/";
+    const { SITE_HOST } = await loadFresh();
+    expect(SITE_HOST).toBe("example.com");
+  });
+
+  it("preserves the port for a local-dev override", async () => {
+    process.env.NEXT_PUBLIC_SITE_URL = "http://localhost:3000";
+    const { SITE_HOST } = await loadFresh();
+    expect(SITE_HOST).toBe("localhost:3000");
+  });
+
+  it("returns host only, dropping any path in the override", async () => {
+    process.env.NEXT_PUBLIC_SITE_URL = "https://example.com/some/path";
+    const { SITE_HOST } = await loadFresh();
+    expect(SITE_HOST).toBe("example.com");
+  });
+
+  it("never contains a scheme separator (the invariant the footers depend on)", async () => {
+    process.env.NEXT_PUBLIC_SITE_URL =
+      "https://standclear-git-claude-keen.vercel.app";
+    const { SITE_HOST } = await loadFresh();
+    expect(SITE_HOST).not.toContain("://");
+  });
+
+  it("degrades a schemeless operator typo without throwing at module load — every route imports this module", async () => {
+    // `new URL("standclear.app")` throws; an unguarded derive would
+    // fail the entire build over one bad env value rather than just
+    // degrading one footer. The regex fallback keeps it sane.
+    process.env.NEXT_PUBLIC_SITE_URL = "standclear.app/changelog";
+    const { SITE_HOST } = await loadFresh();
+    expect(SITE_HOST).toBe("standclear.app");
+  });
+});
+
 describe("brand-string sanity", () => {
   beforeEach(() => {
     // Lock SITE_URL to the brand default so the snapshot below is

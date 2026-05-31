@@ -169,6 +169,29 @@ describe("LinePicker", () => {
     expect(bullets.length).toBe(TOTAL_ORDERED);
   });
 
+  it("close button is a 44px touch target (principle #3)", () => {
+    // jsdom has no CSS engine, so the rendered hit area can't be
+    // measured — the Tailwind class list is the contract. Pin the
+    // HIG-minimum size and reject the old sub-44px size so a future
+    // refactor that shrinks the primary dismiss (tapped one-handed
+    // on a moving train) trips this test. Same approach as the
+    // FollowCapsule touch-target regression test.
+    render(
+      <LinePicker
+        lines={makeLines()}
+        selectedLine={null}
+        onSelect={vi.fn()}
+      />,
+    );
+    openPicker();
+    const dialog = screen.getByRole("dialog");
+    const close = within(dialog).getByRole("button", { name: "Close panel" });
+    expect(close.classList.contains("w-11")).toBe(true);
+    expect(close.classList.contains("h-11")).toBe(true);
+    expect(close.classList.contains("w-9")).toBe(false);
+    expect(close.classList.contains("h-9")).toBe(false);
+  });
+
   it("flags the selected bullet with aria-pressed=true and the deselect aria-label", () => {
     render(
       <LinePicker

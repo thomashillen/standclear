@@ -104,27 +104,29 @@ describe("StopRow staleness chrome", () => {
     expect(nChip.querySelector(".text-gray-200")).toBeTruthy();
   });
 
-  it("floors the rounded-minutes aria to 1 (never '0 minutes ago')", () => {
-    // The Math.max(1, …) floor in `etaChipAria` is defensive — pin it
-    // independent of `trainStaleness`. A label-only mock with ageSec
-    // below 30 s would round to 0 minutes without the floor, leaving
-    // the screen reader saying "position last updated 0 minutes ago"
-    // while the chip still claims stale. Pass a synthetic ageSec of
-    // 10 s here to exercise the branch directly.
-    const microStale = {
+  it("speaks `trainStaleness.ariaLabel` verbatim — no inline re-derivation", () => {
+    // `etaChipAria` no longer rounds `ageSec` itself; the spoken phrase
+    // (incl. its rounded-minute count and singular/plural wording) is
+    // single-sourced in `trainStaleness`. Pin the pass-through with a
+    // synthetic object whose `ariaLabel` deliberately disagrees with
+    // its `ageSec`: if the chip still derived from `ageSec` it would
+    // say "5 minutes"; the contract is that it echoes `ariaLabel`. The
+    // singular "1 minute" wording rides along, documenting that the
+    // grammar now lives in the helper, not here.
+    const synthetic = {
       stale: true,
       veryStale: false,
       label: "Updated 1m ago",
-      ageSec: 10,
+      ariaLabel: "position last updated 1 minute ago",
+      ageSec: 300,
     };
     render(
       <StopRow
         {...defaults}
         nEtaStr="2 min"
-        nStaleness={microStale}
+        nStaleness={synthetic}
       />,
     );
-    // Singular: "1 minute", not "1 minutes".
     expect(
       screen.getByLabelText("Northbound 2 min, position last updated 1 minute ago"),
     ).toBeTruthy();

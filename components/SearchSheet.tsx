@@ -1507,6 +1507,7 @@ export default function SearchSheet({
                       key={`search-${s.stopId}`}
                       station={s}
                       arrivals={arrivalsByStation.get(s.stopId) ?? []}
+                      hasData={!!data}
                       routeColors={routeColors}
                       now={now}
                       isFavorite={has(s.stopId)}
@@ -1529,6 +1530,8 @@ export default function SearchSheet({
                         }
                         onStationOpen(s.stopId);
                       }}
+                      lastReportedByTripId={lastReportedByTripId}
+                      generatedAtSec={generatedAtSec}
                     />
                   ))}
                 </>
@@ -1877,6 +1880,7 @@ export default function SearchSheet({
                     }
                     now={now}
                     isPrimary={i === 0}
+                    isFastest={i === 0 && tripPlans.length > 1}
                     isSelected={isSelected}
                     onSelect={
                       onTripSelect
