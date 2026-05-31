@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   estimateTripTimeSec,
+  hasReachableFirstLegArrival,
   legGeometry,
   planTrips,
   rankPlansByTime,
@@ -568,11 +569,86 @@ describe("rankPlansByTime", () => {
     expect(sorted[1]).toBe(planFast);
   });
 
+  it("can prefer a slower plan with a reachable first-leg departure over a dead first leg", () => {
+    // This is the daily-commute-card failure mode: a static direct
+    // route with no matching live train looked fastest because the
+    // estimator fell back to a 4-minute wait, so the one-card surface
+    // rendered "No upcoming 4 trains" instead of choosing a viable
+    // alternate. With the live-departure preference, a plan with an
+    // actual first-leg train wins even when its total estimate is
+    // longer than the fallback math for the dead route.
+    const arrivalsByStation = new Map<string, Arrival[]>([
+      ["631", [
+        { routeId: "5", stopId: "631", direction: "S", eta: 600, tripId: "real-5" },
+      ]],
+    ]);
+    const sorted = rankPlansByTime([planFast, planSlow], {
+      arrivalsByStation,
+      nowSec: 0,
+      preferReachableFirstLeg: true,
+    });
+    expect(sorted[0]).toBe(planSlow);
+    expect(sorted[1]).toBe(planFast);
+  });
+
+  it("keeps time-only ranking when no live-arrival preference is requested", () => {
+    const arrivalsByStation = new Map<string, Arrival[]>([
+      ["631", [
+        { routeId: "5", stopId: "631", direction: "S", eta: 600, tripId: "real-5" },
+      ]],
+    ]);
+    const sorted = rankPlansByTime([planFast, planSlow], {
+      arrivalsByStation,
+      nowSec: 0,
+    });
+    expect(sorted[0]).toBe(planFast);
+    expect(sorted[1]).toBe(planSlow);
+  });
+
   it("does not mutate the input array", () => {
     const input = [planSlow, planFast];
     const before = [...input];
     rankPlansByTime(input);
     expect(input).toEqual(before);
+  });
+});
+
+describe("hasReachableFirstLegArrival", () => {
+  it("returns null when live arrivals are unavailable", () => {
+    expect(hasReachableFirstLegArrival(ONE_LEG_PLAN)).toBeNull();
+  });
+
+  it("counts sibling route arrivals as reachable for the first leg", () => {
+    const planWithSibling: TripPlan = {
+      legs: [{ ...ONE_LEG_PLAN.legs[0], siblingRouteIds: ["5"] }],
+      totalStops: ONE_LEG_PLAN.totalStops,
+    };
+    const arrivalsByStation = new Map<string, Arrival[]>([
+      ["631", [
+        { routeId: "5", stopId: "631", direction: "S", eta: 120, tripId: "sib" },
+      ]],
+    ]);
+    expect(
+      hasReachableFirstLegArrival(planWithSibling, {
+        arrivalsByStation,
+        nowSec: 0,
+      }),
+    ).toBe(true);
+  });
+
+  it("ignores missed walk-up trains when deciding whether a plan is viable now", () => {
+    const arrivalsByStation = new Map<string, Arrival[]>([
+      ["631", [
+        { routeId: "4", stopId: "631", direction: "S", eta: 60, tripId: "miss" },
+      ]],
+    ]);
+    expect(
+      hasReachableFirstLegArrival(ONE_LEG_PLAN, {
+        arrivalsByStation,
+        nowSec: 0,
+        walkFromMeters: 300,
+      }),
+    ).toBe(false);
   });
 });
 
