@@ -1053,12 +1053,15 @@ export default function NearbyPanel({
                 key={`fav-${s.stopId}`}
                 station={s}
                 arrivals={arrivalsByStation.get(s.stopId) ?? []}
+                hasData={!!data}
                 routeColors={routeColors}
                 now={now}
                 isFavorite={true}
                 onFavoriteToggle={() => toggle(s.stopId)}
                 onTap={() => onStationOpen(s.stopId)}
                 anchor={anchorOf(s.stopId)}
+                lastReportedByTripId={lastReportedByTripId}
+                generatedAtSec={generatedAtSec}
               />
             ))}
           </div>
@@ -1074,12 +1077,15 @@ export default function NearbyPanel({
                 key={`near-${s.stopId}`}
                 station={s}
                 arrivals={arrivalsByStation.get(s.stopId) ?? []}
+                hasData={!!data}
                 routeColors={routeColors}
                 now={now}
                 isFavorite={has(s.stopId)}
                 onFavoriteToggle={() => toggle(s.stopId)}
                 onTap={() => onStationOpen(s.stopId)}
                 anchor={anchorOf(s.stopId)}
+                lastReportedByTripId={lastReportedByTripId}
+                generatedAtSec={generatedAtSec}
               />
             ))}
           </div>

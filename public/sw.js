@@ -81,7 +81,7 @@ function isStaticGtfs(url) {
   return url.pathname === "/gtfsData.json";
 }
 
-async function staleWhileRevalidate(request, cacheName) {
+async function staleWhileRevalidate(request, cacheName, event) {
   const cache = await caches.open(cacheName);
   const cached = await cache.match(request);
   const networkPromise = fetch(request)
@@ -90,6 +90,18 @@ async function staleWhileRevalidate(request, cacheName) {
       return res;
     })
     .catch(() => null);
+  // Keep the worker alive until the background revalidation finishes.
+  // On a cache hit we resolve respondWith() immediately with `cached`,
+  // at which point the browser is free to terminate the SW — killing
+  // the in-flight networkPromise before its cache.put() lands. That
+  // silently drops the "revalidate" half of stale-while-revalidate, so
+  // the next cold launch (often underground, on a worse connection)
+  // serves an even staler /api/trains, /api/alerts, or gtfsData.json.
+  // waitUntil extends the event's lifetime past respondWith, which is
+  // exactly how Workbox's StaleWhileRevalidate guarantees the refresh.
+  // networkPromise never rejects (it .catch()es to null), so this can't
+  // surface an unhandled rejection inside waitUntil.
+  if (event) event.waitUntil(networkPromise);
   return cached || (await networkPromise) || new Response("", { status: 504 });
 }
 
@@ -204,12 +216,12 @@ self.addEventListener("fetch", (event) => {
   }
 
   if (isDataRequest(url)) {
-    event.respondWith(staleWhileRevalidate(request, DATA_CACHE));
+    event.respondWith(staleWhileRevalidate(request, DATA_CACHE, event));
     return;
   }
 
   if (isStaticGtfs(url)) {
-    event.respondWith(staleWhileRevalidate(request, STATIC_CACHE));
+    event.respondWith(staleWhileRevalidate(request, STATIC_CACHE, event));
     return;
   }
 

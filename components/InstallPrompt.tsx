@@ -169,11 +169,16 @@ export default function InstallPrompt() {
             </button>
           )}
         </div>
+        {/* 44px hit target (principle #3): the only dismiss on this
+            banner. The glyph stays 14px; only the circle grows to the
+            HIG minimum. The text column (title + 2-line description)
+            is already taller than 44px and `flex-shrink-0` is set, so
+            the banner height is unchanged and the copy can't squish. */}
         <button
           type="button"
           onClick={close}
           aria-label="Dismiss install prompt"
-          className="press flex-shrink-0 -mt-0.5 -mr-0.5 w-8 h-8 flex items-center justify-center rounded-full bg-white/[0.06] hover:bg-white/[0.10] text-gray-300 touch-manipulation"
+          className="press flex-shrink-0 -mt-0.5 -mr-0.5 w-11 h-11 flex items-center justify-center rounded-full bg-white/[0.06] hover:bg-white/[0.10] text-gray-300 touch-manipulation"
         >
           <X className="w-3.5 h-3.5" strokeWidth={2.5} />
         </button>

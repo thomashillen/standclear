@@ -83,7 +83,13 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   const action = searchParams.get("action");
 
   if (action === "suggest") {
-    const q = searchParams.get("q") ?? "";
+    // Mirror the client's `query.trim()` (lib/geocoding.ts): the
+    // "minimum searchable query" contract is *trimmed* length ≥ 2.
+    // Our own UI already trims before calling, but a direct/abusive
+    // API hit with a whitespace-only or -padded `q` would otherwise
+    // clear this gate and burn a billed Mapbox suggest call — and a
+    // trailing space only degrades the upstream prefix ranking.
+    const q = (searchParams.get("q") ?? "").trim();
     if (q.length < 2) {
       return NextResponse.json({ suggestions: [] });
     }

@@ -17,6 +17,7 @@ describe("trainStaleness", () => {
     expect(r.stale).toBe(false);
     expect(r.veryStale).toBe(false);
     expect(r.label).toBeNull();
+    expect(r.ariaLabel).toBeNull();
     expect(r.ageSec).toBe(30);
   });
 
@@ -24,6 +25,7 @@ describe("trainStaleness", () => {
     const r = trainStaleness(NOW_SEC - 90, NOW_MS, NOW_SEC);
     expect(r.stale).toBe(false);
     expect(r.label).toBeNull();
+    expect(r.ariaLabel).toBeNull();
   });
 
   it("flags stale just past 90s and renders an 'Updated Nm ago' label", () => {
@@ -31,6 +33,7 @@ describe("trainStaleness", () => {
     expect(r.stale).toBe(true);
     expect(r.veryStale).toBe(false);
     expect(r.label).toBe("Updated 2m ago");
+    expect(r.ariaLabel).toBe("position last updated 2 minutes ago");
   });
 
   it("treats exactly 360s as soft-stale, not hard-stale (boundary is inclusive)", () => {
@@ -38,6 +41,7 @@ describe("trainStaleness", () => {
     expect(r.stale).toBe(true);
     expect(r.veryStale).toBe(false);
     expect(r.label).toBe("Updated 6m ago");
+    expect(r.ariaLabel).toBe("position last updated 6 minutes ago");
   });
 
   it("flips to a hard-stale label past 360s", () => {
@@ -45,6 +49,10 @@ describe("trainStaleness", () => {
     expect(r.stale).toBe(true);
     expect(r.veryStale).toBe(true);
     expect(r.label).toBe("Stale · 10m");
+    // Band-independent spoken form: the compact visible label switches
+    // to "Stale · 10m" past the hard floor, but a screen reader still
+    // hears the spelled-out age (not the "·" shorthand).
+    expect(r.ariaLabel).toBe("position last updated 10 minutes ago");
   });
 
   it("falls back to the snapshot's generatedAt when the per-vehicle timestamp is missing", () => {
@@ -64,6 +72,38 @@ describe("trainStaleness", () => {
     expect(r.ageSec).toBe(0);
     expect(r.stale).toBe(false);
     expect(r.label).toBeNull();
+    expect(r.ariaLabel).toBeNull();
+  });
+
+  it("falls back to generatedAt for the spoken phrase too when the per-vehicle ts is missing", () => {
+    const r = trainStaleness(undefined, NOW_MS, NOW_SEC - 600);
+    expect(r.label).toBe("Stale · 10m");
+    expect(r.ariaLabel).toBe("position last updated 10 minutes ago");
+  });
+
+  it("keeps `label` and `ariaLabel` on the same rounded-minute integer at every age (anti-drift)", () => {
+    // The whole reason `ariaLabel` exists: StationPanel + LinePanel
+    // used to each re-derive Math.round(ageSec / 60) inline, so the
+    // spoken age could silently diverge from the visible "Nm" if one
+    // callsite's rounding changed. Both strings now come off one
+    // integer — pin that they always name the same number of minutes,
+    // null together, across the whole stale range incl. both bands.
+    for (let ageSec = 0; ageSec <= 1800; ageSec += 7) {
+      const r = trainStaleness(NOW_SEC - ageSec, NOW_MS, NOW_SEC);
+      if (r.label === null) {
+        expect(r.ariaLabel).toBeNull();
+        continue;
+      }
+      const visibleMin = Number(r.label.match(/(\d+)m/)![1]);
+      const spokenMin = Number(r.ariaLabel!.match(/(\d+) minutes? ago$/)![1]);
+      expect(spokenMin).toBe(visibleMin);
+      // Spoken form is grammatical for whatever count it lands on.
+      expect(r.ariaLabel).toBe(
+        `position last updated ${spokenMin} ${
+          spokenMin === 1 ? "minute" : "minutes"
+        } ago`,
+      );
+    }
   });
 });
 

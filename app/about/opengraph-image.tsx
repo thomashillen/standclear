@@ -1,5 +1,5 @@
 import { ImageResponse } from "next/og";
-import { SITE_NAME } from "@/lib/site";
+import { SITE_NAME, SITE_HOST } from "@/lib/site";
 
 // ─── /about OG card ───────────────────────────────────────────────────
 // Per-page card so a tweeted /about link gets a card framed for that
@@ -112,7 +112,7 @@ export default async function Image() {
             />
             <span>Streaming MTA GTFS-Realtime</span>
           </div>
-          <div>standclear.app</div>
+          <div>{SITE_HOST}</div>
         </div>
       </div>
     ),
