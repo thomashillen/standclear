@@ -2,15 +2,6 @@ import type { Lines, SubwayLine } from "./subwayData";
 import { catchVerdict, haversineMeters, type StationEntry } from "./stopsIndex";
 import type { Arrival } from "./useTrains";
 
-export interface DirectRoute {
-  routeId: string;
-  direction: "N" | "S";
-  /** How many stops between origin and destination on this route. Used to
-   *  rank "best" routes when multiple options exist (the express that
-   *  saves stops wins over the local that touches both ends). */
-  stopCount: number;
-}
-
 export interface TripLeg {
   routeId: string;
   direction: "N" | "S";
@@ -69,43 +60,6 @@ function travelDirection(
   const firstIsNorth = first.lat > last.lat;
   const towardEnd = toIdx > fromIdx;
   return towardEnd ? (firstIsNorth ? "S" : "N") : firstIsNorth ? "N" : "S";
-}
-
-/**
- * Direct (no-transfer) routes between two complexes. Kept as a thin
- * wrapper around `planTrips({ maxTransfers: 0 })` so existing callers
- * (and tests) don't have to change shape, but the underlying engine is
- * the same.
- */
-export function directRoutesBetween(
-  lines: Lines,
-  fromStopIds: string[],
-  toStopIds: string[],
-): DirectRoute[] {
-  const fromSet = new Set(fromStopIds);
-  const toSet = new Set(toStopIds);
-  const out: DirectRoute[] = [];
-
-  for (const line of Object.values(lines)) {
-    if (line.stops.length < 2) continue;
-    let fromIdx = -1;
-    let toIdx = -1;
-    for (let i = 0; i < line.stops.length; i++) {
-      const id = line.stops[i].id;
-      if (fromIdx === -1 && fromSet.has(id)) fromIdx = i;
-      if (toIdx === -1 && toSet.has(id)) toIdx = i;
-      if (fromIdx !== -1 && toIdx !== -1) break;
-    }
-    if (fromIdx === -1 || toIdx === -1 || fromIdx === toIdx) continue;
-    const direction = travelDirection(line, fromIdx, toIdx);
-    if (!direction) continue;
-    out.push({
-      routeId: line.routeId,
-      direction,
-      stopCount: Math.abs(toIdx - fromIdx),
-    });
-  }
-  return out;
 }
 
 /**
