@@ -20,9 +20,12 @@
 // LinePanel keeps its own formatter — its 30 s "Now" threshold and
 // minute-only granularity are an intentional "calm at distance"
 // choice for the dense corridor view, not accidental drift.
-// useTrainMarkers.ts and panelUI.ts each carry compact short-form
-// variants ("Xs"/"Xm") that target glyph + chip layouts; those are
-// also intentional and stay separate.
+// panelUI.ts carries a compact short-form variant ("Xs"/"Xm") that
+// targets the in-panel chip layout, and lib/ringEta.ts carries the
+// on-map incoming-ring caption ("Xs"/"X min"); those are also
+// intentional and stay separate — but ringEta mirrors panelUI's
+// thresholds + round-first rule so the two read consistently for
+// the same train.
 
 /**
  * Long-form arrival countdown for the urgency-rich detail surfaces.

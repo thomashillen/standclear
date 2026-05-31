@@ -14,6 +14,7 @@ import {
 } from "./trainTrajectory";
 import { ringPulsePhase } from "./ringPulse";
 import { markerOpacityMul } from "./trainStaleness";
+import { formatRingEta } from "./ringEta";
 import { iconScaleAtZoom } from "./iconScale";
 
 // Minimal structural surface of the Mapbox map handle the hook touches —
@@ -660,11 +661,12 @@ export function useTrainMarkers({
             // Urgency threshold: < 90 s (mirrors the panel's amber rule).
             const isImminent = etaSec < 90;
 
-            // ETA label text — same formatting as fmtEta in StationPanel.
-            let etaText: string;
-            if (etaSec <= 5) etaText = "Now";
-            else if (etaSec < 60) etaText = `${Math.round(etaSec)}s`;
-            else etaText = `${Math.round(etaSec / 60)} min`;
+            // ETA caption — rounds to whole seconds before banding so
+            // it crosses the "Now"/seconds/minutes boundaries in
+            // lockstep with the StationPanel chip (panelUI fmtEta).
+            // See lib/ringEta.ts for why this stays a separate
+            // compact variant.
+            const etaText = formatRingEta(etaSec);
 
             // Amber when imminent, near-white otherwise — matches the
             // arrival row color in the panel so the language is consistent.
