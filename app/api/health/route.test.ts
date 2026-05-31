@@ -131,6 +131,101 @@ describe("/api/health", () => {
     expect(body.checks.static.status).toBe("ok");
   });
 
+  it("405 HEAD falls back to a ranged GET and reports ok when it serves", async () => {
+    fetchMock
+      .mockResolvedValueOnce(new Response(null, { status: 405 }))
+      .mockResolvedValueOnce(new Response(null, { status: 206 }));
+    statSyncMock.mockReturnValue({ size: 430_000 });
+
+    const GET = await loadGet();
+    const res = await GET();
+    const body = (await res.json()) as { checks: { mta: { status: string } } };
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls[0][1]).toMatchObject({ method: "HEAD" });
+    expect(fetchMock.mock.calls[1][1]).toMatchObject({
+      method: "GET",
+      headers: { Range: "bytes=0-0" },
+    });
+    expect(res.status).toBe(200);
+    expect(body.checks.mta.status).toBe("ok");
+  });
+
+  it("403 HEAD (proxy rejects the method) is confirmed ok via the GET fallback", async () => {
+    // Regression guard: the fallback used to fire only on exactly 405,
+    // so a CDN that answered HEAD with 403/400/501 was reported
+    // degraded even though the feed itself was healthy — a false alarm
+    // to uptime monitors and the rider-facing /status page.
+    fetchMock
+      .mockResolvedValueOnce(new Response(null, { status: 403 }))
+      .mockResolvedValueOnce(new Response(null, { status: 200 }));
+    statSyncMock.mockReturnValue({ size: 430_000 });
+
+    const GET = await loadGet();
+    const res = await GET();
+    const body = (await res.json()) as {
+      status: string;
+      checks: { mta: { status: string } };
+    };
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(res.status).toBe(200);
+    expect(body.status).toBe("ok");
+    expect(body.checks.mta.status).toBe("ok");
+  });
+
+  it("a real outage still flips to down when the GET fallback 5xx's", async () => {
+    fetchMock
+      .mockResolvedValueOnce(new Response(null, { status: 403 }))
+      .mockResolvedValueOnce(new Response(null, { status: 503 }));
+    statSyncMock.mockReturnValue({ size: 430_000 });
+
+    const GET = await loadGet();
+    const res = await GET();
+    const body = (await res.json()) as {
+      status: string;
+      checks: { mta: { status: string; detail?: string } };
+    };
+
+    expect(res.status).toBe(503);
+    expect(body.status).toBe("down");
+    expect(body.checks.mta.status).toBe("down");
+    expect(body.checks.mta.detail).toContain("503");
+  });
+
+  it("a non-5xx GET-fallback failure degrades (not downs) the rollup", async () => {
+    fetchMock
+      .mockResolvedValueOnce(new Response(null, { status: 403 }))
+      .mockResolvedValueOnce(new Response(null, { status: 404 }));
+    statSyncMock.mockReturnValue({ size: 430_000 });
+
+    const GET = await loadGet();
+    const res = await GET();
+    const body = (await res.json()) as {
+      status: string;
+      checks: { mta: { status: string; detail?: string } };
+    };
+
+    // degraded is not a critical rollup → HTTP stays 200 so an uptime
+    // probe doesn't page on a partial-but-reachable upstream.
+    expect(res.status).toBe(200);
+    expect(body.checks.mta.status).toBe("degraded");
+    expect(body.checks.mta.detail).toContain("404");
+  });
+
+  it("a 2xx HEAD short-circuits without the GET fallback", async () => {
+    fetchMock.mockResolvedValue(new Response(null, { status: 200 }));
+    statSyncMock.mockReturnValue({ size: 430_000 });
+
+    const GET = await loadGet();
+    const res = await GET();
+    const body = (await res.json()) as { checks: { mta: { status: string } } };
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0][1]).toMatchObject({ method: "HEAD" });
+    expect(body.checks.mta.status).toBe("ok");
+  });
+
   it("response surfaces X-Health-Status + X-Health-Version routing headers", async () => {
     fetchMock.mockResolvedValue(new Response(null, { status: 200 }));
     statSyncMock.mockReturnValue({ size: 430_000 });

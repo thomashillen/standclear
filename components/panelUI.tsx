@@ -25,7 +25,7 @@ import {
 import type { CommuteAnchor } from "@/lib/useFavorites";
 import { estimateTripTimeSec, type TripPlan } from "@/lib/commuteRouting";
 import type { WalkingRoute } from "@/lib/walkingDirections";
-import { trainStaleness } from "@/lib/trainStaleness";
+import { trainStaleness, type TrainStaleness } from "@/lib/trainStaleness";
 
 // ─── Shared types ───────────────────────────────────────────────────
 
@@ -137,6 +137,8 @@ function DirectionArrivalsRow({
   routeColors,
   meters,
   now,
+  lastReportedByTripId,
+  generatedAtSec,
 }: {
   direction: "N" | "S";
   arrivals: Arrival[];
@@ -146,8 +148,33 @@ function DirectionArrivalsRow({
    *  rider position (e.g. favorites without geolocation). */
   meters?: number;
   now: number;
+  /** Per-trip last-reported VehiclePosition timestamp (epoch seconds) —
+   *  the same map TripPlanRow consumes. When a chip's predicting trip
+   *  has a paired vehicle whose report slipped past the 90 s
+   *  marker-fade threshold, its ETA flips amber so this list can't show
+   *  a confident "3m" off a stale position while the map marker for the
+   *  same train is already fading. Trips with no paired VehiclePosition
+   *  (an arrivals-only stop_time_update) are by definition as fresh as
+   *  the latest poll and stay calm — same rule as TripPlanRow /
+   *  ArrivalRow / LinePanel StopRow. Optional so favorites-only /
+   *  early-load / test call sites keep working unchanged. */
+  lastReportedByTripId?: Map<string, number | undefined>;
+  /** Snapshot generatedAt in epoch seconds; falls in when a trip's
+   *  per-vehicle timestamp is absent so a silent-feed outage still
+   *  surfaces. */
+  generatedAtSec?: number;
 }) {
   const Arrow = direction === "N" ? ArrowUp : ArrowDown;
+  const staleFor = (a: Arrival): TrainStaleness | null => {
+    if (!lastReportedByTripId || !generatedAtSec) return null;
+    if (!lastReportedByTripId.has(a.tripId)) return null;
+    const s = trainStaleness(
+      lastReportedByTripId.get(a.tripId),
+      now,
+      generatedAtSec,
+    );
+    return s.stale ? s : null;
+  };
   return (
     <div className="flex items-center gap-2">
       <Arrow
@@ -166,6 +193,25 @@ function DirectionArrivalsRow({
                 ? catchVerdict(meters, a.eta, now / 1000)
                 : null;
             const style = verdict ? VERDICT_STYLES[verdict] : VERDICT_STYLES.chill;
+            const stale = staleFor(a);
+            // Verdict color wins for the three actionable catch states
+            // (miss/run/walk carry their own urgent palette + the catch
+            // pill — the staleness still rides the aria-label so it
+            // isn't lost to AT). For "chill" and the no-distance case (a
+            // favorite with no geolocation), the ETA is the calm gray
+            // default; there a stale prediction must NOT read as a
+            // confident fresh one, so the amber staleness tint takes
+            // over. Same "don't paint a stale ETA as fresh" rule the
+            // map marker fade (markerOpacityMul), ArrivalRow, and
+            // LinePanel StopRow already enforce on the same data.
+            const actionable =
+              verdict === "miss" || verdict === "run" || verdict === "walk";
+            const etaCls =
+              actionable || !stale ? style.etaCls : "text-amber-300";
+            const etaStr = fmtEta(a.eta, now);
+            const staleMin = stale
+              ? Math.max(1, Math.round(stale.ageSec / 60))
+              : 0;
             return (
               <span
                 key={`${a.tripId}-${i}`}
@@ -176,8 +222,15 @@ function DirectionArrivalsRow({
                   color={info.color}
                   textColor={info.textColor}
                 />
-                <span className={`font-medium tabular-nums ${style.etaCls}`}>
-                  {fmtEta(a.eta, now)}
+                <span
+                  className={`font-medium tabular-nums ${etaCls}`}
+                  aria-label={
+                    stale
+                      ? `${etaStr}, position last updated ${staleMin} ${staleMin === 1 ? "minute" : "minutes"} ago`
+                      : undefined
+                  }
+                >
+                  {etaStr}
                 </span>
                 {style.label && (
                   <span
@@ -200,6 +253,17 @@ function DirectionArrivalsRow({
 export interface StationRowProps {
   station: StationEntry & { meters?: number };
   arrivals: Arrival[];
+  /** Whether the live `/api/trains` feed has produced at least one
+   *  response yet. On a cold first visit (no localStorage cache, before
+   *  the first poll resolves) `arrivals` is `[]` because the data is
+   *  *unknown*, not because the station is dead — rendering the
+   *  definitive "No upcoming trains" there is a false negative on
+   *  exactly the zero-onboarding rider the product is built to win.
+   *  Optional, defaults to `true` so favorites-only / test call sites
+   *  that don't thread it keep the prior behavior. Mirrors the
+   *  `hasData` gate StationPanel's DirectionSection and LinePanel's
+   *  StopRow already apply to the same empty-state copy. */
+  hasData?: boolean;
   routeColors: RouteColorMap;
   now: number;
   isFavorite: boolean;
@@ -219,11 +283,22 @@ export interface StationRowProps {
    *  schedule for riders who want to glance at trains rather than
    *  navigate. */
   onOpenInfo?: () => void;
+  /** Per-trip last-reported VehiclePosition timestamp (epoch seconds).
+   *  Threaded into the arrival chips so a prediction made off a stale
+   *  position reads amber here too, matching the map marker fade /
+   *  StationPanel / LinePanel / TripPlanRow. Optional — favorites-only,
+   *  early-load, and test call sites without train data keep working
+   *  unchanged. */
+  lastReportedByTripId?: Map<string, number | undefined>;
+  /** Snapshot generatedAt in epoch seconds (fallback when a trip's
+   *  per-vehicle timestamp is absent). */
+  generatedAtSec?: number;
 }
 
 export function StationRow({
   station,
   arrivals,
+  hasData = true,
   routeColors,
   now,
   isFavorite,
@@ -232,6 +307,8 @@ export function StationRow({
   anchor,
   onDirectionsFrom,
   onOpenInfo,
+  lastReportedByTripId,
+  generatedAtSec,
 }: StationRowProps) {
   // Drop arrivals whose eta has already passed (5s grace so a train
   // STOPPED_AT the platform still shows for a beat). Filtering here,
@@ -300,6 +377,8 @@ export function StationRow({
                 routeColors={routeColors}
                 meters={station.meters}
                 now={now}
+                lastReportedByTripId={lastReportedByTripId}
+                generatedAtSec={generatedAtSec}
               />
               <DirectionArrivalsRow
                 direction="S"
@@ -307,10 +386,22 @@ export function StationRow({
                 routeColors={routeColors}
                 meters={station.meters}
                 now={now}
+                lastReportedByTripId={lastReportedByTripId}
+                generatedAtSec={generatedAtSec}
               />
             </div>
-          ) : (
+          ) : hasData ? (
             <p className="text-[11px] text-gray-600 mt-2">No upcoming trains</p>
+          ) : (
+            // Feed still loading (cold boot, no cache, pre-first-poll):
+            // an empty list is unknown, not "no trains". The row's name
+            // + route bullets + distance already carry its identity and
+            // it stays tappable into the full StationPanel (which runs
+            // its own "Loading live arrivals…" line), so suppressing the
+            // negative copy here keeps the list calm without a noisy
+            // per-row spinner. ACCURACY FIRST — same rule #168 applied to
+            // StationPanel DirectionSection and LinePanel StopRow.
+            null
           )}
         </button>
 
@@ -484,6 +575,7 @@ export function TripPlanRow({
   arrivals,
   now,
   isPrimary,
+  isFastest,
   isSelected,
   onSelect,
   walkFromMeters,
@@ -500,6 +592,14 @@ export function TripPlanRow({
   arrivals: Arrival[];
   now: number;
   isPrimary: boolean;
+  /** This is the time-ranked winner (rankPlansByTime puts the lowest
+   *  estimated-total-time plan at index 0). Renders a "Fastest" tag in
+   *  the ribbon so the rider can read *why* this option leads the list
+   *  instead of inferring it from the subtly-brighter primary ring —
+   *  the Apple/Google/Transit idiom of labeling the recommended route.
+   *  Caller gates this on "more than one plan" so a lone option doesn't
+   *  carry a comparative label with nothing to compare against. */
+  isFastest?: boolean;
   /** Visual highlight when this is the trip currently shown on the map. */
   isSelected?: boolean;
   /** Tap handler — typically toggles map overlay for this plan. */
@@ -715,6 +815,17 @@ export function TripPlanRow({
               />
             ))}
           </>
+        )}
+        {isFastest && (
+          // Sits between the route identity and the stop-count so the
+          // rider's eye binds "this line ↔ fastest" before scanning the
+          // rest of the ribbon. Emerald reuses the same recommendation
+          // color the "Walking is faster" card already speaks in this
+          // file, so the visual vocabulary stays consistent. flex-shrink-0
+          // so it never collapses when the ribbon wraps on a 2-leg trip.
+          <span className="flex-shrink-0 inline-flex items-center px-1.5 h-[18px] rounded-full bg-emerald-300/10 ring-1 ring-emerald-300/30 text-emerald-200 text-[10px] font-bold uppercase tracking-wide">
+            Fastest
+          </span>
         )}
         <span className="text-[11px] text-gray-400 ml-1.5 truncate min-w-0">
           {plan.totalStops} stop{plan.totalStops === 1 ? "" : "s"}

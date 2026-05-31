@@ -238,10 +238,19 @@ export default async function StationPage({ params }: Params) {
               <span className="flex items-center gap-2.5 min-w-0">
                 <span className="flex flex-shrink-0 items-center gap-1">
                   {entry.routes.slice(0, 4).map((r) => (
+                    // The bullet is a colored letter glyph; without a
+                    // label the enclosing Link's accessible name
+                    // collapses to bare letters ("A C E Times Sq…"),
+                    // which a screen reader spells out ambiguously.
+                    // There's no adjacent "X train" text here to lean
+                    // on the way the "Lines at this station" list does,
+                    // so each bullet carries its own label — same
+                    // per-bullet idiom as the /line interchange bullets.
                     <span
                       key={r.id}
                       className="inline-flex items-center justify-center w-5 h-5 rounded-full text-[10px] font-black"
                       style={{ background: r.color, color: r.textColor }}
+                      aria-label={`${r.id} train`}
                     >
                       {r.id}
                     </span>

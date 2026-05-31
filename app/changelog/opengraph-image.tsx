@@ -1,5 +1,5 @@
 import { ImageResponse } from "next/og";
-import { SITE_NAME, VERSION, APP_RELEASE_NAME } from "@/lib/site";
+import { SITE_NAME, VERSION, APP_RELEASE_NAME, SITE_HOST } from "@/lib/site";
 
 // ─── /changelog OG card ───────────────────────────────────────────────
 // Surfaces the current version label so a tweeted changelog link reads
@@ -128,7 +128,7 @@ export default async function Image() {
             />
             <span>Streaming MTA GTFS-Realtime</span>
           </div>
-          <div>standclear.app/changelog</div>
+          <div>{`${SITE_HOST}/changelog`}</div>
         </div>
       </div>
     ),

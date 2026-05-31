@@ -237,10 +237,16 @@ export default function LinePicker({ lines, selectedLine, onSelect }: LinePicker
                 <Train className="w-[17px] h-[17px]" />
                 <span className="font-black text-[16px] tracking-tight">Lines</span>
               </div>
+              {/* 44px hit target (principle #3): the primary dismiss
+                  for the line picker, tapped one-handed on a moving
+                  train. The glyph stays 16px; only the circle grows
+                  to the HIG minimum. The header is content-driven
+                  (`items-center`, no fixed height) so the larger
+                  button just sets the row height — nothing reflows. */}
               <DialogPrimitive.Close asChild>
                 <button
                   data-no-drag
-                  className="press text-white opacity-85 hover:opacity-100 w-9 h-9 -mr-1 flex items-center justify-center rounded-full bg-white/[0.08] hover:bg-white/[0.12] touch-manipulation flex-shrink-0"
+                  className="press text-white opacity-85 hover:opacity-100 w-11 h-11 -mr-1 flex items-center justify-center rounded-full bg-white/[0.08] hover:bg-white/[0.12] touch-manipulation flex-shrink-0"
                   aria-label="Close panel"
                 >
                   <X className="w-[16px] h-[16px]" strokeWidth={2.5} />

@@ -7,6 +7,7 @@ import {
   lineJsonLd,
   stationBreadcrumbJsonLd,
   stationJsonLd,
+  websiteJsonLd,
 } from "./seoSchemas";
 import {
   SITE_DESCRIPTION,
@@ -50,6 +51,50 @@ describe("homepageJsonLd", () => {
     expect(round.name).toBe(SITE_NAME);
     expect(Array.isArray(round.featureList)).toBe(true);
     expect(round.featureList.length).toBeGreaterThan(0);
+  });
+});
+
+describe("websiteJsonLd", () => {
+  it("declares the WebSite shape Google's 'Site names' feature reads", () => {
+    const ld = websiteJsonLd();
+    expect(ld["@context"]).toBe("https://schema.org");
+    expect(ld["@type"]).toBe("WebSite");
+    expect(ld.url).toBe(SITE_URL);
+    expect(ld.description).toBe(SITE_DESCRIPTION);
+    expect(ld.inLanguage).toBe("en-US");
+  });
+
+  // The entire reason this entity exists is to make the SERP site
+  // name read as the bare brand. `name` MUST be SITE_NAME
+  // ("StandClear"), not the descriptive SITE_TITLE
+  // ("StandClear — NYC Subway Tracker") — Google prints WebSite.name
+  // verbatim above the result URL. A future refactor that "unified"
+  // the two homepage blocks onto SITE_TITLE would silently push the
+  // long page title into every SERP site-name slot, which is exactly
+  // the inference failure this entity is here to prevent.
+  it("uses the bare brand (SITE_NAME), not the descriptive SITE_TITLE", () => {
+    const ld = websiteJsonLd();
+    expect(ld.name).toBe(SITE_NAME);
+    expect(ld.name).not.toBe(SITE_TITLE);
+  });
+
+  // Both homepage JSON-LD blocks (WebApplication + WebSite) carry a
+  // publisher Person. They must be byte-identical: a divergence
+  // (different name casing, a trailing slash on url) forks the
+  // brand-author into two entities in Google's Knowledge Graph, the
+  // same failure mode the shared MTA_PROVIDER block guards against
+  // for station/line.
+  it("shares the exact publisher Person entity with homepageJsonLd", () => {
+    expect(websiteJsonLd().publisher).toEqual(homepageJsonLd().publisher);
+  });
+
+  it("serializes to JSON cleanly so the inline <script> tag is valid", () => {
+    const ld = websiteJsonLd();
+    expect(() => JSON.stringify(ld)).not.toThrow();
+    const round = JSON.parse(JSON.stringify(ld));
+    expect(round["@type"]).toBe("WebSite");
+    expect(round.name).toBe(SITE_NAME);
+    expect(round.publisher["@type"]).toBe("Person");
   });
 });
 

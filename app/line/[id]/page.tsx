@@ -138,10 +138,18 @@ export default async function LinePage({ params }: Params) {
       />
 
       <div className="not-prose flex flex-wrap items-center gap-3 -mt-2">
+        {/* Decorative — the MarketingShell <h1> directly above already
+            reads "{line.id} train", so a screen reader announcing the
+            bare bullet letter again right after it is redundant noise.
+            `title` stays for the pointer-hover tooltip; aria-hidden
+            keeps it out of the accessibility tree. (The /station header
+            bullets are NOT hidden by contrast — those are Links to the
+            line pages and need their own accessible names.) */}
         <span
           className="inline-flex items-center justify-center w-12 h-12 rounded-full text-[20px] font-black tracking-tight ring-1 ring-white/10"
           style={{ background: line.color, color: line.textColor }}
           title={`${line.id} train`}
+          aria-hidden
         >
           {line.id}
         </span>

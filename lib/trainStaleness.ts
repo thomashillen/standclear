@@ -36,6 +36,19 @@ export interface TrainStaleness {
    *  90–360 s band; `"Stale · 6m"` past the floor. Designed to read
    *  at a glance in a single small line of text. */
   label: string | null;
+  /** Screen-reader phrasing of the same age `label` encodes, spelled
+   *  out for assistive tech ("position last updated 4 minutes ago").
+   *  `null` exactly when `label` is null. Built from the *same* rounded
+   *  -minute integer as `label`, so the spoken and visible signals can
+   *  never disagree on the age. StationPanel's arrival-row sub-line and
+   *  LinePanel's per-direction ETA chip read this verbatim instead of
+   *  each re-deriving `Math.round(ageSec / 60)` inline — which they did
+   *  with two divergent phrasings ("Position…" vs "position…", floored
+   *  vs not, always-plural vs pluralized). Band-independent: the spoken
+   *  form stays "position last updated Nm ago" even where the visible
+   *  `label` switches to the compact "Stale · Nm" — a screen reader
+   *  benefits from the spelled-out age, not the visual shorthand. */
+  ariaLabel: string | null;
   /** Age in seconds of the latest position report. Always non-negative
    *  (clock skew is clamped to 0). */
   ageSec: number;
@@ -50,13 +63,6 @@ const HARD_STALE_ABOVE_SEC = 360;
 // "dim but legible" threshold; tested against the Mapbox dark style.
 const MARKER_OPACITY_FLOOR = 0.4;
 
-function fmtAge(ageSec: number): string {
-  // Below the fresh threshold the helper returns `null`, so we don't
-  // need a sub-minute branch — every callsite that hits fmtAge has
-  // ageSec ≥ 90.
-  const minutes = Math.round(ageSec / 60);
-  return `${minutes}m`;
-}
 
 /**
  * Compute the staleness indicator for a single train.
@@ -81,20 +87,33 @@ export function trainStaleness(
   // marker-fade boundary doesn't briefly flash an amber label while
   // the icon is still fully bright.
   if (ageSec <= FRESH_AT_OR_BELOW_SEC) {
-    return { stale: false, veryStale: false, label: null, ageSec };
+    return { stale: false, veryStale: false, label: null, ariaLabel: null, ageSec };
   }
+  // One rounded-minute value feeds both the compact visible `label`
+  // and the spelled-out `ariaLabel`, so the two physically can't drift
+  // (stronger than the old "both callsites happen to call Math.round"
+  // arrangement). The fresh gate above means `minutes` is ≥ 2 for real
+  // feed data, so the singular case never fires today — kept defensive
+  // so the phrase doesn't silently bake in that coupling: a future
+  // threshold change must not produce "1 minutes ago".
+  const minutes = Math.round(ageSec / 60);
+  const ariaLabel = `position last updated ${minutes} ${
+    minutes === 1 ? "minute" : "minutes"
+  } ago`;
   if (ageSec > HARD_STALE_ABOVE_SEC) {
     return {
       stale: true,
       veryStale: true,
-      label: `Stale · ${fmtAge(ageSec)}`,
+      label: `Stale · ${minutes}m`,
+      ariaLabel,
       ageSec,
     };
   }
   return {
     stale: true,
     veryStale: false,
-    label: `Updated ${fmtAge(ageSec)} ago`,
+    label: `Updated ${minutes}m ago`,
+    ariaLabel,
     ageSec,
   };
 }

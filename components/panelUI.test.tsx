@@ -1,6 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
-import { TripPlanRow, type RouteColorMap } from "./panelUI";
+import {
+  TripPlanRow,
+  StationRow,
+  type RouteColorMap,
+  type StationRowProps,
+} from "./panelUI";
 import type { Arrival } from "@/lib/useTrains";
 import type { TripPlan } from "@/lib/commuteRouting";
 import type { StationEntry } from "@/lib/stopsIndex";
@@ -424,5 +429,237 @@ describe("TripPlanRow trunk catch verdict (sibling routes)", () => {
     expect(
       container.querySelectorAll(".text-amber-300").length,
     ).toBeGreaterThan(0);
+  });
+});
+
+// StationRow (search results / favorites / nearest) shares
+// DirectionArrivalsRow with the chips a rider scans before tapping in.
+// Until now its ETAs were the last named-trip surface that could show
+// a confident "3m" off a VehiclePosition the map marker was already
+// fading — every other named-trip surface (marker fade, StationPanel
+// ArrivalRow, LinePanel StopRow, FollowCapsule, TripPlanRow) carries
+// the 90 s staleness signal. These pin the same rule here.
+describe("StationRow staleness", () => {
+  const noop = () => {};
+  function row(props: Partial<StationRowProps> = {}) {
+    return render(
+      <StationRow
+        station={{ ...origin }}
+        arrivals={[makeArrival("trip-x", 3 * 60)]}
+        routeColors={routeColors}
+        now={NOW_MS}
+        isFavorite={false}
+        onFavoriteToggle={noop}
+        onTap={noop}
+        {...props}
+      />,
+    );
+  }
+
+  it("stays calm when the staleness props are omitted (favorites / early load)", () => {
+    const { container } = row();
+    expect(container.querySelectorAll(".text-amber-300")).toHaveLength(0);
+    expect(
+      container.querySelector('[aria-label*="position last updated"]'),
+    ).toBeNull();
+  });
+
+  it("tints a stale ETA amber + adds the age aria note when there's no walk distance", () => {
+    // Favorites case: station.meters undefined → no catch verdict, so
+    // the ETA is the calm gray default. A 200 s-old paired vehicle must
+    // flip it amber rather than read as a confident fresh "3m".
+    const { container } = row({
+      arrivals: [makeArrival("trip-stale", 3 * 60)],
+      lastReportedByTripId: new Map([["trip-stale", NOW_SEC - 200]]),
+      generatedAtSec: NOW_SEC,
+    });
+    expect(
+      container.querySelectorAll(".text-amber-300").length,
+    ).toBeGreaterThan(0);
+    expect(
+      container.querySelector(
+        '[aria-label="3m, position last updated 3 minutes ago"]',
+      ),
+    ).toBeTruthy();
+  });
+
+  it("leaves a trip with no paired VehiclePosition entry calm", () => {
+    // The map has *other* trips but not this one — an arrivals-only
+    // stop_time_update is as fresh as the latest poll, so no chrome.
+    const { container } = row({
+      arrivals: [makeArrival("trip-untracked", 3 * 60)],
+      lastReportedByTripId: new Map([["some-other-trip", NOW_SEC - 500]]),
+      generatedAtSec: NOW_SEC,
+    });
+    expect(container.querySelectorAll(".text-amber-300")).toHaveLength(0);
+    expect(
+      container.querySelector('[aria-label*="position last updated"]'),
+    ).toBeNull();
+  });
+
+  it("keeps the verdict color when the rider is walking up but still carries staleness in the aria note", () => {
+    // station.meters=300 + eta 60 s → "miss" band (strikethrough gray).
+    // The verdict is the actionable signal and wins the color; the
+    // stale age must not be lost to AT, so it still rides the aria-label
+    // — same precedent as TripPlanRow's verdict-wins/leadStale split.
+    const { container } = row({
+      station: { ...origin, meters: 300 },
+      arrivals: [makeArrival("trip-miss-stale", 60)],
+      lastReportedByTripId: new Map([["trip-miss-stale", NOW_SEC - 200]]),
+      generatedAtSec: NOW_SEC,
+    });
+    expect(
+      container.querySelectorAll(".line-through").length,
+    ).toBeGreaterThan(0);
+    expect(container.querySelectorAll(".text-amber-300")).toHaveLength(0);
+    expect(
+      container.querySelector(
+        '[aria-label="1m, position last updated 3 minutes ago"]',
+      ),
+    ).toBeTruthy();
+  });
+
+  it("falls back to the snapshot generatedAt when the per-vehicle timestamp is absent", () => {
+    // Feed omitted VehiclePosition.timestamp → tripId maps to undefined;
+    // staleness must still surface off the snapshot age so a silent
+    // outage doesn't hide behind a missing per-vehicle timestamp.
+    const { container } = row({
+      arrivals: [makeArrival("trip-no-ts", 3 * 60)],
+      lastReportedByTripId: new Map([["trip-no-ts", undefined]]),
+      generatedAtSec: NOW_SEC - 200,
+    });
+    expect(
+      container.querySelectorAll(".text-amber-300").length,
+    ).toBeGreaterThan(0);
+    expect(
+      container.querySelector('[aria-label*="position last updated 3 minutes ago"]'),
+    ).toBeTruthy();
+  });
+});
+
+describe("TripPlanRow fastest tag", () => {
+  it("renders the Fastest tag when isFastest is set", () => {
+    render(
+      <TripPlanRow
+        plan={directLPlan}
+        origin={origin}
+        routeColors={routeColors}
+        stationsByComplexId={stationsByComplexId}
+        arrivals={[]}
+        now={NOW_MS}
+        isPrimary={true}
+        isFastest={true}
+      />,
+    );
+    expect(screen.getByText("Fastest")).toBeTruthy();
+  });
+
+  it("omits the tag when isFastest is explicitly false", () => {
+    render(
+      <TripPlanRow
+        plan={directLPlan}
+        origin={origin}
+        routeColors={routeColors}
+        stationsByComplexId={stationsByComplexId}
+        arrivals={[]}
+        now={NOW_MS}
+        isPrimary={true}
+        isFastest={false}
+      />,
+    );
+    expect(screen.queryByText("Fastest")).toBeNull();
+  });
+
+  it("omits the tag when isFastest is omitted (NearbyPanel single-plan + legacy call sites)", () => {
+    // The prop is optional so the Near-me hero card (one plan, Apple
+    // Today-widget pattern) and any pre-existing caller render exactly
+    // as before — no comparative label on a lone recommendation.
+    render(
+      <TripPlanRow
+        plan={directLPlan}
+        origin={origin}
+        routeColors={routeColors}
+        stationsByComplexId={stationsByComplexId}
+        arrivals={[]}
+        now={NOW_MS}
+        isPrimary={true}
+      />,
+    );
+    expect(screen.queryByText("Fastest")).toBeNull();
+  });
+
+  it("decouples the tag from isPrimary — a primary row without isFastest stays untagged", () => {
+    // isPrimary drives the brighter ring; isFastest drives the label.
+    // A future caller that highlights a row for a different reason
+    // must not accidentally claim it's the fastest.
+    render(
+      <TripPlanRow
+        plan={directLPlan}
+        origin={origin}
+        routeColors={routeColors}
+        stationsByComplexId={stationsByComplexId}
+        arrivals={[]}
+        now={NOW_MS}
+        isPrimary={true}
+        isFastest={false}
+      />,
+    );
+    expect(screen.queryByText("Fastest")).toBeNull();
+  });
+});
+
+// StationRow renders the compact arrival chips a rider scans in search
+// results, the favorites list, and the nearest-stations list. On a cold
+// first visit the live feed is still `null` until the first /api/trains
+// poll resolves, so `arrivals` is `[]` because the data is *unknown* —
+// not because the station is dead. Rendering the definitive "No
+// upcoming trains" there is a false negative on exactly the
+// zero-onboarding rider the product is built to win. `hasData` gates
+// that copy, mirroring the same fix on StationPanel's DirectionSection
+// (#168) and LinePanel's StopRow.
+describe("StationRow loading vs empty", () => {
+  const noop = () => {};
+  function row(props: Partial<StationRowProps> = {}) {
+    return render(
+      <StationRow
+        station={{ ...origin }}
+        arrivals={[]}
+        routeColors={routeColors}
+        now={NOW_MS}
+        isFavorite={false}
+        onFavoriteToggle={noop}
+        onTap={noop}
+        {...props}
+      />,
+    );
+  }
+
+  it("shows the negative copy when hasData is omitted (legacy / favorites-only default)", () => {
+    // Backward-compat: the prop defaults to true so call sites and
+    // tests that never thread it keep the prior empty-state behavior.
+    row();
+    expect(screen.getByText("No upcoming trains")).toBeTruthy();
+  });
+
+  it("suppresses the negative copy while the feed is still loading (hasData=false)", () => {
+    row({ hasData: false });
+    expect(screen.queryByText("No upcoming trains")).toBeNull();
+    // The row keeps its identity — name + route bullets still render
+    // and it stays tappable into the full StationPanel.
+    expect(screen.getByText(origin.name)).toBeTruthy();
+  });
+
+  it("shows the negative copy once the feed has loaded and the station is genuinely empty (hasData=true)", () => {
+    row({ hasData: true });
+    expect(screen.getByText("No upcoming trains")).toBeTruthy();
+  });
+
+  it("ACCURACY-FIRST: hasData gates only the empty-state copy and never hides a real arrival", () => {
+    // Guards a future refactor that might short-circuit the whole
+    // arrivals block on !hasData — a loaded arrival must always render
+    // regardless of the loading flag's value.
+    row({ hasData: false, arrivals: [makeArrival("trip-x", 3 * 60)] });
+    expect(screen.queryByText("No upcoming trains")).toBeNull();
+    expect(screen.getByText("3m")).toBeTruthy();
   });
 });

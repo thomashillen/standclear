@@ -215,6 +215,26 @@ describe("InstallPrompt", () => {
     expect(screen.queryByText("Install StandClear")).toBeNull();
   });
 
+  it("dismiss button is a 44px touch target (principle #3)", () => {
+    // jsdom has no CSS engine, so the rendered hit area can't be
+    // measured — the Tailwind class list is the contract. Pin the
+    // HIG-minimum size and reject the old 32px size so a future
+    // refactor that shrinks the only dismiss on this banner trips
+    // this test. Same approach as the FollowCapsule regression test.
+    setUserAgent(UA_ANDROID);
+    render(<InstallPrompt />);
+    act(() => {
+      vi.advanceTimersByTime(SHOW_DELAY_MS);
+    });
+    const closeBtn = screen.getByRole("button", {
+      name: "Dismiss install prompt",
+    });
+    expect(closeBtn.classList.contains("w-11")).toBe(true);
+    expect(closeBtn.classList.contains("h-11")).toBe(true);
+    expect(closeBtn.classList.contains("w-8")).toBe(false);
+    expect(closeBtn.classList.contains("h-8")).toBe(false);
+  });
+
   it("uses role=region (not dialog) so AT users aren't promised modal semantics the component doesn't deliver", () => {
     setUserAgent(UA_ANDROID);
     render(<InstallPrompt />);
