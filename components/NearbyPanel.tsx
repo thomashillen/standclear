@@ -746,6 +746,7 @@ export default function NearbyPanel({
     const ranked = rankPlansByTime(rawPlans, {
       arrivalsByStation,
       nowSec: now / 1000,
+      preferReachableFirstLeg: true,
       walkFromAnchor: { lng: geo.lng, lat: geo.lat },
       walkToAnchor: dest.address
         ? { lng: dest.address.lng, lat: dest.address.lat }

@@ -162,6 +162,75 @@ export interface RankPlanOptions {
    *  lng/lat of a plan's board/alight complex when computing
    *  per-plan walks. */
   stationsByComplexId?: Map<string, StationEntry>;
+  /** When live arrivals are available, prefer plans whose first leg
+   *  has at least one reachable train over plans that currently have
+   *  no matching departure. The latter still remain in the list; they
+   *  just should not win the one-card commute recommendation over a
+   *  viable alternate. */
+  preferReachableFirstLeg?: boolean;
+}
+
+function walkFromMetersForPlan(
+  plan: TripPlan,
+  {
+    walkFromMeters: walkFromConst = 0,
+    walkFromAnchor,
+    stationsByComplexId,
+  }: Pick<
+    RankPlanOptions,
+    "walkFromMeters" | "walkFromAnchor" | "stationsByComplexId"
+  >,
+): number {
+  const firstLeg = plan.legs[0];
+  if (walkFromAnchor && stationsByComplexId && firstLeg) {
+    const board = stationsByComplexId.get(firstLeg.boardComplexId);
+    if (board) {
+      return haversineMeters(
+        { lat: walkFromAnchor.lat, lng: walkFromAnchor.lng },
+        { lat: board.lat, lng: board.lng },
+      );
+    }
+  }
+  return walkFromConst;
+}
+
+function firstLegRouteIds(plan: TripPlan): Set<string> {
+  const routes = new Set<string>();
+  const leg = plan.legs[0];
+  if (!leg) return routes;
+  routes.add(leg.routeId);
+  if (leg.siblingRouteIds) {
+    for (const routeId of leg.siblingRouteIds) routes.add(routeId);
+  }
+  return routes;
+}
+
+export function hasReachableFirstLegArrival(
+  plan: TripPlan,
+  options: RankPlanOptions = {},
+): boolean | null {
+  const { arrivalsByStation, nowSec } = options;
+  const leg = plan.legs[0];
+  if (!leg || !arrivalsByStation || typeof nowSec !== "number") return null;
+
+  const arrivals = arrivalsByStation.get(leg.boardComplexId);
+  if (!arrivals || arrivals.length === 0) return false;
+
+  const validRoutes = firstLegRouteIds(plan);
+  const walkFromMeters = walkFromMetersForPlan(plan, options);
+  for (const arrival of arrivals) {
+    if (!validRoutes.has(arrival.routeId)) continue;
+    if (arrival.direction !== leg.direction) continue;
+    if (arrival.eta < nowSec - 5) continue;
+    if (
+      walkFromMeters > 0 &&
+      catchVerdict(walkFromMeters, arrival.eta, nowSec) === "miss"
+    ) {
+      continue;
+    }
+    return true;
+  }
+  return false;
 }
 
 /**
@@ -208,16 +277,11 @@ export function estimateTripTimeSec(
   // boarding station rather than the same constant.
   const firstLeg = plan.legs[0];
   const lastLeg = plan.legs[plan.legs.length - 1];
-  let walkFromMeters = walkFromConst;
-  if (walkFromAnchor && stationsByComplexId && firstLeg) {
-    const board = stationsByComplexId.get(firstLeg.boardComplexId);
-    if (board) {
-      walkFromMeters = haversineMeters(
-        { lat: walkFromAnchor.lat, lng: walkFromAnchor.lng },
-        { lat: board.lat, lng: board.lng },
-      );
-    }
-  }
+  const walkFromMeters = walkFromMetersForPlan(plan, {
+    walkFromMeters: walkFromConst,
+    walkFromAnchor,
+    stationsByComplexId,
+  });
   let walkToMeters = walkToConst;
   if (walkToAnchor && stationsByComplexId && lastLeg) {
     const alight = stationsByComplexId.get(lastLeg.alightComplexId);
@@ -335,8 +399,20 @@ export function rankPlansByTime(
     .map((plan) => ({
       plan,
       seconds: estimateTripTimeSec(plan, options),
+      hasFirstLegArrival: options.preferReachableFirstLeg
+        ? hasReachableFirstLegArrival(plan, options)
+        : null,
     }))
-    .sort((a, b) => a.seconds - b.seconds)
+    .sort((a, b) => {
+      if (
+        options.preferReachableFirstLeg &&
+        a.hasFirstLegArrival !== b.hasFirstLegArrival
+      ) {
+        if (a.hasFirstLegArrival === true) return -1;
+        if (b.hasFirstLegArrival === true) return 1;
+      }
+      return a.seconds - b.seconds;
+    })
     .map((p) => p.plan);
 }
 

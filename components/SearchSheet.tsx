@@ -539,6 +539,7 @@ export default function SearchSheet({
     return rankPlansByTime(raw, {
       arrivalsByStation,
       nowSec: now / 1000,
+      preferReachableFirstLeg: true,
       walkFromAnchor: tripFrom.address
         ? { lng: tripFrom.address.lng, lat: tripFrom.address.lat }
         : undefined,
