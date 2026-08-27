@@ -135,7 +135,7 @@ Saved-line push alerts are opt-in and degrade gracefully when their infrastructu
 - `DATABASE_URL`
 - `NEXT_PUBLIC_VAPID_KEY`
 - `VAPID_PRIVATE_KEY`
-- `VAPID_SUBJECT`
+- `VAPID_SUBJECT` — a valid `mailto:` or HTTPS URL, for example `mailto:you@example.com`
 - `CRON_SECRET`
 
 Generate VAPID keys with:
