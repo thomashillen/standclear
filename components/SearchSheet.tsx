@@ -539,6 +539,7 @@ export default function SearchSheet({
     return rankPlansByTime(raw, {
       arrivalsByStation,
       nowSec: now / 1000,
+      liveSnapshotGeneratedAtSec: generatedAtSec,
       preferReachableFirstLeg: true,
       walkFromAnchor: tripFrom.address
         ? { lng: tripFrom.address.lng, lat: tripFrom.address.lat }
@@ -559,6 +560,7 @@ export default function SearchSheet({
     index,
     arrivalsByStation,
     now,
+    generatedAtSec,
     stationsByComplexId,
   ]);
 
@@ -598,6 +600,7 @@ export default function SearchSheet({
     const sec = estimateTripTimeSec(tripPlans[0], {
       arrivalsByStation,
       nowSec: now / 1000,
+      liveSnapshotGeneratedAtSec: generatedAtSec,
       walkFromAnchor: tripFrom?.address
         ? { lng: tripFrom.address.lng, lat: tripFrom.address.lat }
         : undefined,
@@ -607,7 +610,7 @@ export default function SearchSheet({
       stationsByComplexId,
     });
     return Math.max(1, Math.round(sec / 60));
-  }, [tripPlans, arrivalsByStation, now, tripFrom, tripTo, stationsByComplexId]);
+  }, [tripPlans, arrivalsByStation, now, generatedAtSec, tripFrom, tripTo, stationsByComplexId]);
 
   // Walking wins when we have a direct walk estimate AND it's no
   // longer than the fastest subway plan. We also surface walking

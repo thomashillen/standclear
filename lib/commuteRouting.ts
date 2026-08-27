@@ -140,6 +140,10 @@ export interface RankPlanOptions {
    *  arrivalsByStation is provided so the wait calculation is
    *  meaningful. */
   nowSec?: number;
+  /** Snapshot `generatedAt` in epoch seconds. When supplied, live
+   *  arrivals are trusted only while the snapshot is under 60 s old;
+   *  stale snapshots fall back to the deterministic non-live model. */
+  liveSnapshotGeneratedAtSec?: number;
   /** Walk distance in meters from the rider's actual origin (an
    *  address) to the boarding station. Adds to the leg-1 wait so
    *  trip totals reflect "leave home now to catch this."
@@ -205,6 +209,17 @@ function firstLegRouteIds(plan: TripPlan): Set<string> {
   return routes;
 }
 
+const LIVE_SNAPSHOT_STALE_AT_SEC = 60;
+
+function liveSnapshotIsUsable(options: RankPlanOptions): boolean {
+  const { arrivalsByStation, nowSec, liveSnapshotGeneratedAtSec } = options;
+  if (!arrivalsByStation || typeof nowSec !== "number") return false;
+  if (typeof liveSnapshotGeneratedAtSec !== "number") return true;
+  if (!Number.isFinite(liveSnapshotGeneratedAtSec)) return false;
+  const ageSec = Math.max(0, nowSec - liveSnapshotGeneratedAtSec);
+  return ageSec < LIVE_SNAPSHOT_STALE_AT_SEC;
+}
+
 export function hasReachableFirstLegArrival(
   plan: TripPlan,
   options: RankPlanOptions = {},
@@ -212,6 +227,7 @@ export function hasReachableFirstLegArrival(
   const { arrivalsByStation, nowSec } = options;
   const leg = plan.legs[0];
   if (!leg || !arrivalsByStation || typeof nowSec !== "number") return null;
+  if (!liveSnapshotIsUsable(options)) return null;
 
   const arrivals = arrivalsByStation.get(leg.boardComplexId);
   if (!arrivals || arrivals.length === 0) return false;
@@ -303,7 +319,7 @@ export function estimateTripTimeSec(
   // model upstream double-counts walk time into total separately;
   // see the leg-0 branch below for why we keep that as-is).
   let arrivalAtBoardSec = typeof nowSec === "number" ? nowSec : 0;
-  const haveLive = !!arrivalsByStation && typeof nowSec === "number";
+  const haveLive = liveSnapshotIsUsable(options);
 
   for (let i = 0; i < plan.legs.length; i++) {
     const leg = plan.legs[i];
