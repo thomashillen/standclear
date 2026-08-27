@@ -78,13 +78,6 @@ function endpointLabel(
 ): string | null {
   if (!ep) return null;
   if (ep.kind === "address") return ep.name;
-  // Station endpoints store the stopId, not a friendly name. Resolve
-  // it against the live `lines` map so the rider sees the actual
-  // station ("14 St-Union Sq") instead of a generic "Pinned station"
-  // placeholder. Falls back to the placeholder only during the
-  // cold-boot window before /public/gtfsData.json has loaded, or for
-  // a stopId that's no longer in the network (an MTA station closure
-  // mid-rider-pin, say) — both states are recoverable.
   return stationNameByStopId(lines, ep.stopId) ?? "Pinned station";
 }
 
@@ -94,21 +87,9 @@ export default function MoreSheet({ open, onClose, onSetHome, onSetWork }: Props
   const { home, work, setAnchor } = useCommute();
   const [alertsOpen, setAlertsOpen] = useState(false);
   const [aboutOpen, setAboutOpen] = useState(false);
-
-  // Reactive-glass-on-tilt opt-in. Mirrors the localStorage flag the
-  // `<GlassTilt />` provider reads at startup; we mirror it here so
-  // the row's enabled state updates live after the permission prompt
-  // resolves. `tiltGated` is true on iOS Safari (the only platform
-  // that hides the toggle behind a user gesture); on every other
-  // platform the orientation listener attaches automatically and the
-  // row would just confuse riders, so we omit it.
   const [tiltGated, setTiltGated] = useState(false);
   const [tiltGranted, setTiltGranted] = useState(false);
   const [tiltDenied, setTiltDenied] = useState(false);
-  // Re-read the GlassTilt module's localStorage flag every time the
-  // sheet opens — the rider may have granted/denied permission in the
-  // dialog since last open. setState-in-effect is the documented
-  // "subscribe to external system" pattern here.
   useEffect(() => {
     /* eslint-disable react-hooks/set-state-in-effect */
     setTiltGated(isGlassTiltGated());
@@ -129,30 +110,15 @@ export default function MoreSheet({ open, onClose, onSetHome, onSetWork }: Props
 
   const homeLabel = endpointLabel(home, lines);
   const workLabel = endpointLabel(work, lines);
-
-  // Drag-to-dismiss only — no half/full detents (the menu is short
-  // enough that a fixed full-height sheet works). Both rests sit at
-  // 0px so the tap-to-toggle is a visual no-op while drag-down past
-  // the dismiss threshold still fires onClose.
   const { sheetStyle, handlers, contentHandlers, onHandleTap, isDragging } = useSheetDrag({
     halfRestingY: "0px",
     open,
     onDismiss: onClose,
   });
 
-  // Note: don't early-return null when !open. AlertsDialog and
-  // AboutDialog render as siblings of the panel below, and the
-  // "Service alerts" / "About" rows close MoreSheet *and* open the
-  // sibling dialog in the same handler. If we returned null on close,
-  // those dialogs would unmount before they could mount-with-open=true,
-  // which would manifest as "tapping the alerts row does nothing."
-  // The panel div itself is gated by `open &&` instead.
-
   return (
     <>
       {open && (
-      // Landmark for AT users — see StationPanel for the role/aria-label
-      // rationale (region, not dialog: non-modal, no focus trap).
       <div
         role="region"
         aria-label="More"
@@ -180,12 +146,6 @@ export default function MoreSheet({ open, onClose, onSetHome, onSetWork }: Props
             <MoreHorizontal className="w-[17px] h-[17px]" />
             <span className="font-black text-[16px] tracking-tight">More</span>
           </div>
-          {/* 44px hit target (principle #3): the primary dismiss for
-              the More sheet, tapped one-handed on a moving train. The
-              glyph stays 16px; only the circle grows to the HIG
-              minimum. The header is content-driven (`items-center`,
-              no fixed height) so the larger button just sets the row
-              height — nothing else reflows. */}
           <button
             onClick={onClose}
             className="press text-white opacity-85 hover:opacity-100 w-11 h-11 -mr-1 flex items-center justify-center rounded-full bg-white/[0.08] hover:bg-white/[0.12] touch-manipulation"
@@ -202,7 +162,6 @@ export default function MoreSheet({ open, onClose, onSetHome, onSetWork }: Props
           onTouchEnd={contentHandlers.onTouchEnd}
           onTouchCancel={contentHandlers.onTouchCancel}
         >
-          {/* ─── Service alerts ─── */}
           <section>
             <h3 className="px-2 pb-1.5 text-[10px] font-semibold uppercase tracking-wider text-gray-500">
               System
@@ -210,9 +169,6 @@ export default function MoreSheet({ open, onClose, onSetHome, onSetWork }: Props
             <button
               type="button"
               onClick={() => {
-                // Close the More menu first, then open the alerts
-                // dialog. The brief gap (one render frame) avoids
-                // shadcn's overlay double-stacking.
                 onClose();
                 setAlertsOpen(true);
               }}
@@ -261,14 +217,8 @@ export default function MoreSheet({ open, onClose, onSetHome, onSetWork }: Props
             </button>
           </section>
 
-          {/* ─── Notifications ─── */}
-          {/* NotificationsRow renders its own <section> + heading
-              when push is supported, and returns null on unsupported
-              browsers — so no stranded heading on platforms that
-              can't receive push. */}
           <NotificationsRow />
 
-          {/* ─── Commute anchors ─── */}
           <section>
             <h3 className="px-2 pb-1.5 text-[10px] font-semibold uppercase tracking-wider text-gray-500">
               Commute
@@ -284,9 +234,7 @@ export default function MoreSheet({ open, onClose, onSetHome, onSetWork }: Props
                   onClose();
                   onSetHome();
                 }}
-                onClear={
-                  home ? () => setAnchor("home", null) : undefined
-                }
+                onClear={home ? () => setAnchor("home", null) : undefined}
               />
               <AnchorRow
                 icon={<Briefcase className="w-4 h-4" />}
@@ -298,9 +246,7 @@ export default function MoreSheet({ open, onClose, onSetHome, onSetWork }: Props
                   onClose();
                   onSetWork();
                 }}
-                onClear={
-                  work ? () => setAnchor("work", null) : undefined
-                }
+                onClear={work ? () => setAnchor("work", null) : undefined}
               />
               <p className="px-3 pt-1 text-[11px] text-gray-500 leading-snug">
                 Pin an address — the planner uses every nearby station
@@ -310,11 +256,6 @@ export default function MoreSheet({ open, onClose, onSetHome, onSetWork }: Props
             </div>
           </section>
 
-          {/* ─── Personalize ─── */}
-          {/* Surfaces only on iOS, where DeviceOrientation is gated
-              behind a one-time permission prompt. On every other
-              platform the tilt highlight already works without a
-              user gesture, so the row would be a confusing no-op. */}
           {tiltGated && (
             <section>
               <h3 className="px-2 pb-1.5 text-[10px] font-semibold uppercase tracking-wider text-gray-500">
@@ -324,11 +265,6 @@ export default function MoreSheet({ open, onClose, onSetHome, onSetWork }: Props
                 type="button"
                 disabled={tiltGranted}
                 onClick={async () => {
-                  // Must run synchronously inside the click handler
-                  // for iOS to honor the permission prompt — no
-                  // `await` before the first `requestPermission()`
-                  // call. The promise resolves later, but the gesture
-                  // chain has already been preserved.
                   const result = await requestGlassTiltPermission();
                   if (result === "granted") {
                     setTiltGranted(true);
@@ -375,7 +311,6 @@ export default function MoreSheet({ open, onClose, onSetHome, onSetWork }: Props
             </section>
           )}
 
-          {/* ─── About + community ─── */}
           <section>
             <h3 className="px-2 pb-1.5 text-[10px] font-semibold uppercase tracking-wider text-gray-500">
               About
@@ -402,9 +337,6 @@ export default function MoreSheet({ open, onClose, onSetHome, onSetWork }: Props
                 </span>
                 <ChevronRight className="w-4 h-4 text-gray-500 flex-shrink-0" />
               </button>
-              {/* Send feedback — GitHub Issues with a pre-filled
-                  "feedback" label, opening in a new tab so the rider's
-                  current trip context isn't blown away. */}
               <a
                 href={FEEDBACK_URL}
                 target="_blank"
@@ -424,8 +356,6 @@ export default function MoreSheet({ open, onClose, onSetHome, onSetWork }: Props
                 </span>
                 <ExternalLink className="w-3.5 h-3.5 text-gray-500 flex-shrink-0" />
               </a>
-              {/* Source on GitHub. Out-of-app link, also new tab so the
-                  rider doesn't lose the live map. */}
               <a
                 href={GITHUB_URL}
                 target="_blank"
@@ -440,7 +370,7 @@ export default function MoreSheet({ open, onClose, onSetHome, onSetWork }: Props
                     View source on GitHub
                   </span>
                   <span className="block text-[12px] text-gray-400 truncate">
-                    MIT-licensed · open issues + PRs welcome
+                    Source-available · open issues + PRs welcome
                   </span>
                 </span>
                 <ExternalLink className="w-3.5 h-3.5 text-gray-500 flex-shrink-0" />
@@ -457,14 +387,6 @@ export default function MoreSheet({ open, onClose, onSetHome, onSetWork }: Props
   );
 }
 
-// ─── AboutDialog ─────────────────────────────────────────────────────
-// Project info + feature highlights + data attribution. Opened from
-// MoreSheet's About row. Lives in MoreSheet (not its own file) since
-// it's a one-screen sibling and the content is closely tied to the
-// More menu's hierarchy. Kept as a Radix Dialog (vs the bottom-sheet
-// pattern MoreSheet now uses) — content is read-only and doesn't need
-// a drag-to-dismiss gesture; a centered modal with the auto-X close
-// is the simpler match for "tap row → see info → dismiss."
 function AboutDialog({
   open,
   onOpenChange,
@@ -582,11 +504,6 @@ function AboutDialog({
             </div>
           </section>
 
-          {/* Version footer. The About / Feedback / GitHub rows above
-              already cover the rider-relevant identity surface, and
-              Privacy / Terms live on the marketing site footer for
-              riders who land there from search results — duplicating
-              them in the in-app overflow was clutter. */}
           <p className="pt-2 text-center text-[11px] text-gray-500 tabular-nums border-t border-white/[0.06]">
             {VERSION_LABEL} · build
           </p>
@@ -646,11 +563,6 @@ function AnchorRow({
   emptyHint: string;
   accent: "emerald" | "sky";
   onTap: () => void;
-  /** Optional remove handler. When provided AND `value` is set, the
-   *  row renders a small X button that clears just this anchor (the
-   *  whole-row tap still routes the rider to SearchSheet to re-set
-   *  it). Lets the rider drop one anchor without nuking both — Clear
-   *  Commute as a single button conflated those. */
   onClear?: () => void;
 }) {
   const isSet = value !== null;
@@ -690,9 +602,6 @@ function AnchorRow({
         <button
           type="button"
           onClick={(e) => {
-            // Don't fall through to the row's onTap — clearing and
-            // immediately re-opening the search to set the same
-            // anchor would surprise the rider.
             e.stopPropagation();
             onClear();
           }}
