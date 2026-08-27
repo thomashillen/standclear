@@ -1,21 +1,68 @@
-MIT License
+StandClear Source-Available License
+Version 1.0, August 2026
 
-Copyright (c) 2026 Thomas Hillen
+Copyright (c) 2026 Thomas Hillen. All rights reserved.
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+The source code for StandClear is made publicly available for transparency,
+evaluation, learning, security review, and contribution to the official
+StandClear project. Public availability of the source code does not place the
+software in the public domain and does not grant an open-source license.
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
+1. PERMITTED USE
+
+You may:
+
+(a) view and inspect the source code;
+(b) run an unmodified copy privately for personal evaluation, development,
+    testing, or educational purposes; and
+(c) create modifications solely for the purpose of submitting them as a
+    contribution to the official StandClear repository.
+
+2. RESTRICTIONS
+
+Except with prior written permission from the copyright holder, you may not:
+
+(a) copy, publish, distribute, sublicense, sell, or otherwise provide the
+    software or substantial portions of it to another person;
+(b) publish or distribute a fork, modified version, derivative work, or
+    rebranded version of StandClear;
+(c) use the software or a derivative work to provide a public, hosted,
+    commercial, or competing transit service or product;
+(d) remove or alter copyright, license, attribution, or proprietary notices;
+    or
+(e) use the StandClear name, logo, visual identity, or other branding in a way
+    that suggests affiliation, endorsement, or an official StandClear release.
+
+3. CONTRIBUTIONS
+
+By intentionally submitting a contribution to the official StandClear
+repository, you grant the copyright holder a perpetual, worldwide,
+non-exclusive, royalty-free, irrevocable license to use, reproduce, modify,
+distribute, sublicense, and otherwise incorporate that contribution into
+StandClear and related works. You represent that you have the right to grant
+this permission for your contribution.
+
+4. NO TRADEMARK LICENSE
+
+No permission is granted to use the StandClear name, logos, marks, or branding
+except as necessary to identify the official project when discussing or
+contributing to it.
+
+5. HISTORICAL RELEASES
+
+This license applies only to versions of StandClear distributed under these
+terms. Code previously distributed under the MIT License remains available
+under the license grant that accompanied those historical versions. Nothing in
+this license attempts to revoke rights already granted for those versions.
+
+6. NO WARRANTY
 
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
 FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+COPYRIGHT HOLDER BE LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER LIABILITY ARISING
+FROM, OUT OF, OR IN CONNECTION WITH THE SOFTWARE OR THE USE OF THE SOFTWARE.
+
+7. OTHER USES
+
+For permission beyond the uses granted above, contact the copyright holder.
