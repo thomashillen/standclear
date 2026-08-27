@@ -1,148 +1,168 @@
 # StandClear
 
-Real-time NYC subway tracker. Every train on every line, rendered live on a Mapbox dark-mode map, with arrivals, nearby stations, address-to-address commute routing, and active service alerts. Named for the iconic *"stand clear of the closing doors, please."*
+**See the NYC subway move in real time.**
 
-Built with Next.js 16, React 19, TypeScript, Tailwind, and Mapbox GL. Data comes straight from the MTA's public GTFS-Realtime feeds — no API key, no third party.
+StandClear is a live, interactive map of the New York City subway. Watch trains move across the city, tap a station to see upcoming arrivals, and use your location to instantly understand what is happening around you.
+
+No account. No app download. Open it and see the subway.
+
+**[Open StandClear →](https://standclear.vercel.app)**
+
+Named after the iconic *“Stand clear of the closing doors, please.”*
+
+> StandClear is built mobile-first. The goal is simple: make the subway feel alive at a glance, then make the information useful enough that New Yorkers can come back whenever they need to know what is happening nearby.
+
+## What makes it different
+
+- **A live subway map** — trains across all 23 lines animate along real GTFS shape geometry using the MTA's GTFS-Realtime feeds.
+- **Useful in one tap** — enable location to see nearby stations and upcoming trains without entering a destination or planning a trip.
+- **Made for exploration** — tap around the map to inspect stations, arrivals, lines, and current service information.
+- **Planning when you need it** — address search, saved Home/Work destinations, walking legs, transfers, and live-aware commute estimates are available without taking over the default experience.
+- **Installable, but still just a link** — StandClear is a PWA, so it can live on an iPhone or Android home screen while remaining instantly shareable on the web.
+
+The product philosophy is intentionally **less is more**. StandClear is not trying to become every possible transit tool. The live map is the heart of the experience; nearby arrivals and trustworthy realtime information are what make it useful day to day.
 
 ## Features
 
-- **Live trains** — all 23 lines, animated along true GTFS shape geometry, refreshed from the MTA feeds.
-- **Station-centric UX** — tap any stop to see northbound/southbound arrivals, walking distance, and active alerts.
-- **Nearby panel** — auto-populated on first load using device geolocation (with iOS Safari quirks handled).
-- **Commute routing** — type a home and work address; get walking + transfer + ride legs with live ETAs.
-- **Service alerts** — severity-classified, scoped to your route or station, polled separately from train data.
-- **PWA** — installable on iOS / Android with proper icons, offline shell, and Dynamic Island clearance.
+- **Live trains** — animated across the subway network and refreshed from MTA realtime feeds.
+- **Station arrivals** — tap a stop for direction-aware upcoming trains, walking distance, and relevant alerts.
+- **Near Me** — location-powered nearby stations and arrivals for quick everyday checks.
+- **Commute routing** — optional Home/Work and address-to-address planning with walking, transfers, ride legs, and live-aware timing.
+- **Service alerts** — severity-classified alerts scoped to relevant routes and stations.
+- **PWA** — home-screen installation on iOS and Android, app icons, offline shell, and mobile safe-area handling.
+
+## How it works
+
+StandClear combines static MTA GTFS data with the MTA's public GTFS-Realtime feeds. Static data provides subway lines, stations, shapes, and stop ordering; realtime vehicle and trip data places trains on those shapes and powers arrival information.
+
+The map is rendered with Mapbox GL. The application is built with Next.js 16, React 19, TypeScript, and Tailwind CSS.
 
 ## Getting started
 
 ```bash
 npm install
-cp .env.example .env.local   # then fill in MAPBOX_TOKEN + NEXT_PUBLIC_MAPBOX_TOKEN
+cp .env.example .env.local
 npm run dev
 ```
 
-Then open http://localhost:3000.
+Add Mapbox tokens to `.env.local`:
 
-You'll need a Mapbox access token to see the map. Create one (free tier is plenty) at https://mapbox.com, then add both vars to `.env.local` (they can be the same token in dev):
-
-```
-MAPBOX_TOKEN=pk.eyJ1...           # server-only: geocoding + walking directions
-NEXT_PUBLIC_MAPBOX_TOKEN=pk.eyJ1... # client-visible: GL JS map tile rendering
+```bash
+MAPBOX_TOKEN=pk.eyJ1...
+NEXT_PUBLIC_MAPBOX_TOKEN=pk.eyJ1...
 ```
 
-The MTA GTFS-Realtime feeds are public and require no key.
+Then open `http://localhost:3000`.
 
-### Production deploy notes
+`MAPBOX_TOKEN` is server-only and is used for geocoding and walking directions. `NEXT_PUBLIC_MAPBOX_TOKEN` is client-visible and renders the map. They can be the same token locally, but production should use separate tokens with the public token restricted to the production domain.
 
-The app uses two Mapbox tokens with different exposure profiles:
+The MTA GTFS-Realtime feeds are public and require no API key.
 
-- **`MAPBOX_TOKEN`** (server-only) — used by `/api/geocode` and `/api/walk` to proxy geocoding and walking-directions calls. Never leaves the server. No URL restriction needed.
-- **`NEXT_PUBLIC_MAPBOX_TOKEN`** (client-visible) — used by Mapbox GL JS for tile rendering. Ships in the client bundle; restrict it at https://account.mapbox.com/access-tokens/ under *URL restrictions* to your production domain(s). A leaked map token restricted to your domain can only render tiles, not run geocoding or billing-intensive calls.
+## Project layout
 
-If `MAPBOX_TOKEN` is not set, `/api/geocode` and `/api/walk` fall back to `NEXT_PUBLIC_MAPBOX_TOKEN` so the app stays functional rather than silently 503-ing on every search. Setting `MAPBOX_TOKEN` is still recommended in production: it keeps PII-adjacent address queries off the same token that ships in the client bundle, and lets you scope each token's billing limits independently. The server logs a one-line warning per cold start when running on the fallback so the misconfig is visible in operator logs. Note that URL-restricted public tokens may not work when called server-to-Mapbox (no browser Referer is sent), so the fallback only helps if your public token's restrictions are lax — a fresh dedicated `MAPBOX_TOKEN` is always the most reliable setup.
+```text
+app/
+  api/trains/       GTFS-RT vehicle + arrival aggregation
+  api/alerts/       GTFS-RT subway alerts
+  page.tsx          Map shell
+components/
+  SubwayMap.tsx     Product state + map experience
+  MapView.tsx       Mapbox rendering and interactions
+  StationPanel      Station arrivals and detail
+  NearbyPanel       Location-powered nearby experience
+lib/
+  commuteRouting.ts Address-to-address routing
+  stopsIndex.ts     Spatial station index
+  useTrains         Realtime train polling + caching
+  useAlerts         Service-alert polling + caching
+scripts/
+  build-gtfs.mjs    Static GTFS → public/gtfsData.json
+public/
+  gtfsData.json     Pre-built subway geometry + stop data
+```
 
-Additional pre-production checklist:
+## Rebuilding static GTFS data
 
-1. Set `NEXT_PUBLIC_SITE_URL` to your canonical URL so OG/Twitter cards, sitemap, and robots.txt resolve absolute URLs correctly.
-2. (Optional) Wire `NEXT_PUBLIC_SENTRY_DSN` to forward `error`/`warn` records through `lib/observability.ts` to Sentry. No `@sentry/*` SDK is pulled in — the shim builds a Sentry [envelope](https://develop.sentry.dev/sdk/envelopes/) and POSTs it with a plain `fetch`, so there's no third-party runtime dependency (a few hundred gzipped bytes of pure parse/envelope JS ride into the client bundle but never execute there — the transmit is gated server-side) and the structured-console default still works with no DSN. The POST is **server-side only**: client errors already reach the server via `/api/log` (item 4) and are re-emitted there, so one server hop covers both origins without double-counting or shipping Sentry code to the browser. Delivery is best-effort (fire-and-forget, never blocks or throws); a malformed DSN silently disables forwarding rather than taking the logger down on import. Self-hosted Sentry/Relay is supported, including DSNs with an ingest path prefix.
-3. Hook `/api/health` into an external uptime monitor (UptimeRobot, Better Stack). It returns 503 when the upstream MTA feed is unreachable so a probe can flip a status page without parsing JSON.
-4. Client-side `error`/`warn` records from `lib/observability.ts` are POSTed to `/api/log` (rate-limited, sanitized, capped per page-load) and re-emitted via the server logger so they land in your function-log sink (Vercel logs, etc.) without needing a third-party DSN. Set `NEXT_PUBLIC_LOG_FORWARD=off` to disable the network hop — useful for local development or when wiring a different transport.
+The repository ships with a pre-built `public/gtfsData.json`. To refresh it:
 
-### A note on `standclear.app`
+1. Download `gtfs_subway.zip` from the [MTA developer page](https://new.mta.info/developers).
+2. Unzip it to `data/gtfs/` (the raw files are gitignored).
+3. Run `npm run build:gtfs`.
 
-The codebase defaults to `https://standclear.app` as the canonical URL — that's the brand target, not necessarily the live deploy. Until the domain is registered + DNS-pointed at the Vercel deploy, set `NEXT_PUBLIC_SITE_URL` to the actual deployment URL (the Vercel preview URL is fine) so social previews and the sitemap don't reference a 404. If the brand ever pivots away from `StandClear`, update `SITE_NAME`, `SITE_URL`, `GITHUB_REPO` in `lib/site.ts`.
+The build script chooses representative route shapes, associates stops with shape geometry, and emits the static dataset used by the client.
+
+## Scripts
+
+| Command | What it does |
+| --- | --- |
+| `npm run dev` | Start the Next.js development server |
+| `npm run build` | Create a production build |
+| `npm run start` | Run the production build |
+| `npm run lint` | Run ESLint |
+| `npm test` | Run Vitest tests |
+| `npm run test:watch` | Run Vitest in watch mode |
+| `npm run build:gtfs` | Regenerate `public/gtfsData.json` |
+| `npm run db:migrate` | Apply pending database migrations |
+| `npm run db:migrate:list` | List applied and pending migrations |
+
+## Production notes
+
+### Canonical URL
+
+Set `NEXT_PUBLIC_SITE_URL` to the actual production URL so Open Graph/Twitter cards, the sitemap, and `robots.txt` resolve correctly.
+
+The codebase uses `https://standclear.app` as the brand-target canonical URL, but the current public deployment is `https://standclear.vercel.app`. Until a custom domain is registered and connected, production configuration should point at the live deployment rather than a domain that does not resolve.
+
+### Mapbox tokens
+
+Use separate tokens in production:
+
+- `MAPBOX_TOKEN` — server-only, for `/api/geocode` and `/api/walk`.
+- `NEXT_PUBLIC_MAPBOX_TOKEN` — client-visible, for Mapbox GL map rendering. Restrict this token to the production domain in Mapbox.
+
+If `MAPBOX_TOKEN` is absent, server routes can fall back to `NEXT_PUBLIC_MAPBOX_TOKEN`, but a dedicated server token is the recommended production setup.
+
+### Observability
+
+`/api/health` reports upstream MTA feed health and can be connected to an external uptime monitor. Client `error`/`warn` records can be forwarded through `/api/log` into server logs. Optional Sentry forwarding is supported with `NEXT_PUBLIC_SENTRY_DSN`; no Sentry SDK is required.
+
+Set `NEXT_PUBLIC_LOG_FORWARD=off` to disable client-to-server log forwarding.
 
 ### Push notifications (optional)
 
-Push alerts for saved subway lines are opt-in. To enable them, three env vars need to be set in addition to the Mapbox + Site URL ones above:
+Saved-line push alerts are opt-in and degrade gracefully when their infrastructure is not configured. They require:
 
-- **`DATABASE_URL`** — Neon Postgres connection string. Easiest path: Vercel dashboard → Storage → Marketplace → Neon, free tier. Vercel injects this var automatically. Locally, run `npx vercel env pull .env.local` after adding Neon.
-- **`NEXT_PUBLIC_VAPID_KEY`** — public half of a VAPID keypair (client uses it for `pushManager.subscribe()`).
-- **`VAPID_PRIVATE_KEY`** — server-only half (server signs push payloads).
-- **`VAPID_SUBJECT`** — a `mailto:` URL push services use as the abuse-report contact (e.g. `mailto:you@example.com`).
-- **`CRON_SECRET`** — random unguessable string (e.g. `openssl rand -hex 32`) that the dispatch cron checks before fanning out pushes. Vercel passes it as `Authorization: Bearer <value>` on every cron invocation.
+- `DATABASE_URL`
+- `NEXT_PUBLIC_VAPID_KEY`
+- `VAPID_PRIVATE_KEY`
+- `VAPID_SUBJECT`
+- `CRON_SECRET`
 
-Generate the VAPID keypair once with `npx web-push generate-vapid-keys`.
+Generate VAPID keys with:
 
-Then apply the schema:
+```bash
+npx web-push generate-vapid-keys
+```
+
+Then apply the database schema:
 
 ```bash
 npm run db:migrate
 ```
 
-This creates the `push_subscriptions` and `alert_dispatch_log` tables in the connected database. Re-running is safe — the migration ledger tracks applied files and skips them. The push features degrade gracefully when these env vars are missing: the API routes return 500 with a clear message, and the UI hides the opt-in.
-
-The dispatch path runs as a GitHub Actions cron (every 5 min — Vercel Hobby restricts crons to daily, so we trigger externally). It polls the MTA alerts feed, filters to severity = "severe", and fans out web-push to every matching subscription. Per-(subscription, alert) dedup via the `alert_dispatch_log` primary key guarantees no double-fires. A second GitHub Actions cron (daily, 4am UTC) runs `/api/cron/cleanup-subscriptions` to purge `unsubscribed_at > 30d` rows and trim the dispatch log to 14 days.
-
-**Operator commands** — both gated by `CRON_SECRET`:
-
-```bash
-SECRET=$(grep '^CRON_SECRET=' .env.local | cut -d= -f2- | tr -d '"')
-
-# What's the current subscriber + dispatch volume?
-curl -H "Authorization: Bearer $SECRET" \
-  https://standclear.vercel.app/api/notifications/stats
-
-# Fire the dispatch cron manually (useful right after a severe alert
-# hits the MTA feed if you don't want to wait 5 minutes for the
-# next scheduled GitHub Actions run).
-curl -H "Authorization: Bearer $SECRET" \
-  https://standclear.vercel.app/api/cron/dispatch-alerts
-
-# Fire the cleanup cron manually.
-curl -H "Authorization: Bearer $SECRET" \
-  https://standclear.vercel.app/api/cron/cleanup-subscriptions
-```
-
-Both workflows can also be triggered from the GitHub Actions UI via "Run workflow" (workflow_dispatch).
-
-## Project layout
-
-```
-app/
-  api/trains/   GTFS-RT vehicle + arrival aggregation across 8 MTA feeds
-  api/alerts/   GTFS-RT subway-alerts feed, severity-classified
-  page.tsx      Map shell
-components/
-  SubwayMap.tsx, MapView.tsx       Map + render layers
-  StationPanel, NearbyPanel, …     Bottom-sheet UI
-lib/
-  commuteRouting.ts   Address-to-address routing with transfer + walking legs
-  stopsIndex.ts       Spatial index over all stops for nearest-N lookup
-  useTrains, useAlerts, …          React data hooks (polling + caching)
-scripts/
-  build-gtfs.mjs      Static GTFS → public/gtfsData.json (lines, shapes, stops)
-public/
-  gtfsData.json       Pre-baked line geometry shipped to the client
-```
-
-## Rebuilding the static GTFS data
-
-The repo ships with a pre-built `public/gtfsData.json`. To regenerate from a fresh MTA GTFS dump:
-
-1. Download `gtfs_subway.zip` from the [MTA developer page](https://new.mta.info/developers).
-2. Unzip it to `data/gtfs/` (the raw zip and unpacked folder are gitignored).
-3. Run `npm run build:gtfs`.
-
-The script picks the longest representative trip + shape per route, snaps each stop to the nearest shape vertex, and emits a single JSON the client streams in.
-
-## Scripts
-
-| Command            | What it does                                  |
-| ------------------ | --------------------------------------------- |
-| `npm run dev`      | Next.js dev server                            |
-| `npm run build`    | Production build                              |
-| `npm run start`    | Run the production build                      |
-| `npm run lint`     | ESLint                                        |
-| `npm test`         | Vitest unit tests                             |
-| `npm run test:watch` | Vitest watch mode                           |
-| `npm run build:gtfs` | Regenerate `public/gtfsData.json` from raw GTFS |
-| `npm run db:migrate` | Apply any pending Postgres migrations (push notifications schema) |
-| `npm run db:migrate:list` | Show applied vs pending migration files |
+The dispatch workflow polls MTA alerts, sends qualifying severe alerts to matching subscriptions, and deduplicates deliveries. A cleanup workflow removes old unsubscribed records and dispatch history.
 
 ## Contributing
 
-Issues and PRs welcome. Run `npm run lint` and `npm test` before opening a PR — CI runs both on every push and pull request.
+Issues and PRs are welcome. Before opening a PR, run:
+
+```bash
+npm run lint
+npm test
+npm run build
+```
+
+CI runs the repository's validation checks on pull requests.
 
 ## License
 
@@ -150,6 +170,6 @@ Issues and PRs welcome. Run `npm run lint` and `npm test` before opening a PR �
 
 ## Acknowledgments
 
-- The [MTA](https://new.mta.info/developers) for publishing GTFS-Realtime feeds without an API key.
-- [Mapbox](https://mapbox.com) for the map tiles.
-- The [`gtfs-realtime-bindings`](https://github.com/MobilityData/gtfs-realtime-bindings) project for protobuf decoding.
+- [MTA](https://new.mta.info/developers) for publishing the subway's GTFS and GTFS-Realtime data.
+- [Mapbox](https://www.mapbox.com) for map rendering and location services.
+- [`gtfs-realtime-bindings`](https://github.com/MobilityData/gtfs-realtime-bindings) for GTFS-Realtime protobuf decoding.
