@@ -1,0 +1,97 @@
+name: Apply expanded timing confidence patch
+
+on:
+  push:
+    branches:
+      - fix/commute-timing-confidence
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: fix/commute-timing-confidence
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Apply expanded detail confidence fix
+        shell: python
+        run: |
+          from pathlib import Path
+
+          panel = Path('components/panelUI.tsx')
+          s = panel.read_text()
+          old = '''  /** Live arrivals + clock so the header total matches the plan\n   *  row's countdown. Falls back to a generic wait constant when\n   *  absent. */\n  arrivalsByStation?: Map<string, Arrival[]>;\n  now?: number;'''
+          new = '''  /** Live arrivals + clock so the header total matches the plan\n   *  row's countdown. Falls back to a generic wait constant when\n   *  absent. */\n  arrivalsByStation?: Map<string, Arrival[]>;\n  now?: number;\n  /** Aggregate realtime snapshot timestamp in epoch seconds. Uses the\n   *  same freshness boundary as ranking and TripPlanRow so expanded\n   *  detail cannot restore stale live-looking precision. */\n  generatedAtSec?: number;'''
+          assert old in s
+          s = s.replace(old, new, 1)
+
+          old = '''  arrivalsByStation,\n  now,\n  focusedLegIndex,'''
+          new = '''  arrivalsByStation,\n  now,\n  generatedAtSec,\n  focusedLegIndex,'''
+          assert old in s
+          s = s.replace(old, new, 1)
+
+          old = '''  const walkFromMin = walkFromMeters ? walkMinutes(walkFromMeters) : 0;\n  const walkToMin = walkToMeters ? walkMinutes(walkToMeters) : 0;\n\n  const totalSec = useMemo('''
+          new = '''  const walkFromMin = walkFromMeters ? walkMinutes(walkFromMeters) : 0;\n  const walkToMin = walkToMeters ? walkMinutes(walkToMeters) : 0;\n  const liveSnapshotFresh = useMemo(() => {\n    if (generatedAtSec === undefined) return true;\n    if (!Number.isFinite(generatedAtSec) || generatedAtSec <= 0) return false;\n    if (typeof now !== "number") return false;\n    return Math.max(0, now / 1000 - generatedAtSec) < LIVE_SNAPSHOT_STALE_AT_SEC;\n  }, [generatedAtSec, now]);\n\n  const totalSec = useMemo('''
+          assert old in s
+          s = s.replace(old, new, 1)
+
+          old = '''        walkToMeters: walkToMeters ?? 0,\n        stationsByComplexId,\n      }),'''
+          new = '''        walkToMeters: walkToMeters ?? 0,\n        stationsByComplexId,\n        liveSnapshotGeneratedAtSec: generatedAtSec,\n      }),'''
+          assert old in s
+          s = s.replace(old, new, 1)
+
+          old = '''      walkToMeters,\n      stationsByComplexId,\n    ],'''
+          new = '''      walkToMeters,\n      stationsByComplexId,\n      generatedAtSec,\n    ],'''
+          assert old in s
+          s = s.replace(old, new, 1)
+
+          old = '''  const nextLeg1 = useMemo(() => {\n    if (!arrivalsByStation || typeof now !== "number") return null;'''
+          new = '''  const nextLeg1 = useMemo(() => {\n    if (!liveSnapshotFresh || !arrivalsByStation || typeof now !== "number") return null;'''
+          assert old in s
+          s = s.replace(old, new, 1)
+
+          old = '''  }, [arrivalsByStation, now, plan]);\n  const nextLeg1Info'''
+          new = '''  }, [arrivalsByStation, now, plan, liveSnapshotFresh]);\n  const nextLeg1Info'''
+          assert old in s
+          s = s.replace(old, new, 1)
+
+          old = '''          <span className="text-[13px] text-gray-400">min total</span>\n        </div>\n        {nextLeg1 && nextLeg1Info && typeof now === "number" && ('''
+          new = '''          <span className="text-[13px] text-gray-400">min total</span>\n          <span className={`ml-1 inline-flex items-center px-1.5 h-[18px] rounded-full ring-1 text-[10px] font-bold uppercase tracking-wide ${\n            liveSnapshotFresh && nextLeg1\n              ? "bg-emerald-300/10 ring-emerald-300/30 text-emerald-200"\n              : "bg-white/[0.05] ring-white/[0.10] text-gray-400"\n          }`}>\n            {liveSnapshotFresh && nextLeg1 ? "Live" : "Estimated"}\n          </span>\n        </div>\n        {nextLeg1 && nextLeg1Info && typeof now === "number" && ('''
+          assert old in s
+          panel.write_text(s.replace(old, new, 1))
+
+          search = Path('components/SearchSheet.tsx')
+          s = search.read_text()
+          old = '''                  arrivalsByStation={arrivalsByStation}\n                  now={now}\n                  focusedLegIndex={focusedLegIndex}'''
+          new = '''                  arrivalsByStation={arrivalsByStation}\n                  now={now}\n                  generatedAtSec={generatedAtSec}\n                  focusedLegIndex={focusedLegIndex}'''
+          assert old in s
+          search.write_text(s.replace(old, new, 1))
+
+          tests = Path('components/panelUI.test.tsx')
+          s = tests.read_text()
+          old = '''  TripPlanRow,\n  StationRow,'''
+          new = '''  TripPlanRow,\n  TripPlanDetail,\n  StationRow,'''
+          assert old in s
+          s = s.replace(old, new, 1)
+          marker = 'describe("TripPlanRow timing confidence", () => {\n'
+          assert marker in s
+          addition = '''describe("TripPlanDetail timing confidence", () => {\n  it("falls back and hides the exact first-train countdown for a stale snapshot", () => {\n    const arrivalsByStation = new Map([["L03", [makeArrival("detail-stale", 60)]]]);\n    render(\n      <TripPlanDetail\n        plan={directLPlan}\n        routeColors={routeColors}\n        stationsByComplexId={stationsByComplexId}\n        walkFromRoute={null}\n        walkToRoute={null}\n        arrivalsByStation={arrivalsByStation}\n        now={NOW_MS}\n        generatedAtSec={NOW_SEC - 60}\n      />,\n    );\n    expect(screen.getByText("Estimated")).toBeTruthy();\n    expect(screen.getByText("7")).toBeTruthy();\n    expect(screen.queryByText("1m")).toBeNull();\n  });\n\n  it("keeps fresh expanded timing live", () => {\n    const arrivalsByStation = new Map([["L03", [makeArrival("detail-live", 60)]]]);\n    render(\n      <TripPlanDetail\n        plan={directLPlan}\n        routeColors={routeColors}\n        stationsByComplexId={stationsByComplexId}\n        walkFromRoute={null}\n        walkToRoute={null}\n        arrivalsByStation={arrivalsByStation}\n        now={NOW_MS}\n        generatedAtSec={NOW_SEC}\n      />,\n    );\n    expect(screen.getByText("Live")).toBeTruthy();\n    expect(screen.getByText("4")).toBeTruthy();\n    expect(screen.getByText("1m")).toBeTruthy();\n  });\n});\n\n'''
+          tests.write_text(s.replace(marker, addition + marker, 1))
+      - run: npx vitest run components/panelUI.test.tsx lib/commuteRouting.staleRealtime.test.ts
+      - run: npm run lint
+      - run: npx tsc --noEmit
+      - name: Commit patch and remove helper workflow
+        run: |
+          rm .github/workflows/patch-detail-confidence.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add components/panelUI.tsx components/panelUI.test.tsx components/SearchSheet.tsx .github/workflows/patch-detail-confidence.yml
+          git commit -m "fix(commute): keep expanded timing confidence honest"
+          git push origin HEAD:fix/commute-timing-confidence
