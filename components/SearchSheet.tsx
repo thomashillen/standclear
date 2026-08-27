@@ -1745,6 +1745,7 @@ export default function SearchSheet({
                   }
                   arrivalsByStation={arrivalsByStation}
                   now={now}
+                  generatedAtSec={generatedAtSec}
                   focusedLegIndex={focusedLegIndex}
                   onFocusLeg={onFocusLeg}
                   walkRouteError={walkRouteError}

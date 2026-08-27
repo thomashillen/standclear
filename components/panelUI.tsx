@@ -1153,6 +1153,10 @@ interface TripPlanDetailProps {
    *  absent. */
   arrivalsByStation?: Map<string, Arrival[]>;
   now?: number;
+  /** Aggregate realtime snapshot timestamp in epoch seconds. Uses the
+   *  same freshness boundary as ranking and TripPlanRow so expanded
+   *  detail cannot restore stale live-looking precision. */
+  generatedAtSec?: number;
   /** Index of the leg the rider has zoomed in on, or null for the
    *  whole-trip view. Owned by SubwayMap so the camera can refit. */
   focusedLegIndex?: number | null;
@@ -1180,6 +1184,7 @@ export function TripPlanDetail({
   toName,
   arrivalsByStation,
   now,
+  generatedAtSec,
   focusedLegIndex,
   onFocusLeg,
   walkRouteError = false,
@@ -1192,6 +1197,12 @@ export function TripPlanDetail({
 
   const walkFromMin = walkFromMeters ? walkMinutes(walkFromMeters) : 0;
   const walkToMin = walkToMeters ? walkMinutes(walkToMeters) : 0;
+  const liveSnapshotFresh = useMemo(() => {
+    if (generatedAtSec === undefined) return true;
+    if (!Number.isFinite(generatedAtSec) || generatedAtSec <= 0) return false;
+    if (typeof now !== "number") return false;
+    return Math.max(0, now / 1000 - generatedAtSec) < LIVE_SNAPSHOT_STALE_AT_SEC;
+  }, [generatedAtSec, now]);
 
   const totalSec = useMemo(
     () =>
@@ -1201,6 +1212,7 @@ export function TripPlanDetail({
         walkFromMeters: walkFromMeters ?? 0,
         walkToMeters: walkToMeters ?? 0,
         stationsByComplexId,
+        liveSnapshotGeneratedAtSec: generatedAtSec,
       }),
     [
       plan,
@@ -1209,6 +1221,7 @@ export function TripPlanDetail({
       walkFromMeters,
       walkToMeters,
       stationsByComplexId,
+      generatedAtSec,
     ],
   );
   const totalMin = Math.max(1, Math.round(totalSec / 60));
@@ -1219,7 +1232,7 @@ export function TripPlanDetail({
   // Siblings (co-running trunk routes) count: at Times Sq inbound,
   // a W arriving sooner than the primary N is the train to catch.
   const nextLeg1 = useMemo(() => {
-    if (!arrivalsByStation || typeof now !== "number") return null;
+    if (!liveSnapshotFresh || !arrivalsByStation || typeof now !== "number") return null;
     const leg1 = plan.legs[0];
     if (!leg1) return null;
     const arrivals = arrivalsByStation.get(leg1.boardComplexId);
@@ -1243,7 +1256,7 @@ export function TripPlanDetail({
     return Number.isFinite(earliest)
       ? { eta: earliest, routeId: earliestRouteId }
       : null;
-  }, [arrivalsByStation, now, plan]);
+  }, [arrivalsByStation, now, plan, liveSnapshotFresh]);
   const nextLeg1Info = nextLeg1 ? routeColors.get(nextLeg1.routeId) : null;
 
   const showWalkFrom = !!board;
@@ -1264,6 +1277,13 @@ export function TripPlanDetail({
             {totalMin}
           </span>
           <span className="text-[13px] text-gray-400">min total</span>
+          <span className={`ml-1 inline-flex items-center px-1.5 h-[18px] rounded-full ring-1 text-[10px] font-bold uppercase tracking-wide ${
+            liveSnapshotFresh && nextLeg1
+              ? "bg-emerald-300/10 ring-emerald-300/30 text-emerald-200"
+              : "bg-white/[0.05] ring-white/[0.10] text-gray-400"
+          }`}>
+            {liveSnapshotFresh && nextLeg1 ? "Live" : "Estimated"}
+          </span>
         </div>
         {nextLeg1 && nextLeg1Info && typeof now === "number" && (
           <div className="ml-auto flex items-center gap-1.5 flex-shrink-0">
