@@ -14,13 +14,18 @@ You may:
 
 (a) view and inspect the source code;
 (b) run an unmodified copy privately for personal evaluation, development,
-    testing, or educational purposes; and
+    testing, or educational purposes;
 (c) create modifications solely for the purpose of submitting them as a
-    contribution to the official StandClear repository.
+    contribution to the official StandClear repository; and
+(d) create and publish a GitHub fork only as reasonably necessary to prepare
+    and submit a contribution to the official StandClear repository, provided
+    the fork retains this license and all copyright/proprietary notices and is
+    not deployed, promoted, distributed, or used for any other purpose.
 
 2. RESTRICTIONS
 
-Except with prior written permission from the copyright holder, you may not:
+Except for the narrow contribution-fork permission in Section 1(d), or with
+prior written permission from the copyright holder, you may not:
 
 (a) copy, publish, distribute, sublicense, sell, or otherwise provide the
     software or substantial portions of it to another person;
