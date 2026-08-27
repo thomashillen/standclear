@@ -26,6 +26,9 @@ jobs:
       - name: Capture production audit
         run: npm audit --omit=dev --json > npm-audit-prod.json || true
 
+      - name: Trace remaining production packages
+        run: npm ls brace-expansion linkify-it markdown-it protobufjs protobufjs-cli tmp @protobufjs/utf8 --all > npm-ls-vulnerable.txt || true
+
       - name: Upload audit reports
         uses: actions/upload-artifact@v4
         with:
@@ -33,5 +36,6 @@ jobs:
           path: |
             npm-audit.json
             npm-audit-prod.json
+            npm-ls-vulnerable.txt
           if-no-files-found: error
           retention-days: 1
