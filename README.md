@@ -162,11 +162,13 @@ npm test
 npm run build
 ```
 
-CI runs the repository's validation checks on pull requests.
+CI runs the repository's validation checks on pull requests. The source-available license permits a public GitHub fork only as needed to prepare and submit a contribution to this official repository.
 
 ## License
 
-[MIT](./LICENSE) — do whatever you want, just don't blame me when the L is delayed.
+StandClear is **source-available, not open source**. You may inspect the code, run it privately for evaluation/development/testing/education, and contribute changes back to the official project. The current license does not permit rebranding, redistribution, public deployment, or competing/commercial derivatives. See [LICENSE](./LICENSE) for the exact terms.
+
+Historical versions that were released under MIT remain governed by the MIT grant attached to those versions.
 
 ## Acknowledgments
 
