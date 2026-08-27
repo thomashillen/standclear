@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import {
   TripPlanRow,
+  TripPlanDetail,
   StationRow,
   type RouteColorMap,
   type StationRowProps,
@@ -56,6 +57,105 @@ function makeArrival(tripId: string, etaOffsetSec: number): Arrival {
     tripId,
   };
 }
+
+describe("TripPlanDetail timing confidence", () => {
+  it("falls back and hides the exact first-train countdown for a stale snapshot", () => {
+    const arrivalsByStation = new Map([["L03", [makeArrival("detail-stale", 60)]]]);
+    render(
+      <TripPlanDetail
+        plan={directLPlan}
+        routeColors={routeColors}
+        stationsByComplexId={stationsByComplexId}
+        walkFromRoute={null}
+        walkToRoute={null}
+        arrivalsByStation={arrivalsByStation}
+        now={NOW_MS}
+        generatedAtSec={NOW_SEC - 60}
+      />,
+    );
+    expect(screen.getByText("Estimated")).toBeTruthy();
+    expect(screen.getByText("7")).toBeTruthy();
+    expect(screen.queryByText("1m")).toBeNull();
+  });
+
+  it("keeps fresh expanded timing live", () => {
+    const arrivalsByStation = new Map([["L03", [makeArrival("detail-live", 60)]]]);
+    render(
+      <TripPlanDetail
+        plan={directLPlan}
+        routeColors={routeColors}
+        stationsByComplexId={stationsByComplexId}
+        walkFromRoute={null}
+        walkToRoute={null}
+        arrivalsByStation={arrivalsByStation}
+        now={NOW_MS}
+        generatedAtSec={NOW_SEC}
+      />,
+    );
+    expect(screen.getByText("Live")).toBeTruthy();
+    expect(screen.getByText("4")).toBeTruthy();
+    expect(screen.getByText("1m")).toBeTruthy();
+  });
+});
+
+describe("TripPlanRow timing confidence", () => {
+  it("labels a fresh matching departure Live and uses its wait in the total", () => {
+    render(
+      <TripPlanRow
+        plan={directLPlan}
+        origin={origin}
+        routeColors={routeColors}
+        stationsByComplexId={stationsByComplexId}
+        arrivals={[makeArrival("trip-live", 60)]}
+        now={NOW_MS}
+        isPrimary={true}
+        generatedAtSec={NOW_SEC}
+      />,
+    );
+    expect(screen.getByText("Live")).toBeTruthy();
+    expect(screen.getByText("4 min")).toBeTruthy();
+    expect(screen.getByText("1m")).toBeTruthy();
+  });
+
+  it("labels a stale snapshot Estimated, falls back to deterministic total, and hides precise countdowns", () => {
+    render(
+      <TripPlanRow
+        plan={directLPlan}
+        origin={origin}
+        routeColors={routeColors}
+        stationsByComplexId={stationsByComplexId}
+        arrivals={[makeArrival("trip-stale", 60)]}
+        now={NOW_MS}
+        isPrimary={true}
+        generatedAtSec={NOW_SEC - 60}
+      />,
+    );
+    expect(screen.getByText("Estimated")).toBeTruthy();
+    expect(screen.getByText("7 min")).toBeTruthy();
+    expect(screen.queryByText("1m")).toBeNull();
+    expect(
+      screen.getByText(/Live arrivals are unavailable; wait and trip time are estimated/),
+    ).toBeTruthy();
+  });
+
+  it("treats the real missing-feed sentinel as Estimated", () => {
+    render(
+      <TripPlanRow
+        plan={directLPlan}
+        origin={origin}
+        routeColors={routeColors}
+        stationsByComplexId={stationsByComplexId}
+        arrivals={[makeArrival("trip-missing", 60)]}
+        now={NOW_MS}
+        isPrimary={true}
+        generatedAtSec={0}
+      />,
+    );
+    expect(screen.getByText("Estimated")).toBeTruthy();
+    expect(screen.getByText("7 min")).toBeTruthy();
+    expect(screen.queryByText("1m")).toBeNull();
+  });
+});
 
 describe("TripPlanRow staleness", () => {
   it("renders no staleness chrome when all upcoming trains are fresh", () => {
