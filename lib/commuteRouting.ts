@@ -209,7 +209,7 @@ function firstLegRouteIds(plan: TripPlan): Set<string> {
   return routes;
 }
 
-const LIVE_SNAPSHOT_STALE_AT_SEC = 60;
+export const LIVE_SNAPSHOT_STALE_AT_SEC = 60;
 
 function liveSnapshotIsUsable(options: RankPlanOptions): boolean {
   const { arrivalsByStation, nowSec, liveSnapshotGeneratedAtSec } = options;

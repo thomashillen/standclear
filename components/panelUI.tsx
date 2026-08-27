@@ -23,7 +23,11 @@ import {
   type StationEntry,
 } from "@/lib/stopsIndex";
 import type { CommuteAnchor } from "@/lib/useFavorites";
-import { estimateTripTimeSec, type TripPlan } from "@/lib/commuteRouting";
+import {
+  estimateTripTimeSec,
+  LIVE_SNAPSHOT_STALE_AT_SEC,
+  type TripPlan,
+} from "@/lib/commuteRouting";
 import type { WalkingRoute } from "@/lib/walkingDirections";
 import { trainStaleness, type TrainStaleness } from "@/lib/trainStaleness";
 
@@ -670,6 +674,15 @@ export function TripPlanRow({
     return s;
   }, [leg1]);
 
+  // Keep the rider-facing confidence boundary aligned with route ranking.
+  // Real callers pass 0 while realtime is unavailable; an omitted prop is
+  // retained as a legacy/test compatibility path.
+  const liveSnapshotFresh = useMemo(() => {
+    if (generatedAtSec === undefined) return true;
+    if (!Number.isFinite(generatedAtSec) || generatedAtSec <= 0) return false;
+    return Math.max(0, now / 1000 - generatedAtSec) < LIVE_SNAPSHOT_STALE_AT_SEC;
+  }, [generatedAtSec, now]);
+
   const upcoming = useMemo(() => {
     if (!leg1) return [];
     const cutoff = now / 1000 - 5;
@@ -740,9 +753,10 @@ export function TripPlanRow({
       nowSec: now / 1000,
       walkFromMeters,
       walkToMeters,
+      liveSnapshotGeneratedAtSec: generatedAtSec,
     });
     return Math.max(1, Math.round(sec / 60));
-  }, [plan, leg1, arrivals, now, walkFromMeters, walkToMeters]);
+  }, [plan, leg1, arrivals, now, walkFromMeters, walkToMeters, generatedAtSec]);
 
   // Outer element switches between div (purely informational) and
   // button (when onSelect is provided). The latter gives keyboard /
@@ -833,6 +847,15 @@ export function TripPlanRow({
             ? ` · ${transferStation.name}`
             : " · direct"}
         </span>
+        <span className={`flex-shrink-0 inline-flex items-center px-1.5 h-[18px] rounded-full ring-1 text-[10px] font-bold uppercase tracking-wide ${
+          liveSnapshotFresh && upcoming.length > 0 && upcomingStaleness[0] == null
+            ? "bg-emerald-300/10 ring-emerald-300/30 text-emerald-200"
+            : "bg-white/[0.05] ring-white/[0.10] text-gray-400"
+        }`}>
+          {liveSnapshotFresh && upcoming.length > 0 && upcomingStaleness[0] == null
+            ? "Live"
+            : "Estimated"}
+        </span>
         {/* Total time pill — vibrant, tabular numerals, route-color
             tinted on the selected plan and quiet otherwise. Pinned
             to the right of the ribbon so the rider's eye lands on
@@ -853,7 +876,11 @@ export function TripPlanRow({
         </span>
       </div>
 
-      {upcoming.length === 0 ? (
+      {!liveSnapshotFresh ? (
+        <p className="text-[12px] text-gray-500 leading-snug">
+          Live arrivals are unavailable; wait and trip time are estimated.
+        </p>
+      ) : upcoming.length === 0 ? (
         <p className="text-[12px] text-gray-500 leading-snug">
           No upcoming{" "}
           {leg1ValidRouteIds.size > 1
