@@ -1,31 +1,27 @@
-// The canonical first-paint camera frame: lower-Manhattan center at a
-// neighborhood zoom. Two consumers in components/MapView.tsx — ~1000
-// lines apart — must agree on it:
+// The canonical first-paint camera frame: Lower + Midtown Manhattan at a
+// train-forward neighborhood zoom. Two consumers in components/MapView.tsx
+// must agree on it:
 //
 //   1. The `new mapboxgl.Map({...})` constructor: the frame the live
-//      map paints on cold boot. Per CLAUDE.md's "UI shell" note the
-//      live map is the cold-boot hero, so this is the very first thing
-//      every first-time rider sees.
+//      map paints on cold boot. The live map is the cold-boot hero, so
+//      this is the first thing a new rider sees.
 //   2. The reset-to-Manhattan `flyTo` driven by `flyToDefaultSignal`,
 //      fired when an out-of-NYC rider taps "Preview the map" from the
-//      Near-me panel. It must land on *exactly* the cold-boot frame so
-//      "Preview" returns the rider to the same canonical hero rather
-//      than a drifted approximation.
+//      Near-me panel. It must land on exactly the cold-boot frame.
 //
-// These were duplicated literals before. A retune of the hero frame
-// that touched only the constructor would silently leave "Preview the
-// map" flying to a stale center, with no compile-time signal (both
-// sites are valid standalone calls). Single-sourced here, with
-// lib/mapView.test.ts pinning the invariant and guarding against a
-// re-introduced hard-coded literal in MapView.tsx.
+// The launch frame deliberately sits above the train marker's low-zoom
+// "abstract dot" range. At z≈12.2 the car silhouette is clearly visible
+// while a phone still shows enough of Lower + Midtown Manhattan to read
+// the subway as a living network rather than a handful of isolated trains.
+// Keep this mobile-first: the first public impression should be moving
+// trains around the iconic Manhattan core, not a zoomed-out system map.
 //
-// Scope is exactly center + zoom: the `minZoom`/`maxZoom` constructor
-// options are persistent map constraints, not part of the resettable
-// frame, so the reset deliberately does not re-assert them.
+// Single-sourced here, with lib/mapView.test.ts pinning the invariant and
+// guarding against a re-introduced hard-coded literal in MapView.tsx.
 export const INITIAL_MAP_VIEW: {
   center: [number, number];
   zoom: number;
 } = {
-  center: [-73.9857, 40.7484],
-  zoom: 11,
+  center: [-73.989, 40.7355],
+  zoom: 12.2,
 };
