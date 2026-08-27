@@ -133,12 +133,15 @@ export default function AboutPage() {
         stays free for everyone, indefinitely.
       </p>
       <p>
-        Self-host it if you prefer: the source is{" "}
+        The source is publicly viewable on{" "}
         <a href={GITHUB_URL} target="_blank" rel="noopener noreferrer">
-          MIT-licensed
-        </a>
-        . Fork it, deploy it, modify it — your only running cost is your
-        own Mapbox token, since the MTA feeds are free.
+          GitHub
+        </a>{" "}
+        under a source-available license. You can inspect it, run it
+        privately for evaluation or development, and submit contributions
+        back to the official project. The current license does not permit
+        rebranding, redistribution, public deployment, or competing or
+        commercial derivatives.
       </p>
 
       <h2>The honest part</h2>
@@ -159,9 +162,11 @@ export default function AboutPage() {
       <p>
         Built by {AUTHOR_NAME}. The source is{" "}
         <a href={GITHUB_URL} target="_blank" rel="noopener noreferrer">
-          MIT-licensed on GitHub
+          publicly viewable on GitHub
         </a>{" "}
-        — issues, pull requests, and forks welcome.
+        under the project&rsquo;s source-available license. Issues and pull
+        requests are welcome; contribution-only public forks are permitted
+        by the license.
       </p>
       <p>
         Have feedback, a feature request, or a bug to report? Open an
@@ -188,7 +193,8 @@ export default function AboutPage() {
           trip planning that includes street-level walking directions
           and transfer routing. There&rsquo;s no account, no app store
           download required, and no advertising — the source code is
-          MIT-licensed on GitHub. Built by {AUTHOR_NAME} (
+          publicly viewable on GitHub under a source-available license.
+          Built by {AUTHOR_NAME} (
           <a
             href={`https://github.com/${AUTHOR_HANDLE}`}
             target="_blank"
