@@ -746,6 +746,7 @@ export default function NearbyPanel({
     const ranked = rankPlansByTime(rawPlans, {
       arrivalsByStation,
       nowSec: now / 1000,
+      liveSnapshotGeneratedAtSec: generatedAtSec,
       preferReachableFirstLeg: true,
       walkFromAnchor: { lng: geo.lng, lat: geo.lat },
       walkToAnchor: dest.address
@@ -774,6 +775,7 @@ export default function NearbyPanel({
     geo.lng,
     arrivalsByStation,
     now,
+    generatedAtSec,
   ]);
 
   // Station-pinned anchors only — for those it's correct to dedupe
