@@ -1,6 +1,6 @@
 # Contributing to StandClear
 
-Thanks for considering a contribution. StandClear is open source under MIT, and the project welcomes issues, ideas, and pull requests from anyone.
+Thanks for considering a contribution. StandClear is source-available rather than open source, and the project welcomes issues, ideas, and pull requests from anyone. The license permits a public GitHub fork only as reasonably necessary to prepare and submit a contribution back to this official repository.
 
 This guide is the short version of "how do I make a change without surprising the maintainers."
 
@@ -37,7 +37,7 @@ If you've got an idea that isn't on the issue tracker, open an issue describing 
 
 ## Workflow
 
-1. **Fork + branch.** Branch names like `feat/xxx`, `fix/xxx`, `chore/xxx`.
+1. **Fork + branch.** A contribution-only public GitHub fork is permitted by the project license. Keep the fork solely for preparing/submitting your contribution, retain the license/notices, and do not deploy or repurpose it. Branch names like `feat/xxx`, `fix/xxx`, `chore/xxx`.
 2. **Make the change.** Keep it focused — bug fix, feature, or refactor; not all three.
 3. **Run the checks locally:**
    ```bash

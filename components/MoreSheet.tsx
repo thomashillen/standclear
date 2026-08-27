@@ -440,7 +440,7 @@ export default function MoreSheet({ open, onClose, onSetHome, onSetWork }: Props
                     View source on GitHub
                   </span>
                   <span className="block text-[12px] text-gray-400 truncate">
-                    MIT-licensed · open issues + PRs welcome
+                    Source-available · open issues + PRs welcome
                   </span>
                 </span>
                 <ExternalLink className="w-3.5 h-3.5 text-gray-500 flex-shrink-0" />

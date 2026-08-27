@@ -87,7 +87,7 @@ export default async function Image() {
             }}
           >
             Live MTA arrivals, address-to-address routing, service alerts.
-            No accounts. No ads. MIT-licensed open source.
+            No accounts. No ads. Public source, source-available terms.
           </div>
         </div>
 

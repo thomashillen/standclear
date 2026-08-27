@@ -11,7 +11,7 @@ export const metadata: Metadata = {
   alternates: { canonical: "/terms" },
 };
 
-const LAST_UPDATED = "2026-05-09";
+const LAST_UPDATED = "2026-08-27";
 
 export default function TermsPage() {
   return (
@@ -97,16 +97,20 @@ export default function TermsPage() {
         its own terms.
       </p>
 
-      <h2>7. Open source</h2>
+      <h2>7. Source code license</h2>
       <p>
-        The {SITE_NAME} source code is published under the MIT License
-        on{" "}
+        The current {SITE_NAME} source code is publicly viewable on{" "}
         <a href={GITHUB_URL} target="_blank" rel="noopener noreferrer">
           GitHub
-        </a>
-        . You may fork, modify, and self-host the project subject to
-        that license. Your obligations under these Terms apply to{" "}
-        <em>this</em> hosted instance only — your fork is your own.
+        </a>{" "}
+        under the project&rsquo;s source-available license. Public source
+        visibility does not grant permission to rebrand, redistribute,
+        publicly deploy, or commercially exploit the current code. A
+        narrowly scoped public fork is permitted when needed to prepare
+        and submit a contribution to the official repository. See the
+        repository&rsquo;s LICENSE file for the exact terms. Historical
+        versions released under MIT remain governed by the MIT grant that
+        accompanied those versions.
       </p>
 
       <h2>8. Privacy</h2>

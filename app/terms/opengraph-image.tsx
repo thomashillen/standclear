@@ -88,8 +88,8 @@ export default async function Image() {
               maxWidth: 1000,
             }}
           >
-            Free to use. Informational, not authoritative. MIT-licensed
-            source on GitHub.
+            Free to use. Informational, not authoritative. Public source under
+            source-available terms.
           </div>
         </div>
 
