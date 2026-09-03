@@ -5,10 +5,9 @@
  * The bottom-sheet panels in SubwayMap are mostly mutually exclusive,
  * but a few combinations are legitimate: a station detail can sit
  * under an open SearchSheet (the rider hit Search from a station
- * page), and cinematic follow-mode runs alongside whatever panel was
- * open when the rider tapped a train marker. Codifying the order as a
- * pure helper keeps the keydown effect in SubwayMap small and gives
- * us a node-env regression test against silent reordering.
+ * page). Codifying the order as a pure helper keeps the keydown effect
+ * in SubwayMap small and gives us a node-env regression test against
+ * silent reordering.
  *
  * The Radix-managed dialogs (LiveTrainsPopup, MoreSheet's nested
  * AlertsDialog / AboutDialog) intentionally do NOT appear here.
@@ -23,7 +22,6 @@ export type DismissablePanelState = {
   lineOpen: boolean;
   nearbyOpen: boolean;
   moreOpen: boolean;
-  followActive: boolean;
 };
 
 export type DismissTarget =
@@ -32,7 +30,6 @@ export type DismissTarget =
   | "line"
   | "nearby"
   | "more"
-  | "follow"
   | null;
 
 export function pickDismissTarget(state: DismissablePanelState): DismissTarget {
@@ -50,9 +47,5 @@ export function pickDismissTarget(state: DismissablePanelState): DismissTarget {
   // MoreSheet sits on top visually but logically it's the settings
   // surface — only dismissed once nothing more specific is open.
   if (state.moreOpen) return "more";
-  // Cinematic follow-mode is the last layer ESC can exit. It runs
-  // alongside the map (no panel chrome of its own) so it's the
-  // final fallback before ESC is a no-op.
-  if (state.followActive) return "follow";
   return null;
 }

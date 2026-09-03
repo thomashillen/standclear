@@ -1,13 +1,13 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { useLines, CORRIDOR, type Stop } from "@/lib/subwayData";
+import { useLines, CORRIDOR } from "@/lib/subwayData";
 import { useTrains } from "@/lib/useTrains";
 import { useGeolocationState } from "@/lib/useGeolocation";
 import { buildStationIndex } from "@/lib/stopsIndex";
 import { useTrainMarkers } from "@/lib/useTrainMarkers";
 import { iconSizeByZoomExpression } from "@/lib/iconScale";
-import { INITIAL_MAP_VIEW } from "@/lib/mapView";
+import { INITIAL_MAP_VIEW, nearestStop } from "@/lib/mapView";
 import "mapbox-gl/dist/mapbox-gl.css";
 
 interface MapViewProps {
@@ -60,15 +60,6 @@ interface MapViewProps {
    *  NearbyPanel half-detent ≈0.42). Defaults to the plan-list
    *  height so a missing prop errs on the side of more headroom. */
   tripFitBottomDvh?: number;
-  /** Trip ID of the train currently being "cinematically followed",
-   *  or null if no follow lock is active. When set, MapView locks
-   *  the camera onto that train every animation tick with a tilted
-   *  pitch and tighter zoom. */
-  followedTrainId?: string | null;
-  /** Callback invoked when MapView wants to enter or exit follow
-   *  mode — fires on a train tap (enter) and on any explicit camera
-   *  gesture (exit, with null). */
-  onFollowTrain?: (trainId: string | null) => void;
 }
 
 /** Lightweight DTO between SubwayMap (which holds the user's chosen
@@ -107,28 +98,12 @@ export interface SelectedTrip {
   walkToCoords?: [number, number][];
 }
 
-function nearestStop(stops: Stop[], lng: number, lat: number): Stop | null {
-  let best: Stop | null = null;
-  let minD2 = Infinity;
-  for (const s of stops) {
-    const dx = s.lng - lng;
-    const dy = s.lat - lat;
-    const d2 = dx * dx + dy * dy;
-    if (d2 < minD2) {
-      minD2 = d2;
-      best = s;
-    }
-  }
-  return best;
-}
-
 type MapboxExpression = unknown;
 type MapboxMap = {
   getSource: (id: string) => { setData: (d: unknown) => void } | undefined;
   setPaintProperty: (id: string, prop: string, val: MapboxExpression) => void;
   fitBounds: (bounds: unknown, opts: unknown) => void;
   remove: () => void;
-  stop: () => void;
   getCanvas: () => HTMLCanvasElement;
   on: (event: string, ...args: unknown[]) => void;
   off: (event: string, ...args: unknown[]) => void;
@@ -144,14 +119,9 @@ type MapboxMap = {
     padding?: { top?: number; right?: number; bottom?: number; left?: number };
   }) => void;
   easeTo: (opts: {
-    // All optional — follow-mode reuses easeTo to update center
-    // alone (during the per-tick lock) and pitch alone (when entering
-    // / exiting the cinematic mode).
     center?: [number, number];
     zoom?: number;
-    pitch?: number;
     duration?: number;
-    essential?: boolean;
     padding?: { top: number; right: number; bottom: number; left: number };
   }) => void;
 };
@@ -457,7 +427,7 @@ function computeTopPad(): number {
   return Math.round(px) + 16;
 }
 
-export default function MapView({ selectedLine, stationStopId, onLineSelect, onStationOpen, flyToUserSignal, flyToDefaultSignal, panelOpen, selectedTrip, focusedLegIndex, walkOnlyOverlay, tripFitBottomDvh = 0.62, followedTrainId = null, onFollowTrain }: MapViewProps) {
+export default function MapView({ selectedLine, stationStopId, onLineSelect, onStationOpen, flyToUserSignal, flyToDefaultSignal, panelOpen, selectedTrip, focusedLegIndex, walkOnlyOverlay, tripFitBottomDvh = 0.62 }: MapViewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<MapboxMap | null>(null);
   const [mapLoaded, setMapLoaded] = useState(false);
@@ -474,13 +444,6 @@ export default function MapView({ selectedLine, stationStopId, onLineSelect, onS
   // without stale-closure issues.
   const stationStopIdRef = useRef(stationStopId);
   useEffect(() => { stationStopIdRef.current = stationStopId; }, [stationStopId]);
-  // Same pattern for the followed-train id and its setter — the rAF
-  // tick recenters the camera every frame while a follow lock is
-  // active, and the train-click handler enters follow mode.
-  const followedTrainIdRef = useRef(followedTrainId);
-  useEffect(() => { followedTrainIdRef.current = followedTrainId; }, [followedTrainId]);
-  const onFollowTrainRef = useRef(onFollowTrain);
-  useEffect(() => { onFollowTrainRef.current = onFollowTrain; }, [onFollowTrain]);
   // Set by the map line-click handler; read + cleared by the selection
   // effect so a click-initiated selection zooms to the nearest stop rather
   // than to the default downtown frame.
@@ -1168,23 +1131,24 @@ export default function MapView({ selectedLine, stationStopId, onLineSelect, onS
         map.on("click", "subway-trains-icon", (e: unknown) => {
           const ev = e as {
             features?: {
-              properties?: { routeId?: string; id?: string };
+              properties?: { routeId?: string };
               geometry?: GeoJSON.Point;
             }[];
           };
           const feat = ev.features?.[0];
-          const trainId = feat?.properties?.id;
-          // Tap a train → enter cinematic follow mode. Riders who want
-          // to inspect the line as a whole still have the LinePicker
-          // and the "View line" link inside the follow capsule. The
-          // previous behavior of selecting the route on tap meant a
-          // single tap immediately yanked the camera to a different
-          // station and replaced the live trains with a static line
-          // overlay, which buried the most striking thing about the
-          // app — the live train you just clicked.
-          if (trainId && onFollowTrainRef.current) {
-            onFollowTrainRef.current(trainId);
-          }
+          const routeId = feat?.properties?.routeId;
+          const coordinates = feat?.geometry?.coordinates as
+            | [number, number]
+            | undefined;
+          if (!routeId || !coordinates) return;
+          const line = lines[routeId];
+          if (!line) return;
+          // A train tap stays useful without taking control of the
+          // camera: open the nearest station on that train's route.
+          // StationPanel exposes every route serving the complex, so
+          // riders can continue into either station or line detail.
+          const stop = nearestStop(line.stops, coordinates[0], coordinates[1]);
+          if (stop) onStationOpenRef.current(stop.id);
         });
         map.on("mouseenter", "subway-trains-icon", () => {
           map.getCanvas().style.cursor = "pointer";
@@ -1321,11 +1285,9 @@ export default function MapView({ selectedLine, stationStopId, onLineSelect, onS
             point?: { x: number; y: number };
           };
           // A train sitting STOPPED_AT a platform renders on top of the
-          // station dot; without this guard, tapping that train would
-          // fire BOTH this handler (open StationPanel) and the train
-          // handler (enter follow mode). Train marker wins — visually
-          // it's what the rider tapped, and the station is one tap
-          // away via the line-and-stop list inside the follow capsule.
+          // station dot; without this guard, both handlers would open
+          // station detail. Let the train handler win so it resolves the
+          // nearest stop specifically on that train's route.
           if (ev.point) {
             const trainHit = (map as unknown as {
               queryRenderedFeatures: (p: unknown, o: unknown) => unknown[];
@@ -1382,113 +1344,16 @@ export default function MapView({ selectedLine, stationStopId, onLineSelect, onS
   // matches what the MTA feed is actually reporting. When a new poll
   // arrives we refresh the velocity estimate and reset the baseline; any
   // residual correction is lerped in so there's no visible catch-up jump.
-  // The whole animation — train markers, follow-camera lock, and the
-  // open-station incoming-rings overlay — lives in this hook; see
+  // The whole animation — train markers and the open-station
+  // incoming-rings overlay — lives in this hook; see
   // lib/useTrainMarkers.ts.
   useTrainMarkers({
     getMap: () => mapRef.current,
     mapLoaded,
     lines,
     dataRef,
-    followedTrainIdRef,
-    onFollowTrainRef,
     stationStopIdRef,
   });
-
-  
-  // ── Follow-my-train enter/exit animation + gesture release ──────────
-  // Distinct from the per-tick recentering loop above: this effect
-  // fires only on the *transition* into or out of follow mode, animating
-  // pitch + zoom once and wiring the user-gesture exit listeners. The
-  // tick handles continuous tracking, so we don't fight the rider's
-  // pan/pinch — those gestures release the lock here, after which the
-  // tick stops updating the camera.
-  useEffect(() => {
-    if (!mapLoaded || !mapRef.current) return;
-    const map = mapRef.current;
-    if (followedTrainId) {
-      // Enter — tilt + zoom in. One-shot easeTo with the iOS-spring
-      // timing reads as a "the camera is leaning in to follow this
-      // thing" moment rather than a teleport.
-      //
-      // No `essential: true`: the tilt is decorative polish, not
-      // load-bearing for tracking. Riders with `prefers-reduced-motion`
-      // get the same final framing (pitch 50°, zoom ≥ 15.5) without
-      // the 700ms camera lean, courtesy of Mapbox's
-      // `respectPrefersReducedMotion` default.
-      map.easeTo({
-        pitch: 50,
-        zoom: Math.max(map.getZoom(), 15.5),
-        duration: 700,
-      });
-      // The release order matters:
-      //   1. Clear `followedTrainIdRef.current` SYNCHRONOUSLY so the
-      //      next rAF tick doesn't fire another `map.easeTo` toward
-      //      the train (the React state update routed through
-      //      `onFollowTrain` is async — the ref update via the
-      //      mirroring useEffect lands a frame later, which is too
-      //      slow to stop the recenter loop from fighting the drag).
-      //   2. `map.stop()` halts whatever easeTo the previous tick
-      //      had in flight (250 ms duration), so the camera doesn't
-      //      keep gliding toward the train under the user's finger.
-      //   3. `onFollowTrain(null)` propagates the state change up so
-      //      the capsule unmounts, the pitch unwinds, and the listener
-      //      cleanup runs.
-      const release = () => {
-        followedTrainIdRef.current = null;
-        map.stop();
-        onFollowTrainRef.current?.(null);
-      };
-      // Bind to the canvas DOM directly rather than Mapbox's event
-      // system. The rAF tick is firing easeTo every ~33 ms during
-      // follow mode, so the camera is in a perpetual programmatic
-      // animation — user gestures end up competing with the
-      // recenter loop for control, and Mapbox-level events
-      // (dragstart, move with originalEvent, etc.) don't fire
-      // reliably under that pressure. touchstart/mousedown on the
-      // canvas fires the instant the rider's finger lands, with no
-      // dependency on Mapbox's animation state. Once release runs
-      // the ref is cleared synchronously, the in-flight ease is
-      // stopped, and the next rAF tick is a no-op — Mapbox's normal
-      // pan/pinch handlers take over from there.
-      //
-      // Tapping a train re-enters follow mode (the train layer's
-      // click handler runs on the same touch). Tapping the FollowCapsule
-      // X button doesn't reach the canvas (the capsule sits above
-      // the map in DOM order), so this doesn't conflict with the
-      // dedicated exit affordance.
-      const canvas = map.getCanvas();
-      const onTouchStart = () => release();
-      const onMouseDown = (e: MouseEvent) => {
-        if (e.button === 0) release();
-      };
-      canvas.addEventListener("touchstart", onTouchStart, { passive: true });
-      canvas.addEventListener("mousedown", onMouseDown);
-      // Also wire up wheel — desktop scroll-zoom doesn't go through
-      // mousedown, but it's a clear "I'm controlling the camera"
-      // signal worth releasing on.
-      const onWheel = () => release();
-      canvas.addEventListener("wheel", onWheel, { passive: true });
-      return () => {
-        canvas.removeEventListener("touchstart", onTouchStart);
-        canvas.removeEventListener("mousedown", onMouseDown);
-        canvas.removeEventListener("wheel", onWheel);
-      };
-    } else {
-      // Exit — restore flat top-down view. Shorter ease than the
-      // entrance: when the rider's release gesture was a pan, they
-      // want to keep panning, not wait for the camera to finish
-      // unfolding. Animating only `pitch` (center / zoom stay where
-      // the user left them) lets the pan compose with the unfold.
-      // Like the entrance, this is purely decorative — `prefers-
-      // reduced-motion` riders snap straight to pitch 0 and resume
-      // panning immediately.
-      map.easeTo({
-        pitch: 0,
-        duration: 400,
-      });
-    }
-  }, [mapLoaded, followedTrainId]);
 
   // Sync user-location source with geolocation state. The dot only appears
   // once the user has granted location permission via the Near Me panel.

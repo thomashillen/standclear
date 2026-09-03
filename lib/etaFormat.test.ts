@@ -76,11 +76,8 @@ describe("formatEtaCountdown", () => {
   });
 
   describe("unit conventions", () => {
-    // The historic divergence between StationPanel's `(eta, now)`
-    // (millis) and FollowCapsule's `(etaSec, nowSec)` is the bug
-    // this helper exists to retire. Pinning the canonical
-    // (etaSec, nowMs) shape so a future caller that swaps either
-    // unit trips the suite.
+    // Pin the canonical (etaSec, nowMs) shape so a future caller that
+    // swaps either unit trips the suite.
     it("treats `now` as wall-clock milliseconds", () => {
       // nowMs = 60_000 → 60 s of wall clock has passed; an eta
       // 90 s past epoch leaves 30 s remaining.

@@ -174,8 +174,7 @@ describe("LinePicker", () => {
     // measured — the Tailwind class list is the contract. Pin the
     // HIG-minimum size and reject the old sub-44px size so a future
     // refactor that shrinks the primary dismiss (tapped one-handed
-    // on a moving train) trips this test. Same approach as the
-    // FollowCapsule touch-target regression test.
+    // on a moving train) trips this test.
     render(
       <LinePicker
         lines={makeLines()}

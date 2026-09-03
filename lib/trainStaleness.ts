@@ -5,11 +5,10 @@
 // `lib/useTrainMarkers.ts` imports `markerOpacityMul` to fade each
 // train's icon opacity once its `lastReportedAt` slips past 90 s old,
 // on a curve that floors at 0.4 by 6 minutes. `trainStaleness` is
-// the textual counterpart: when a rider is committed to one specific
-// train (cinematic follow-mode, the StationPanel arrival rows, the
-// LinePanel arrivals — every surface where a single trip is named)
-// they should be able to read *why* the marker is dim, i.e. how
-// stale the underlying GTFS-RT VehiclePosition.timestamp is.
+// the textual counterpart: wherever a surface names a specific trip
+// (StationPanel arrival rows, LinePanel arrivals, etc.), riders should
+// be able to read *why* the marker is dim, i.e. how stale the underlying
+// GTFS-RT VehiclePosition.timestamp is.
 //
 // Both halves share the same boundaries so the visual + textual
 // signals agree at the boundary — the marker keeps full opacity

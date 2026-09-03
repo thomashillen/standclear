@@ -9,10 +9,18 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { ICON_SCALE_STOPS, iconScaleAtZoom } from "@/lib/iconScale";
-import { INITIAL_MAP_VIEW } from "@/lib/mapView";
+import { INITIAL_MAP_VIEW, nearestStop } from "@/lib/mapView";
 
 const MAP_VIEW_SRC = readFileSync(
   resolve(__dirname, "..", "components", "MapView.tsx"),
+  "utf8",
+);
+const SUBWAY_MAP_SRC = readFileSync(
+  resolve(__dirname, "..", "components", "SubwayMap.tsx"),
+  "utf8",
+);
+const TRAIN_MARKERS_SRC = readFileSync(
+  resolve(__dirname, "useTrainMarkers.ts"),
   "utf8",
 );
 
@@ -62,7 +70,7 @@ describe("INITIAL_MAP_VIEW", () => {
 describe("MapView.tsx single-sources the frame", () => {
   it("imports INITIAL_MAP_VIEW from @/lib/mapView", () => {
     expect(MAP_VIEW_SRC).toMatch(
-      /import\s*\{\s*INITIAL_MAP_VIEW\s*\}\s*from\s*["']@\/lib\/mapView["']/,
+      /import\s*\{[^}]*INITIAL_MAP_VIEW[^}]*\}\s*from\s*["']@\/lib\/mapView["']/,
     );
   });
 
@@ -76,5 +84,34 @@ describe("MapView.tsx single-sources the frame", () => {
   it("carries no re-introduced hard-coded hero coordinates", () => {
     expect(MAP_VIEW_SRC).not.toContain("-73.989");
     expect(MAP_VIEW_SRC).not.toContain("40.7355");
+  });
+});
+
+describe("train marker taps", () => {
+  const stops = [
+    { id: "north", name: "North", lng: -73.98, lat: 40.76, shapeIdx: 20 },
+    { id: "south", name: "South", lng: -74.01, lat: 40.71, shapeIdx: 4 },
+  ];
+
+  it("resolves the nearest stop on the tapped train's route", () => {
+    expect(nearestStop(stops, -73.981, 40.759)?.id).toBe("north");
+    expect(nearestStop(stops, -74.009, 40.711)?.id).toBe("south");
+  });
+
+  it("returns null for a route with no stops", () => {
+    expect(nearestStop([], -73.99, 40.74)).toBeNull();
+  });
+
+  it("opens station detail from the train-layer click handler", () => {
+    expect(MAP_VIEW_SRC).toMatch(
+      /map\.on\("click", "subway-trains-icon"[\s\S]*?nearestStop\(line\.stops,[\s\S]*?onStationOpenRef\.current\(stop\.id\)/,
+    );
+  });
+
+  it("contains no persistent train-follow state, props, or camera loop", () => {
+    for (const source of [MAP_VIEW_SRC, SUBWAY_MAP_SRC, TRAIN_MARKERS_SRC]) {
+      expect(source).not.toMatch(/followedTrainId|onFollowTrain|FollowCapsule/);
+    }
+    expect(TRAIN_MARKERS_SRC).not.toContain("easeTo");
   });
 });
