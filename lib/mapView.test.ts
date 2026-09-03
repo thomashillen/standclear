@@ -78,3 +78,12 @@ describe("MapView.tsx single-sources the frame", () => {
     expect(MAP_VIEW_SRC).not.toContain("40.7355");
   });
 });
+
+describe("train marker interaction", () => {
+  it("opens the nearest station without introducing camera-follow state", () => {
+    expect(MAP_VIEW_SRC).toMatch(
+      /map\.on\("click", "subway-trains-icon"[\s\S]*nearestStop\(line\.stops, coordinates\[0\], coordinates\[1\]\)[\s\S]*onStationOpenRef\.current\(stop\.id\)/,
+    );
+    expect(MAP_VIEW_SRC).not.toMatch(/followedTrain|onFollowTrain|follow-camera/i);
+  });
+});

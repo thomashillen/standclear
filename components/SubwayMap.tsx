@@ -46,9 +46,6 @@ import LinePicker from "./LinePicker";
 // on the server, and skipping SSR avoids hydration mismatch headaches
 // with portal-based primitives (Radix Dialog in MoreSheet /
 // LiveTrainsPopup, custom sheet-drag in the rest).
-const FollowCapsule = dynamic(() => import("./FollowCapsule"), {
-  ssr: false,
-});
 const InstallPrompt = dynamic(() => import("./InstallPrompt"), {
   ssr: false,
 });
@@ -153,14 +150,6 @@ export default function SubwayMap() {
   // markers + walking segments and fits the camera.
   const [selectedTripSelection, setSelectedTripSelection] =
     useState<TripSelection | null>(null);
-  // Cinematic follow-my-train mode. When set, MapView locks the
-  // camera onto the train (tracking its live position with pitch +
-  // tighter zoom) and the floating header is replaced by a compact
-  // glass capsule showing the train's next stop and ETA. Cleared by
-  // tapping the capsule's exit affordance OR by dragging/zooming
-  // the map (handled inside MapView so the lock can release on any
-  // explicit camera move).
-  const [followedTrainId, setFollowedTrainIdState] = useState<string | null>(null);
   // Index of the leg the rider has zoomed in on from the expanded
   // route detail. Null means "frame the whole trip" (default).
   // Cleared whenever the trip selection changes so a new plan opens
@@ -206,7 +195,7 @@ export default function SubwayMap() {
   // Drop every piece of trip-overlay state in one shot. The overlay
   // belongs to whichever sheet sourced it (SearchSheet / NearbyPanel
   // commute card); switching to a different context — opening Near-me,
-  // tapping a line, opening a station, entering follow mode, etc. —
+  // tapping a line, opening a station, etc. —
   // should put the map back into all-trains mode that matches the new
   // panel. Previously each handler cleared a different subset of these
   // four fields, so e.g. a leftover `walkOnlyOverlay` would keep a
@@ -221,26 +210,6 @@ export default function SubwayMap() {
     setWalkOnlyOverlay(null);
     setTripDetailExpanded(false);
   }, []);
-  // Wrap the follow setter so entering follow mode also closes any
-  // sheet covering the map — a panel would defeat the cinematic
-  // shot, and every panel's open-state machine already expects
-  // mutual exclusion with the other entry points.
-  const setFollowedTrainId = useCallback((id: string | null) => {
-    setFollowedTrainIdState(id);
-    if (id) {
-      setNearbyOpen(false);
-      setSearchOpen(false);
-      setMoreOpen(false);
-      setSelectedLine(null);
-      setFocusStopId(undefined);
-      setStationStopId(null);
-      // Drop the trip overlay too — a highlighted route under the
-      // cinematic frame would split the rider's attention between
-      // "that train I'm following" and "this trip I planned earlier."
-      clearTripOverlay();
-    }
-  }, [clearTripOverlay]);
-
   // Bottom-padding fraction MapView reserves when fitting the
   // selected trip's bounds. Depends on which panel actually sourced
   // the selection — SearchSheet's plan-list view occupies ~48dvh
@@ -269,12 +238,6 @@ export default function SubwayMap() {
   const [flyToDefaultSignal, setFlyToDefaultSignal] = useState(0);
   const data = useTrains();
   const lines = useLines();
-  // Live wall-clock for the follow capsule's countdown. Tied to a
-  // 1Hz tick so the ETA refreshes second by second; gated by an
-  // active follow lock so we don't run a global timer when nothing
-  // is consuming it.
-  const now = useNow(!!followedTrainId);
-
   // Drive the global liquid-glass tint from the currently selected
   // line. Every `.ios-glass` surface picks up `--glass-tint` /
   // `--glass-tint-strength` automatically, so when the rider focuses
@@ -470,7 +433,6 @@ export default function SubwayMap() {
         lineOpen: !!selectedLine,
         nearbyOpen,
         moreOpen,
-        followActive: !!followedTrainId,
       });
       if (!target) return;
       e.preventDefault();
@@ -498,9 +460,6 @@ export default function SubwayMap() {
         case "more":
           setMoreOpen(false);
           return;
-        case "follow":
-          setFollowedTrainId(null);
-          return;
       }
     };
     window.addEventListener("keydown", onKeyDown);
@@ -511,15 +470,12 @@ export default function SubwayMap() {
     selectedLine,
     nearbyOpen,
     moreOpen,
-    followedTrainId,
-    setFollowedTrainId,
     clearTripOverlay,
   ]);
 
   const totalTrains = data?.trains.length ?? 0;
   // Slow tick (10s) just for the stale banner — reading Date.now() in
-  // render trips React 19's purity rule, and the existing follow-mode
-  // useNow above is gated on followedTrainId so it can't be reused.
+  // render trips React 19's purity rule.
   const staleTick = useNow(true, 10_000);
   const stale = data ? staleTick - data.generatedAt > 60_000 : false;
   // Folded into the live-feed pill so the rider knows the app feels
@@ -817,8 +773,6 @@ export default function SubwayMap() {
           focusedLegIndex={focusedLegIndex}
           walkOnlyOverlay={walkOnlyOverlay}
           tripFitBottomDvh={tripFitBottomDvh}
-          followedTrainId={followedTrainId}
-          onFollowTrain={setFollowedTrainId}
         />
         {selectedLine && !nearbyOpen && !stationStopId && (
           <LinePanel
@@ -913,34 +867,13 @@ export default function SubwayMap() {
         />
       </div>
 
-      {/* Cinematic follow-my-train capsule — replaces the floating
-          header while a follow lock is active. Same vertical position
-          as the header so the rider's eye doesn't have to relocate
-          between the two modes. */}
-      {followedTrainId && (
-        <FollowCapsule
-          trainId={followedTrainId}
-          data={data}
-          lines={lines}
-          now={now}
-          onExit={() => setFollowedTrainId(null)}
-        />
-      )}
-
       {/* ── Floating Liquid Glass control row, overlaid on the map ──
           The container itself is pointer-events-none so users can pan
           the map between buttons; each interactive child opts back in
           with pointer-events-auto. iOS-26-style frosted-glass tiles
           float independently rather than sharing a header bar — same
           spatial grouping as Apple Maps' top-row controls.
-
-          Unmounted entirely while following a train so the cinematic
-          frame isn't fighting the line picker / live pulse / search
-          controls for screen real estate. The earlier `opacity-0 +
-          pointer-events-none` approach left ghost taps hitting the
-          invisible buttons because each child opts back into pointer
-          events with `pointer-events-auto`. */}
-      {!followedTrainId && (
+ */}
       <div
         className="absolute inset-x-0 top-0 z-30 flex items-center gap-2 px-3 pointer-events-none transition-opacity duration-200 opacity-100"
         style={{
@@ -1156,7 +1089,6 @@ export default function SubwayMap() {
           <MoreHorizontal className="w-[18px] h-[18px]" />
         </button>
       </div>
-      )}
 
       {/* One-shot Add-to-Home-Screen nudge. Hides itself on standalone
           PWAs, on desktop, and after a one-time dismiss — so the
