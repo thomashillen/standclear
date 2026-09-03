@@ -1,3 +1,5 @@
+import type { Stop } from "./subwayData";
+
 // The canonical first-paint camera frame: Lower + Midtown Manhattan at a
 // train-forward neighborhood zoom. Two consumers in components/MapView.tsx
 // must agree on it:
@@ -25,3 +27,28 @@ export const INITIAL_MAP_VIEW: {
   center: [-73.989, 40.7355],
   zoom: 12.2,
 };
+
+/** Return the route stop nearest a rendered map position.
+ *
+ * Train markers can be between stations and may be visually offset when
+ * multiple trains share track. Resolving from the marker's rendered point
+ * keeps a tap useful without introducing any persistent camera ownership.
+ */
+export function nearestStop(
+  stops: Stop[],
+  lng: number,
+  lat: number,
+): Stop | null {
+  let best: Stop | null = null;
+  let minD2 = Infinity;
+  for (const stop of stops) {
+    const dx = stop.lng - lng;
+    const dy = stop.lat - lat;
+    const d2 = dx * dx + dy * dy;
+    if (d2 < minD2) {
+      minD2 = d2;
+      best = stop;
+    }
+  }
+  return best;
+}

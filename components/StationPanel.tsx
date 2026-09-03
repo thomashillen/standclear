@@ -212,9 +212,8 @@ export function ArrivalRow({
         {staleLabel && (
           // Amber sub-line that surfaces only when the underlying
           // VehiclePosition is past the marker-fade threshold (90 s).
-          // Mirrors FollowCapsule's eyebrow swap so the textual signal
-          // at the row level matches the cinematic-mode capsule a
-          // rider would see if they were already following the train.
+          // The row-level text explains the same staleness signal as
+          // the matching marker's opacity fade on the map.
           <p
             className="text-[11px] text-amber-300 leading-tight mt-0.5 truncate"
             // Spoken age phrase is single-sourced in `trainStaleness`

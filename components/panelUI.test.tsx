@@ -537,7 +537,7 @@ describe("TripPlanRow trunk catch verdict (sibling routes)", () => {
 // Until now its ETAs were the last named-trip surface that could show
 // a confident "3m" off a VehiclePosition the map marker was already
 // fading — every other named-trip surface (marker fade, StationPanel
-// ArrivalRow, LinePanel StopRow, FollowCapsule, TripPlanRow) carries
+// ArrivalRow, LinePanel StopRow, TripPlanRow) carries
 // the 90 s staleness signal. These pin the same rule here.
 describe("StationRow staleness", () => {
   const noop = () => {};

@@ -220,7 +220,7 @@ describe("InstallPrompt", () => {
     // measured — the Tailwind class list is the contract. Pin the
     // HIG-minimum size and reject the old 32px size so a future
     // refactor that shrinks the only dismiss on this banner trips
-    // this test. Same approach as the FollowCapsule regression test.
+    // this test.
     setUserAgent(UA_ANDROID);
     render(<InstallPrompt />);
     act(() => {

@@ -1,14 +1,8 @@
 // ─── Arrival countdown formatters ───────────────────────────────────
 //
-// Shared formatters for live arrival countdowns. Two surfaces — the
-// StationPanel arrival rows and the FollowCapsule next-stop pill —
-// were each carrying a private copy of the same six-line `fmtEta`
-// helper but with a subtle unit-handling divergence: StationPanel's
-// took `(etaSec, nowMs)` and divided inside, while FollowCapsule's
-// took `(etaSec, nowSec)` and divided at the call site. Same string
-// output today, but two functions named identically with mismatched
-// unit contracts are a foot-gun for the third caller — pick one
-// canonical signature and route both through it.
+// Shared formatter for live arrival countdowns. The canonical unit
+// contract remains centralized here so detail surfaces do not grow
+// private helpers that disagree about seconds versus milliseconds.
 //
 // Canonical contract: `eta` is the GTFS-RT arrival timestamp in
 // SECONDS (matches `Arrival.eta` produced by lib/useTrains and

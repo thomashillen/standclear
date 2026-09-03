@@ -24,11 +24,6 @@ import { iconScaleAtZoom } from "./iconScale";
 interface MapHandle {
   getSource: (id: string) => { setData: (d: unknown) => void } | undefined;
   getZoom: () => number;
-  easeTo: (opts: {
-    center?: [number, number];
-    duration?: number;
-    essential?: boolean;
-  }) => void;
 }
 
 export interface UseTrainMarkersArgs {
@@ -48,14 +43,6 @@ export interface UseTrainMarkersArgs {
    *  thrash this effect. The tick reads `.current` each frame and
    *  detects new polls by reference equality. */
   dataRef: RefObject<TrainsResponse | null>;
-  /** Current followed train id, ref'd so the rAF loop sees the latest
-   *  value without restarting on every prop change. The tick recenters
-   *  on this train's marker each frame; clearing it releases the lock. */
-  followedTrainIdRef: RefObject<string | null>;
-  /** Setter the rAF tick calls back to when the followed train leaves
-   *  the feed (e.g. trip completed) so the lock doesn't strand the
-   *  rider on a frozen patch of map. */
-  onFollowTrainRef: RefObject<((id: string | null) => void) | undefined>;
   /** When a StationPanel is open, the rAF tick also rebuilds the
    *  incoming-train-rings overlay from the per-tick rendered features.
    *  null/undefined → rings are cleared. */
@@ -83,7 +70,6 @@ export interface UseTrainMarkersArgs {
  *   • per-train trajectory + smoothed render position
  *   • position-based stack-offset for collisions (4/5/6 at Union Sq,
  *     express overtaking local at a shared platform, etc.)
- *   • cinematic follow-my-train camera lock
  *   • the StationPanel "incoming" pulse rings
  *
  * Mutates the `subway-trains` and `station-incoming-rings` Mapbox
@@ -96,8 +82,6 @@ export function useTrainMarkers({
   mapLoaded,
   lines,
   dataRef,
-  followedTrainIdRef,
-  onFollowTrainRef,
   stationStopIdRef,
 }: UseTrainMarkersArgs): void {
   useEffect(() => {
@@ -211,11 +195,6 @@ export function useTrainMarkers({
       prefersReducedMotion = e.matches;
     };
     motionQuery?.addEventListener?.("change", onMotionChange);
-
-    // Latest rendered (post-stack-offset) position per train, captured
-    // each tick where the marker feature is pushed. Used by follow-mode
-    // to recenter on the same point the rider sees on screen.
-    const lastRenderById = new Map<string, [number, number]>();
 
     // Trajectory + smoothed render state per train. Trajectory is
     // rebuilt every poll; renderState tracks the marker's current
@@ -480,9 +459,8 @@ export function useTrainMarkers({
       //
       // Curve lives in `lib/trainStaleness.ts::markerOpacityMul` so
       // it shares boundaries with the textual `trainStaleness` label
-      // riders see on StationPanel arrival rows + FollowCapsule — a
-      // marker that fades to dim is paired with a "Updated 2m ago"
-      // line, not a contradiction.
+      // riders see on arrival surfaces — a marker that fades to dim
+      // is paired with a "Updated 2m ago" line, not a contradiction.
       //
       // Falls back to the snapshot's generatedAt when a feed omits
       // the per-vehicle timestamp — preserves the outage-detection
@@ -554,7 +532,6 @@ export function useTrainMarkers({
             },
             geometry: { type: "Point", coordinates: [renderLng, renderLat] },
           });
-          lastRenderById.set(c.trainId, [renderLng, renderLat]);
         }
       }
 
@@ -568,45 +545,8 @@ export function useTrainMarkers({
         for (const id of renderState.keys())
           if (!seen.has(id)) renderState.delete(id);
       }
-      if (seen.size !== lastRenderById.size) {
-        for (const id of lastRenderById.keys())
-          if (!seen.has(id)) lastRenderById.delete(id);
-      }
       const src = map.getSource("subway-trains");
       src?.setData({ type: "FeatureCollection", features });
-
-      // ── Cinematic follow-my-train ──────────────────────────────────────
-      // While a follow lock is active, recenter the camera on the
-      // followed train every tick using the same post-stack-offset
-      // position the marker was just rendered at. easeTo with a
-      // short 250ms duration smooths the per-tick jitter without
-      // lagging behind real motion. Pitch + zoom only get applied
-      // once at lock-on so subsequent ticks don't fight the rider's
-      // pinch-zoom — see the dragstart/zoomstart handlers below for
-      // exit behavior.
-      //
-      // `essential: true` is intentionally omitted: with
-      // `prefers-reduced-motion` Mapbox collapses the 250ms ease into
-      // an instant recenter, which is the right behavior — the
-      // camera still tracks the train precisely each tick, just
-      // without smoothing. Tracking is preserved; only the
-      // smoothing is dropped.
-      const followId = followedTrainIdRef.current;
-      if (followId) {
-        const head = lastRenderById.get(followId);
-        if (head) {
-          const [followLng, followLat] = head;
-          map.easeTo({
-            center: [followLng, followLat],
-            duration: 250,
-          });
-        } else {
-          // Train left the feed (completed trip / went out of service).
-          // Drop the lock so the rider isn't left staring at a frozen
-          // empty patch of map.
-          onFollowTrainRef.current?.(null);
-        }
-      }
 
       // When a StationPanel is open, find which trains are headed to that
       // station and animate a glowing ring beneath each one. The ring's
@@ -717,5 +657,5 @@ export function useTrainMarkers({
     // passes a stable closure over its mapRef so we don't need to
     // re-attach when the function identity changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mapLoaded, lines, dataRef, followedTrainIdRef, onFollowTrainRef, stationStopIdRef]);
+  }, [mapLoaded, lines, dataRef, stationStopIdRef]);
 }

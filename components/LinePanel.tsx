@@ -46,8 +46,7 @@ interface StopRowProps {
    *  fresh as the snapshot itself). When `.label` is non-null, the
    *  ETA flips amber so the rider sees the same "trust this less"
    *  signal that fades the matching train marker on the map and
-   *  surfaces the eyebrow swap in StationPanel's ArrivalRow + the
-   *  follow-mode capsule. */
+   *  surfaces in StationPanel's ArrivalRow. */
   nStaleness?: TrainStaleness | null;
   sStaleness?: TrainStaleness | null;
   trainHere: boolean;

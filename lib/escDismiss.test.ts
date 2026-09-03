@@ -8,7 +8,6 @@ const empty: DismissablePanelState = {
   lineOpen: false,
   nearbyOpen: false,
   moreOpen: false,
-  followActive: false,
 };
 
 describe("pickDismissTarget", () => {
@@ -25,12 +24,11 @@ describe("pickDismissTarget", () => {
         lineOpen: true,
         nearbyOpen: true,
         moreOpen: true,
-        followActive: true,
       }),
     ).toBe("search");
   });
 
-  it("dismisses station detail before line, nearby, more, follow", () => {
+  it("dismisses station detail before line, nearby, and more", () => {
     expect(
       pickDismissTarget({
         ...empty,
@@ -38,7 +36,6 @@ describe("pickDismissTarget", () => {
         lineOpen: true,
         nearbyOpen: true,
         moreOpen: true,
-        followActive: true,
       }),
     ).toBe("station");
   });
@@ -64,22 +61,12 @@ describe("pickDismissTarget", () => {
     ).toBe("nearby");
   });
 
-  it("dismisses More before falling through to follow", () => {
+  it("dismisses More when no other panel is open", () => {
     expect(
       pickDismissTarget({
         ...empty,
         moreOpen: true,
-        followActive: true,
       }),
     ).toBe("more");
-  });
-
-  it("falls through to cinematic follow when no panel is open", () => {
-    expect(
-      pickDismissTarget({
-        ...empty,
-        followActive: true,
-      }),
-    ).toBe("follow");
   });
 });
