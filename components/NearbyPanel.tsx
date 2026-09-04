@@ -889,11 +889,9 @@ export default function NearbyPanel({
       style={sheetStyle}
       data-glass-active={isDragging || undefined}
     >
-      {/* Drag handle — separate flow row above the title row so it
-          gets a proper tap target (h-7 = 28px) for the tap-to-toggle
-          gesture. The 5px pill stays at the top edge of the panel
-          via items-start + pt-1.5 so visual rhythm matches StationPanel
-          / LinePanel. */}
+      {/* Drag handle — separate flow row above the title row. The shared
+          component supplies centered mobile hit slop without moving this
+          header; the 5px pill keeps the StationPanel / LinePanel rhythm. */}
       <DragHandle
         onTap={onHandleTap}
         ariaLabel={detent === "half" ? "Expand panel" : "Collapse panel"}

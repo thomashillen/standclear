@@ -398,9 +398,8 @@ export default function LinePanel({ lineId, focusStopId, onClose, onStationOpen 
       data-glass-active={isDragging || undefined}
     >
       {/* Drag handle — tap to toggle half ↔ full, drag to resize or
-          dismiss. Hit area is h-11 (44px, the iOS minimum tap target) so a
-          finger landing anywhere near the top of the sheet catches the
-          gesture, not just the 5px pill. */}
+          dismiss. DragHandle owns the mobile hit-slop contract so this
+          header can keep its existing layout and edge controls. */}
       <DragHandle
         onTap={onHandleTap}
         ariaLabel={detent === "half" ? "Expand panel" : "Collapse panel"}
