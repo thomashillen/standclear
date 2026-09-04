@@ -8,6 +8,8 @@ No account. No app download. Open it and see the subway.
 
 **[Open StandClear →](https://standclear.vercel.app)**
 
+<img src="docs/images/standclear-live-map-mobile.png" alt="StandClear mobile live map showing real-time NYC subway trains across Manhattan" width="427">
+
 Named after the iconic *“Stand clear of the closing doors, please.”*
 
 > StandClear is built mobile-first. The goal is simple: make the subway feel alive at a glance, then make the information useful enough that New Yorkers can come back whenever they need to know what is happening nearby.
