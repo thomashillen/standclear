@@ -986,7 +986,11 @@ export function TripPlanRow({
         // matches what the rider's eye is on.
         <p
           className="text-[11px] text-amber-300 leading-tight mt-1 truncate"
-          aria-label={`Soonest train position last updated ${Math.round(leadStale.ageSec / 60)} minutes ago`}
+          aria-label={
+            leadStale.ariaLabel
+              ? `Soonest train ${leadStale.ariaLabel}`
+              : undefined
+          }
         >
           {leadStale.label}
         </p>
@@ -1424,4 +1428,3 @@ export function TripPlanDetail({
     </div>
   );
 }
-
