@@ -397,7 +397,10 @@ describe("TripPlanRow catch verdict", () => {
     // miss verdict applied to the chip — not amber.
     expect(container.querySelectorAll(".line-through").length).toBeGreaterThan(0);
     // Stale sub-line still rendered below the inline ETAs.
-    expect(screen.getByText("Updated 4m ago")).toBeTruthy();
+    expect(
+      screen.getByLabelText("Soonest train position last updated 4 minutes ago")
+        .textContent,
+    ).toBe("Updated 4m ago");
   });
 });
 
