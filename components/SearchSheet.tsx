@@ -974,10 +974,9 @@ export default function SearchSheet({
       style={sheetStyle}
       data-glass-active={isDragging || undefined}
     >
-      {/* Drag handle — separate flow row above the title row so it
-          gets a proper tap target (h-7 = 28px) for the tap-to-toggle
-          gesture. Visual rhythm matches NearbyPanel / StationPanel /
-          LinePanel. */}
+      {/* Drag handle — separate flow row above the title row. The shared
+          component supplies centered mobile hit slop without moving this
+          header; visual rhythm matches NearbyPanel / StationPanel / LinePanel. */}
       <DragHandle
         onTap={onHandleTap}
         ariaLabel={detent === "half" ? "Expand panel" : "Collapse panel"}
