@@ -6,21 +6,19 @@ The run that logs an item should also leave a note on the PR thread if applicabl
 ---
 
 <!-- template: YYYY-MM-DD · <description> · (PR #NNN or branch) -->
-2026-05-15 · Panel-grammar touch-target sweep: several dismiss/close
-controls across the sheet grammar are still below the 44px HIG
-minimum (principle #3) — `MoreSheet.tsx:185` (w-9 h-9),
-`LinePicker.tsx:243` (w-9 h-9), `NearbyPanel.tsx:380` (w-8 h-8) +
-`:913` (w-9 h-9), `SearchSheet.tsx:1022/1042/1073/1157` (w-7/w-8/w-9),
-`InstallPrompt.tsx:176` (w-8 h-8). FollowCapsule was fixed first (the
-critical-path case) on branch claude/keen-goldberg-TVinZ. The rest is
-deferred because several of these files (panelUI/SearchSheet/NearbyPanel
-call sites) are currently churned by in-flight PRs #153/#155 — a
-broad sweep now would conflict. Pick this up once those land. Open
-question: bump the visible circle to 44px (simple, in-idiom since
-these are already filled-circle buttons) vs. an invisible
-hit-area-expander pseudo (Apple-purest, keeps small glyphs, but risks
-intercepting adjacent taps in dense header rows — needs per-callsite
-spacing review).
+2026-09-05 · Panel-grammar touch-target follow-up: the earlier broad sweep is
+mostly complete. MoreSheet, LinePicker, InstallPrompt, and the shared mobile
+sheet grabber now meet the 44px touch-target baseline. Current `main` still has
+compact controls below that baseline in `NearbyPanel.tsx` (saved-destination
+swap and Near me close) and `SearchSheet.tsx` (directions back, close,
+clear-search, and swap). Exact invisible-hit-area implementations and focused
+regression tests for both components were fully validated in Codex and are
+preserved in issue #191, but could not be published because those Codex
+checkouts had no authenticated Git remote and replacing the large components
+wholesale through limited file APIs would be unnecessarily risky. The product
+direction is no longer ambiguous: preserve the visible compact controls and
+expand only their effective hit areas. Remaining work is safe publication of
+the preserved patches plus normal CI/Vercel validation. · (#191)
 
 2026-05-15 · Background "Leave at X" commute reminders (Option B in
 `docs/research/leave-at-reminders-2026-05-15.md`) require persisting a
