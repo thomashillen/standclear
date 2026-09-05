@@ -1,0 +1,142 @@
+diff --git a/components/SearchSheet.touchTarget.test.tsx b/components/SearchSheet.touchTarget.test.tsx
+new file mode 100644
+index 0000000..b48da99
+--- /dev/null
++++ b/components/SearchSheet.touchTarget.test.tsx
+@@ -0,0 +1,55 @@
++import { fireEvent, render, screen } from "@testing-library/react";
++import { readFileSync } from "node:fs";
++import { describe, expect, it, vi } from "vitest";
++
++import { CompactControlHitArea } from "./SearchSheet";
++
++const searchSheetSource = readFileSync("components/SearchSheet.tsx", "utf8");
++
++describe("SearchSheet compact control touch targets", () => {
++  it("provides an accessibility-hidden 44px hit area whose click bubbles to its button", () => {
++    const onClick = vi.fn();
++    render(
++      <button type="button" aria-label="Compact control" onClick={onClick}>
++        <CompactControlHitArea />
++      </button>,
++    );
++
++    const button = screen.getByRole("button", { name: "Compact control" });
++    const hitArea = button.querySelector("[data-compact-control-hit-area]");
++
++    expect(hitArea).not.toBeNull();
++    expect(hitArea?.getAttribute("aria-hidden")).toBe("true");
++    expect(hitArea?.className).toContain("h-11");
++    expect(hitArea?.className).toContain("w-11");
++    expect(screen.getAllByRole("button")).toHaveLength(1);
++
++    fireEvent.click(hitArea!);
++    expect(onClick).toHaveBeenCalledOnce();
++  });
++
++  it("adds the hit area to all four compact controls without enlarging their visible boxes", () => {
++    expect(
++      searchSheetSource.match(/<CompactControlHitArea \/>/g),
++    ).toHaveLength(4);
++
++    expect(searchSheetSource).toMatch(
++      /aria-label=\{\s*expandedPlan[\s\S]*?className="press relative w-8 h-8[\s\S]*?<CompactControlHitArea \/>/,
++    );
++    expect(searchSheetSource).toMatch(
++      /aria-label="Close panel"[\s\S]*?<CompactControlHitArea \/>/,
++    );
++    expect(searchSheetSource).toMatch(
++      /aria-label="Clear search"[\s\S]*?w-7 h-7[\s\S]*?<CompactControlHitArea \/>/,
++    );
++    expect(searchSheetSource).toMatch(
++      /aria-label="Swap from and to"[\s\S]*?w-9 h-9[\s\S]*?<CompactControlHitArea \/>/,
++    );
++  });
++
++  it("contains the clear-search target within the 44px input and reserves its text space", () => {
++    expect(searchSheetSource).toMatch(
++      /<div className="relative">[\s\S]*?className="w-full h-11 pl-10 pr-11[\s\S]*?aria-label="Clear search"[\s\S]*?absolute right-2 top-1\/2 -translate-y-1\/2 w-7 h-7[\s\S]*?<CompactControlHitArea \/>/,
++    );
++  });
++});
+diff --git a/components/SearchSheet.tsx b/components/SearchSheet.tsx
+index fec5bc9..e1031fd 100644
+--- a/components/SearchSheet.tsx
++++ b/components/SearchSheet.tsx
+@@ -204,6 +204,22 @@ function PlaceSearchUnavailable() {
+   );
+ }
+ 
++/**
++ * Invisible hit slop for compact controls whose visible box must not affect
++ * the sheet's layout. The span remains hidden from the accessibility tree and
++ * lets pointer events bubble to the existing button, so the button keeps its
++ * name, focus behavior, and click handler.
++ */
++export function CompactControlHitArea() {
++  return (
++    <span
++      aria-hidden="true"
++      data-compact-control-hit-area
++      className="absolute left-1/2 top-1/2 z-10 h-11 w-11 -translate-x-1/2 -translate-y-1/2"
++    />
++  );
++}
++
+ // ─── Set-as-Home/Work toggle button ─────────────────────────────────
+ export default function SearchSheet({
+   open,
+@@ -1022,9 +1038,10 @@ export default function SearchSheet({
+               aria-label={
+                 expandedPlan ? "Back to route options" : "Back to search"
+               }
+-              className="press w-8 h-8 -ml-1 flex items-center justify-center rounded-full bg-white/[0.08] hover:bg-white/[0.14] touch-manipulation flex-shrink-0"
++              className="press relative w-8 h-8 -ml-1 flex items-center justify-center rounded-full bg-white/[0.08] hover:bg-white/[0.14] touch-manipulation flex-shrink-0"
+             >
+               <ArrowLeft className="w-[16px] h-[16px]" strokeWidth={2.5} />
++              <CompactControlHitArea />
+             </button>
+           )}
+           {mode === "search" ? (
+@@ -1042,10 +1059,11 @@ export default function SearchSheet({
+         </div>
+         <button
+           onClick={onClose}
+-          className="press text-white opacity-85 hover:opacity-100 w-9 h-9 -mr-1 flex items-center justify-center rounded-full bg-white/[0.08] hover:bg-white/[0.12] touch-manipulation flex-shrink-0"
++          className="press relative text-white opacity-85 hover:opacity-100 w-9 h-9 -mr-1 flex items-center justify-center rounded-full bg-white/[0.08] hover:bg-white/[0.12] touch-manipulation flex-shrink-0"
+           aria-label="Close panel"
+         >
+           <X className="w-[16px] h-[16px]" strokeWidth={2.5} />
++          <CompactControlHitArea />
+         </button>
+       </div>
+ 
+@@ -1066,7 +1084,7 @@ export default function SearchSheet({
+               // reset on blur — leaving the top floating UI shifted
+               // behind the Dynamic Island. Same constraint applies
+               // to every other input in the app.
+-              className="w-full h-11 pl-10 pr-10 rounded-xl bg-white/[0.08] border border-white/[0.06] text-[16px] text-gray-50 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-white/25 focus:border-transparent transition-shadow"
++              className="w-full h-11 pl-10 pr-11 rounded-xl bg-white/[0.08] border border-white/[0.06] text-[16px] text-gray-50 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-white/25 focus:border-transparent transition-shadow"
+               autoFocus
+             />
+             {query && (
+@@ -1076,6 +1094,7 @@ export default function SearchSheet({
+                 className="press absolute right-2 top-1/2 -translate-y-1/2 w-7 h-7 flex items-center justify-center rounded-full text-gray-300 bg-white/[0.08] hover:bg-white/[0.14]"
+               >
+                 <X className="w-3.5 h-3.5" />
++                <CompactControlHitArea />
+               </button>
+             )}
+           </div>
+@@ -1157,9 +1176,10 @@ export default function SearchSheet({
+               onClick={swapTrip}
+               aria-label="Swap from and to"
+               disabled={!tripFrom && !tripTo}
+-              className="press w-9 h-9 self-center flex items-center justify-center rounded-full bg-white/[0.08] hover:bg-white/[0.14] border border-white/[0.08] text-gray-100 disabled:opacity-40 disabled:pointer-events-none touch-manipulation flex-shrink-0"
++              className="press relative w-9 h-9 self-center flex items-center justify-center rounded-full bg-white/[0.08] hover:bg-white/[0.14] border border-white/[0.08] text-gray-100 disabled:opacity-40 disabled:pointer-events-none touch-manipulation flex-shrink-0"
+             >
+               <ArrowLeftRight className="w-4 h-4 rotate-90" />
++              <CompactControlHitArea />
+             </button>
+           </div>
+         </div>
