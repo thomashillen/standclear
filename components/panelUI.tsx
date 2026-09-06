@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useRef } from "react";
 import {
   ArrowUp,
   ArrowDown,
@@ -479,6 +479,7 @@ export function PlannerField({
   onTap: () => void;
   onClear: () => void;
 }) {
+  const inputRef = useRef<HTMLInputElement>(null);
   const dot =
     accent === "emerald"
       ? "bg-emerald-400 ring-emerald-300/30"
@@ -489,14 +490,13 @@ export function PlannerField({
       : "ring-sky-400/40"
     : "ring-white/[0.08]";
 
-  // Active fields render a div + nested <input> — the input handles
-  // typing, so the outer container can't be a button (a button
-  // wrapping an input swallows focus). Inactive fields render a
-  // <button> so a single tap activates the field.
+  // Editing and clearing are separate native controls: nesting a clear
+  // action inside the field's button hides it from keyboard navigation.
+  // The row and clear targets are 44px; the visible X chip stays compact.
   if (active) {
     return (
       <div
-        className={`relative w-full h-10 px-3 rounded-xl bg-white/[0.06] ring-1 ${ring} flex items-center gap-2.5 transition-colors`}
+        className={`relative w-full h-11 pl-3 rounded-xl bg-white/[0.06] ring-1 ${ring} flex items-center gap-2.5 transition-colors`}
       >
         <span
           className={`inline-block w-2 h-2 rounded-full ${dot} ring-2 flex-shrink-0`}
@@ -505,6 +505,7 @@ export function PlannerField({
           {label}
         </span>
         <input
+          ref={inputRef}
           autoFocus
           value={query}
           onChange={(e) => onQueryChange(e.target.value)}
@@ -513,16 +514,23 @@ export function PlannerField({
           // 16px font-size prevents iOS Safari from auto-zooming
           // the page on focus, which leaves the layout shifted
           // behind the Dynamic Island even after blur.
-          className="flex-1 min-w-0 bg-transparent text-[16px] text-gray-50 placeholder-gray-400 focus:outline-none"
+          className="flex-1 min-w-0 h-full pr-3 bg-transparent text-[16px] text-gray-50 placeholder-gray-400 focus:outline-none"
         />
         {query && (
           <button
             type="button"
-            onClick={() => onQueryChange("")}
-            aria-label="Clear search"
-            className="press w-6 h-6 flex items-center justify-center rounded-full bg-white/[0.10] hover:bg-white/[0.18] text-gray-200 flex-shrink-0"
+            onClick={() => {
+              onQueryChange("");
+              // This button disappears when the query empties. Return
+              // focus to the input so typing can continue immediately.
+              inputRef.current?.focus();
+            }}
+            aria-label={`Clear ${label.toLowerCase()} search`}
+            className="press group w-11 h-11 -ml-2.5 flex items-center justify-center rounded-xl text-gray-200 flex-shrink-0 touch-manipulation focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white/70"
           >
-            <X className="w-3 h-3" />
+            <span aria-hidden="true" className="w-6 h-6 flex items-center justify-center rounded-full bg-white/[0.10] group-hover:bg-white/[0.18]">
+              <X className="w-3 h-3" />
+            </span>
           </button>
         )}
       </div>
@@ -530,38 +538,42 @@ export function PlannerField({
   }
 
   return (
-    <button
-      type="button"
-      onClick={onTap}
-      className={`press w-full h-10 px-3 rounded-xl bg-white/[0.06] hover:bg-white/[0.10] ring-1 ${ring} flex items-center gap-2.5 text-left touch-manipulation transition-colors`}
+    <div
+      className={`w-full h-11 rounded-xl bg-white/[0.06] ring-1 ${ring} flex items-center transition-colors`}
     >
-      <span
-        className={`inline-block w-2 h-2 rounded-full ${dot} ring-2 flex-shrink-0`}
-      />
-      <span className="text-[10px] uppercase tracking-wider text-gray-500 w-9 flex-shrink-0">
-        {label}
-      </span>
-      <span
-        className={`flex-1 min-w-0 text-[14px] truncate ${
-          station ? "font-semibold text-gray-50" : "text-gray-400"
-        }`}
+      <button
+        type="button"
+        onClick={onTap}
+        aria-label={`${label}: ${station ? station.name : placeholder}`}
+        className="press flex-1 min-w-0 h-full px-3 rounded-xl hover:bg-white/[0.10] flex items-center gap-2.5 text-left touch-manipulation focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white/70"
       >
-        {station ? station.name : placeholder}
-      </span>
-      {station && (
         <span
-          role="button"
-          aria-label={`Clear ${label.toLowerCase()}`}
-          onClick={(e) => {
-            e.stopPropagation();
-            onClear();
-          }}
-          className="press w-6 h-6 flex items-center justify-center rounded-full bg-white/[0.10] hover:bg-white/[0.18] text-gray-200 flex-shrink-0"
-        >
-          <X className="w-3 h-3" />
+          className={`inline-block w-2 h-2 rounded-full ${dot} ring-2 flex-shrink-0`}
+        />
+        <span className="text-[10px] uppercase tracking-wider text-gray-500 w-9 flex-shrink-0">
+          {label}
         </span>
+        <span
+          className={`flex-1 min-w-0 text-[14px] truncate ${
+            station ? "font-semibold text-gray-50" : "text-gray-400"
+          }`}
+        >
+          {station ? station.name : placeholder}
+        </span>
+      </button>
+      {station && (
+        <button
+          type="button"
+          aria-label={`Clear ${label.toLowerCase()}`}
+          onClick={onClear}
+          className="press group w-11 h-11 flex items-center justify-center rounded-xl text-gray-200 flex-shrink-0 touch-manipulation focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white/70"
+        >
+          <span aria-hidden="true" className="w-6 h-6 flex items-center justify-center rounded-full bg-white/[0.10] group-hover:bg-white/[0.18]">
+            <X className="w-3 h-3" />
+          </span>
+        </button>
       )}
-    </button>
+    </div>
   );
 }
 

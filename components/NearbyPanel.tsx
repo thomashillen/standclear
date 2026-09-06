@@ -41,6 +41,7 @@ import {
   type RouteColorMap,
 } from "./panelUI";
 import { DragHandle } from "./DragHandle";
+import { CompactControlHitArea } from "./CompactControlHitArea";
 
 interface Props {
   open: boolean;
@@ -377,9 +378,10 @@ function GoingToCard({
           type="button"
           onClick={onSwap}
           aria-label="Swap destination"
-          className="press ml-auto w-8 h-8 -mr-1 flex items-center justify-center rounded-full bg-white/[0.06] hover:bg-white/[0.12] text-gray-200 touch-manipulation"
+          className="press relative ml-auto w-8 h-8 -mr-1 flex items-center justify-center rounded-full bg-white/[0.06] hover:bg-white/[0.12] text-gray-200 touch-manipulation"
         >
           <ArrowLeftRight className="w-3.5 h-3.5" />
+          <CompactControlHitArea />
         </button>
       </div>
 
@@ -911,10 +913,11 @@ export default function NearbyPanel({
         </div>
         <button
           onClick={onClose}
-          className="press text-white opacity-85 hover:opacity-100 w-9 h-9 -mr-1 flex items-center justify-center rounded-full bg-white/[0.08] hover:bg-white/[0.12] touch-manipulation"
+          className="press relative text-white opacity-85 hover:opacity-100 w-9 h-9 -mr-1 flex items-center justify-center rounded-full bg-white/[0.08] hover:bg-white/[0.12] touch-manipulation"
           aria-label="Close panel"
         >
           <X className="w-[16px] h-[16px]" strokeWidth={2.5} />
+          <CompactControlHitArea />
         </button>
       </div>
 

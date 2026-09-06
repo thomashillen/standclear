@@ -64,17 +64,16 @@ const DialogContent = React.forwardRef<
       {...props}
     >
       {children}
-      {/* iOS-26 close affordance — matches the X buttons used in
-          NearbyPanel and SearchSheet headers (circle glass chip with
-          subtle white wash). The shadcn default was a tiny unstyled
-          cross at the corner; this one has the same touch target and
-          visual weight as every other "exit panel" affordance in the
-          app. */}
+      {/* Keep the 36px glass circle in its original position while
+          extending the native button by 4px on every side, so riders
+          get a 44px target without shifting the dialog chrome. */}
       <DialogPrimitive.Close
-        className="press absolute right-4 top-4 w-9 h-9 flex items-center justify-center rounded-full text-white opacity-85 hover:opacity-100 bg-white/[0.08] hover:bg-white/[0.12] touch-manipulation focus:outline-none focus:ring-2 focus:ring-white/30 focus:ring-offset-0 disabled:pointer-events-none transition-opacity"
+        className="group press absolute right-3 top-3 w-11 h-11 flex items-center justify-center rounded-full text-white opacity-85 hover:opacity-100 touch-manipulation focus:outline-none focus:ring-2 focus:ring-white/30 focus:ring-offset-0 disabled:pointer-events-none transition-opacity"
         aria-label="Close"
       >
-        <X className="w-[16px] h-[16px]" strokeWidth={2.5} />
+        <span aria-hidden="true" className="flex w-9 h-9 items-center justify-center rounded-full bg-white/[0.08] group-hover:bg-white/[0.12]">
+          <X className="w-[16px] h-[16px]" strokeWidth={2.5} />
+        </span>
         <span className="sr-only">Close</span>
       </DialogPrimitive.Close>
     </DialogPrimitive.Content>

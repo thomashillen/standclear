@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Search,
   X,
@@ -53,6 +53,7 @@ import {
   type RouteColorMap,
 } from "./panelUI";
 import { DragHandle } from "./DragHandle";
+import { CompactControlHitArea } from "./CompactControlHitArea";
 
 interface Props {
   open: boolean;
@@ -431,8 +432,17 @@ export default function SearchSheet({
   // presetTrip (e.g. just `to`) lets this effect fill the missing
   // side from the rider's anchors so the StationPanel "Directions"
   // hand-off doesn't strand the From field empty when Home is set.
+  const directionsPrefilled = useRef(false);
   useEffect(() => {
-    if (mode !== "directions") return;
+    if (!open || mode !== "directions") {
+      directionsPrefilled.current = false;
+      return;
+    }
+    // Wait for asynchronously loaded stations, then initialize only once
+    // per entry. Repeating this on endpoint edits refills a deliberately
+    // cleared Home/Work and steals focus from the field the rider chose.
+    if (directionsPrefilled.current || index.length === 0) return;
+    directionsPrefilled.current = true;
     if (presetTrip?.from && presetTrip?.to) return;
     if (tripFrom && tripTo) return;
     const h = endpointToTrip(home);
@@ -447,7 +457,7 @@ export default function SearchSheet({
     const toFilled = tripTo || presetTrip?.to || w;
     setActiveField(!fromFilled ? "from" : !toFilled ? "to" : null);
     /* eslint-enable react-hooks/set-state-in-effect */
-  }, [mode, home, work, endpointToTrip, tripFrom, tripTo, presetTrip]);
+  }, [open, mode, index.length, home, work, endpointToTrip, tripFrom, tripTo, presetTrip]);
 
   // Apply presetTrip on open / preset-change. Runs whenever the
   // preset reference changes, which the parent toggles per "See all
@@ -480,7 +490,10 @@ export default function SearchSheet({
     /* eslint-disable react-hooks/set-state-in-effect */
     if (f) setTripFrom(f);
     if (t) setTripTo(t);
-    setActiveField(null);
+    // The prefill effect chooses the missing side for partial presets,
+    // including a saved Home/Work fallback. Only a complete resolved pair
+    // can unconditionally suppress the keyboard here.
+    if (f && t) setActiveField(null);
     setMode("directions");
     /* eslint-enable react-hooks/set-state-in-effect */
   }, [open, presetTrip, stationsByComplexId, index]);
@@ -1022,9 +1035,10 @@ export default function SearchSheet({
               aria-label={
                 expandedPlan ? "Back to route options" : "Back to search"
               }
-              className="press w-8 h-8 -ml-1 flex items-center justify-center rounded-full bg-white/[0.08] hover:bg-white/[0.14] touch-manipulation flex-shrink-0"
+              className="press relative w-8 h-8 -ml-1 flex items-center justify-center rounded-full bg-white/[0.08] hover:bg-white/[0.14] touch-manipulation flex-shrink-0"
             >
               <ArrowLeft className="w-[16px] h-[16px]" strokeWidth={2.5} />
+              <CompactControlHitArea />
             </button>
           )}
           {mode === "search" ? (
@@ -1042,10 +1056,11 @@ export default function SearchSheet({
         </div>
         <button
           onClick={onClose}
-          className="press text-white opacity-85 hover:opacity-100 w-9 h-9 -mr-1 flex items-center justify-center rounded-full bg-white/[0.08] hover:bg-white/[0.12] touch-manipulation flex-shrink-0"
+          className="press relative text-white opacity-85 hover:opacity-100 w-9 h-9 -mr-1 flex items-center justify-center rounded-full bg-white/[0.08] hover:bg-white/[0.12] touch-manipulation flex-shrink-0"
           aria-label="Close panel"
         >
           <X className="w-[16px] h-[16px]" strokeWidth={2.5} />
+          <CompactControlHitArea />
         </button>
       </div>
 
@@ -1066,7 +1081,7 @@ export default function SearchSheet({
               // reset on blur — leaving the top floating UI shifted
               // behind the Dynamic Island. Same constraint applies
               // to every other input in the app.
-              className="w-full h-11 pl-10 pr-10 rounded-xl bg-white/[0.08] border border-white/[0.06] text-[16px] text-gray-50 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-white/25 focus:border-transparent transition-shadow"
+              className="w-full h-11 pl-10 pr-11 rounded-xl bg-white/[0.08] border border-white/[0.06] text-[16px] text-gray-50 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-white/25 focus:border-transparent transition-shadow"
               autoFocus
             />
             {query && (
@@ -1076,6 +1091,7 @@ export default function SearchSheet({
                 className="press absolute right-2 top-1/2 -translate-y-1/2 w-7 h-7 flex items-center justify-center rounded-full text-gray-300 bg-white/[0.08] hover:bg-white/[0.14]"
               >
                 <X className="w-3.5 h-3.5" />
+                <CompactControlHitArea />
               </button>
             )}
           </div>
@@ -1157,9 +1173,10 @@ export default function SearchSheet({
               onClick={swapTrip}
               aria-label="Swap from and to"
               disabled={!tripFrom && !tripTo}
-              className="press w-9 h-9 self-center flex items-center justify-center rounded-full bg-white/[0.08] hover:bg-white/[0.14] border border-white/[0.08] text-gray-100 disabled:opacity-40 disabled:pointer-events-none touch-manipulation flex-shrink-0"
+              className="press relative w-9 h-9 self-center flex items-center justify-center rounded-full bg-white/[0.08] hover:bg-white/[0.14] border border-white/[0.08] text-gray-100 disabled:opacity-40 disabled:pointer-events-none touch-manipulation flex-shrink-0"
             >
               <ArrowLeftRight className="w-4 h-4 rotate-90" />
+              <CompactControlHitArea />
             </button>
           </div>
         </div>
