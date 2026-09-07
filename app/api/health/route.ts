@@ -116,8 +116,10 @@ async function checkMta(): Promise<CheckResult> {
       // still deserve confirmation by the authoritative GET below.
     }
 
-    let res = head;
-    if (!head?.ok) {
+    let res: Response;
+    if (head?.ok) {
+      res = head;
+    } else {
       const elapsedMs = Date.now() - start;
       const remainingMs = MTA_CHECK_TIMEOUT_MS - elapsedMs;
       if (remainingMs <= 0) {
