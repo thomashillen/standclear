@@ -36,6 +36,10 @@ const MTA_CHECK_URL =
   "https://api-endpoint.mta.info/Dataservice/mtagtfsfeeds/nyct%2Fgtfs";
 
 const MTA_CHECK_TIMEOUT_MS = 3_000;
+// HEAD is only an optimization. Bound it separately so a slow or
+// unsupported HEAD cannot consume the entire health-check deadline
+// before the authoritative ranged GET gets a chance to run.
+const MTA_HEAD_TIMEOUT_MS = 1_000;
 
 // The full GTFS blob the build script emits hovers around 430 KB. A
 // well-below-floor of 100 KB catches any deploy that shipped an empty
@@ -71,9 +75,24 @@ interface HealthResponse {
   };
 }
 
-async function checkMta(): Promise<CheckResult> {
+async function fetchMta(
+  init: Omit<RequestInit, "signal" | "cache">,
+  timeoutMs: number,
+): Promise<Response> {
   const ctrl = new AbortController();
-  const timeout = setTimeout(() => ctrl.abort(), MTA_CHECK_TIMEOUT_MS);
+  const timeout = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    return await fetch(MTA_CHECK_URL, {
+      ...init,
+      signal: ctrl.signal,
+      cache: "no-store",
+    });
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function checkMta(): Promise<CheckResult> {
   const start = Date.now();
   try {
     // Fast path: HEAD avoids transferring the full protobuf payload.
@@ -84,25 +103,37 @@ async function checkMta(): Promise<CheckResult> {
     // page operators and paint the rider-facing /status page red for
     // an upstream that is actually healthy — a false alarm that erodes
     // trust exactly like a stale train rendered on-time would. So a
-    // failed HEAD never classifies on its own: on ANY non-success we
-    // fall back to a 1-byte ranged GET, which is the authoritative
-    // answer to "can we reach the GTFS-RT feed?" A real outage fails
-    // the GET too, so this only corrects false negatives.
-    const head = await fetch(MTA_CHECK_URL, {
-      method: "HEAD",
-      signal: ctrl.signal,
-      cache: "no-store",
-    });
-    let res = head;
-    if (!head.ok) {
-      res = await fetch(MTA_CHECK_URL, {
-        method: "GET",
-        headers: { Range: "bytes=0-0" },
-        signal: ctrl.signal,
-        cache: "no-store",
-      });
+    // failed HEAD never classifies on its own: on ANY non-success or
+    // HEAD error/timeout we fall back to a 1-byte ranged GET, which is
+    // the authoritative answer to "can we reach the GTFS-RT feed?"
+    // The HEAD phase is capped at 1s and the GET receives the remaining
+    // portion of the original 3s overall deadline.
+    let head: Response | null = null;
+    try {
+      head = await fetchMta({ method: "HEAD" }, MTA_HEAD_TIMEOUT_MS);
+    } catch {
+      // HEAD is advisory. Network/proxy errors and its shorter timeout
+      // still deserve confirmation by the authoritative GET below.
     }
-    clearTimeout(timeout);
+
+    let res: Response;
+    if (head?.ok) {
+      res = head;
+    } else {
+      const elapsedMs = Date.now() - start;
+      const remainingMs = MTA_CHECK_TIMEOUT_MS - elapsedMs;
+      if (remainingMs <= 0) {
+        throw new DOMException("MTA health-check deadline exceeded", "AbortError");
+      }
+      res = await fetchMta(
+        {
+          method: "GET",
+          headers: { Range: "bytes=0-0" },
+        },
+        remainingMs,
+      );
+    }
+
     const latencyMs = Date.now() - start;
     if (res.status >= 500) {
       return {
@@ -120,7 +151,6 @@ async function checkMta(): Promise<CheckResult> {
     }
     return { status: "ok", latencyMs };
   } catch (err) {
-    clearTimeout(timeout);
     const latencyMs = Date.now() - start;
     const detail =
       err instanceof Error
