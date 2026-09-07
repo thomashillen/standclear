@@ -36,6 +36,7 @@ const subscribers = new Set<() => void>();
 let current: GeoState = initial;
 let watchId: number | null = null;
 let fastFixRequested = false;
+let activeConsumers = 0;
 
 function publish(patch: Partial<GeoState>) {
   current = { ...current, ...patch, updatedAt: Date.now() };
@@ -151,12 +152,18 @@ function getSnapshot(): GeoState {
 // someone else's geo subscription without prompting itself.
 export function useGeolocation(active: boolean): GeoState & { request: () => void } {
   const state = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
-  // Watch lifecycle is gated on `active`. The subscribe path attaches
-  // notification only; the prompt + watchPosition call lives here so
-  // useGeolocation(false) and useGeolocationState() never spin up a
-  // watch on their own.
+  // Track active consumers separately from passive subscribers. NearbyPanel
+  // stays mounted while closed, so subscriber-count cleanup alone would leave
+  // its high-accuracy watch running after dismissal. Keep the singleton alive
+  // while any consumer is active, then stop it as soon as the last one pauses.
   useEffect(() => {
-    if (active) startWatch();
+    if (!active) return;
+    activeConsumers += 1;
+    startWatch();
+    return () => {
+      activeConsumers = Math.max(0, activeConsumers - 1);
+      if (activeConsumers === 0) stopWatch();
+    };
   }, [active]);
 
   const request = useCallback(() => requestGeolocation(), []);
