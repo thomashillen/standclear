@@ -157,4 +157,45 @@ describe("useGeolocation", () => {
     expect(geo.watchPosition).not.toHaveBeenCalled();
     expect(geo.getCurrentPosition).not.toHaveBeenCalled();
   });
+
+  it("stops the watch when an active consumer becomes inactive", async () => {
+    geo.watchPosition.mockReturnValue(42);
+
+    const { useGeolocation } = await freshImport();
+    const { rerender } = renderHook(
+      ({ active }) => useGeolocation(active),
+      { initialProps: { active: true } },
+    );
+
+    expect(geo.watchPosition).toHaveBeenCalledTimes(1);
+    expect(geo.clearWatch).not.toHaveBeenCalled();
+
+    rerender({ active: false });
+
+    expect(geo.clearWatch).toHaveBeenCalledTimes(1);
+    expect(geo.clearWatch).toHaveBeenCalledWith(42);
+  });
+
+  it("keeps the singleton watch alive until the last active consumer pauses", async () => {
+    geo.watchPosition.mockReturnValue(42);
+
+    const { useGeolocation } = await freshImport();
+    const first = renderHook(
+      ({ active }) => useGeolocation(active),
+      { initialProps: { active: true } },
+    );
+    const second = renderHook(
+      ({ active }) => useGeolocation(active),
+      { initialProps: { active: true } },
+    );
+
+    expect(geo.watchPosition).toHaveBeenCalledTimes(1);
+
+    first.rerender({ active: false });
+    expect(geo.clearWatch).not.toHaveBeenCalled();
+
+    second.rerender({ active: false });
+    expect(geo.clearWatch).toHaveBeenCalledTimes(1);
+    expect(geo.clearWatch).toHaveBeenCalledWith(42);
+  });
 });
