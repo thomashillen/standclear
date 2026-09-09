@@ -97,13 +97,13 @@ export default function SubwayMap() {
   // Closed on first load so the rider's first impression is the live
   // map — every train moving across the city — instead of half the
   // viewport covered by a panel asking for geolocation permission. The
-  // Near-me button in the floating header opens it on tap, which is
+  // Near-me control opens it on tap, which is
   // also when iOS Safari is happiest to grant the geolocation prompt
   // (user-activated request, not cold-mount).
   const [nearbyOpen, setNearbyOpen] = useState(false);
   // SearchSheet state. Mutually exclusive with the other panels; the
   // handler below closes them when search opens. `searchInitialMode`
-  // controls which pane the sheet lands in — the header Search button
+  // controls which pane the sheet lands in — the Search control
   // opens it in "search" mode, while NearbyPanel's "See all routes"
   // CTA opens it directly in "directions" mode with home/work
   // auto-filled by SearchSheet's own effect.
@@ -291,7 +291,7 @@ export default function SubwayMap() {
     const next = !searchOpen;
     setSearchOpen(next);
     if (next) {
-      // Header search button always opens in plain Search mode and
+      // The home search control always opens in plain Search mode and
       // clears any leftover anchor-pick / preset state from prior
       // MoreSheet or "See all routes" entries — otherwise the rider
       // would see a stale "tap to set as Home" banner or a
@@ -320,6 +320,30 @@ export default function SubwayMap() {
       // the sheet animated out.
       clearTripOverlay();
     }
+  };
+
+  const handleOpenMore = () => {
+    // Close any other panel that's currently covering the
+    // map slot — More is mutually exclusive with Search /
+    // NearbyPanel / LinePanel / StationPanel, same as the
+    // other floating-button entry points. In particular,
+    // when the rider is mid-anchor-pick (MoreSheet opened
+    // SearchSheet to grab a Home/Work address), tapping
+    // the dots again should bounce back to More instead
+    // of leaving the search panel layered behind it.
+    setSearchOpen(false);
+    setNearbyOpen(false);
+    setSelectedLine(null);
+    setFocusStopId(undefined);
+    setStationStopId(null);
+    setSearchAnchorPick(null);
+    setSearchPresetTrip(null);
+    // Drop any trip overlay from the panel being displaced
+    // — same rationale as the other floating-button entry
+    // points: opening More is a context switch, and a
+    // leftover commute route would contradict the panel.
+    clearTripOverlay();
+    setMoreOpen(true);
   };
 
   // "See all routes" handoff from NearbyPanel — opens SearchSheet
@@ -831,6 +855,7 @@ export default function SubwayMap() {
           onClose={() => setLivePulseOpen(false)}
         />
         <SearchSheet
+          onOpenMore={handleOpenMore}
           initialMode={searchInitialMode}
           anchorPickMode={searchAnchorPick}
           onAnchorPicked={() => {
@@ -915,13 +940,9 @@ export default function SubwayMap() {
           />
         </div>
 
-        {/* Live-feed pill — pulsing dot + train count. The number
-            communicates "system scale right now" at a glance, the
-            color signals freshness (green = live, amber = stale,
-            gray = connecting). Tap opens the System Pulse popup with
-            direction split, status mix, and per-line breakdown. Pill
-            shape (auto width) so it grows naturally with the count
-            without ever clipping. */}
+        {/* Feed health stays visible when the home search surface yields to
+            a panel. Mobile uses a quiet label; fleet counts remain available
+            in System Pulse without competing with the map. */}
         <button
           type="button"
           onClick={() => setLivePulseOpen(true)}
@@ -948,7 +969,7 @@ export default function SubwayMap() {
                     ? "Stale — last refresh more than a minute ago"
                     : `${totalTrains} trains live`
           }
-          className="pointer-events-auto press flex items-center gap-1.5 h-9 px-2.5 flex-shrink-0 rounded-full ios-glass ios-glass--header border border-white/[0.10] shadow-[0_6px_20px_rgba(0,0,0,0.45)] touch-manipulation"
+          className="pointer-events-auto press flex items-center gap-1.5 min-h-11 px-3 flex-shrink-0 rounded-full ios-glass ios-glass--header border border-white/[0.10] shadow-[0_6px_20px_rgba(0,0,0,0.45)] touch-manipulation"
         >
           <span className="relative flex w-2 h-2">
             <span
@@ -983,26 +1004,16 @@ export default function SubwayMap() {
               <span className="absolute inset-0 rounded-full bg-emerald-400 motion-safe:animate-ping opacity-60" />
             )}
           </span>
-          {/* Train glyph next to the count so a first-time visitor
-              reads "live trains" rather than just an unlabeled number.
-              Subtle gray so the pulsing dot stays the visual anchor.
-              When offline we show "Offline" copy instead of a count
-              that would be a stale lie. */}
-          {!online ? (
-            <span className="text-[11px] font-semibold uppercase tracking-wide text-rose-200 leading-none">
-              Offline
+          <span className={`text-[12px] font-semibold leading-none ${
+            !online || feedDegraded ? "text-rose-200" : stale ? "text-amber-200" : "text-gray-100"
+          }`}>
+            {!online ? "Offline" : !data ? "Connecting…" : feedDegraded ? "Feed issue" : stale ? "Stale" : "Live"}
+          </span>
+          {online && data && !stale && !feedDegraded && (
+            <span className="hidden sm:flex items-center gap-1 text-[12px] tabular-nums text-gray-300">
+              <TrainFront className="w-3 h-3" aria-hidden="true" />
+              {totalTrains}
             </span>
-          ) : feedDegraded ? (
-            <span className="text-[11px] font-semibold uppercase tracking-wide text-rose-200 leading-none">
-              Feed
-            </span>
-          ) : (
-            <>
-              <TrainFront className="w-3 h-3 text-gray-400 flex-shrink-0" />
-              <span className="text-[12px] font-bold tabular-nums text-gray-100 leading-none">
-                {data ? totalTrains : "…"}
-              </span>
-            </>
           )}
         </button>
 
@@ -1027,7 +1038,7 @@ export default function SubwayMap() {
           onClick={handleSearchToggle}
           aria-label="Search stations and plan trips"
           aria-pressed={searchOpen}
-          className={`pointer-events-auto press flex items-center justify-center w-11 h-11 rounded-full touch-manipulation flex-shrink-0 transition-colors border shadow-[0_6px_20px_rgba(0,0,0,0.45)] ${
+          className={`pointer-events-auto press hidden sm:flex items-center justify-center w-11 h-11 rounded-full touch-manipulation flex-shrink-0 transition-colors border shadow-[0_6px_20px_rgba(0,0,0,0.45)] ${
             searchOpen
               ? "bg-white text-gray-950 border-white/30 shadow-[0_6px_20px_rgba(255,255,255,0.20)]"
               : "ios-glass ios-glass--header text-gray-100 border-white/[0.10]"
@@ -1044,7 +1055,7 @@ export default function SubwayMap() {
           onClick={handleNearbyToggle}
           aria-label="Find nearby stations"
           aria-pressed={nearbyOpen}
-          className={`pointer-events-auto press flex items-center justify-center w-11 h-11 rounded-full touch-manipulation flex-shrink-0 transition-colors border shadow-[0_6px_20px_rgba(0,0,0,0.45)] ${
+          className={`pointer-events-auto press hidden sm:flex items-center justify-center w-11 h-11 rounded-full touch-manipulation flex-shrink-0 transition-colors border shadow-[0_6px_20px_rgba(0,0,0,0.45)] ${
             nearbyOpen
               ? "bg-white text-gray-950 border-white/30 shadow-[0_6px_20px_rgba(255,255,255,0.20)]"
               : "ios-glass ios-glass--header text-gray-100 border-white/[0.10]"
@@ -1058,36 +1069,50 @@ export default function SubwayMap() {
             iOS convention that "settings / overflow actions" live at
             the trailing edge. */}
         <button
-          onClick={() => {
-            // Close any other panel that's currently covering the
-            // map slot — More is mutually exclusive with Search /
-            // NearbyPanel / LinePanel / StationPanel, same as the
-            // other floating-button entry points. In particular,
-            // when the rider is mid-anchor-pick (MoreSheet opened
-            // SearchSheet to grab a Home/Work address), tapping
-            // the dots again should bounce back to More instead
-            // of leaving the search panel layered behind it.
-            setSearchOpen(false);
-            setNearbyOpen(false);
-            setSelectedLine(null);
-            setFocusStopId(undefined);
-            setStationStopId(null);
-            setSearchAnchorPick(null);
-            setSearchPresetTrip(null);
-            // Drop any trip overlay from the panel being displaced
-            // — same rationale as the other floating-button entry
-            // points: opening More is a context switch, and a
-            // leftover commute route would contradict the panel.
-            clearTripOverlay();
-            setMoreOpen(true);
-          }}
+          onClick={handleOpenMore}
           aria-label="More options"
           aria-pressed={moreOpen}
-          className="pointer-events-auto press flex items-center justify-center w-11 h-11 rounded-full touch-manipulation flex-shrink-0 transition-colors border shadow-[0_6px_20px_rgba(0,0,0,0.45)] ios-glass ios-glass--header text-gray-100 border-white/[0.10]"
+          className="pointer-events-auto press hidden sm:flex items-center justify-center w-11 h-11 rounded-full touch-manipulation flex-shrink-0 transition-colors border shadow-[0_6px_20px_rgba(0,0,0,0.45)] ios-glass ios-glass--header text-gray-100 border-white/[0.10]"
         >
           <MoreHorizontal className="w-[18px] h-[18px]" />
         </button>
       </div>
+
+      {/* The resting search surface yields its space to every open panel.
+          Keep attribution below it and avoid requesting location on mount. */}
+      {!panelOpen && (
+        <div
+          className="absolute inset-x-3 z-20 sm:hidden flex flex-col items-end gap-3 pointer-events-none"
+          style={{ bottom: "calc(max(var(--safe-bottom), 0.5rem) + 1.5rem)" }}
+        >
+          <button
+            type="button"
+            onClick={handleNearbyToggle}
+            aria-label="Find nearby stations"
+            className="pointer-events-auto press flex items-center justify-center size-12 rounded-full ios-glass ios-glass--header border border-white/10 shadow-lg touch-manipulation"
+          >
+            <MapPin className="size-5" aria-hidden="true" />
+          </button>
+          <section aria-label="Search" className="pointer-events-auto w-full rounded-[24px] ios-glass ios-glass--header border border-white/10 p-3 pt-1 shadow-[0_8px_30px_rgba(0,0,0,0.35)]">
+            <div className="flex items-center justify-between gap-3 pl-1">
+              <span className="text-[15px] font-semibold tracking-tight">StandClear</span>
+              <button type="button" onClick={handleOpenMore} aria-label="More options" className="press size-11 flex shrink-0 items-center justify-center rounded-full touch-manipulation">
+                <MoreHorizontal className="size-5" aria-hidden="true" />
+              </button>
+            </div>
+            <button
+              type="button"
+              onClick={handleSearchToggle}
+              aria-label="Search stations and plan trips"
+              aria-expanded={false}
+              className="press flex w-full min-h-12 items-center gap-3 rounded-2xl bg-white/[0.08] px-3 py-3 text-left text-gray-200 touch-manipulation"
+            >
+              <Search className="size-5 shrink-0 text-gray-400" aria-hidden="true" />
+              <span className="text-[15px] leading-snug">Where to?</span>
+            </button>
+          </section>
+        </div>
+      )}
 
       {/* One-shot Add-to-Home-Screen nudge. Hides itself on standalone
           PWAs, on desktop, and after a one-time dismiss — so the

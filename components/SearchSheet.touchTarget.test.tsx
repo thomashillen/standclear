@@ -24,6 +24,16 @@ function hitArea(button: HTMLElement): HTMLElement {
 }
 
 describe("SearchSheet expanded control behavior", () => {
+  it("opens More from its header without starting a sheet drag", () => {
+    const onOpenMore = vi.fn();
+    render(<SearchSheet open onClose={vi.fn()} onStationOpen={vi.fn()} onOpenMore={onOpenMore} />);
+    const more = screen.getByRole("button", { name: "More options" });
+    fireEvent.pointerDown(more, { clientY: 80, pointerId: 1 });
+    expect(screen.getByRole("region", { name: "Search and directions" }).hasAttribute("data-glass-active")).toBe(false);
+    fireEvent.click(more);
+    expect(onOpenMore).toHaveBeenCalledOnce();
+  });
+
   it("clears the query and closes the sheet from the expanded targets without starting a drag", () => {
     const onClose = vi.fn();
     render(<SearchSheet open onClose={onClose} onStationOpen={vi.fn()} />);

@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Search,
+  MoreHorizontal,
   X,
   Compass,
   ChevronRight,
@@ -58,6 +59,7 @@ import { CompactControlHitArea } from "./CompactControlHitArea";
 interface Props {
   open: boolean;
   onClose: () => void;
+  onOpenMore?: () => void;
   onStationOpen: (stopId: string) => void;
   /** Tap on a trip plan in directions mode. The parent renders the
    *  trip's legs, station markers, and walking segments on the map.
@@ -209,6 +211,7 @@ function PlaceSearchUnavailable() {
 export default function SearchSheet({
   open,
   onClose,
+  onOpenMore,
   onStationOpen,
   onTripSelect,
   selectedTripKey,
@@ -1054,14 +1057,21 @@ export default function SearchSheet({
                 : "Directions"}
           </span>
         </div>
-        <button
-          onClick={onClose}
-          className="press relative text-white opacity-85 hover:opacity-100 w-9 h-9 -mr-1 flex items-center justify-center rounded-full bg-white/[0.08] hover:bg-white/[0.12] touch-manipulation flex-shrink-0"
-          aria-label="Close panel"
-        >
-          <X className="w-[16px] h-[16px]" strokeWidth={2.5} />
-          <CompactControlHitArea />
-        </button>
+        <div className="flex items-center gap-2 shrink-0">
+          {onOpenMore && (
+            <button type="button" onClick={onOpenMore} aria-label="More options" className="press size-11 flex items-center justify-center rounded-full bg-white/[0.08] touch-manipulation sm:hidden">
+              <MoreHorizontal className="size-5" aria-hidden="true" />
+            </button>
+          )}
+          <button
+            onClick={onClose}
+            className="press relative text-white opacity-85 hover:opacity-100 w-9 h-9 -mr-1 flex items-center justify-center rounded-full bg-white/[0.08] hover:bg-white/[0.12] touch-manipulation flex-shrink-0"
+            aria-label="Close panel"
+          >
+            <X className="w-[16px] h-[16px]" strokeWidth={2.5} />
+            <CompactControlHitArea />
+          </button>
+        </div>
       </div>
 
       {/* ── Mode-specific input row ───────────────────────────────── */}
