@@ -51,14 +51,33 @@ describe("useOnline", () => {
     const cb = vi.fn();
     const unsub = subscribeOnline(cb);
 
+    setNavigatorOnline(false);
     window.dispatchEvent(new Event("offline"));
     expect(cb).toHaveBeenCalled();
     expect(isOnline()).toBe(false);
 
     cb.mockClear();
+    setNavigatorOnline(true);
     window.dispatchEvent(new Event("online"));
     expect(cb).toHaveBeenCalled();
     expect(isOnline()).toBe(true);
+
+    unsub();
+  });
+
+  it("reads a connectivity change before its browser event arrives", async () => {
+    setNavigatorOnline(true);
+    const { isOnline, subscribeOnline } = await freshImport();
+    const cb = vi.fn();
+    const unsub = subscribeOnline(cb);
+
+    setNavigatorOnline(false);
+
+    expect(isOnline()).toBe(false);
+    expect(cb).not.toHaveBeenCalled();
+
+    window.dispatchEvent(new Event("offline"));
+    expect(cb).toHaveBeenCalledOnce();
 
     unsub();
   });

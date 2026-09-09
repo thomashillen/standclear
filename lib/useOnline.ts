@@ -17,7 +17,6 @@ import { useSyncExternalStore } from "react";
 
 const subscribers = new Set<() => void>();
 let bound = false;
-let cachedOnline = true;
 
 function publish() {
   subscribers.forEach((cb) => cb());
@@ -26,15 +25,8 @@ function publish() {
 function bindIfNeeded() {
   if (bound || typeof window === "undefined") return;
   bound = true;
-  cachedOnline = window.navigator.onLine;
-  window.addEventListener("online", () => {
-    cachedOnline = true;
-    publish();
-  });
-  window.addEventListener("offline", () => {
-    cachedOnline = false;
-    publish();
-  });
+  window.addEventListener("online", publish);
+  window.addEventListener("offline", publish);
 }
 
 function subscribe(cb: () => void): () => void {
@@ -46,11 +38,12 @@ function subscribe(cb: () => void): () => void {
 }
 
 function getSnapshot(): boolean {
-  // Re-read on every snapshot — the cached flag is updated by the
-  // event listeners, but on first call (pre-event) we want the live
-  // value. SSR returns true (the optimistic default).
+  // Read the browser directly on every snapshot. DevTools/network
+  // emulation can update navigator.onLine before dispatching the
+  // matching event, so a module-level mirror can briefly be stale.
+  // SSR returns true (the optimistic default).
   if (typeof window === "undefined") return true;
-  return cachedOnline;
+  return window.navigator.onLine;
 }
 
 function getServerSnapshot(): boolean {
@@ -73,7 +66,7 @@ export function useOnline(): boolean {
 export function isOnline(): boolean {
   bindIfNeeded();
   if (typeof window === "undefined") return true;
-  return cachedOnline;
+  return window.navigator.onLine;
 }
 
 /**
