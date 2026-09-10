@@ -134,7 +134,7 @@ export default function MoreSheet({ open, onClose, onSetHome, onSetWork }: Props
   // enough that a fixed full-height sheet works). Both rests sit at
   // 0px so the tap-to-toggle is a visual no-op while drag-down past
   // the dismiss threshold still fires onClose.
-  const { sheetStyle, handlers, contentHandlers, onHandleTap, isDragging } = useSheetDrag({
+  const { sheetStyle, handlers, contentHandlers, onHandleTap } = useSheetDrag({
     halfRestingY: "0px",
     open,
     onDismiss: onClose,
@@ -160,12 +160,11 @@ export default function MoreSheet({ open, onClose, onSetHome, onSetWork }: Props
           absolute z-20 overflow-hidden flex flex-col
           inset-x-0 bottom-0 top-[var(--panel-top-rest)] rounded-t-[28px] border-t border-white/[0.08]
           sm:inset-auto sm:right-3 sm:top-[var(--panel-top-rest)] sm:bottom-3 sm:w-[340px] sm:h-auto sm:rounded-[22px] sm:border sm:border-white/[0.08]
-          ios-glass ios-glass--sheet
+          panel-surface
           shadow-[0_20px_60px_-10px_rgba(0,0,0,0.6)]
           pb-[env(safe-area-inset-bottom)]
         "
         style={sheetStyle}
-        data-glass-active={isDragging || undefined}
       >
         <DragHandle onTap={onHandleTap} ariaLabel="Drag to dismiss" />
 
