@@ -26,7 +26,7 @@ const ENTRIES: Entry[] = [
     date: "2026-05-12",
     title: "MVP build",
     changes: [
-      { type: "changed", text: "Search, Nearby, station, line, and More panels now use a steady near-opaque reading background, keeping text contrast consistent as the map and live train markers move underneath. Reactive glass remains on compact floating controls and transient overlays." },
+      { type: "changed", text: "Search, Nearby, station, line, and More panels now use a steady near-opaque reading background, keeping text contrast consistent as the map and live train markers move underneath. More groups related settings into calmer separated rows with shorter supporting copy; reactive glass remains on compact floating controls and transient overlays." },
       { type: "changed", text: "Mobile home brings search and nearby stations within thumb reach, with More in the search header and a quieter Live indicator that keeps stale and offline warnings visible." },
       { type: "fixed", text: "Trip endpoints now have separate keyboard-accessible edit and clear buttons. Clearing Home or Work stays cleared, focus follows the chosen field, and clearing search text lets you immediately keep typing. Planner fields and compact Search, Near me, and dialog controls now have 44px touch areas while keeping their small icons." },
       { type: "removed", text: "Train taps no longer lock, tilt, zoom, or continuously steer the map camera. Tapping a live train now opens the nearest station on that route, where riders can inspect arrivals and continue into line detail while keeping full control of the map." },

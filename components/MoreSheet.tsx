@@ -55,7 +55,7 @@ import {
 //     clear that anchor specifically)
 //   • About StandClear
 //
-// Rendered as a bottom-sheet panel — same chrome (ios-glass material,
+// Rendered as a bottom-sheet panel — same steady reading surface,
 // drag handle, drag-to-dismiss, X close button, mobile-bottom /
 // desktop-side layout) as NearbyPanel / StationPanel / LinePanel /
 // SearchSheet so the system reads as one design language. Settings and
@@ -272,7 +272,7 @@ export default function MoreSheet({ open, onClose, onSetHome, onSetWork }: Props
             <h3 className="px-2 pb-1.5 text-[10px] font-semibold uppercase tracking-wider text-gray-500">
               Commute
             </h3>
-            <div className="space-y-1.5">
+            <div className="overflow-hidden rounded-2xl border border-white/[0.06] bg-white/[0.025] divide-y divide-white/[0.06]">
               <AnchorRow
                 icon={<Home className="w-4 h-4" />}
                 label="Home"
@@ -301,12 +301,10 @@ export default function MoreSheet({ open, onClose, onSetHome, onSetWork }: Props
                   work ? () => setAnchor("work", null) : undefined
                 }
               />
-              <p className="px-3 pt-1 text-[11px] text-gray-500 leading-snug">
-                Pin an address — the planner uses every nearby station
-                as a candidate so your route stays fastest from
-                whichever direction you&apos;re coming from.
-              </p>
             </div>
+            <p className="px-2 pt-1.5 text-[11px] text-gray-500 leading-snug">
+              Pin Home and Work for faster route planning.
+            </p>
           </section>
 
           {/* ─── Personalize ─── */}
@@ -379,14 +377,14 @@ export default function MoreSheet({ open, onClose, onSetHome, onSetWork }: Props
             <h3 className="px-2 pb-1.5 text-[10px] font-semibold uppercase tracking-wider text-gray-500">
               About
             </h3>
-            <div className="space-y-1.5">
+            <div className="overflow-hidden rounded-2xl border border-white/[0.06] bg-white/[0.025] divide-y divide-white/[0.06]">
               <button
                 type="button"
                 onClick={() => {
                   onClose();
                   setAboutOpen(true);
                 }}
-                className="press w-full flex items-center gap-3 px-3 py-3 rounded-2xl bg-white/[0.04] hover:bg-white/[0.08] touch-manipulation"
+                className="press w-full flex items-center gap-3 px-3 py-3 hover:bg-white/[0.05] touch-manipulation"
               >
                 <span className="flex items-center justify-center w-9 h-9 rounded-full bg-white/[0.08] text-gray-300 flex-shrink-0">
                   <Info className="w-4 h-4" />
@@ -396,7 +394,7 @@ export default function MoreSheet({ open, onClose, onSetHome, onSetWork }: Props
                     About StandClear
                   </span>
                   <span className="block text-[12px] text-gray-400 truncate">
-                    What this app does, where the data comes from
+                    How it works and where data comes from
                   </span>
                 </span>
                 <ChevronRight className="w-4 h-4 text-gray-500 flex-shrink-0" />
@@ -408,7 +406,7 @@ export default function MoreSheet({ open, onClose, onSetHome, onSetWork }: Props
                 href={FEEDBACK_URL}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="press w-full flex items-center gap-3 px-3 py-3 rounded-2xl bg-white/[0.04] hover:bg-white/[0.08] touch-manipulation"
+                className="press w-full flex items-center gap-3 px-3 py-3 hover:bg-white/[0.05] touch-manipulation"
               >
                 <span className="flex items-center justify-center w-9 h-9 rounded-full bg-emerald-500/15 text-emerald-200 ring-1 ring-emerald-500/30 flex-shrink-0">
                   <MessageSquare className="w-4 h-4" />
@@ -418,7 +416,7 @@ export default function MoreSheet({ open, onClose, onSetHome, onSetWork }: Props
                     Send feedback
                   </span>
                   <span className="block text-[12px] text-gray-400 truncate">
-                    Bugs, feature requests, kind words
+                    Report a bug or request a feature
                   </span>
                 </span>
                 <ExternalLink className="w-3.5 h-3.5 text-gray-500 flex-shrink-0" />
@@ -429,7 +427,7 @@ export default function MoreSheet({ open, onClose, onSetHome, onSetWork }: Props
                 href={GITHUB_URL}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="press w-full flex items-center gap-3 px-3 py-3 rounded-2xl bg-white/[0.04] hover:bg-white/[0.08] touch-manipulation"
+                className="press w-full flex items-center gap-3 px-3 py-3 hover:bg-white/[0.05] touch-manipulation"
               >
                 <span className="flex items-center justify-center w-9 h-9 rounded-full bg-white/[0.08] text-gray-300 flex-shrink-0">
                   <GithubIcon className="w-[15px] h-[15px]" />
@@ -439,7 +437,7 @@ export default function MoreSheet({ open, onClose, onSetHome, onSetWork }: Props
                     View source on GitHub
                   </span>
                   <span className="block text-[12px] text-gray-400 truncate">
-                    Source-available · open issues + PRs welcome
+                    Code, open issues, and pull requests
                   </span>
                 </span>
                 <ExternalLink className="w-3.5 h-3.5 text-gray-500 flex-shrink-0" />
@@ -658,7 +656,7 @@ function AnchorRow({
       ? "bg-emerald-500/15 text-emerald-200 ring-1 ring-emerald-500/30"
       : "bg-sky-500/15 text-sky-200 ring-1 ring-sky-500/30";
   return (
-    <div className="relative flex items-stretch w-full rounded-2xl bg-white/[0.04] hover:bg-white/[0.08] touch-manipulation overflow-hidden">
+    <div className="relative flex items-stretch w-full hover:bg-white/[0.05] touch-manipulation">
       <button
         type="button"
         onClick={onTap}
