@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Search,
   MoreHorizontal,
@@ -19,7 +19,7 @@ import { useLines } from "@/lib/subwayData";
 import { useTrains, refreshTrains, type Arrival } from "@/lib/useTrains";
 import { fetchWalkingRoute, type WalkingRoute } from "@/lib/walkingDirections";
 import { useFavorites, useCommute, type CommuteEndpoint } from "@/lib/useFavorites";
-import { useGeolocationState } from "@/lib/useGeolocation";
+import { useGeolocation } from "@/lib/useGeolocation";
 import { useNow } from "@/lib/useNow";
 import { useRecentSearches } from "@/lib/useRecentSearches";
 import { useSheetDrag } from "@/lib/useSheetDrag";
@@ -283,6 +283,12 @@ export default function SearchSheet({
   // routing keeps using a real StationEntry.
   const [tripFrom, setTripFrom] = useState<TripEndpoint | null>(null);
   const [tripTo, setTripTo] = useState<TripEndpoint | null>(null);
+  // Destination-led directions should start from the rider's current
+  // position. This flag keeps the geo watch active only until we get one
+  // usable fix (or the rider supplies a start manually), rather than
+  // leaving GPS running for the lifetime of the open search sheet.
+  const [requestingCurrentLocation, setRequestingCurrentLocation] =
+    useState(false);
   // null = neither field is the active input. Used when both
   // endpoints arrive pre-filled (e.g. via the compass "directions to
   // here" shortcut from a station search result) so the input
@@ -292,11 +298,22 @@ export default function SearchSheet({
   const [plannerPlaceResults, setPlannerPlaceResults] = useState<Suggestion[]>([]);
   const [plannerPlaceError, setPlannerPlaceError] = useState(false);
 
-  // Read-only geo (no permission prompt) for proximity-biased
-  // geocoding. The NearbyPanel mounts useGeolocation on its open
-  // state, so by the time a rider has been in the app long enough
-  // to plan a trip, we usually have a location to bias by.
-  const geo = useGeolocationState();
+  // Stay passive during ordinary search. Once a destination-led
+  // directions flow explicitly asks for Current location, keep the
+  // singleton watch alive only until the origin is resolved.
+  const geo = useGeolocation(
+    open && requestingCurrentLocation && !tripFrom,
+  );
+  const requestGeo = geo.request;
+
+  // Call from the original tap whenever possible: iOS Safari is much
+  // more reliable about showing its permission prompt inside a direct
+  // user gesture than from the render effect that keeps the watch alive.
+  const requestCurrentLocationOrigin = useCallback(() => {
+    if (geo.lat != null && geo.lng != null) return;
+    setRequestingCurrentLocation(true);
+    requestGeo();
+  }, [geo.lat, geo.lng, requestGeo]);
 
   const index = useMemo(() => (lines ? buildStationIndex(lines) : []), [lines]);
 
@@ -385,11 +402,60 @@ export default function SearchSheet({
       setSearchPlaceResults([]);
       setTripFrom(null);
       setTripTo(null);
+      setRequestingCurrentLocation(false);
       setActiveField("from");
       setExpandedPlan(null);
       /* eslint-enable react-hooks/set-state-in-effect */
     }
   }, [open, initialMode]);
+
+  // Finish a destination-led request as soon as the shared geo store
+  // publishes a fix. The endpoint retains the real coordinates for the
+  // walking leg while routing through the nearest subway complex.
+  useEffect(() => {
+    if (
+      !requestingCurrentLocation ||
+      tripFrom ||
+      !tripTo ||
+      geo.lat == null ||
+      geo.lng == null ||
+      index.length === 0
+    ) {
+      return;
+    }
+    const nearestFrom = nearestStations(index, geo.lng, geo.lat, 1)[0];
+    if (!nearestFrom) return;
+    /* eslint-disable react-hooks/set-state-in-effect -- resolving an external geolocation subscription into planner state. */
+    setTripFrom({
+      ...nearestFrom,
+      displayName: "Current location",
+      address: {
+        id: "current-location",
+        name: "Current location",
+        context: "",
+        lng: geo.lng,
+        lat: geo.lat,
+      },
+    });
+    setActiveField(null);
+    setRequestingCurrentLocation(false);
+    /* eslint-enable react-hooks/set-state-in-effect */
+  }, [requestingCurrentLocation, tripFrom, tripTo, geo.lat, geo.lng, index]);
+
+  // A denied/unavailable request should never strand the form. Keep the
+  // destination, focus the From picker, and let the rider enter a start.
+  useEffect(() => {
+    if (
+      !requestingCurrentLocation ||
+      !["denied", "unavailable", "error"].includes(geo.status)
+    ) {
+      return;
+    }
+    /* eslint-disable react-hooks/set-state-in-effect -- geolocation failure hands control back to the manual picker. */
+    setRequestingCurrentLocation(false);
+    setActiveField("from");
+    /* eslint-enable react-hooks/set-state-in-effect */
+  }, [requestingCurrentLocation, geo.status]);
 
   // When the sheet is already mounted and the parent flips
   // initialMode (rider tapped "See all routes" while sheet was
@@ -491,15 +557,23 @@ export default function SearchSheet({
     const f = presetTrip.from ? resolveEndpoint(presetTrip.from) : null;
     const t = presetTrip.to ? resolveEndpoint(presetTrip.to) : null;
     /* eslint-disable react-hooks/set-state-in-effect */
-    if (f) setTripFrom(f);
+    if (f) {
+      setRequestingCurrentLocation(false);
+      setTripFrom(f);
+    }
     if (t) setTripTo(t);
+    // A destination-only preset with no saved Home is the same rider
+    // intent as tapping a place result: route from where I am now.
+    if (t && !f && !tripFrom && !endpointToTrip(home)) {
+      requestCurrentLocationOrigin();
+    }
     // The prefill effect chooses the missing side for partial presets,
     // including a saved Home/Work fallback. Only a complete resolved pair
     // can unconditionally suppress the keyboard here.
     if (f && t) setActiveField(null);
     setMode("directions");
     /* eslint-enable react-hooks/set-state-in-effect */
-  }, [open, presetTrip, stationsByComplexId, index]);
+  }, [open, presetTrip, stationsByComplexId, index, tripFrom, endpointToTrip, home, requestCurrentLocationOrigin]);
 
   // ── Search-mode results.
   const searchResults = useMemo<(StationEntry & { meters?: number })[] | null>(
@@ -877,12 +951,15 @@ export default function SearchSheet({
         };
       }
     }
+    if (!nextFrom) requestCurrentLocationOrigin();
+    else setRequestingCurrentLocation(false);
     setTripFrom(nextFrom);
     setTripTo(destination);
     setActiveField(nextFrom ? null : "from");
   };
 
   const swapTrip = () => {
+    setRequestingCurrentLocation(false);
     setTripFrom(tripTo);
     setTripTo(tripFrom);
   };
@@ -892,6 +969,7 @@ export default function SearchSheet({
     // field will render station.name as before.
     const ep = s as TripEndpoint;
     if (activeField === "from") {
+      setRequestingCurrentLocation(false);
       setTripFrom(ep);
       // Auto-advance to the still-empty side, or null when both are
       // now filled (plans render without re-popping a keyboard).
@@ -913,6 +991,7 @@ export default function SearchSheet({
       address: place,
     };
     if (activeField === "from") {
+      setRequestingCurrentLocation(false);
       setTripFrom(ep);
       setActiveField(!tripTo ? "to" : null);
     } else {
@@ -1030,6 +1109,7 @@ export default function SearchSheet({
                   return;
                 }
                 setMode("search");
+                setRequestingCurrentLocation(false);
                 setPlannerQuery("");
                 setPlannerPlaceResults([]);
                 onTripSelect?.(null);
@@ -1142,6 +1222,7 @@ export default function SearchSheet({
                   setPlannerQuery("");
                 }}
                 onClear={() => {
+                  setRequestingCurrentLocation(false);
                   setTripFrom(null);
                   setActiveField("from");
                   setPlannerQuery("");
@@ -1169,6 +1250,7 @@ export default function SearchSheet({
                   setPlannerQuery("");
                 }}
                 onClear={() => {
+                  setRequestingCurrentLocation(false);
                   setTripTo(null);
                   setActiveField("to");
                   setPlannerQuery("");
@@ -1578,8 +1660,17 @@ export default function SearchSheet({
                       <button
                         type="button"
                         onClick={async () => {
+                          // Start geolocation before the asynchronous
+                          // Mapbox retrieve call so iOS receives the
+                          // request inside the original user gesture.
+                          if (!anchorPickMode) {
+                            requestCurrentLocationOrigin();
+                          }
                           const resolved = await resolveSuggestion(suggestion);
-                          if (!resolved) return;
+                          if (!resolved) {
+                            setRequestingCurrentLocation(false);
+                            return;
+                          }
                           const { place, nearest } = resolved;
                           // Anchor-pick mode: pin this address and
                           // close. No directions side-trip.
