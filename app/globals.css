@@ -240,25 +240,31 @@
   --glass-active: 1;
 }
 
-/* Depth tiers — three thicknesses of glass. Order matches their
-   typical stacking on screen (header above sheet above modal). */
+/* Depth tiers for floating controls and transient modal overlays. */
 @utility ios-glass--header {
   --glass-blur: 22px;
   --glass-saturate: 160%;
   --glass-bg-alpha: 0.42;
   --glass-specular: 0.7;
 }
-@utility ios-glass--sheet {
-  --glass-blur: 32px;
-  --glass-saturate: 180%;
-  --glass-bg-alpha: 0.6;
-  --glass-specular: 1;
-}
 @utility ios-glass--modal {
   --glass-blur: 44px;
   --glass-saturate: 200%;
   --glass-bg-alpha: 0.72;
   --glass-specular: 1.15;
+}
+
+/* Primary map panels are reading surfaces, not floating controls. Keep their
+   text contrast steady as streets, route colors, and train markers move below
+   them; reserve the reactive glass treatment for compact navigation and
+   transient modal surfaces. */
+.panel-surface {
+  isolation: isolate;
+  background-color: rgb(15 18 24 / 0.97);
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.08),
+    inset 0 -1px 0 rgb(255 255 255 / 0.025),
+    0 0 0 0.5px rgb(255 255 255 / 0.05);
 }
 
 /* Authentic NYC subway bullet typography. The MTA standard (Vignelli,
@@ -330,14 +336,6 @@
    `calc(var(--surface-radius) - <inset>)`. We expose the convention
    here rather than hard-coding numbers per component so the radii
    stay in lockstep when a surface's outer corner changes. */
-.ios-glass--sheet {
-  --surface-radius: 28px;
-}
-@media (min-width: 640px) {
-  .ios-glass--sheet {
-    --surface-radius: 22px;
-  }
-}
 .ios-glass--header {
   --surface-radius: 9999px;
 }

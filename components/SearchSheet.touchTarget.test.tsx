@@ -6,7 +6,12 @@ import SearchSheet from "./SearchSheet";
 vi.mock("@/lib/subwayData", () => ({ useLines: () => null }));
 vi.mock("@/lib/useTrains", () => ({ useTrains: () => null }));
 vi.mock("@/lib/useGeolocation", () => ({
-  useGeolocationState: () => ({ lat: null, lng: null }),
+  useGeolocation: () => ({
+    status: "idle",
+    lat: null,
+    lng: null,
+    request: vi.fn(),
+  }),
 }));
 
 beforeEach(() => {

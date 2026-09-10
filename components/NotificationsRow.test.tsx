@@ -42,14 +42,14 @@ describe("NotificationsRow", () => {
     mockState.current = "denied";
     render(<NotificationsRow />);
     expect(screen.getByText(/Notifications blocked/i)).toBeDefined();
-    expect(screen.getByText(/site settings/i)).toBeDefined();
+    expect(screen.getByText(/browser settings/i)).toBeDefined();
   });
 
   it("shows the Enable button on permission default", () => {
     mockState.current = "default";
     render(<NotificationsRow />);
     expect(screen.getByText("Enable")).toBeDefined();
-    expect(screen.getByText(/Get notified when a line is suspended/i)).toBeDefined();
+    expect(screen.getByText(/Severe service alerts only/i)).toBeDefined();
   });
 
   it("shows the Enable button when granted but no sub exists", () => {
@@ -62,7 +62,7 @@ describe("NotificationsRow", () => {
     mockState.current = "granted-subscribed";
     render(<NotificationsRow />);
     expect(screen.getByText("On")).toBeDefined();
-    expect(screen.getByText(/Tap to/i)).toBeDefined();
+    expect(screen.getByText(/no-service alerts/i)).toBeDefined();
   });
 
   it("surfaces a hook error message under the row as an alert", () => {

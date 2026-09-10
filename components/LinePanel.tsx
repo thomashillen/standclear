@@ -324,7 +324,7 @@ export default function LinePanel({ lineId, focusStopId, onClose, onStationOpen 
   // Three-detent bottom sheet: half (default), full, and dismissed. The
   // sheet DOM is always `full` tall — detent switches just animate a
   // translateY. Tap the handle to toggle; swipe down from half to dismiss.
-  const { detent, sheetStyle, handlers, contentHandlers, onHandleTap, isDragging } = useSheetDrag({
+  const { detent, sheetStyle, handlers, contentHandlers, onHandleTap } = useSheetDrag({
     halfRestingY: "calc(100dvh - var(--panel-top-rest) - 50dvh)",
     open: true,
     onDismiss: onClose,
@@ -390,12 +390,11 @@ export default function LinePanel({ lineId, focusStopId, onClose, onStationOpen 
         absolute z-20 overflow-hidden flex flex-col
         inset-x-0 bottom-0 top-[var(--panel-top-rest)] rounded-t-[28px] border-t border-white/[0.08]
         sm:inset-auto sm:right-3 sm:top-[var(--panel-top-rest)] sm:bottom-3 sm:w-[340px] sm:h-auto sm:rounded-[22px] sm:border sm:border-white/[0.08]
-        ios-glass ios-glass--sheet
+        panel-surface
         shadow-[0_20px_60px_-10px_rgba(0,0,0,0.6)]
         pb-[env(safe-area-inset-bottom)]
       "
       style={sheetStyle}
-      data-glass-active={isDragging || undefined}
     >
       {/* Drag handle — tap to toggle half ↔ full, drag to resize or
           dismiss. DragHandle owns the mobile hit-slop contract so this

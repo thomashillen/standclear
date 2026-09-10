@@ -100,8 +100,8 @@ function renderInner(
             Notifications blocked
           </span>
           <span className="block text-[12px] text-gray-400 leading-snug">
-            Enable in your browser&rsquo;s site settings to get push
-            alerts about service disruptions.
+            Enable notifications in browser settings to receive
+            disruption alerts.
           </span>
         </span>
       </div>
@@ -128,8 +128,7 @@ function renderInner(
             Service alert push
           </span>
           <span className="block text-[12px] text-gray-400 leading-snug">
-            Get notified when a line is suspended or has no service.
-            Severe alerts only — quiet otherwise.
+            Severe service alerts only — quiet otherwise.
           </span>
         </span>
         <span className="text-[11px] font-bold uppercase tracking-wider text-emerald-300 flex-shrink-0">
@@ -156,8 +155,7 @@ function renderInner(
           Service alert push
         </span>
         <span className="block text-[12px] text-gray-400 leading-snug">
-          On — you&rsquo;ll get a push when a line is suspended. Tap to
-          turn off.
+          On for suspended lines and no-service alerts.
         </span>
       </span>
       <span className="text-[11px] font-bold uppercase tracking-wider text-emerald-300 flex-shrink-0">
