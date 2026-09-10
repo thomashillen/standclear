@@ -20,8 +20,10 @@ export default function Home() {
   //     show the descriptive title instead of the bare brand.
   // Both inline (not <Script>) because the crawler needs them in the
   // initial SSR payload, not after client-side hydration.
+  // Clip without creating a scroll container: focusing the translated
+  // search input must not scroll the entire map and its top controls.
   return (
-    <div className="h-dvh w-screen overflow-hidden">
+    <div className="h-dvh w-screen overflow-clip">
       <script
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: JSON.stringify(homepageJsonLd()) }}
