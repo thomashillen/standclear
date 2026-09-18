@@ -528,10 +528,13 @@ export default function SearchSheet({
     /* eslint-enable react-hooks/set-state-in-effect */
   }, [open, mode, index.length, home, work, endpointToTrip, tripFrom, tripTo, presetTrip]);
 
-  // Apply presetTrip on open / preset-change. Runs whenever the
-  // preset reference changes, which the parent toggles per "See all
-  // routes" tap, so successive taps land cleanly with current
-  // location and the right destination.
+  // Apply presetTrip on open / preset-change. Planner fields are
+  // deliberately *not* dependencies: a preset initializes the form,
+  // rather than controlling it for the lifetime of the open sheet.
+  // Otherwise clearing, editing, or swapping an endpoint would replay
+  // the preset and immediately undo the rider's action. Station/index
+  // dependencies remain so a preset received before GTFS loads still
+  // resolves once the index is ready.
   useEffect(() => {
     if (!open || !presetTrip) return;
     const resolveEndpoint = (
@@ -573,7 +576,8 @@ export default function SearchSheet({
     if (f && t) setActiveField(null);
     setMode("directions");
     /* eslint-enable react-hooks/set-state-in-effect */
-  }, [open, presetTrip, stationsByComplexId, index, tripFrom, endpointToTrip, home, requestCurrentLocationOrigin]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- `tripFrom` must not replay a resolved preset after a rider edits it.
+  }, [open, presetTrip, stationsByComplexId, index, endpointToTrip, home, requestCurrentLocationOrigin]);
 
   // ── Search-mode results.
   const searchResults = useMemo<(StationEntry & { meters?: number })[] | null>(
