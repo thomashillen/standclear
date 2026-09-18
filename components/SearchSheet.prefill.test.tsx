@@ -193,4 +193,25 @@ describe("SearchSheet directions prefill", () => {
     fireEvent.click(screen.getByRole("button", { name: "Clear to" }));
     expect(screen.getByRole<HTMLInputElement>("textbox", { name: "To station search" }).placeholder).toBe("Search destination");
   });
+
+  it("lets a rider clear and swap endpoints from a complete preset", () => {
+    useCommute.mockReturnValue({ home: null, work: null });
+    render(
+      <SearchSheet open initialMode="directions" onClose={vi.fn()} onStationOpen={vi.fn()}
+        presetTrip={{
+          from: { kind: "station", stopId: "test-home" },
+          to: { kind: "station", stopId: "test-work" },
+        }} />,
+    );
+    expect(screen.getByRole("button", { name: "From: Home station" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "To: Work station" })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Swap from and to" }));
+    expect(screen.getByRole("button", { name: "From: Work station" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "To: Home station" })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Clear from" }));
+    expect(screen.getByRole<HTMLInputElement>("textbox", { name: "From station search" }).placeholder).toBe("Search start");
+    expect(screen.getByRole("button", { name: "To: Home station" })).toBeTruthy();
+  });
 });
