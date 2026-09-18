@@ -13,12 +13,14 @@
 //     launches still render the shell using whatever was cached last.
 //   * Opaque or failed fetches are never cached.
 //
-// Bump CACHE_VERSION when the SW logic changes meaningfully — older caches
-// are purged on activate. Caches written by the previous brand prefix
-// (subwaysurfer-*) are also evicted on activate so a one-time deploy
-// reclaims their storage.
+// Bump CACHE_VERSION whenever a deploy can reuse a static-asset URL. The
+// cache-first strategy deliberately prefers an existing bundle, so a version
+// change is how clients receive rebuilt CSS/JS even if the bundler preserves
+// the pathname. Older caches are purged on activate. Caches written by the
+// previous brand prefix (subwaysurfer-*) are also evicted on activate so a
+// one-time deploy reclaims their storage.
 
-const CACHE_VERSION = "v3";
+const CACHE_VERSION = "v4";
 const STATIC_CACHE = `standclear-static-${CACHE_VERSION}`;
 const DATA_CACHE = `standclear-data-${CACHE_VERSION}`;
 const HTML_CACHE = `standclear-html-${CACHE_VERSION}`;
