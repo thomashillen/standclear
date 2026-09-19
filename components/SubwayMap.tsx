@@ -1089,9 +1089,10 @@ export default function SubwayMap() {
             type="button"
             onClick={handleNearbyToggle}
             aria-label="Find nearby stations"
-            className="pointer-events-auto press flex items-center justify-center size-12 rounded-full ios-glass ios-glass--header border border-white/10 shadow-lg touch-manipulation"
+            className="pointer-events-auto press flex min-h-12 items-center justify-center gap-2 rounded-full ios-glass ios-glass--header border border-white/10 px-3 shadow-lg touch-manipulation"
           >
             <MapPin className="size-5" aria-hidden="true" />
+            <span className="text-[14px] font-semibold">Near me</span>
           </button>
           <section aria-label="Search" className="pointer-events-auto w-full rounded-[24px] ios-glass ios-glass--header border border-white/10 p-3 pt-1 shadow-[0_8px_30px_rgba(0,0,0,0.35)]">
             <div className="flex items-center justify-between gap-3 pl-1">
@@ -1108,7 +1109,7 @@ export default function SubwayMap() {
               className="press flex w-full min-h-12 items-center gap-3 rounded-2xl bg-white/[0.08] px-3 py-3 text-left text-gray-200 touch-manipulation"
             >
               <Search className="size-5 shrink-0 text-gray-400" aria-hidden="true" />
-              <span className="text-[15px] leading-snug">Where to?</span>
+              <span className="text-[15px] leading-snug">Search stations or plan a trip</span>
             </button>
           </section>
         </div>
