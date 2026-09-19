@@ -31,14 +31,7 @@ export type TripSelection = {
   walkFrom?: { lng: number; lat: number; name?: string };
   walkTo?: { lng: number; lat: number; name?: string };
 };
-// LinePicker stays a static import — it's part of the always-visible
-// floating header and renders on first paint, so deferring it would
-// blank out the primary nav until a chunk lands. The rest of the
-// panels render only after a user interaction (or in InstallPrompt's
-// case, after a 60s timer), so we ship them in their own chunks and
-// pay the parse/eval cost lazily. Numbers from the build below — main
-// chunk drops materially without these in it.
-import LinePicker from "./LinePicker";
+import NearbyGlance from "./NearbyGlance";
 
 // Bottom-sheet / overlay panels. All `ssr: false` because they're
 // purely interactive and the static HTML for an unopened sheet would
@@ -849,6 +842,10 @@ export default function SubwayMap() {
           onClose={() => setMoreOpen(false)}
           onSetHome={() => handleSetAnchorFromMore("home")}
           onSetWork={() => handleSetAnchorFromMore("work")}
+          onSelectLine={(id) => {
+            setMoreOpen(false);
+            handleLineSelect(id);
+          }}
         />
         <LiveTrainsPopup
           open={livePulseOpen}
@@ -892,29 +889,31 @@ export default function SubwayMap() {
         />
       </div>
 
+      {/* Compact, location-led arrivals stay near the top of the map.
+          They disappear whenever another panel owns the map space. */}
+      {!panelOpen && <NearbyGlance onStationOpen={handleStationOpen} />}
+
       {/* ── Floating Liquid Glass control row, overlaid on the map ──
           The container itself is pointer-events-none so users can pan
           the map between buttons; each interactive child opts back in
-          with pointer-events-auto. iOS-26-style frosted-glass tiles
+          with pointer-events-auto. Frosted-glass tiles
           float independently rather than sharing a header bar — same
           spatial grouping as Apple Maps' top-row controls. */}
       <div
-        className="absolute inset-x-0 top-0 z-30 flex items-center gap-2 px-3 pointer-events-none transition-opacity duration-200 opacity-100"
+        className="absolute inset-x-0 top-0 z-30 flex items-center justify-end gap-2 px-3 pointer-events-none transition-opacity duration-200 opacity-100"
         style={{
           paddingTop: "calc(max(var(--safe-top), 0.5rem) + 0.5rem)",
         }}
       >
         {/* Brand pill — wordmark + tagline above the fold. Hidden on
-            mobile (the floating row gets crowded by the line picker
-            and 4 buttons; the iOS standalone status-bar carries the
-            brand there). On desktop it doubles as identity AND a
+            mobile to keep the map controls compact. On desktop it doubles as identity AND a
             home affordance — a same-page link to "/" reloads the
             map shell, which is the closest thing to a "back to
             top" we have. */}
         <Link
           href="/"
           aria-label="StandClear — live NYC subway"
-          className="pointer-events-auto hidden sm:flex items-center gap-2 h-11 pl-3 pr-4 rounded-full ios-glass ios-glass--header border border-white/[0.10] shadow-[0_6px_20px_rgba(0,0,0,0.45)] flex-shrink-0 select-none touch-manipulation hover:border-white/[0.18] transition-colors"
+          className="pointer-events-auto mr-auto hidden sm:flex items-center gap-2 h-11 pl-3 pr-4 rounded-full ios-glass ios-glass--header border border-white/[0.10] shadow-[0_6px_20px_rgba(0,0,0,0.45)] flex-shrink-0 select-none touch-manipulation hover:border-white/[0.18] transition-colors"
         >
           <span className="text-[20px] leading-none" aria-hidden>
             🚇
@@ -928,17 +927,6 @@ export default function SubwayMap() {
             </span>
           </span>
         </Link>
-
-        {/* Line picker — primary nav. Already styles itself as a glass
-            pill internally; the wrapping div just owns layout flex and
-            pointer-events. */}
-        <div className="flex-1 min-w-0 pointer-events-auto">
-          <LinePicker
-            lines={lines}
-            selectedLine={selectedLine}
-            onSelect={handleLineSelect}
-          />
-        </div>
 
         {/* Feed health stays visible when the home search surface yields to
             a panel. Mobile uses a quiet label; fleet counts remain available

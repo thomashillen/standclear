@@ -26,7 +26,7 @@ import {
   VERSION_LABEL,
 } from "@/lib/site";
 import { stationNameByStopId } from "@/lib/stopsIndex";
-import { useLines } from "@/lib/subwayData";
+import { LINE_GROUPS, useLines } from "@/lib/subwayData";
 import { useAlerts } from "@/lib/useAlerts";
 import { useCommute } from "@/lib/useFavorites";
 import { useSheetDrag } from "@/lib/useSheetDrag";
@@ -70,6 +70,7 @@ interface Props {
   onSetHome: () => void;
   /** Same idea for Work. */
   onSetWork: () => void;
+  onSelectLine: (routeId: string) => void;
 }
 
 function endpointLabel(
@@ -88,12 +89,13 @@ function endpointLabel(
   return stationNameByStopId(lines, ep.stopId) ?? "Pinned station";
 }
 
-export default function MoreSheet({ open, onClose, onSetHome, onSetWork }: Props) {
+export default function MoreSheet({ open, onClose, onSetHome, onSetWork, onSelectLine }: Props) {
   const data = useAlerts();
   const lines = useLines();
   const { home, work, setAnchor } = useCommute();
   const [alertsOpen, setAlertsOpen] = useState(false);
   const [aboutOpen, setAboutOpen] = useState(false);
+  const [browseLines, setBrowseLines] = useState(false);
 
   // Reactive-glass-on-tilt opt-in. Mirrors the localStorage flag the
   // `<GlassTilt />` provider reads at startup; we mirror it here so
@@ -206,6 +208,7 @@ export default function MoreSheet({ open, onClose, onSetHome, onSetWork }: Props
             <h3 className="px-2 pb-1.5 text-[10px] font-semibold uppercase tracking-wider text-gray-500">
               System
             </h3>
+            <div className="overflow-hidden rounded-2xl bg-white/[0.04] divide-y divide-white/[0.06]">
             <button
               type="button"
               onClick={() => {
@@ -215,7 +218,7 @@ export default function MoreSheet({ open, onClose, onSetHome, onSetWork }: Props
                 onClose();
                 setAlertsOpen(true);
               }}
-              className="press w-full flex items-center gap-3 px-3 py-3 rounded-2xl bg-white/[0.04] hover:bg-white/[0.08] touch-manipulation"
+              className="press w-full flex items-center gap-3 px-3 py-3 hover:bg-white/[0.08] touch-manipulation"
             >
               <span
                 className={`flex items-center justify-center w-9 h-9 rounded-full flex-shrink-0 ${
@@ -258,6 +261,43 @@ export default function MoreSheet({ open, onClose, onSetHome, onSetWork }: Props
               </span>
               <ChevronRight className="w-4 h-4 text-gray-500 flex-shrink-0" />
             </button>
+            {/* Keep route browsing available to keyboard and screen-reader
+                users now that the persistent map dropdown is gone. */}
+            <button
+              type="button"
+              onClick={() => setBrowseLines((value) => !value)}
+              aria-expanded={browseLines}
+              className="press w-full flex items-center gap-3 px-3 py-3 hover:bg-white/[0.08] touch-manipulation"
+            >
+              <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-white/[0.08] text-gray-200">
+                <Train className="size-4" aria-hidden="true" />
+              </span>
+              <span className="flex-1 text-left text-[14px] font-semibold text-gray-100">Browse lines</span>
+              <ChevronRight className={`size-4 text-gray-500 transition-transform ${browseLines ? "rotate-90" : ""}`} aria-hidden="true" />
+            </button>
+            {browseLines && (
+              <div className="flex flex-wrap gap-2 px-2 pb-2" aria-label="Subway lines">
+                {LINE_GROUPS.flatMap((group) => group.lines).map((id) => {
+                  const line = lines?.[id];
+                  if (!line) return null;
+                  return (
+                    <button
+                      type="button"
+                      key={id}
+                      onClick={() => onSelectLine(id)}
+                      aria-label={`${id} — ${line.name}`}
+                      className="press flex size-11 items-center justify-center rounded-xl bg-white/[0.05] touch-manipulation"
+                    >
+                      <span className="nyc-bullet flex size-6 items-center justify-center rounded-full text-[12px] font-bold"
+                        style={{ backgroundColor: line.color, color: line.textColor }}>
+                        {line.id}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+            </div>
           </section>
 
           {/* ─── Notifications ─── */}
