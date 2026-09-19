@@ -16,7 +16,7 @@ describe("MoreSheet grouped reading surfaces", () => {
   it("does not box each grouped row as its own card", () => {
     expect(
       source.match(/rounded-2xl bg-white\/\[0\.04\] hover:bg-white\/\[0\.08\]/g),
-    ).toHaveLength(1);
+    ).toBeNull();
   });
 
   it("keeps the commute explanation concise", () => {
