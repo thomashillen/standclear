@@ -99,10 +99,15 @@ describe("useGeolocation", () => {
     expect(result.current.accuracy).toBe(5);
   });
 
-  it("transitions to 'denied' on PERMISSION_DENIED and clears the watch", async () => {
+  it("transitions to 'denied', clears stale coords, and clears the watch", async () => {
+    let watchSuccess: ((p: GeolocationPosition) => void) | null = null;
     let watchError: ((e: GeolocationPositionError) => void) | null = null;
     geo.watchPosition.mockImplementation(
-      (_ok: unknown, onError: (e: GeolocationPositionError) => void) => {
+      (
+        onSuccess: (p: GeolocationPosition) => void,
+        onError: (e: GeolocationPositionError) => void,
+      ) => {
+        watchSuccess = onSuccess;
         watchError = onError;
         return 7;
       },
@@ -112,11 +117,52 @@ describe("useGeolocation", () => {
     const { result } = renderHook(() => useGeolocation(true));
 
     act(() => {
+      watchSuccess!(makePosition());
+    });
+    expect(result.current.lng).not.toBeNull();
+
+    act(() => {
       watchError!(makeError(PERMISSION_DENIED, "User denied geolocation"));
     });
 
     expect(result.current.status).toBe("denied");
+    expect(result.current.lng).toBeNull();
+    expect(result.current.lat).toBeNull();
+    expect(result.current.accuracy).toBeNull();
     expect(geo.clearWatch).toHaveBeenCalledWith(7);
+  });
+
+  it("invalidates the last fix when the active watch errors", async () => {
+    let watchSuccess: ((p: GeolocationPosition) => void) | null = null;
+    let watchError: ((e: GeolocationPositionError) => void) | null = null;
+    geo.watchPosition.mockImplementation(
+      (
+        onSuccess: (p: GeolocationPosition) => void,
+        onError: (e: GeolocationPositionError) => void,
+      ) => {
+        watchSuccess = onSuccess;
+        watchError = onError;
+        return 8;
+      },
+    );
+
+    const { useGeolocation } = await freshImport();
+    const { result } = renderHook(() => useGeolocation(true));
+
+    act(() => {
+      watchSuccess!(makePosition({ longitude: -73.99, latitude: 40.73 }));
+    });
+    expect(result.current.status).toBe("granted");
+    expect(result.current.lng).toBe(-73.99);
+
+    act(() => {
+      watchError!(makeError(POSITION_UNAVAILABLE, "Watch lost position"));
+    });
+
+    expect(result.current.status).toBe("error");
+    expect(result.current.lng).toBeNull();
+    expect(result.current.lat).toBeNull();
+    expect(result.current.accuracy).toBeNull();
   });
 
   it("ignores POSITION_UNAVAILABLE errors from the fast fast-fix path", async () => {
@@ -158,11 +204,15 @@ describe("useGeolocation", () => {
     expect(geo.getCurrentPosition).not.toHaveBeenCalled();
   });
 
-  it("stops the watch when an active consumer becomes inactive", async () => {
-    geo.watchPosition.mockReturnValue(42);
+  it("stops the watch and clears the last fix when an active consumer becomes inactive", async () => {
+    let watchSuccess: ((p: GeolocationPosition) => void) | null = null;
+    geo.watchPosition.mockImplementation((onSuccess: (p: GeolocationPosition) => void) => {
+      watchSuccess = onSuccess;
+      return 42;
+    });
 
     const { useGeolocation } = await freshImport();
-    const { rerender } = renderHook(
+    const { result, rerender } = renderHook(
       ({ active }) => useGeolocation(active),
       { initialProps: { active: true } },
     );
@@ -170,10 +220,18 @@ describe("useGeolocation", () => {
     expect(geo.watchPosition).toHaveBeenCalledTimes(1);
     expect(geo.clearWatch).not.toHaveBeenCalled();
 
+    act(() => {
+      watchSuccess!(makePosition());
+    });
+    expect(result.current.status).toBe("granted");
+
     rerender({ active: false });
 
     expect(geo.clearWatch).toHaveBeenCalledTimes(1);
     expect(geo.clearWatch).toHaveBeenCalledWith(42);
+    expect(result.current.status).toBe("idle");
+    expect(result.current.lng).toBeNull();
+    expect(result.current.lat).toBeNull();
   });
 
   it("keeps the singleton watch alive until the last active consumer pauses", async () => {
