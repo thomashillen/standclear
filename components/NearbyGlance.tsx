@@ -46,8 +46,10 @@ export default function NearbyGlance({
   const index = useMemo(() => (lines ? buildStationIndex(lines) : []), [lines]);
   const rows = useMemo(
     () =>
-      geo.lng != null && geo.lat != null &&
-      (permission === "granted" || geo.status === "granted")
+      geo.lng != null &&
+      geo.lat != null &&
+      geo.status === "granted" &&
+      permission !== "denied"
         ? nearbyGlanceRows(index, data, { lng: geo.lng, lat: geo.lat }, now / 1000)
         : [],
     [index, data, geo.lng, geo.lat, geo.status, permission, now],
