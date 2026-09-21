@@ -62,7 +62,13 @@ function applyError(err: GeolocationPositionError, fromWatch: boolean) {
   // (with a Try Again button) even for users who had granted permission
   // and were seconds away from a real fix.
   if (!denied && !fromWatch) return;
-  publish({ status: denied ? "denied" : "error", error: err.message });
+  publish({
+    status: denied ? "denied" : "error",
+    lng: null,
+    lat: null,
+    accuracy: null,
+    error: err.message,
+  });
   if (denied && watchId !== null && typeof navigator !== "undefined") {
     navigator.geolocation.clearWatch(watchId);
     watchId = null;
@@ -118,6 +124,19 @@ function stopWatch() {
     watchId = null;
   }
   fastFixRequested = false;
+
+  // A stopped watch no longer represents a current rider location.
+  // Clear the cached fix so passive consumers cannot keep using stale
+  // coordinates after the final active consumer goes away.
+  if (current.status !== "denied" && current.status !== "unavailable") {
+    publish({
+      status: "idle",
+      lng: null,
+      lat: null,
+      accuracy: null,
+      error: null,
+    });
+  }
 }
 
 // Explicit re-request, callable from a user-gesture handler. iOS Safari
