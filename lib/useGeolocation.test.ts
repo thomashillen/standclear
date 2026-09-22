@@ -84,7 +84,6 @@ describe("useGeolocation", () => {
     const { useGeolocation } = await freshImport();
     const { result } = renderHook(() => useGeolocation(true));
 
-    // First the hook should ask for a fast fix and a watch.
     expect(geo.getCurrentPosition).toHaveBeenCalledTimes(1);
     expect(geo.watchPosition).toHaveBeenCalledTimes(1);
     expect(result.current.status).toBe("prompting");
@@ -172,7 +171,6 @@ describe("useGeolocation", () => {
         fastError = onError;
       },
     );
-    // Do nothing on watch — keeps state in 'prompting'.
     geo.watchPosition.mockReturnValue(1);
 
     const { useGeolocation } = await freshImport();
@@ -182,7 +180,6 @@ describe("useGeolocation", () => {
       fastError!(makeError(POSITION_UNAVAILABLE, "Coarse fix failed"));
     });
 
-    // 'prompting', not 'error' — the high-accuracy watch is still alive.
     expect(result.current.status).toBe("prompting");
   });
 
@@ -229,6 +226,32 @@ describe("useGeolocation", () => {
 
     expect(geo.clearWatch).toHaveBeenCalledTimes(1);
     expect(geo.clearWatch).toHaveBeenCalledWith(42);
+    expect(result.current.status).toBe("idle");
+    expect(result.current.lng).toBeNull();
+    expect(result.current.lat).toBeNull();
+  });
+
+  it("ignores a pending coarse-location success after the final active consumer stops", async () => {
+    let fastSuccess: ((p: GeolocationPosition) => void) | null = null;
+    geo.getCurrentPosition.mockImplementation((onSuccess: (p: GeolocationPosition) => void) => {
+      fastSuccess = onSuccess;
+    });
+    geo.watchPosition.mockReturnValue(42);
+
+    const { useGeolocation } = await freshImport();
+    const { result, rerender } = renderHook(
+      ({ active }) => useGeolocation(active),
+      { initialProps: { active: true } },
+    );
+
+    expect(result.current.status).toBe("prompting");
+    rerender({ active: false });
+    expect(result.current.status).toBe("idle");
+
+    act(() => {
+      fastSuccess!(makePosition({ longitude: -73.98, latitude: 40.72 }));
+    });
+
     expect(result.current.status).toBe("idle");
     expect(result.current.lng).toBeNull();
     expect(result.current.lat).toBeNull();
