@@ -37,6 +37,7 @@ let current: GeoState = initial;
 let watchId: number | null = null;
 let fastFixRequested = false;
 let activeConsumers = 0;
+let lifecycleGeneration = 0;
 
 function publish(patch: Partial<GeoState>) {
   current = { ...current, ...patch, updatedAt: Date.now() };
@@ -69,6 +70,7 @@ function applyError(err: GeolocationPositionError, fromWatch: boolean) {
     accuracy: null,
     error: err.message,
   });
+  if (denied) lifecycleGeneration += 1;
   if (denied && watchId !== null && typeof navigator !== "undefined") {
     navigator.geolocation.clearWatch(watchId);
     watchId = null;
@@ -87,6 +89,16 @@ function startWatch() {
     publish({ status: "prompting" });
   }
 
+  const generation = lifecycleGeneration;
+  const applyCurrentPosition = (pos: GeolocationPosition) => {
+    if (generation !== lifecycleGeneration) return;
+    applyPosition(pos);
+  };
+  const applyCurrentError = (err: GeolocationPositionError, fromWatch: boolean) => {
+    if (generation !== lifecycleGeneration) return;
+    applyError(err, fromWatch);
+  };
+
   // Kick off a fast low-accuracy fix in parallel with the high-accuracy
   // watch. iOS Safari's high-accuracy pipeline can take 10-30s indoors
   // before the first callback fires, leaving the UI stuck on "Finding
@@ -96,16 +108,16 @@ function startWatch() {
   if (!fastFixRequested) {
     fastFixRequested = true;
     navigator.geolocation.getCurrentPosition(
-      applyPosition,
-      (err) => applyError(err, false),
+      applyCurrentPosition,
+      (err) => applyCurrentError(err, false),
       { enableHighAccuracy: false, maximumAge: 60_000, timeout: 10_000 },
     );
   }
 
   if (watchId !== null) return;
   watchId = navigator.geolocation.watchPosition(
-    applyPosition,
-    (err) => applyError(err, true),
+    applyCurrentPosition,
+    (err) => applyCurrentError(err, true),
     {
       // High accuracy matters: at normal accuracy (~100m+) the "nearest
       // stop" sort flips between adjacent stations as the fix wanders,
@@ -119,6 +131,10 @@ function startWatch() {
 }
 
 function stopWatch() {
+  // Browser geolocation requests cannot be cancelled. Invalidate callbacks
+  // from this lifecycle before clearing state so a late coarse/watch result
+  // cannot restore coordinates after the final active consumer has stopped.
+  lifecycleGeneration += 1;
   if (watchId !== null && typeof navigator !== "undefined") {
     navigator.geolocation.clearWatch(watchId);
     watchId = null;
