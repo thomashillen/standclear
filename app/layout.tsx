@@ -3,7 +3,6 @@ import { Inter } from "next/font/google";
 import { Analytics } from "@vercel/analytics/next";
 import "./globals.css";
 import RegisterSW from "@/components/RegisterSW";
-import { GlassTilt } from "@/components/GlassTilt";
 import {
   AUTHOR_NAME,
   SITE_DESCRIPTION,
@@ -104,7 +103,6 @@ export default function RootLayout({
         style={{ minHeight: "100dvh" }}
       >
         {children}
-        <GlassTilt />
         <RegisterSW />
         <Analytics />
       </body>
