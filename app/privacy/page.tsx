@@ -191,10 +191,6 @@ export default function PrivacyPage() {
           completes.
         </li>
         <li>
-          <strong>Personalization flags</strong> — e.g. whether you
-          enabled the reactive-glass-on-tilt effect on iOS.
-        </li>
-        <li>
           <strong>Anonymous notification ID</strong> — if you enabled
           push notifications, a random UUID we use to find your
           subscription row on the server. No personal data is derived
