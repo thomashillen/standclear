@@ -216,7 +216,10 @@ for (const routeId of ROUTES) {
   };
 }
 
-const out = { lines, generatedAt: new Date().toISOString() };
+// Geometry is the only data this static asset exposes. Do not include a
+// wall-clock generation timestamp: it would create a deploy-worthy diff on
+// every scheduled refresh even when the MTA data is unchanged.
+const out = { lines };
 fs.writeFileSync(OUTPUT, JSON.stringify(out));
 console.log(`✔ Wrote ${OUTPUT}`);
 console.log(`  ${Object.keys(lines).length} lines, ${Object.values(lines).reduce((n, l) => n + l.stops.length, 0)} stops`);
