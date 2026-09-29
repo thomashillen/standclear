@@ -17,15 +17,19 @@ on:
     - cron: "0 9 * * 2"
   workflow_dispatch:
 
+# The workflow token is only used to check out the scheduled revision. The
+# separately configured fine-grained PAT below creates the PR, which lets the
+# repository's normal pull-request workflows run without manual approval.
 permissions:
-  contents: write
-  pull-requests: write
+  contents: read
 
 jobs:
   refresh:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       - uses: actions/setup-node@v7
         with:
@@ -61,6 +65,10 @@ jobs:
         if: steps.change.outputs.changed == 'true'
         uses: peter-evans/create-pull-request@v8
         with:
+          # Fine-grained PAT scoped to this repository with Contents and Pull
+          # requests set to Read and write. Unlike GITHUB_TOKEN, pull requests
+          # it creates can trigger the repository's normal CI workflows.
+          token: ${{ secrets.GTFS_PR_TOKEN }}
           commit-message: "chore: refresh public/gtfsData.json from MTA"
           title: "chore: refresh GTFS static data"
           branch: chore/refresh-gtfs

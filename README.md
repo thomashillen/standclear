@@ -93,6 +93,15 @@ The repository ships with a pre-built `public/gtfsData.json`. To refresh it:
 
 The build script chooses representative route shapes, associates stops with shape geometry, and emits the static dataset used by the client.
 
+### Automated GTFS refresh
+
+The weekly refresh workflow opens its pull request as a dedicated GitHub App so the repository's normal pull-request checks can run without the approval gate applied to PRs created with `GITHUB_TOKEN`. Before enabling it, create and install a GitHub App on this repository only with these repository permissions:
+
+- **Contents:** Read and write
+- **Pull requests:** Read and write
+
+Set the App's client ID as the `GTFS_REFRESH_APP_CLIENT_ID` repository variable and its private key as the `GTFS_REFRESH_APP_PRIVATE_KEY` repository secret. The workflow requests only those two permissions and uses the short-lived installation token only to create the generated-data PR.
+
 ## Scripts
 
 | Command | What it does |
