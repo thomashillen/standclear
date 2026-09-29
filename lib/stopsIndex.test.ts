@@ -221,6 +221,12 @@ describe("searchStations", () => {
     expect(r[0].name).toBe("14 St-Union Sq");
   });
 
+  it("matches a rider's spelled-out Square query to the MTA Sq abbreviation", () => {
+    const r = searchStations(SAMPLE_INDEX, "Times Square");
+    expect(r).toHaveLength(1);
+    expect(r[0].name).toBe("Times Sq-42 St");
+  });
+
   it("is case-insensitive", () => {
     const r = searchStations(SAMPLE_INDEX, "UNION");
     expect(r[0].name).toBe("14 St-Union Sq");
