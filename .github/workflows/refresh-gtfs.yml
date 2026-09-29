@@ -18,7 +18,7 @@ on:
   workflow_dispatch:
 
 # The workflow token is only used to check out the scheduled revision. The
-# separately configured GitHub App token below creates the PR, which lets the
+# separately configured fine-grained PAT below creates the PR, which lets the
 # repository's normal pull-request workflows run without manual approval.
 permissions:
   contents: read
@@ -61,25 +61,14 @@ jobs:
             echo "changed=true" >> "$GITHUB_OUTPUT"
           fi
 
-      # Configure a GitHub App installed only on this repository with Contents
-      # and Pull requests set to Read and write. Store its client ID in the
-      # GTFS_REFRESH_APP_CLIENT_ID repository variable and its private key in
-      # the GTFS_REFRESH_APP_PRIVATE_KEY repository secret.
-      - name: Create GTFS refresh app token
-        if: steps.change.outputs.changed == 'true'
-        id: app-token
-        uses: actions/create-github-app-token@v3
-        with:
-          client-id: ${{ vars.GTFS_REFRESH_APP_CLIENT_ID }}
-          private-key: ${{ secrets.GTFS_REFRESH_APP_PRIVATE_KEY }}
-          permission-contents: write
-          permission-pull-requests: write
-
       - name: Open PR if data changed
         if: steps.change.outputs.changed == 'true'
         uses: peter-evans/create-pull-request@v8
         with:
-          token: ${{ steps.app-token.outputs.token }}
+          # Fine-grained PAT scoped to this repository with Contents and Pull
+          # requests set to Read and write. Unlike GITHUB_TOKEN, pull requests
+          # it creates can trigger the repository's normal CI workflows.
+          token: ${{ secrets.GTFS_PR_TOKEN }}
           commit-message: "chore: refresh public/gtfsData.json from MTA"
           title: "chore: refresh GTFS static data"
           branch: chore/refresh-gtfs
