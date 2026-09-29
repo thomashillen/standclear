@@ -199,27 +199,33 @@ export function stationNameByStopId(
 // Simple multi-term substring search over station names. The MTA station
 // list is small (~470) and names are short, so a full-text library would
 // be overkill. Splitting by whitespace means "union sq" matches "14 St-
-// Union Sq" without caring about order or extra punctuation.
+// Union Sq" without caring about order or extra punctuation. Normalize the
+// one common MTA abbreviation riders regularly spell out, so "Times Square"
+// also finds the feed's "Times Sq-42 St" name.
+function normalizeStationSearchText(value: string): string {
+  return value.toLowerCase().replace(/\b(?:sq|square)\b/g, "square");
+}
+
 export function searchStations(
   index: StationEntry[],
   query: string,
   limit = 30,
 ): StationEntry[] {
-  const terms = query
-    .toLowerCase()
+  const normalizedQuery = normalizeStationSearchText(query);
+  const terms = normalizedQuery
     .split(/\s+/)
     .map((t) => t.trim())
     .filter(Boolean);
   if (terms.length === 0) return [];
   const scored: { station: StationEntry; score: number }[] = [];
   for (const s of index) {
-    const name = s.name.toLowerCase();
+    const name = normalizeStationSearchText(s.name);
     if (!terms.every((t) => name.includes(t))) continue;
     // Lightweight scoring: earlier match position on the first term wins,
     // with a small bonus when the whole query starts the name. Good enough
     // to float "Union Square" above "14 St-Union Sq" if both match.
     const first = name.indexOf(terms[0]);
-    const prefixBonus = name.startsWith(query.toLowerCase()) ? -100 : 0;
+    const prefixBonus = name.startsWith(normalizedQuery) ? -100 : 0;
     scored.push({ station: s, score: first + prefixBonus });
   }
   scored.sort((a, b) => a.score - b.score);
