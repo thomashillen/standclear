@@ -12,7 +12,7 @@
 //
 // This test pins the convention across the five marketing routes
 // (/about /changelog /privacy /status /terms) by reading the file
-// source — importing the page modules drags `next/font/google` +
+// source — importing the page modules drags `next/font/local` +
 // `next/link` into a node-only test runner, which the Vitest env
 // can't resolve without a Next runtime. Source-string assertion is
 // good enough because the title literal is what the bug looks like:
