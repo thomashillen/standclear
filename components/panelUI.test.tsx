@@ -766,3 +766,51 @@ describe("StationRow loading vs empty", () => {
     expect(screen.getByText("3m")).toBeTruthy();
   });
 });
+
+describe("StationRow compact accessibility", () => {
+  function row(props: Partial<StationRowProps> = {}) {
+    return render(
+      <StationRow
+        station={{ ...origin, name: "Times Sq-42 St / Port Authority Bus Terminal", meters: 300 }}
+        arrivals={[makeArrival("compact", 500)]}
+        routeColors={routeColors}
+        now={NOW_MS}
+        isFavorite={false}
+        onFavoriteToggle={vi.fn()}
+        onTap={vi.fn()}
+        {...props}
+      />,
+    );
+  }
+
+  it.each(["home", "work"] as const)("keeps the %s badge readable without exposing its decorative icon", (anchor) => {
+    row({ anchor });
+    const badge = screen.getByText(anchor === "home" ? "Home" : "Work");
+    expect(badge.classList.contains("text-xs")).toBe(true);
+    expect(badge.classList.contains("h-5")).toBe(false);
+    expect(badge.querySelector("svg")?.getAttribute("aria-hidden")).toBe("true");
+  });
+
+  it("retains the full station name, directions, arrivals and independent actions", () => {
+    const onTap = vi.fn();
+    const onFavoriteToggle = vi.fn();
+    row({ onTap, onFavoriteToggle });
+    const name = "Times Sq-42 St / Port Authority Bus Terminal";
+    expect(screen.getByText(name).classList.contains("break-words")).toBe(true);
+    expect(screen.getByLabelText("Northbound")).toBeTruthy();
+    expect(screen.getByLabelText("Southbound")).toBeTruthy();
+    expect(screen.getByText("8m")).toBeTruthy();
+    screen.getByRole("button", { name: `See all trains at ${name}` }).click();
+    expect(onTap).toHaveBeenCalledOnce();
+    screen.getByRole("button", { name: "Add to favorites" }).click();
+    expect(onFavoriteToggle).toHaveBeenCalledOnce();
+    expect(onTap).toHaveBeenCalledOnce();
+  });
+
+  it("uses readable secondary copy for a loaded empty station", () => {
+    row({ arrivals: [], hasData: true });
+    const empty = screen.getByText("No upcoming trains");
+    expect(empty.classList.contains("text-xs")).toBe(true);
+    expect(empty.classList.contains("text-gray-400")).toBe(true);
+  });
+});
