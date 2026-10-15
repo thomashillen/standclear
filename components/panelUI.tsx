@@ -83,15 +83,15 @@ export function RouteBullet({
 export function AnchorBadge({ anchor }: { anchor: CommuteAnchor }) {
   if (anchor === "home") {
     return (
-      <span className="inline-flex items-center gap-1 px-1.5 h-5 rounded-full text-[10px] font-bold bg-emerald-300/15 text-emerald-200 ring-1 ring-emerald-300/30">
-        <Home className="w-3 h-3" />
+      <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs leading-4 font-semibold bg-emerald-300/20 text-emerald-100 ring-1 ring-emerald-300/30">
+        <Home className="w-3.5 h-3.5 flex-shrink-0" aria-hidden="true" />
         Home
       </span>
     );
   }
   return (
-    <span className="inline-flex items-center gap-1 px-1.5 h-5 rounded-full text-[10px] font-bold bg-sky-300/15 text-sky-200 ring-1 ring-sky-300/30">
-      <Briefcase className="w-3 h-3" />
+    <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs leading-4 font-semibold bg-sky-300/20 text-sky-100 ring-1 ring-sky-300/30">
+      <Briefcase className="w-3.5 h-3.5 flex-shrink-0" aria-hidden="true" />
       Work
     </span>
   );
@@ -186,7 +186,7 @@ function DirectionArrivalsRow({
         aria-label={direction === "N" ? "Northbound" : "Southbound"}
       />
       {arrivals.length === 0 ? (
-        <span className="text-[11px] text-gray-600">—</span>
+        <span className="text-xs text-gray-400">—</span>
       ) : (
         <div className="flex flex-wrap gap-x-3 gap-y-1 min-w-0">
           {arrivals.map((a, i) => {
@@ -219,7 +219,7 @@ function DirectionArrivalsRow({
             return (
               <span
                 key={`${a.tripId}-${i}`}
-                className="inline-flex items-center gap-1 text-[11px]"
+                className="inline-flex items-center gap-1 text-xs"
               >
                 <RouteBullet
                   id={info.displayId}
@@ -238,7 +238,7 @@ function DirectionArrivalsRow({
                 </span>
                 {style.label && (
                   <span
-                    className={`ml-0.5 px-1.5 py-[1px] rounded-full text-[9px] leading-none uppercase tracking-wider ${style.pill}`}
+                    className={`ml-0.5 px-1.5 py-[1px] rounded-full text-[0.625rem] leading-4 uppercase tracking-wide ${style.pill}`}
                   >
                     {style.label}
                   </span>
@@ -368,7 +368,7 @@ export function StationRow({
             {station.name}
           </p>
           {station.meters !== undefined && (
-            <p className="text-[11px] text-gray-500 mt-0.5">
+            <p className="text-xs text-gray-400 mt-0.5">
               {formatWalkSummary(station.meters)}
             </p>
           )}
@@ -395,7 +395,7 @@ export function StationRow({
               />
             </div>
           ) : hasData ? (
-            <p className="text-[11px] text-gray-600 mt-2">No upcoming trains</p>
+            <p className="text-xs text-gray-400 mt-2">No upcoming trains</p>
           ) : (
             // Feed still loading (cold boot, no cache, pre-first-poll):
             // an empty list is unknown, not "no trains". The row's name
