@@ -763,14 +763,14 @@ export default function SubwayMap() {
 
   return (
     <div
-      className="relative flex flex-col h-full bg-gray-950 text-white"
+      className="subway-shell relative flex flex-col h-full bg-gray-950 text-white"
       style={{
         // Panel top resting edge — shared CSS variable consumed by
         // every bottom-sheet panel so they all start at the same
         // distance from the top of the screen, clearing the floating
         // control row (h-11 ≈ 2.75rem) plus safe-area and a small gap.
         ["--panel-top-rest" as string]:
-          "calc(max(var(--safe-top), 0.5rem) + 4rem)",
+          "var(--map-panel-top)",
       }}
     >
       {/* ── Map fills the full viewport ── */}
@@ -893,215 +893,213 @@ export default function SubwayMap() {
           They disappear whenever another panel owns the map space. */}
       {!panelOpen && <NearbyGlance onStationOpen={handleStationOpen} />}
 
-      {/* ── Floating Liquid Glass control row, overlaid on the map ──
-          The container itself is pointer-events-none so users can pan
-          the map between buttons; each interactive child opts back in
-          with pointer-events-auto. Frosted-glass tiles
-          float independently rather than sharing a header bar — same
-          spatial grouping as Apple Maps' top-row controls. */}
-      <div
-        className="absolute inset-x-0 top-0 z-30 flex items-center justify-end gap-2 px-3 pointer-events-none transition-opacity duration-200 opacity-100"
-        style={{
-          paddingTop: "calc(max(var(--safe-top), 0.5rem) + 0.5rem)",
-        }}
-      >
-        {/* Brand pill — wordmark + tagline above the fold. Hidden on
-            mobile to keep the map controls compact. On desktop it doubles as identity AND a
-            home affordance — a same-page link to "/" reloads the
-            map shell, which is the closest thing to a "back to
-            top" we have. */}
-        <Link
-          href="/"
-          aria-label="StandClear — live NYC subway"
-          className="pointer-events-auto mr-auto hidden sm:flex items-center gap-2 h-11 pl-3 pr-4 rounded-full ios-glass ios-glass--header border border-white/[0.10] shadow-[0_6px_20px_rgba(0,0,0,0.45)] flex-shrink-0 select-none touch-manipulation hover:border-white/[0.18] transition-colors"
-        >
-          <span className="text-[20px] leading-none" aria-hidden>
-            🚇
-          </span>
-          <span className="leading-tight">
-            <span className="block text-[13px] font-black tracking-tight text-white">
-              StandClear
+      {/* Mobile actions share a bottom dock with search, keeping the
+          upper-right system region clear. Desktop retains its top row.
+          Only interactive children intercept map gestures. */}
+      <div className="map-home-controls" data-panel-open={panelOpen}>
+        <div className="map-toolbar flex flex-wrap items-center justify-end gap-2 pointer-events-none">
+          {/* Brand pill — wordmark + tagline above the fold. Hidden on
+              mobile to keep the map controls compact. On desktop it doubles as identity AND a
+              home affordance — a same-page link to "/" reloads the
+              map shell, which is the closest thing to a "back to
+              top" we have. */}
+          <Link
+            href="/"
+            aria-label="StandClear — live NYC subway"
+            className="pointer-events-auto mr-auto hidden sm:flex items-center gap-2 h-11 pl-3 pr-4 rounded-full ios-glass ios-glass--header border border-white/[0.10] shadow-[0_6px_20px_rgba(0,0,0,0.45)] flex-shrink-0 select-none touch-manipulation hover:border-white/[0.18] transition-colors"
+          >
+            <span className="text-[20px] leading-none" aria-hidden>
+              🚇
             </span>
-            <span className="block text-[10px] font-medium tracking-wide text-gray-400">
-              Live NYC subway
+            <span className="leading-tight">
+              <span className="block text-[13px] font-black tracking-tight text-white">
+                StandClear
+              </span>
+              <span className="block text-[10px] font-medium tracking-wide text-gray-400">
+                Live NYC subway
+              </span>
             </span>
-          </span>
-        </Link>
+          </Link>
 
-        {/* Feed health stays visible when the home search surface yields to
-            a panel. Mobile uses a quiet label; fleet counts remain available
-            in System Pulse without competing with the map. */}
-        <button
-          type="button"
-          onClick={() => setLivePulseOpen(true)}
-          aria-label={
-            !online
-              ? "Offline — tap for details"
-              : liveFeedState === "connecting"
-                ? "Connecting to live feed"
-                : feedDegraded
-                  ? `Feed degraded after ${feedHealth.consecutiveFailures} retries — tap for details`
-                  : stale
-                    ? "Live feed is stale — tap for details"
-                    : `${totalTrains} trains live — tap for system pulse`
-          }
-          aria-pressed={livePulseOpen}
-          title={
-            !online
-              ? "Offline — showing last-known data"
-              : liveFeedState === "connecting"
-                ? "Connecting…"
-                : feedDegraded
-                  ? `Feed degraded — ${feedHealth.consecutiveFailures} failed polls (${feedHealth.lastError ?? "network error"})`
-                  : stale
-                    ? "Stale — last refresh more than a minute ago"
-                    : `${totalTrains} trains live`
-          }
-          className="pointer-events-auto press flex items-center gap-1.5 min-h-11 px-3 flex-shrink-0 rounded-full ios-glass ios-glass--header border border-white/[0.10] shadow-[0_6px_20px_rgba(0,0,0,0.45)] touch-manipulation"
-        >
-          <span className="relative flex w-2 h-2">
-            <span
-              className={`absolute inset-0 rounded-full ${
-                !online
-                  ? "bg-rose-400"
-                  : liveFeedState === "connecting"
-                    ? "bg-gray-500"
-                    : feedDegraded
-                      ? "bg-rose-400"
-                      : stale
-                        ? "bg-amber-400"
-                        : "bg-emerald-400"
-              } shadow-[0_0_8px_currentColor]`}
-              style={{
-                color: !online
-                  ? "rgba(251,113,133,0.65)"
-                  : liveFeedState === "connecting"
-                    ? "rgba(107,114,128,0.5)"
-                    : feedDegraded
-                      ? "rgba(251,113,133,0.65)"
-                      : stale
-                        ? "rgba(251,191,36,0.6)"
-                        : "rgba(52,211,153,0.7)",
-              }}
-            />
-            {online && data && !stale && !feedDegraded && (
-              // motion-safe gate: the ring pulse is purely decorative
-              // emphasis on "live" — the colored dot + glow underneath
-              // already carries the state signal. A rider with
-              // `prefers-reduced-motion` gets the static dot, no ping.
-              <span className="absolute inset-0 rounded-full bg-emerald-400 motion-safe:animate-ping opacity-60" />
-            )}
-          </span>
-          <span className={`text-[12px] font-semibold leading-none ${
-            !online || feedDegraded ? "text-rose-200" : stale ? "text-amber-200" : "text-gray-100"
-          }`}>
-            {!online ? "Offline" : liveFeedState === "connecting" ? "Connecting…" : feedDegraded ? "Feed issue" : stale ? "Stale" : "Live"}
-          </span>
-          {online && data && !stale && !feedDegraded && (
-            <span className="hidden sm:flex items-center gap-1 text-[12px] tabular-nums text-gray-300">
-              <TrainFront className="w-3 h-3" aria-hidden="true" />
-              {totalTrains}
-            </span>
-          )}
-        </button>
-
-        {/* Screen-reader announcement for live-feed state transitions.
-            The pill above has an `aria-label` that fires only when
-            focus lands on the button — a rider whose SR focus is
-            elsewhere never hears the feed flip from live → stale →
-            offline. This sibling `role="status"` (implicit
-            aria-live=polite, aria-atomic=true) re-reads the state
-            sentence whenever it changes. Train count is deliberately
-            excluded from the announcement string — see
-            `lib/liveFeedState.ts::liveFeedAnnouncement` — so the
-            region doesn't fire on every 8 s poll tick. */}
-        <span role="status" className="sr-only">
-          {liveFeedAnnouncement(liveFeedState)}
-        </span>
-
-        {/* Search & directions — Apple-Maps-style sheet for finding a
-            station or planning a trip. Mutually exclusive with the
-            other panels; opening it closes Near Me / Line / Station. */}
-        <button
-          onClick={handleSearchToggle}
-          aria-label="Search stations and plan trips"
-          aria-pressed={searchOpen}
-          className={`pointer-events-auto press hidden sm:flex items-center justify-center w-11 h-11 rounded-full touch-manipulation flex-shrink-0 transition-colors border shadow-[0_6px_20px_rgba(0,0,0,0.45)] ${
-            searchOpen
-              ? "bg-white text-gray-950 border-white/30 shadow-[0_6px_20px_rgba(255,255,255,0.20)]"
-              : "ios-glass ios-glass--header text-gray-100 border-white/[0.10]"
-          }`}
-        >
-          <Search className="w-[18px] h-[18px]" />
-        </button>
-
-        {/* Near-me — taps fly the map to the rider's location AND open
-            the Near Me panel. When already centered + panel open, a
-            re-tap re-centers (the signal counter increments either
-            way). Active state mirrors the panel's open state. */}
-        <button
-          onClick={handleNearbyToggle}
-          aria-label="Find nearby stations"
-          aria-pressed={nearbyOpen}
-          className={`pointer-events-auto press hidden sm:flex items-center justify-center w-11 h-11 rounded-full touch-manipulation flex-shrink-0 transition-colors border shadow-[0_6px_20px_rgba(0,0,0,0.45)] ${
-            nearbyOpen
-              ? "bg-white text-gray-950 border-white/30 shadow-[0_6px_20px_rgba(255,255,255,0.20)]"
-              : "ios-glass ios-glass--header text-gray-100 border-white/[0.10]"
-          }`}
-        >
-          <MapPin className="w-[18px] h-[18px]" />
-        </button>
-
-        {/* More menu — service alerts, Home/Work address, About.
-            Sits on the far right of the floating header, matching the
-            iOS convention that "settings / overflow actions" live at
-            the trailing edge. */}
-        <button
-          onClick={handleOpenMore}
-          aria-label="More options"
-          aria-pressed={moreOpen}
-          className="pointer-events-auto press hidden sm:flex items-center justify-center w-11 h-11 rounded-full touch-manipulation flex-shrink-0 transition-colors border shadow-[0_6px_20px_rgba(0,0,0,0.45)] ios-glass ios-glass--header text-gray-100 border-white/[0.10]"
-        >
-          <MoreHorizontal className="w-[18px] h-[18px]" />
-        </button>
-      </div>
-
-      {/* The resting search surface yields its space to every open panel.
-          Keep attribution below it and avoid requesting location on mount. */}
-      {!panelOpen && (
-        <div
-          className="absolute inset-x-3 z-20 sm:hidden flex flex-col items-end gap-3 pointer-events-none"
-          style={{ bottom: "calc(max(var(--safe-bottom), 0.5rem) + 1.5rem)" }}
-        >
+          {/* Feed health stays reachable when a panel replaces search.
+              On mobile it moves to the upper-left, clear of the right
+              camera region; fleet counts remain in System Pulse. */}
           <button
             type="button"
-            onClick={handleNearbyToggle}
-            aria-label="Find nearby stations"
-            className="pointer-events-auto press flex min-h-12 items-center justify-center gap-2 rounded-full ios-glass ios-glass--header border border-white/10 px-3 shadow-lg touch-manipulation"
+            onClick={() => setLivePulseOpen(true)}
+            aria-label={
+              !online
+                ? "Offline — tap for details"
+                : liveFeedState === "connecting"
+                  ? "Connecting to live feed"
+                  : feedDegraded
+                    ? `Feed degraded after ${feedHealth.consecutiveFailures} retries — tap for details`
+                    : stale
+                      ? "Live feed is stale — tap for details"
+                      : `${totalTrains} trains live — tap for system pulse`
+            }
+            aria-pressed={livePulseOpen}
+            title={
+              !online
+                ? "Offline — showing last-known data"
+                : liveFeedState === "connecting"
+                  ? "Connecting…"
+                  : feedDegraded
+                    ? `Feed degraded — ${feedHealth.consecutiveFailures} failed polls (${feedHealth.lastError ?? "network error"})`
+                    : stale
+                      ? "Stale — last refresh more than a minute ago"
+                      : `${totalTrains} trains live`
+            }
+            className="pointer-events-auto press flex items-center gap-1.5 min-h-11 px-3 flex-shrink-0 rounded-full ios-glass ios-glass--header border border-white/[0.10] shadow-[0_6px_20px_rgba(0,0,0,0.45)] touch-manipulation"
           >
-            <MapPin className="size-5" aria-hidden="true" />
-            <span className="text-[14px] font-semibold">Near me</span>
+            <span className="relative flex w-2 h-2">
+              <span
+                className={`absolute inset-0 rounded-full ${
+                  !online
+                    ? "bg-rose-400"
+                    : liveFeedState === "connecting"
+                      ? "bg-gray-500"
+                      : feedDegraded
+                        ? "bg-rose-400"
+                        : stale
+                          ? "bg-amber-400"
+                          : "bg-emerald-400"
+                } shadow-[0_0_8px_currentColor]`}
+                style={{
+                  color: !online
+                    ? "rgba(251,113,133,0.65)"
+                    : liveFeedState === "connecting"
+                      ? "rgba(107,114,128,0.5)"
+                      : feedDegraded
+                        ? "rgba(251,113,133,0.65)"
+                        : stale
+                          ? "rgba(251,191,36,0.6)"
+                          : "rgba(52,211,153,0.7)",
+                }}
+              />
+              {online && data && !stale && !feedDegraded && (
+                // motion-safe gate: the ring pulse is purely decorative
+                // emphasis on "live" — the colored dot + glow underneath
+                // already carries the state signal. A rider with
+                // `prefers-reduced-motion` gets the static dot, no ping.
+                <span className="absolute inset-0 rounded-full bg-emerald-400 motion-safe:animate-ping opacity-60" />
+              )}
+            </span>
+            <span className={`text-[12px] font-semibold leading-none ${
+              !online || feedDegraded ? "text-rose-200" : stale ? "text-amber-200" : "text-gray-100"
+            }`}>
+              {!online ? "Offline" : liveFeedState === "connecting" ? "Connecting…" : feedDegraded ? "Feed issue" : stale ? "Stale" : "Live"}
+            </span>
+            {online && data && !stale && !feedDegraded && (
+              <span className="hidden sm:flex items-center gap-1 text-[12px] tabular-nums text-gray-300">
+                <TrainFront className="w-3 h-3" aria-hidden="true" />
+                {totalTrains}
+              </span>
+            )}
           </button>
-          <section aria-label="Search" className="pointer-events-auto w-full rounded-[24px] ios-glass ios-glass--header border border-white/10 p-3 pt-1 shadow-[0_8px_30px_rgba(0,0,0,0.35)]">
-            <div className="flex items-center justify-between gap-3 pl-1">
-              <span className="text-[15px] font-semibold tracking-tight">StandClear</span>
-              <button type="button" onClick={handleOpenMore} aria-label="More options" className="press size-11 flex shrink-0 items-center justify-center rounded-full touch-manipulation">
-                <MoreHorizontal className="size-5" aria-hidden="true" />
-              </button>
-            </div>
+
+          {/* Screen-reader announcement for live-feed state transitions.
+              The pill above has an `aria-label` that fires only when
+              focus lands on the button — a rider whose SR focus is
+              elsewhere never hears the feed flip from live → stale →
+              offline. This sibling `role="status"` (implicit
+              aria-live=polite, aria-atomic=true) re-reads the state
+              sentence whenever it changes. Train count is deliberately
+              excluded from the announcement string — see
+              `lib/liveFeedState.ts::liveFeedAnnouncement` — so the
+              region doesn't fire on every 8 s poll tick. */}
+          <span role="status" className="sr-only">
+            {liveFeedAnnouncement(liveFeedState)}
+          </span>
+
+          {!panelOpen && (
             <button
               type="button"
-              onClick={handleSearchToggle}
-              aria-label="Search stations and plan trips"
-              aria-expanded={false}
-              className="press flex w-full min-h-12 items-center gap-3 rounded-2xl bg-white/[0.08] px-3 py-3 text-left text-gray-200 touch-manipulation"
+              onClick={handleNearbyToggle}
+              aria-label="Find nearby stations"
+              className="pointer-events-auto press flex sm:hidden min-h-12 items-center justify-center gap-2 rounded-full ios-glass ios-glass--header border border-white/10 px-3 shadow-lg touch-manipulation"
             >
-              <Search className="size-5 shrink-0 text-gray-400" aria-hidden="true" />
-              <span className="text-[15px] leading-snug">Search stations or plan a trip</span>
+              <MapPin className="size-5" aria-hidden="true" />
+              <span className="text-[14px] font-semibold">Near me</span>
             </button>
-          </section>
+          )}
+
+          {/* Search & directions — Apple-Maps-style sheet for finding a
+              station or planning a trip. Mutually exclusive with the
+              other panels; opening it closes Near Me / Line / Station. */}
+          <button
+            onClick={handleSearchToggle}
+            aria-label="Search stations and plan trips"
+            aria-pressed={searchOpen}
+            className={`pointer-events-auto press hidden sm:flex items-center justify-center w-11 h-11 rounded-full touch-manipulation flex-shrink-0 transition-colors border shadow-[0_6px_20px_rgba(0,0,0,0.45)] ${
+              searchOpen
+                ? "bg-white text-gray-950 border-white/30 shadow-[0_6px_20px_rgba(255,255,255,0.20)]"
+                : "ios-glass ios-glass--header text-gray-100 border-white/[0.10]"
+            }`}
+          >
+            <Search className="w-[18px] h-[18px]" />
+          </button>
+
+          {/* Near-me — taps fly the map to the rider's location AND open
+              the Near Me panel. When already centered + panel open, a
+              re-tap re-centers (the signal counter increments either
+              way). Active state mirrors the panel's open state. */}
+          <button
+            onClick={handleNearbyToggle}
+            aria-label="Find nearby stations"
+            aria-pressed={nearbyOpen}
+            className={`pointer-events-auto press hidden sm:flex items-center justify-center w-11 h-11 rounded-full touch-manipulation flex-shrink-0 transition-colors border shadow-[0_6px_20px_rgba(0,0,0,0.45)] ${
+              nearbyOpen
+                ? "bg-white text-gray-950 border-white/30 shadow-[0_6px_20px_rgba(255,255,255,0.20)]"
+                : "ios-glass ios-glass--header text-gray-100 border-white/[0.10]"
+            }`}
+          >
+            <MapPin className="w-[18px] h-[18px]" />
+          </button>
+
+          {/* More menu — service alerts, Home/Work address, About.
+              Sits on the far right of the floating header, matching the
+              iOS convention that "settings / overflow actions" live at
+              the trailing edge. */}
+          <button
+            onClick={handleOpenMore}
+            aria-label="More options"
+            aria-pressed={moreOpen}
+            className="pointer-events-auto press hidden sm:flex items-center justify-center w-11 h-11 rounded-full touch-manipulation flex-shrink-0 transition-colors border shadow-[0_6px_20px_rgba(0,0,0,0.45)] ios-glass ios-glass--header text-gray-100 border-white/[0.10]"
+          >
+            <MoreHorizontal className="w-[18px] h-[18px]" />
+          </button>
         </div>
-      )}
+
+        {/* The resting search surface yields its space to every open panel.
+            Keep attribution below it and avoid requesting location on mount. */}
+        {!panelOpen && (
+          <div
+            className="w-full sm:hidden pointer-events-none"
+          >
+            <section aria-label="Search" className="pointer-events-auto w-full rounded-[24px] ios-glass ios-glass--header border border-white/10 p-3 pt-1 shadow-[0_8px_30px_rgba(0,0,0,0.35)]">
+              <div className="flex items-center justify-between gap-3 pl-1">
+                <span className="text-[15px] font-semibold tracking-tight">StandClear</span>
+                <button type="button" onClick={handleOpenMore} aria-label="More options" className="press size-11 flex shrink-0 items-center justify-center rounded-full touch-manipulation">
+                  <MoreHorizontal className="size-5" aria-hidden="true" />
+                </button>
+              </div>
+              <button
+                type="button"
+                onClick={handleSearchToggle}
+                aria-label="Search stations and plan trips"
+                aria-expanded={false}
+                className="press flex w-full min-h-12 items-center gap-3 rounded-2xl bg-white/[0.08] px-3 py-3 text-left text-gray-200 touch-manipulation"
+              >
+                <Search className="size-5 shrink-0 text-gray-400" aria-hidden="true" />
+                <span className="text-[15px] leading-snug">Search stations or plan a trip</span>
+              </button>
+            </section>
+          </div>
+        )}
+
+      </div>
+
 
       {/* One-shot Add-to-Home-Screen nudge. Hides itself on standalone
           PWAs, on desktop, and after a one-time dismiss — so the

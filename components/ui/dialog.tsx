@@ -47,7 +47,7 @@ const DialogContent = React.forwardRef<
       ref={ref}
       className={cn(
         // Base layout — mobile bottom sheet by default.
-        "fixed inset-x-0 bottom-0 z-50 grid w-full gap-4 border bg-background p-6 shadow-lg duration-200",
+        "safe-area-dialog fixed inset-x-0 bottom-0 z-50 grid w-full gap-4 border bg-background p-6 shadow-lg duration-200",
         "rounded-t-[28px]",
         // Desktop override — centered modal with max-w-lg, all
         // corners rounded.

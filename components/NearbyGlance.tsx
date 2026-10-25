@@ -62,7 +62,7 @@ export default function NearbyGlance({
       role="region"
       aria-label="Nearby train arrivals"
       className="absolute left-3 z-20 flex flex-col items-start gap-1.5 sm:hidden"
-      style={{ top: "calc(max(var(--safe-top), 0.5rem) + 4rem)" }}
+      style={{ top: "var(--map-panel-top)", left: "max(var(--safe-left), 0.75rem)" }}
     >
       {rows.map((row) => {
         // Badges name the actual next trains, not every service that
