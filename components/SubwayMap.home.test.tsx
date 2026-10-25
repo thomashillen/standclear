@@ -49,6 +49,21 @@ describe("mobile home shell", () => {
     expect(screen.getByRole("region", { name: "Search" })).toBeTruthy();
   });
 
+  it("keeps mobile Near me and More reachable and restores the home dock after dismissal", () => {
+    render(<SubwayMap />);
+    fireEvent.click(screen.getByText("Near me").closest("button")!);
+    expect(screen.queryByRole("region", { name: "Search" })).toBeNull();
+    expect(screen.getByRole("region", { name: "NearbyPanel" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss NearbyPanel" }));
+    const home = screen.getByRole("region", { name: "Search" });
+    fireEvent.click(within(home).getByRole("button", { name: "More options" }));
+    expect(screen.getByRole("region", { name: "MoreSheet" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss MoreSheet" }));
+    expect(screen.getByRole("region", { name: "Search" })).toBeTruthy();
+    fireEvent.click(screen.getByText("Live").closest("button")!);
+    expect(screen.getByRole("region", { name: "LiveTrainsPopup" })).toBeTruthy();
+  });
+
   it.each([
     ["Stale", true, false, 1],
     ["Offline", false, false, 100_000],
