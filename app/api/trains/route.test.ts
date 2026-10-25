@@ -34,6 +34,16 @@ function feedResponse(buf: Buffer): Response {
   return new Response(ab, { status: 200, headers: { "Content-Type": "application/octet-stream" } });
 }
 
+// Like native fetch/body consumption, settle only when the supplied
+// signal aborts. This exercises the actual deadline rather than making
+// the upstream reject immediately on its own.
+function stalledUntilAbort(signal: AbortSignal): Promise<never> {
+  return new Promise((_, reject) => {
+    if (signal.aborted) reject(signal.reason);
+    else signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+  });
+}
+
 describe("GET /api/trains", () => {
   let fetchMock: ReturnType<typeof vi.fn>;
 
@@ -362,6 +372,73 @@ describe("GET /api/trains", () => {
     const res = await GET();
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ generatedAt: Date.now(), trains: [], arrivals: [] });
+  });
+
+  it("delivers usable partial data when one feed stalls until its deadline", async () => {
+    const entity = {
+      id: "timeout-survivor",
+      vehicle: { trip: { tripId: "timeout-survivor", routeId: "4" }, stopId: "631N", currentStatus: 1 },
+      tripUpdate: {
+        trip: { tripId: "timeout-survivor", routeId: "4" },
+        stopTimeUpdate: [{ stopId: "631N", arrival: { time: 1_700_000_700 } }],
+      },
+    };
+    fetchMock.mockImplementation(async () => feedResponse(feed([])));
+    fetchMock.mockImplementationOnce((_url, init: RequestInit) => stalledUntilAbort(init.signal!));
+    fetchMock.mockResolvedValueOnce(feedResponse(feed([entity])));
+    let settled = false;
+    const pending = GET().then(res => { settled = true; return res; });
+    await vi.advanceTimersByTimeAsync(9_999);
+    expect(settled).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    const res = await pending;
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as TrainsResponse;
+    expect(body.trains.map(t => t.id)).toEqual(["timeout-survivor"]);
+    expect(body.arrivals.map(a => a.tripId)).toEqual(["timeout-survivor"]);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("returns no-store 503 when all feed requests stall, then recovers", async () => {
+    fetchMock.mockImplementation((_url, init: RequestInit) => stalledUntilAbort(init.signal!));
+    const pending = GET();
+    await vi.advanceTimersByTimeAsync(10_000);
+    const res = await pending;
+    expect(res.status).toBe(503);
+    expect(res.headers.get("Cache-Control")).toContain("no-store");
+    expect(await res.json()).not.toHaveProperty("generatedAt");
+    expect(vi.getTimerCount()).toBe(0);
+
+    fetchMock.mockImplementation(async () => feedResponse(feed([])));
+    const recovered = await GET();
+    expect(recovered.status).toBe(200);
+    expect(await recovered.json()).toEqual({ generatedAt: Date.now(), trains: [], arrivals: [] });
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("keeps the deadline active while a successful HTTP response body stalls", async () => {
+    fetchMock.mockImplementation(async (_url, init: RequestInit) => ({
+      ok: true,
+      arrayBuffer: () => stalledUntilAbort(init.signal!),
+    }));
+    const pending = GET();
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect((await pending).status).toBe(503);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("clears deadline timers on successful and HTTP-failed feeds", async () => {
+    const signals: AbortSignal[] = [];
+    fetchMock.mockImplementation(async (_url, init: RequestInit) => {
+      signals.push(init.signal!);
+      return signals.length === 1
+        ? new Response("unavailable", { status: 503 })
+        : feedResponse(feed([]));
+    });
+    expect((await GET()).status).toBe(200);
+    expect(vi.getTimerCount()).toBe(0);
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(signals.every(s => !s.aborted)).toBe(true);
   });
 
   it("propagates per-vehicle timestamp into Train.lastReportedAt", async () => {
