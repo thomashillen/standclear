@@ -102,4 +102,104 @@ describe("train feed outage lifecycle", () => {
     expect(result.current.health).toMatchObject({ consecutiveFailures: 1, lastSuccessAt: null });
     expect(JSON.parse(localStorage.getItem(STORAGE_KEY)!)).toEqual(saved);
   });
+
+  it("aborts stalled headers, releases coalesced refreshes and retries with existing backoff", async () => {
+    let signal!: AbortSignal;
+    const fetchMock = vi.fn((_url: string, init?: RequestInit) => {
+      signal = init!.signal!;
+      return new Promise<Response>((_resolve, reject) => {
+        signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const { useTrains, useFeedHealth, refreshTrains } = await import("./useTrains");
+    const { result, unmount } = renderHook(() => ({ data: useTrains(), health: useFeedHealth() }));
+    const refreshes = Promise.all([refreshTrains(), refreshTrains()]);
+    await act(async () => { await vi.advanceTimersByTimeAsync(19_999); });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(signal.aborted).toBe(false);
+    expect(result.current.health.consecutiveFailures).toBe(0);
+    await act(async () => { await vi.advanceTimersByTimeAsync(1); await refreshes; });
+    expect(signal.aborted).toBe(true);
+    expect(result.current.data).toBeNull();
+    expect(result.current.health).toMatchObject({
+      consecutiveFailures: 1, lastSuccessAt: null,
+      lastFailureAt: NOW + 20_000, lastError: "Train refresh timed out after 20 seconds",
+    });
+    expect(localStorage.getItem(STORAGE_KEY)).toBeNull();
+    fetchMock.mockImplementation(async () => response(snapshot(Date.now())));
+    await act(async () => { await vi.advanceTimersByTimeAsync(15_999); });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(result.current.data!.generatedAt).toBe(NOW + 36_000);
+    expect(result.current.health).toMatchObject({ consecutiveFailures: 0, degraded: false, lastSuccessAt: NOW + 36_000 });
+    expect(vi.getTimerCount()).toBe(1); // Next poll only; deadline is gone.
+    unmount();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("bounds stalled body consumption while retaining last-good data, storage and freshness", async () => {
+    const fetchMock = vi.fn().mockImplementation(async () => response(snapshot()));
+    vi.stubGlobal("fetch", fetchMock);
+    const { useTrains, useFeedHealth, refreshTrains } = await import("./useTrains");
+    const { result } = renderHook(() => ({ data: useTrains(), health: useFeedHealth() }));
+    await act(async () => {});
+    const good = result.current.data;
+    const persisted = localStorage.getItem(STORAGE_KEY);
+    let signal!: AbortSignal;
+    fetchMock.mockImplementation(async (_url: string, init?: RequestInit) => {
+      signal = init!.signal!;
+      // Headers arrive, but no body bytes do. As with browser fetch, aborting
+      // the originating signal errors the response stream during res.json().
+      return new Response(new ReadableStream({ start(controller) {
+        signal.addEventListener("abort", () => controller.error(signal.reason), { once: true });
+      } }));
+    });
+    await act(async () => { await vi.advanceTimersByTimeAsync(8_000); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(20_000); });
+    expect(signal.aborted).toBe(true);
+    expect(result.current.data).toBe(good);
+    expect(result.current.data!.generatedAt).toBe(NOW);
+    expect(result.current.health).toMatchObject({ consecutiveFailures: 1, lastSuccessAt: NOW, lastFailureAt: NOW + 28_000 });
+    expect(localStorage.getItem(STORAGE_KEY)).toBe(persisted);
+    const recovered = snapshot(Date.now());
+    fetchMock.mockImplementation(async () => response(recovered));
+    await act(async () => { await refreshTrains(); });
+    expect(result.current.data).toEqual(recovered);
+    expect(result.current.health).toMatchObject({ consecutiveFailures: 0, degraded: false, lastSuccessAt: NOW + 28_000 });
+  });
+
+  it("surfaces repeated cold-boot timeouts as degradation without fabricating data", async () => {
+    vi.stubGlobal("fetch", vi.fn((_url: string, init?: RequestInit) => new Promise<Response>((_resolve, reject) => {
+      init!.signal!.addEventListener("abort", () => reject(init!.signal!.reason), { once: true });
+    })));
+    const { useTrains, useFeedHealth } = await import("./useTrains");
+    const { result } = renderHook(() => ({ data: useTrains(), health: useFeedHealth() }));
+    // 20s deadline, 16s backoff, second 20s deadline.
+    await act(async () => { await vi.advanceTimersByTimeAsync(56_000); });
+    expect(result.current.health).toMatchObject({ consecutiveFailures: 2, degraded: true, lastSuccessAt: null });
+    expect(result.current.data).toBeNull();
+    expect(localStorage.getItem(STORAGE_KEY)).toBeNull();
+    expect(deriveLiveFeedState(true, false, result.current.health.degraded, false)).toBe("degraded");
+  });
+
+  it.each(["success", "HTTP failure", "decode failure"] as const)("clears the request deadline after %s", async outcome => {
+    let signal!: AbortSignal;
+    vi.stubGlobal("fetch", vi.fn(async (_url: string, init?: RequestInit) => {
+      signal = init!.signal!;
+      return outcome === "success" ? response(snapshot())
+        : outcome === "HTTP failure" ? new Response("outage", { status: 503 })
+        : new Response("not json");
+    }));
+    const { useTrains } = await import("./useTrains");
+    const { unmount } = renderHook(() => useTrains());
+    await act(async () => {});
+    expect(vi.getTimerCount()).toBe(1);
+    unmount();
+    expect(vi.getTimerCount()).toBe(0);
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(signal.aborted).toBe(false);
+  });
+
 });
