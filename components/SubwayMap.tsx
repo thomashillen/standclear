@@ -894,9 +894,7 @@ export default function SubwayMap() {
           Only interactive children intercept map gestures. */}
       <div className="map-home-controls" data-panel-open={panelOpen}>
         {!panelOpen && (
-          <div className="map-glance-space sm:hidden">
-            <NearbyGlance onStationOpen={handleStationOpen} />
-          </div>
+          <NearbyGlance onStationOpen={handleStationOpen} />
         )}
         <div className="map-home-actions">
         <div className="map-toolbar flex flex-wrap items-center justify-end gap-2 pointer-events-none">
