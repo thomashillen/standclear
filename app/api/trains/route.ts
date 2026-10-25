@@ -144,7 +144,7 @@ async function fetchFeed(url: string): Promise<{ trains: Train[]; arrivals: Arri
   const res = await fetch(url, { cache: "no-store" });
   if (!res.ok) {
     captureWarning("MTA feed non-2xx", { feed: url, status: res.status });
-    return { trains: [], arrivals: [] };
+    throw new Error(`MTA feed HTTP ${res.status}`);
   }
   const buf = Buffer.from(await res.arrayBuffer());
   const feed = GtfsRealtimeBindings.transit_realtime.FeedMessage.decode(buf);
@@ -318,15 +318,18 @@ export async function GET() {
       captureException(r.reason, { what: "MTA feed fetch rejected" });
     }
   }
-  // If every feed failed we still return a 200 with empty arrays so
-  // the client renders the "stale / offline" state cleanly, but we
-  // emit a structured warning so the outage is visible to whoever's
-  // tailing logs / configured Sentry.
+  // A total outage is not a fresh, empty snapshot. Let the client keep
+  // its last good data and original timestamp via its failure path.
+  // A fulfilled empty feed still counts as a valid success.
   if (failed === FEEDS.length) {
     captureWarning("All MTA feeds failed in one cycle", {
       failed,
       feeds: FEEDS.length,
     });
+    return NextResponse.json(
+      { error: "Live train feeds unavailable" },
+      { status: 503, headers: { "Cache-Control": "no-store, max-age=0" } },
+    );
   } else if (failed > 0) {
     captureWarning("Partial MTA feed outage", {
       failed,

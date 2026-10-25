@@ -15,9 +15,11 @@ describe("deriveLiveFeedState", () => {
 
   it("returns 'connecting' when online but no data has arrived yet", () => {
     expect(deriveLiveFeedState(true, false, false, false)).toBe("connecting");
-    // Even with degraded/stale flags raised — without data they're
-    // meaningless. Cold boot reads as connecting.
-    expect(deriveLiveFeedState(true, false, true, true)).toBe("connecting");
+    expect(deriveLiveFeedState(true, false, false, true)).toBe("connecting");
+  });
+
+  it("surfaces repeated cold-boot failures instead of connecting indefinitely", () => {
+    expect(deriveLiveFeedState(true, false, true, true)).toBe("degraded");
   });
 
   it("returns 'degraded' when feed health is degraded and data is present", () => {

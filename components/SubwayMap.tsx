@@ -937,7 +937,7 @@ export default function SubwayMap() {
           aria-label={
             !online
               ? "Offline — tap for details"
-              : !data
+              : liveFeedState === "connecting"
                 ? "Connecting to live feed"
                 : feedDegraded
                   ? `Feed degraded after ${feedHealth.consecutiveFailures} retries — tap for details`
@@ -949,7 +949,7 @@ export default function SubwayMap() {
           title={
             !online
               ? "Offline — showing last-known data"
-              : !data
+              : liveFeedState === "connecting"
                 ? "Connecting…"
                 : feedDegraded
                   ? `Feed degraded — ${feedHealth.consecutiveFailures} failed polls (${feedHealth.lastError ?? "network error"})`
@@ -964,7 +964,7 @@ export default function SubwayMap() {
               className={`absolute inset-0 rounded-full ${
                 !online
                   ? "bg-rose-400"
-                  : !data
+                  : liveFeedState === "connecting"
                     ? "bg-gray-500"
                     : feedDegraded
                       ? "bg-rose-400"
@@ -975,7 +975,7 @@ export default function SubwayMap() {
               style={{
                 color: !online
                   ? "rgba(251,113,133,0.65)"
-                  : !data
+                  : liveFeedState === "connecting"
                     ? "rgba(107,114,128,0.5)"
                     : feedDegraded
                       ? "rgba(251,113,133,0.65)"
@@ -995,7 +995,7 @@ export default function SubwayMap() {
           <span className={`text-[12px] font-semibold leading-none ${
             !online || feedDegraded ? "text-rose-200" : stale ? "text-amber-200" : "text-gray-100"
           }`}>
-            {!online ? "Offline" : !data ? "Connecting…" : feedDegraded ? "Feed issue" : stale ? "Stale" : "Live"}
+            {!online ? "Offline" : liveFeedState === "connecting" ? "Connecting…" : feedDegraded ? "Feed issue" : stale ? "Stale" : "Live"}
           </span>
           {online && data && !stale && !feedDegraded && (
             <span className="hidden sm:flex items-center gap-1 text-[12px] tabular-nums text-gray-300">
