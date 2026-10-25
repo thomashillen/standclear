@@ -7,10 +7,9 @@
 // state transitions, not just on-focus labels) reads the same state
 // the visual chrome reflects.
 //
-// Priority order matches the existing inlined chain — keep it.
-// Reordering would silently change which condition wins when two are
-// true (e.g. a feed-degraded snapshot that's also stale today reads
-// "degraded"; flipping the order would render stale instead).
+// Offline wins, followed by confirmed feed degradation even on cold
+// boot. Repeated failures must not look like a connection still pending.
+// Degraded continues to outrank a stale retained snapshot.
 //
 // "Connecting" applies only on cold boot before the first poll lands;
 // once any data has arrived, even a subsequently-stale snapshot is
@@ -30,8 +29,8 @@ export function deriveLiveFeedState(
   stale: boolean,
 ): LiveFeedState {
   if (!online) return "offline";
-  if (!hasData) return "connecting";
   if (feedDegraded) return "degraded";
+  if (!hasData) return "connecting";
   if (stale) return "stale";
   return "live";
 }

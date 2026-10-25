@@ -13,9 +13,11 @@ const trainsRef = vi.hoisted(() => ({
 const linesRef = vi.hoisted(() => ({
   current: null as Lines | null,
 }));
+const healthRef = vi.hoisted(() => ({ online: true, degraded: false }));
 
 vi.mock("@/lib/useTrains", () => ({
   useTrains: () => trainsRef.current,
+  useFeedHealth: () => healthRef,
 }));
 
 vi.mock("@/lib/subwayData", () => ({
@@ -75,6 +77,7 @@ describe("LiveTrainsPopup", () => {
   beforeEach(() => {
     trainsRef.current = null;
     linesRef.current = null;
+    Object.assign(healthRef, { online: true, degraded: false });
   });
   // Manual cleanup between cases so Radix's portal-managed dialog tears
   // down between mounts — without this the previous dialog stays attached
@@ -243,5 +246,27 @@ describe("LiveTrainsPopup", () => {
     expect(
       screen.getByText(/Connecting to MTA realtime feed/),
     ).toBeTruthy();
+  });
+
+  it("shows cold-boot feed failure and recovers without closing the dialog", () => {
+    healthRef.degraded = true;
+    const { rerender } = render(<LiveTrainsPopup open onClose={vi.fn()} />);
+    expect(screen.getByText("Live train feed unavailable. Retrying automatically.")).toBeTruthy();
+    expect(screen.queryByText(/Connecting to MTA realtime feed/)).toBeNull();
+
+    healthRef.degraded = false;
+    trainsRef.current = makeResponse([]);
+    rerender(<LiveTrainsPopup open onClose={vi.fn()} />);
+    expect(screen.getByText(/Live · refreshed 0s ago/)).toBeTruthy();
+    expect(screen.queryByText(/Live train feed unavailable/)).toBeNull();
+  });
+
+  it("labels retained fresh-looking data as last-known during a confirmed outage", () => {
+    healthRef.degraded = true;
+    trainsRef.current = makeResponse([makeTrain("t1", "1")]);
+    render(<LiveTrainsPopup open onClose={vi.fn()} />);
+    expect(screen.getByText(/Feed issue — showing last-known data/)).toBeTruthy();
+    expect(screen.getByText("trains in the last-known snapshot")).toBeTruthy();
+    expect(screen.queryByText(/Live · refreshed/)).toBeNull();
   });
 });

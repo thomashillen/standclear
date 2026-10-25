@@ -10,7 +10,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { useTrains } from "@/lib/useTrains";
+import { useFeedHealth, useTrains } from "@/lib/useTrains";
 import { useLines } from "@/lib/subwayData";
 import { useNow } from "@/lib/useNow";
 import { lineSlug } from "@/lib/lineSlug";
@@ -28,6 +28,8 @@ interface Props {
 // and a busiest-lines breakdown. Refreshes implicitly with `useTrains`.
 export default function LiveTrainsPopup({ open, onClose }: Props) {
   const data = useTrains();
+  const health = useFeedHealth();
+  const feedDegraded = health.online && health.degraded;
   const lines = useLines();
   // Tick once per second so the "updated Xs ago" footer stays honest
   // between feed polls. Only ticks while the dialog is mounted-open.
@@ -82,7 +84,7 @@ export default function LiveTrainsPopup({ open, onClose }: Props) {
   }, [data]);
 
   const ageSec = data ? Math.max(0, Math.round((now - data.generatedAt) / 1000)) : null;
-  const fresh = ageSec !== null && ageSec < 30;
+  const fresh = !feedDegraded && ageSec !== null && ageSec < 30;
   const stale = ageSec !== null && ageSec >= 60;
 
   // Per-vehicle staleness rolled up across the fleet, separate from
@@ -122,10 +124,12 @@ export default function LiveTrainsPopup({ open, onClose }: Props) {
             <span className="relative inline-flex w-2.5 h-2.5">
               <span
                 className={`absolute inset-0 rounded-full ${
-                  !data ? "bg-gray-500" : stale ? "bg-amber-400" : "bg-emerald-400"
+                  feedDegraded ? "bg-rose-400" : !data ? "bg-gray-500" : stale ? "bg-amber-400" : "bg-emerald-400"
                 } shadow-[0_0_10px_currentColor]`}
                 style={{
-                  color: !data
+                  color: feedDegraded
+                    ? "rgba(251,113,133,0.65)"
+                    : !data
                     ? "rgba(107,114,128,0.5)"
                     : stale
                       ? "rgba(251,191,36,0.6)"
@@ -142,7 +146,11 @@ export default function LiveTrainsPopup({ open, onClose }: Props) {
             System Pulse
           </DialogTitle>
           <DialogDescription className="text-gray-400 text-left">
-            {!data
+            {feedDegraded
+              ? data
+                ? `Feed issue — showing last-known data from ${ageSec}s ago. Retrying automatically.`
+                : "Live train feed unavailable. Retrying automatically."
+              : !data
               ? "Connecting to MTA realtime feed…"
               : stale
                 ? `Stale — last refresh ${ageSec}s ago`
@@ -162,7 +170,7 @@ export default function LiveTrainsPopup({ open, onClose }: Props) {
                 {stats?.total ?? "—"}
               </div>
               <div className="text-[12px] text-gray-400 mt-1">
-                trains in service across NYC right now
+                {!data ? "Waiting for live train data" : feedDegraded ? "trains in the last-known snapshot" : "trains in service across NYC right now"}
               </div>
             </div>
           </div>

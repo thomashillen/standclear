@@ -15,7 +15,7 @@ import { join } from "node:path";
 // body, so the browser may terminate the SW before the background
 // revalidation's cache.put() lands. The handler must call
 // event.waitUntil(networkPromise) so the refresh actually completes —
-// otherwise riders get an even staler /api/trains, /api/alerts, or
+// otherwise riders get an even staler /api/alerts or
 // gtfsData.json on the next (often underground) cold launch.
 
 const SW_SRC = readFileSync(join(__dirname, "public", "sw.js"), "utf8");
@@ -134,7 +134,7 @@ function makeFetchEvent(
   return event;
 }
 
-const TRAINS_URL = "https://example.test/api/trains";
+const ALERTS_URL = "https://example.test/api/alerts";
 const GTFS_URL = "https://example.test/gtfsData.json";
 
 // Drive one miss-path request to completion so the cache is populated
@@ -152,6 +152,23 @@ async function seed(
 }
 
 describe("sw.js stale-while-revalidate", () => {
+  it("lets train polls reach the network even with an old successful snapshot cached", async () => {
+    const { handlers, caches, fetchSpy } = loadSw(async () => new ResponseStub("unexpected"));
+    const url = "https://example.test/api/trains";
+    // Existing installs can still have train snapshots in worker storage.
+    const oldCache = await caches.open("standclear-data-v4");
+    await oldCache.put({ url }, new ResponseStub("old train snapshot"));
+    const currentCache = await caches.open("standclear-data-v5");
+    await currentCache.put({ url }, new ResponseStub("retained train snapshot"));
+    const event = makeFetchEvent(url);
+    handlers.fetch(event);
+    // No respondWith means the browser performs the request normally;
+    // HTTP 503 and network rejection reach useTrains' own failure path.
+    expect(event.respondWith).not.toHaveBeenCalled();
+    expect(event.waitUntil).not.toHaveBeenCalled();
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
   it("serves the cached body on a hit but keeps the worker alive to revalidate", async () => {
     const res1 = new ResponseStub("snapshot-1");
     const res2 = new ResponseStub("snapshot-2");
@@ -159,7 +176,7 @@ describe("sw.js stale-while-revalidate", () => {
     const { handlers, caches } = loadSw(async () => queue.shift());
 
     // First request: cache miss → network fills the cache with res1.
-    const e1 = makeFetchEvent(TRAINS_URL);
+    const e1 = makeFetchEvent(ALERTS_URL);
     handlers.fetch(e1);
     expect(e1.respondWith).toHaveBeenCalledOnce();
     expect(await e1.response).toBe(res1);
@@ -168,7 +185,7 @@ describe("sw.js stale-while-revalidate", () => {
     // immediately, AND the handler must register the revalidation with
     // waitUntil so res2 actually lands in the cache. Pre-fix this
     // waitUntil call is absent and the assertion below fails.
-    const e2 = makeFetchEvent(TRAINS_URL);
+    const e2 = makeFetchEvent(ALERTS_URL);
     handlers.fetch(e2);
     expect(await e2.response).toBe(res1);
     expect(e2.waitUntil).toHaveBeenCalledOnce();
@@ -178,9 +195,9 @@ describe("sw.js stale-while-revalidate", () => {
     // race would otherwise silently drop).
     await Promise.all(e2.waited);
     const dataCache = [...caches._byName.values()].find((c) =>
-      c._store.has(TRAINS_URL),
+      c._store.has(ALERTS_URL),
     )!;
-    expect(dataCache._store.get(TRAINS_URL)).toBe(res2);
+    expect(dataCache._store.get(ALERTS_URL)).toBe(res2);
     expect(dataCache._putCalls).toHaveLength(2);
   });
 
@@ -197,9 +214,9 @@ describe("sw.js stale-while-revalidate", () => {
       return new ResponseStub("fresh");
     });
 
-    await seed(handlers, TRAINS_URL);
+    await seed(handlers, ALERTS_URL);
 
-    const e2 = makeFetchEvent(TRAINS_URL);
+    const e2 = makeFetchEvent(ALERTS_URL);
     handlers.fetch(e2);
     // Resolves to the stale body even though the revalidation fetch is
     // still pending — that's the whole point of SWR.
@@ -218,9 +235,9 @@ describe("sw.js stale-while-revalidate", () => {
       throw new Error("offline mid-revalidate");
     });
 
-    await seed(handlers, TRAINS_URL);
+    await seed(handlers, ALERTS_URL);
 
-    const e2 = makeFetchEvent(TRAINS_URL);
+    const e2 = makeFetchEvent(ALERTS_URL);
     handlers.fetch(e2);
     expect(await e2.response).toBe(res1);
     expect(e2.waitUntil).toHaveBeenCalledOnce();
@@ -234,7 +251,7 @@ describe("sw.js stale-while-revalidate", () => {
     const { handlers } = loadSw(async () => {
       throw new Error("no network");
     });
-    const e = makeFetchEvent(TRAINS_URL);
+    const e = makeFetchEvent(ALERTS_URL);
     handlers.fetch(e);
     const r = (await e.response) as ResponseStub;
     expect(r.status).toBe(504);
@@ -260,7 +277,7 @@ describe("sw.js stale-while-revalidate", () => {
   it("bypasses non-GET and cross-origin requests entirely", async () => {
     const { handlers, fetchSpy } = loadSw(async () => new ResponseStub("x"));
 
-    const post = makeFetchEvent(TRAINS_URL, { method: "POST" });
+    const post = makeFetchEvent(ALERTS_URL, { method: "POST" });
     handlers.fetch(post);
     expect(post.respondWith).not.toHaveBeenCalled();
 

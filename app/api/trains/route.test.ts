@@ -39,7 +39,7 @@ describe("GET /api/trains", () => {
 
   beforeEach(() => {
     fetchMock = vi.fn();
-    globalThis.fetch = fetchMock as unknown as typeof fetch;
+    vi.stubGlobal("fetch", fetchMock);
     // Pin Date.now so progress / arrival cutoffs are deterministic. The
     // route uses Math.floor(Date.now() / 1000) as `now`.
     vi.useFakeTimers();
@@ -48,6 +48,7 @@ describe("GET /api/trains", () => {
   afterEach(() => {
     vi.useRealTimers();
     vi.restoreAllMocks();
+    vi.unstubAllGlobals();
   });
 
   it("decodes a single in-transit vehicle and computes interpolated progress", async () => {
@@ -297,12 +298,70 @@ describe("GET /api/trains", () => {
     expect(call).toBeGreaterThanOrEqual(1);
   });
 
-  it("treats a non-2xx feed response as empty rather than throwing", async () => {
+  it("returns a no-store 503 when every feed returns an HTTP error", async () => {
     fetchMock.mockResolvedValue(new Response("server error", { status: 503 }));
+    const res = await GET();
+    expect(res.status).toBe(503);
+    expect(res.headers.get("Cache-Control")).toContain("no-store");
+    expect(await res.json()).toEqual({ error: "Live train feeds unavailable" });
+  });
+
+  it("returns 503 on total network failure and recovers on the next cycle", async () => {
+    fetchMock.mockRejectedValue(new Error("network unavailable"));
+    const failed = await GET();
+    expect(failed.status).toBe(503);
+    expect(failed.headers.get("Cache-Control")).toContain("no-store");
+    expect(await failed.json()).not.toHaveProperty("generatedAt");
+
+    vi.advanceTimersByTime(8_000);
+    fetchMock.mockImplementation(async () => feedResponse(feed([])));
+    const recovered = await GET();
+    expect(recovered.status).toBe(200);
+    expect(await recovered.json()).toEqual({ generatedAt: Date.now(), trains: [], arrivals: [] });
+  });
+
+  it("returns 503 when every feed fails to decode", async () => {
+    fetchMock.mockImplementation(async () => feedResponse(Buffer.from([0xff])));
+    expect((await GET()).status).toBe(503);
+  });
+
+  it("preserves a successful empty feed even when every other feed fails", async () => {
+    fetchMock.mockRejectedValue(new Error("network unavailable"));
+    fetchMock.mockResolvedValueOnce(feedResponse(feed([])));
+    const res = await GET();
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ generatedAt: Date.now(), trains: [], arrivals: [] });
+  });
+
+  it("retains usable trains and arrivals during a mixed partial outage", async () => {
+    const entity = {
+      id: "outage-trip",
+      tripUpdate: {
+        trip: { tripId: "outage-trip", routeId: "4" },
+        stopTimeUpdate: [{ stopId: "631N", arrival: { time: 1_700_000_700 } }],
+      },
+      vehicle: {
+        trip: { tripId: "outage-trip", routeId: "4" },
+        stopId: "631N",
+        currentStatus: 1,
+      },
+    };
+    fetchMock.mockRejectedValue(new Error("network unavailable"));
+    fetchMock.mockResolvedValueOnce(feedResponse(feed([entity])));
+    fetchMock.mockResolvedValueOnce(new Response("bad gateway", { status: 502 }));
+    fetchMock.mockResolvedValueOnce(feedResponse(Buffer.from([0xff])));
     const res = await GET();
     expect(res.status).toBe(200);
     const body = (await res.json()) as TrainsResponse;
-    expect(body.trains).toEqual([]);
+    expect(body.trains.map(t => t.id)).toEqual(["outage-trip"]);
+    expect(body.arrivals.map(a => a.tripId)).toEqual(["outage-trip"]);
+  });
+
+  it("accepts fully successful empty feeds", async () => {
+    fetchMock.mockImplementation(async () => feedResponse(feed([])));
+    const res = await GET();
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ generatedAt: Date.now(), trains: [], arrivals: [] });
   });
 
   it("propagates per-vehicle timestamp into Train.lastReportedAt", async () => {
