@@ -140,13 +140,26 @@ function pruneTripStopCache(nowMs: number) {
   }
 }
 
+// One stalled upstream must not hold back every other feed. Cover the
+// body read too: receiving headers doesn't mean the protobuf arrived.
+const FEED_TIMEOUT_MS = 10_000;
+
 async function fetchFeed(url: string): Promise<{ trains: Train[]; arrivals: Arrival[] }> {
-  const res = await fetch(url, { cache: "no-store" });
-  if (!res.ok) {
-    captureWarning("MTA feed non-2xx", { feed: url, status: res.status });
-    throw new Error(`MTA feed HTTP ${res.status}`);
+  const controller = new AbortController();
+  const timeout = setTimeout(() => {
+    controller.abort(new Error("MTA feed timed out after 10 seconds"));
+  }, FEED_TIMEOUT_MS);
+  let buf: Buffer;
+  try {
+    const res = await fetch(url, { cache: "no-store", signal: controller.signal });
+    if (!res.ok) {
+      captureWarning("MTA feed non-2xx", { feed: url, status: res.status });
+      throw new Error(`MTA feed HTTP ${res.status}`);
+    }
+    buf = Buffer.from(await res.arrayBuffer());
+  } finally {
+    clearTimeout(timeout);
   }
-  const buf = Buffer.from(await res.arrayBuffer());
   const feed = GtfsRealtimeBindings.transit_realtime.FeedMessage.decode(buf);
 
   // Feed-header timestamp is the floor for per-train freshness: any
