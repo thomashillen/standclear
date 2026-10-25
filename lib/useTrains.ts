@@ -17,6 +17,9 @@ const POLL_MS = 8_000;
 // hammer /api/trains every 8s — 60s feels alive without burning
 // battery + bandwidth at the same rate as the steady-state poll.
 const MAX_POLL_MS = 60_000;
+// Bound the browser-to-app request as well as the server's upstream feeds.
+// Leave margin beyond the server's 10s feed deadline for transit/cold starts.
+const REQUEST_TIMEOUT_MS = 20_000;
 
 // Persist the last successful response to localStorage so a cold boot
 // surfaces the last-known state immediately instead of a "Connecting…"
@@ -131,8 +134,10 @@ async function refresh() {
     return;
   }
   cache.promise = (async () => {
+    const controller = new AbortController();
+    const deadline = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
     try {
-      const res = await fetch("/api/trains", { cache: "no-store" });
+      const res = await fetch("/api/trains", { cache: "no-store", signal: controller.signal });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const raw = (await res.json()) as TrainsResponse;
       const data = dedupeResponse(raw);
@@ -149,7 +154,10 @@ async function refresh() {
       // setHealth already notified — no double-fire.
     } catch (err) {
       cache.promise = null;
-      const message = err instanceof Error ? err.message : String(err);
+      const failure = controller.signal.aborted
+        ? new Error("Train refresh timed out after 20 seconds")
+        : err;
+      const message = failure instanceof Error ? failure.message : String(failure);
       const failures = health.consecutiveFailures + 1;
       setHealth({
         consecutiveFailures: failures,
@@ -160,11 +168,15 @@ async function refresh() {
       // (and any wired-up Sentry quota) during a sustained outage.
       // First failure + every 5th after.
       if (failures === 1 || failures % 5 === 0) {
-        captureException(err, {
+        captureException(failure, {
           what: "useTrains: /api/trains poll failed",
           consecutiveFailures: failures,
         });
       }
+    } finally {
+      // Keep the deadline through body consumption, and clear it on every
+      // outcome so completed requests cannot later abort or leak timers.
+      clearTimeout(deadline);
     }
   })();
   return cache.promise;
