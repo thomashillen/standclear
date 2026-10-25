@@ -143,17 +143,18 @@
 @container (height < 2.75rem) {
   .nearby-glance { display: none; }
 }
-.map-home-controls[data-panel-open="true"] {
-  display: block;
-  top: calc(max(var(--safe-top), 0.5rem) + 0.5rem);
-  right: auto;
-  bottom: auto;
-}
-.map-home-controls[data-panel-open="true"] .map-home-actions {
-  max-height: none;
-  overflow: visible;
-}
 @media (max-width: 639px) {
+  .map-home-controls[data-panel-open="true"] {
+    display: block;
+    top: calc(max(var(--safe-top), 0.5rem) + 0.5rem);
+    right: auto;
+    bottom: auto;
+  }
+  .map-home-controls[data-panel-open="true"] .map-home-actions {
+    max-height: none;
+    overflow: visible;
+  }
+
   .map-sheet, .safe-area-dialog {
     left: var(--safe-left);
     right: var(--safe-right);
