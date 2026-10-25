@@ -422,11 +422,33 @@
   }
 }
 
-/* Reduced motion: skip the active-state transition while preserving
-   the static glass material. */
-@media (prefers-reduced-motion: reduce) {
+/* Respect accessibility preferences exposed by the browser. Keep the
+   functional layer legible without blur, map colors, or decorative light. */
+@media (prefers-reduced-transparency: reduce), (prefers-contrast: more) {
   .ios-glass {
+    background-color: rgb(10 10 12);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+  .ios-glass::before, .ios-glass::after {
+    display: none;
+  }
+}
+@media (prefers-contrast: more) {
+  .ios-glass {
+    border-color: rgb(255 255 255 / 0.6);
+  }
+}
+
+/* Immediate, visible press feedback without scale or transition motion. */
+@media (prefers-reduced-motion: reduce) {
+  .ios-glass, .ios-glass::after, .press {
     transition: none !important;
+  }
+  .press { will-change: auto; }
+  .press:active {
+    transform: none;
+    filter: brightness(0.8);
   }
 }
 
