@@ -952,7 +952,7 @@ export default function SubwayMap() {
                       ? "Stale — last refresh more than a minute ago"
                       : `${totalTrains} trains live`
             }
-            className="pointer-events-auto press flex items-center gap-1.5 min-h-11 px-3 flex-shrink-0 rounded-full ios-glass ios-glass--header border border-white/[0.10] shadow-[0_6px_20px_rgba(0,0,0,0.45)] touch-manipulation"
+            className="pointer-events-auto press flex items-center gap-1.5 min-h-12 sm:min-h-11 px-3 flex-shrink-0 rounded-full ios-glass ios-glass--header border border-white/[0.10] shadow-[0_6px_20px_rgba(0,0,0,0.45)] touch-manipulation"
           >
             <span className="relative flex w-2 h-2">
               <span
