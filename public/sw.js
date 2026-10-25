@@ -5,10 +5,12 @@
 //     chunks we cannot know at SW-author time; instead we cache-on-use.
 //   * Runtime caching lives in two buckets:
 //       standclear-static  — CSS, JS, fonts, icons, images. Cache-first.
-//       standclear-data    — /api/trains and /api/alerts. Stale-while-
+//       standclear-data    — /api/alerts. Stale-while-
 //         revalidate so the app opens instantly and refreshes in the
 //         background. The UI already polls, so showing last-known data for
 //         a second while the network catches up is preferable to a spinner.
+//   * /api/trains bypasses worker caching. The client's persisted snapshot
+//     provides last-known data without disguising an outage as a success.
 //   * HTML navigations are network-first with a cached fallback, so offline
 //     launches still render the shell using whatever was cached last.
 //   * Opaque or failed fetches are never cached.
@@ -20,7 +22,7 @@
 // previous brand prefix (subwaysurfer-*) are also evicted on activate so a
 // one-time deploy reclaims their storage.
 
-const CACHE_VERSION = "v4";
+const CACHE_VERSION = "v5";
 const STATIC_CACHE = `standclear-static-${CACHE_VERSION}`;
 const DATA_CACHE = `standclear-data-${CACHE_VERSION}`;
 const HTML_CACHE = `standclear-html-${CACHE_VERSION}`;
@@ -71,7 +73,7 @@ function isStaticAsset(url) {
 }
 
 function isDataRequest(url) {
-  return url.pathname === "/api/trains" || url.pathname === "/api/alerts";
+  return url.pathname === "/api/alerts";
 }
 
 // The static GTFS payload is ~430KB and only changes with a redeploy.
@@ -98,7 +100,7 @@ async function staleWhileRevalidate(request, cacheName, event) {
   // the in-flight networkPromise before its cache.put() lands. That
   // silently drops the "revalidate" half of stale-while-revalidate, so
   // the next cold launch (often underground, on a worse connection)
-  // serves an even staler /api/trains, /api/alerts, or gtfsData.json.
+  // serves an even staler /api/alerts or gtfsData.json.
   // waitUntil extends the event's lifetime past respondWith, which is
   // exactly how Workbox's StaleWhileRevalidate guarantees the refresh.
   // networkPromise never rejects (it .catch()es to null), so this can't
