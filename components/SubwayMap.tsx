@@ -889,14 +889,16 @@ export default function SubwayMap() {
         />
       </div>
 
-      {/* Compact, location-led arrivals stay near the top of the map.
-          They disappear whenever another panel owns the map space. */}
-      {!panelOpen && <NearbyGlance onStationOpen={handleStationOpen} />}
-
       {/* Mobile actions share a bottom dock with search, keeping the
           upper-right system region clear. Desktop retains its top row.
           Only interactive children intercept map gestures. */}
       <div className="map-home-controls" data-panel-open={panelOpen}>
+        {!panelOpen && (
+          <div className="map-glance-space sm:hidden">
+            <NearbyGlance onStationOpen={handleStationOpen} />
+          </div>
+        )}
+        <div className="map-home-actions">
         <div className="map-toolbar flex flex-wrap items-center justify-end gap-2 pointer-events-none">
           {/* Brand pill — wordmark + tagline above the fold. Hidden on
               mobile to keep the map controls compact. On desktop it doubles as identity AND a
@@ -1099,7 +1101,7 @@ export default function SubwayMap() {
         )}
 
       </div>
-
+      </div>
 
       {/* One-shot Add-to-Home-Screen nudge. Hides itself on standalone
           PWAs, on desktop, and after a one-time dismiss — so the

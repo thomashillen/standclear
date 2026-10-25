@@ -114,16 +114,44 @@
   z-index: 30;
   left: max(var(--safe-left), 0.75rem);
   right: max(var(--safe-right), 0.75rem);
+  top: var(--map-panel-top);
   bottom: calc(max(var(--safe-bottom), 0.5rem) + 1.5rem);
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
   gap: 0.75rem;
   pointer-events: none;
 }
+.map-home-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  max-height: calc(100dvh - var(--map-panel-top) - max(var(--safe-bottom), 0.5rem) - 2.25rem);
+  overflow-y: auto;
+  pointer-events: auto;
+}
+.map-glance-space {
+  min-height: 0;
+  container-type: size;
+}
+.nearby-glance {
+  max-height: 100%;
+  overflow-y: auto;
+  pointer-events: auto;
+}
+/* Hide the optional glance if even one full tap target cannot fit.
+   Near me still exposes all arrivals; hidden rows leave the tab order. */
+@container (height < 2.75rem) {
+  .nearby-glance { display: none; }
+}
 .map-home-controls[data-panel-open="true"] {
+  display: block;
   top: calc(max(var(--safe-top), 0.5rem) + 0.5rem);
   right: auto;
   bottom: auto;
+}
+.map-home-controls[data-panel-open="true"] .map-home-actions {
+  max-height: none;
+  overflow: visible;
 }
 @media (max-width: 639px) {
   .map-sheet, .safe-area-dialog {
@@ -140,17 +168,16 @@
     gap: 0.5rem;
     bottom: calc(max(var(--safe-bottom), 0.5rem) + 1rem);
   }
-  .map-home-controls:not([data-panel-open="true"]) {
-    max-height: calc(100dvh - var(--compact-top-clearance) - max(var(--safe-bottom), 0.5rem) - 1rem);
-    overflow-y: auto;
-    pointer-events: auto;
+  .map-home-actions {
+    gap: 0.5rem;
+    max-height: calc(100dvh - var(--map-panel-top) - max(var(--safe-bottom), 0.5rem) - 1.5rem);
   }
   .safe-area-dialog {
     max-height: min(85dvh, calc(100dvh - var(--compact-top-clearance)));
   }
 }
 @media (min-width: 640px) {
-  .map-home-controls { display: contents; }
+  .map-home-controls, .map-home-actions { display: contents; }
   .map-toolbar {
     position: absolute;
     z-index: 30;
