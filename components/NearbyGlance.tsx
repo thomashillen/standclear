@@ -87,8 +87,8 @@ export default function NearbyGlance({
       if (!cancelled && status) setPermissionSnapshot({ value: status.state, hidden });
     };
     // Some browsers keep an old PermissionStatus snapshot without emitting
-    // change. Recheck metadata after panel use/focus; never probe by making
-    // a geolocation request when permission is unconfirmed.
+    // change. Recheck metadata after panel use/focus, especially to stop
+    // automatic discovery when access has been revoked.
     const query = () => {
       const request = ++sequence;
       status?.removeEventListener("change", update);
@@ -135,11 +135,11 @@ export default function NearbyGlance({
     };
   }, [hidden]);
 
-  // A prior grant is the only automatic entry. A first visit never
-  // receives a surprise location prompt; the existing Near me control
-  // remains the user-initiated path for that case.
+  // Startup discovery is intentional: request access for prompt/unknown
+  // states too (Safari may not expose a reliable Permissions API). Native
+  // geolocation remains the authority; never persist or assume a grant.
   const eligible = visible && !hidden;
-  const active = eligible && permission === "granted";
+  const active = eligible && permission !== "checking" && permission !== "denied";
   const geo = useGeolocation(active);
   const lines = useLines();
   const lineStatus = useSubwayDataStatus();
@@ -164,7 +164,6 @@ export default function NearbyGlance({
   let waiting = false;
   if (permission === "checking") waiting = true;
   else if (permission === "denied" || geo.status === "denied") message = "Location is blocked";
-  else if (permission !== "granted") message = "Use Near me for arrivals";
   else if (!online) message = "Offline · arrivals unavailable";
   else if (geo.status === "error" || geo.status === "unavailable") message = "Location unavailable";
   else if (lineStatus.error) message = "Stations unavailable";
