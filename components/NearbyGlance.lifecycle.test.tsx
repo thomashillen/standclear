@@ -64,8 +64,8 @@ async function mount() {
 function permissionChange(state: PermissionState) {
   act(() => { permission.state = state; permission.dispatchEvent(new Event("change")); });
 }
-function visibilityChange(state: DocumentVisibilityState) {
-  act(() => { visibility = state; document.dispatchEvent(new Event("visibilitychange")); });
+async function visibilityChange(state: DocumentVisibilityState) {
+  await act(async () => { visibility = state; document.dispatchEvent(new Event("visibilitychange")); });
 }
 
 describe("automatic nearby location lifecycle", () => {
@@ -114,14 +114,14 @@ describe("automatic nearby location lifecycle", () => {
     visibility = "hidden";
     await mount();
     expect(geo.watchPosition).not.toHaveBeenCalled();
-    visibilityChange("visible");
+    await visibilityChange("visible");
     act(() => success[0](position));
     expect(region()).toBeTruthy();
-    visibilityChange("hidden");
+    await visibilityChange("hidden");
     expect(geo.clearWatch).toHaveBeenCalledWith(1);
     act(() => success[0](position));
     expect(region()).toBeNull();
-    visibilityChange("visible");
+    await visibilityChange("visible");
     expect(geo.watchPosition).toHaveBeenCalledTimes(2);
     expect(region()).toBeNull();
   });
@@ -146,7 +146,7 @@ describe("automatic nearby location lifecycle", () => {
     view.unmount();
     expect(disconnect).toHaveBeenCalledTimes(1);
     expect(geo.clearWatch).toHaveBeenCalledWith(1);
-    visibilityChange("visible");
+    await visibilityChange("visible");
     act(() => window.dispatchEvent(new Event("resize")));
     expect(geo.watchPosition).toHaveBeenCalledTimes(1);
   });
@@ -236,18 +236,111 @@ describe("initial nearby arrival discovery", () => {
     expect(geo.watchPosition).toHaveBeenCalledTimes(1);
   });
 
-  it("retains discovery across panel handoff without duplicate watches or another permission query", async () => {
+  it("retains discovery across panel handoff without duplicate watches", async () => {
     const view = await mount();
     act(() => success[0](position));
     const { useGeolocation } = await import("@/lib/useGeolocation");
     const panel = renderHook(() => useGeolocation(true));
-    view.refresh(true);
+    await act(async () => view.refresh(true));
     expect(region()).toBeNull();
     expect(geo.clearWatch).not.toHaveBeenCalled();
-    view.refresh(false);
+    await act(async () => view.refresh(false));
     expect(region()).toBeTruthy();
     panel.unmount();
     expect(geo.watchPosition).toHaveBeenCalledTimes(1);
-    expect(navigator.permissions.query).toHaveBeenCalledTimes(1);
+  });
+});
+
+
+describe("permission refresh without browser change events", () => {
+  it("recovers badges after Near me closes when the first permission snapshot stays prompt", async () => {
+    permission.state = "prompt";
+    const query = vi.mocked(navigator.permissions.query);
+    const view = await mount();
+    await act(async () => view.refresh(true));
+    expect(geo.watchPosition).not.toHaveBeenCalled();
+    const granted = Object.assign(new EventTarget(), { state: "granted" });
+    query.mockResolvedValue(granted as PermissionStatus);
+    await act(async () => view.refresh(false));
+    expect(permission.state).toBe("prompt"); // No synthetic change event.
+    expect(geo.watchPosition).toHaveBeenCalledTimes(1);
+    act(() => success[0](position));
+    expect(region()).toBeTruthy();
+  });
+
+  it("rechecks on focus, including a later revocation, without requesting unconfirmed location", async () => {
+    permission.state = "prompt";
+    await mount();
+    expect(geo.watchPosition).not.toHaveBeenCalled();
+    const fresh = Object.assign(new EventTarget(), { state: "granted" });
+    vi.mocked(navigator.permissions.query).mockResolvedValue(fresh as PermissionStatus);
+    await act(async () => window.dispatchEvent(new Event("focus")));
+    expect(geo.watchPosition).toHaveBeenCalledTimes(1);
+    act(() => success[0](position));
+    expect(region()).toBeTruthy();
+    const denied = Object.assign(new EventTarget(), { state: "denied" });
+    vi.mocked(navigator.permissions.query).mockResolvedValue(denied as PermissionStatus);
+    await act(async () => window.dispatchEvent(new Event("focus")));
+    expect(region()).toBeNull();
+    expect(geo.clearWatch).toHaveBeenCalledWith(1);
+    expect(screen.getByRole("status").textContent).toBe("Location is blocked");
+  });
+
+  it("discovers a grant on foreground return when there was no permission change event", async () => {
+    permission.state = "prompt";
+    await mount();
+    await visibilityChange("hidden");
+    vi.mocked(navigator.permissions.query).mockResolvedValue(Object.assign(new EventTarget(), { state: "granted" }) as PermissionStatus);
+    await visibilityChange("visible");
+    expect(geo.watchPosition).toHaveBeenCalledTimes(1);
+  });
+
+  it("ignores an older permission response arriving after a fresh focus query", async () => {
+    let finish!: (value: PermissionStatus) => void;
+    vi.mocked(navigator.permissions.query).mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+    await mount();
+    await act(async () => window.dispatchEvent(new Event("focus")));
+    expect(geo.watchPosition).toHaveBeenCalledTimes(1);
+    await act(async () => finish(Object.assign(new EventTarget(), { state: "prompt" }) as PermissionStatus));
+    act(() => success[0](position));
+    expect(region()).toBeTruthy();
+    expect(geo.clearWatch).not.toHaveBeenCalled();
+  });
+
+  it("removes focus refresh and permission listeners on unmount", async () => {
+    const view = await mount();
+    const calls = vi.mocked(navigator.permissions.query).mock.calls.length;
+    view.unmount();
+    await act(async () => {
+      window.dispatchEvent(new Event("focus"));
+      permission.state = "prompt";
+      permission.dispatchEvent(new Event("change"));
+    });
+    expect(navigator.permissions.query).toHaveBeenCalledTimes(calls);
+    expect(geo.watchPosition).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not let an old grant event restart GPS while a fresh permission check is pending", async () => {
+    await mount();
+    let finish!: (value: PermissionStatus) => void;
+    vi.mocked(navigator.permissions.query).mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+    await act(async () => window.dispatchEvent(new Event("focus")));
+    expect(geo.clearWatch).toHaveBeenCalledWith(1);
+    act(() => permission.dispatchEvent(new Event("change")));
+    expect(geo.watchPosition).toHaveBeenCalledTimes(1);
+    await act(async () => finish(Object.assign(new EventTarget(), { state: "denied" }) as PermissionStatus));
+    expect(screen.getByRole("status").textContent).toBe("Location is blocked");
+    expect(geo.watchPosition).toHaveBeenCalledTimes(1);
+  });
+
+  it("requires a fresh answer after a rapid panel round trip with pending queries", async () => {
+    const view = await mount();
+    vi.mocked(navigator.permissions.query).mockImplementation(() => new Promise(() => {}));
+    await act(async () => view.refresh(true));
+    expect(geo.clearWatch).toHaveBeenCalledWith(1);
+    await act(async () => view.refresh(false));
+    expect(geo.watchPosition).toHaveBeenCalledTimes(1);
+    expect(region()).toBeNull();
+    expect(screen.getByRole("status").textContent).toBe("Finding nearby arrivals");
   });
 });
