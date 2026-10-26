@@ -66,34 +66,74 @@ export default function NearbyGlance({
     };
   }, []);
 
-  const [permission, setPermission] = useState<PermissionState | "checking" | "unknown">(() =>
-    typeof navigator !== "undefined" && typeof navigator.permissions?.query === "function" ? "checking" : "unknown");
+  const [permissionSnapshot, setPermissionSnapshot] = useState<{
+    value: PermissionState | "checking" | "unknown"; hidden: boolean;
+  }>(() => ({ value: typeof navigator !== "undefined" && typeof navigator.permissions?.query === "function" ? "checking" : "unknown", hidden }));
+  // A previous panel phase's answer cannot authorize a new automatic watch.
+  const canQueryPermission = typeof navigator !== "undefined" && typeof navigator.permissions?.query === "function";
+  const permission = !canQueryPermission ? "unknown" : permissionSnapshot.hidden === hidden ? permissionSnapshot.value : "checking";
+  if (permissionSnapshot.hidden !== hidden) {
+    // Invalidate on every transition, including a rapid open/close before
+    // the intermediate permission query has settled.
+    setPermissionSnapshot({ value: "checking", hidden });
+  }
   useEffect(() => {
     if (!navigator.permissions?.query) return;
     let cancelled = false;
-    // A broken/unsupported permissions query must never leave a skeleton
-    // indefinitely. A late successful query may still recover safely.
-    const deadline = setTimeout(() => setPermission("unknown"), 5_000);
+    let sequence = 0;
+    let deadline: ReturnType<typeof setTimeout> | null = null;
     let status: PermissionStatus | null = null;
     const update = () => {
-      if (!cancelled && status) setPermission(status.state);
+      if (!cancelled && status) setPermissionSnapshot({ value: status.state, hidden });
     };
-    Promise.resolve().then(() => navigator.permissions.query({ name: "geolocation" })).then(
-      (result) => {
-        if (cancelled) return;
-        clearTimeout(deadline);
-        status = result;
-        update();
-        result.addEventListener("change", update);
-      },
-      () => { clearTimeout(deadline); if (!cancelled) setPermission("unknown"); },
-    );
+    // Some browsers keep an old PermissionStatus snapshot without emitting
+    // change. Recheck metadata after panel use/focus; never probe by making
+    // a geolocation request when permission is unconfirmed.
+    const query = () => {
+      const request = ++sequence;
+      status?.removeEventListener("change", update);
+      status = null;
+      if (deadline !== null) clearTimeout(deadline);
+      deadline = setTimeout(() => {
+        if (!cancelled && request === sequence) setPermissionSnapshot({ value: "unknown", hidden });
+      }, 5_000);
+      Promise.resolve().then(() => navigator.permissions.query({ name: "geolocation" })).then(
+        (result) => {
+          if (cancelled || request !== sequence) return;
+          if (deadline !== null) clearTimeout(deadline);
+          status?.removeEventListener("change", update);
+          status = result;
+          update();
+          status.addEventListener("change", update);
+        },
+        () => {
+          if (cancelled || request !== sequence) return;
+          if (deadline !== null) clearTimeout(deadline);
+          setPermissionSnapshot({ value: "unknown", hidden });
+        },
+      );
+    };
+    const recheck = () => {
+      setPermissionSnapshot({ value: "checking", hidden });
+      query();
+    };
+    const onVisibility = () => {
+      // Invalidate before the next visible render, so a previously granted
+      // snapshot cannot restart GPS ahead of a fresh permission response.
+      setPermissionSnapshot({ value: "checking", hidden });
+      if (document.visibilityState === "visible") query();
+    };
+    query();
+    window.addEventListener("focus", recheck);
+    document.addEventListener("visibilitychange", onVisibility);
     return () => {
       cancelled = true;
-      clearTimeout(deadline);
+      if (deadline !== null) clearTimeout(deadline);
       status?.removeEventListener("change", update);
+      window.removeEventListener("focus", recheck);
+      document.removeEventListener("visibilitychange", onVisibility);
     };
-  }, []);
+  }, [hidden]);
 
   // A prior grant is the only automatic entry. A first visit never
   // receives a surprise location prompt; the existing Near me control
