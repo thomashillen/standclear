@@ -1949,7 +1949,9 @@ export default function SearchSheet({
                     }
                   }}
                   aria-label="Refresh routes"
-                  className="press inline-flex items-center gap-1.5 h-7 px-2.5 rounded-full bg-white/[0.06] hover:bg-white/[0.12] text-gray-200 text-[11px] font-semibold touch-manipulation"
+                  aria-busy={refreshing}
+                  aria-disabled={refreshing}
+                  className="press inline-flex items-center gap-1.5 min-h-11 px-2.5 rounded-full bg-white/[0.06] hover:bg-white/[0.12] text-gray-200 text-[11px] font-semibold touch-manipulation aria-disabled:opacity-60"
                 >
                   <RefreshCw
                     className={`w-3.5 h-3.5 ${refreshing ? "motion-safe:animate-spin" : ""}`}
