@@ -3,15 +3,41 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { nearbyGlanceRows, glanceEta } from "@/lib/nearbyGlance";
 import { buildStationIndex } from "@/lib/stopsIndex";
-import { useLines } from "@/lib/subwayData";
+import { useLines, useSubwayDataStatus } from "@/lib/subwayData";
 import { useGeolocation } from "@/lib/useGeolocation";
 import { useNow } from "@/lib/useNow";
-import { useTrains } from "@/lib/useTrains";
+import { useTrains, useFeedHealth } from "@/lib/useTrains";
+import { useOnline } from "@/lib/useOnline";
+
+function GlanceStatus({ message, loading = false }: { message: string; loading?: boolean }) {
+  return (
+    <div role="status" className="flex min-h-11 max-w-[230px] items-center gap-2 rounded-2xl border border-white/[0.10] bg-gray-950/90 px-2.5 py-1.5 text-[12px] text-gray-300">
+      {loading ? <>
+        <span aria-hidden="true" className="flex items-center gap-2 motion-safe:animate-pulse">
+          <span className="size-5 rounded-full bg-white/10" />
+          <span className="h-3 w-20 rounded bg-white/10" />
+        </span>
+        <span className="sr-only">{message}</span>
+      </> : message}
+    </div>
+  );
+}
+
+function LoadingGlance() {
+  const [slow, setSlow] = useState(false);
+  useEffect(() => {
+    const deadline = setTimeout(() => setSlow(true), 30_000);
+    return () => clearTimeout(deadline);
+  }, []);
+  return <GlanceStatus loading={!slow} message={slow ? "Nearby arrivals taking longer" : "Finding nearby arrivals"} />;
+}
 
 export default function NearbyGlance({
   onStationOpen,
+  hidden = false,
 }: {
   onStationOpen: (stopId: string) => void;
+  hidden?: boolean;
 }) {
   const spaceRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
@@ -40,25 +66,31 @@ export default function NearbyGlance({
     };
   }, []);
 
-  const [permission, setPermission] = useState<PermissionState | null>(null);
+  const [permission, setPermission] = useState<PermissionState | "checking" | "unknown">(() =>
+    typeof navigator !== "undefined" && typeof navigator.permissions?.query === "function" ? "checking" : "unknown");
   useEffect(() => {
     if (!navigator.permissions?.query) return;
     let cancelled = false;
+    // A broken/unsupported permissions query must never leave a skeleton
+    // indefinitely. A late successful query may still recover safely.
+    const deadline = setTimeout(() => setPermission("unknown"), 5_000);
     let status: PermissionStatus | null = null;
     const update = () => {
       if (!cancelled && status) setPermission(status.state);
     };
-    navigator.permissions.query({ name: "geolocation" }).then(
+    Promise.resolve().then(() => navigator.permissions.query({ name: "geolocation" })).then(
       (result) => {
         if (cancelled) return;
+        clearTimeout(deadline);
         status = result;
         update();
         result.addEventListener("change", update);
       },
-      () => {}, // Unsupported query: keep the explicit Near me path.
+      () => { clearTimeout(deadline); if (!cancelled) setPermission("unknown"); },
     );
     return () => {
       cancelled = true;
+      clearTimeout(deadline);
       status?.removeEventListener("change", update);
     };
   }, []);
@@ -66,11 +98,16 @@ export default function NearbyGlance({
   // A prior grant is the only automatic entry. A first visit never
   // receives a surprise location prompt; the existing Near me control
   // remains the user-initiated path for that case.
-  const active = visible && permission === "granted";
+  const eligible = visible && !hidden;
+  const active = eligible && permission === "granted";
   const geo = useGeolocation(active);
   const lines = useLines();
+  const lineStatus = useSubwayDataStatus();
   const data = useTrains();
-  const now = useNow(visible);
+  const health = useFeedHealth();
+  const online = useOnline();
+  const clock = useNow(eligible);
+  const now = Math.max(clock, geo.updatedAt ?? 0);
   const index = useMemo(() => (lines ? buildStationIndex(lines) : []), [lines]);
   const rows = useMemo(
     () =>
@@ -83,15 +120,31 @@ export default function NearbyGlance({
     [index, data, geo.lng, geo.lat, geo.status, active, now],
   );
 
+  let message: string | null = null;
+  let waiting = false;
+  if (permission === "checking") waiting = true;
+  else if (permission === "denied" || geo.status === "denied") message = "Location is blocked";
+  else if (permission !== "granted") message = "Use Near me for arrivals";
+  else if (!online) message = "Offline · arrivals unavailable";
+  else if (geo.status === "error" || geo.status === "unavailable") message = "Location unavailable";
+  else if (lineStatus.error) message = "Stations unavailable";
+  else if (health.consecutiveFailures > 0) message = "Arrival update delayed";
+  else if (data && now - data.generatedAt >= 60_000) message = "Waiting for fresh arrivals";
+  else if (geo.status !== "granted" || !lines || !data) waiting = true;
+  else if (!rows.length) message = "No nearby arrivals";
+
+  const showRows = eligible && !waiting && !message;
+
   return (
-    <div ref={spaceRef} className="map-glance-space sm:hidden">
+    <div ref={spaceRef} className={`map-glance-space sm:hidden ${hidden ? "hidden" : ""}`}>
       <div
         ref={contentRef}
-        role={rows.length ? "region" : undefined}
-        aria-label={rows.length ? "Nearby train arrivals" : undefined}
+        role={showRows && rows.length ? "region" : undefined}
+        aria-label={showRows && rows.length ? "Nearby train arrivals" : undefined}
         className="nearby-glance flex flex-col items-start gap-1.5 sm:hidden"
       >
-        {rows.map((row) => {
+        {eligible && (waiting ? <LoadingGlance /> : message ? <GlanceStatus message={message} /> : null)}
+        {(showRows ? rows : []).map((row) => {
           // Badges name the actual next trains, not every service that
           // happens to share this color at the station.
           const nextRoutes = row.routes.filter((route) =>

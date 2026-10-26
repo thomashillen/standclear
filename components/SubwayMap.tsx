@@ -893,9 +893,7 @@ export default function SubwayMap() {
           upper-right system region clear. Desktop retains its top row.
           Only interactive children intercept map gestures. */}
       <div className="map-home-controls" data-panel-open={panelOpen}>
-        {!panelOpen && (
-          <NearbyGlance onStationOpen={handleStationOpen} />
-        )}
+        <NearbyGlance hidden={panelOpen} onStationOpen={handleStationOpen} />
         <div className="map-home-actions">
         <div className="map-toolbar flex flex-wrap items-center justify-end gap-2 pointer-events-none">
           {/* Brand pill — wordmark + tagline above the fold. Hidden on

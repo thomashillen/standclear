@@ -4,7 +4,7 @@ import type { ComponentType } from "react";
 import SubwayMap from "./SubwayMap";
 
 const feed = vi.hoisted(() => ({ online: true, degraded: false, generatedAt: 100_000 as number | null }));
-vi.mock("@/lib/subwayData", () => ({ useLines: () => null }));
+vi.mock("@/lib/subwayData", () => ({ useLines: () => null, useSubwayDataStatus: () => ({ error: false, attempt: 0 }) }));
 vi.mock("@/lib/useOnline", () => ({ useOnline: () => feed.online }));
 vi.mock("@/lib/useNow", () => ({ useNow: () => 100_000 }));
 vi.mock("@/lib/useTrains", () => ({
