@@ -1,14 +1,16 @@
 import { act, cleanup, fireEvent, render, renderHook, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("@/lib/subwayData", () => ({ useLines: () => null }));
-vi.mock("@/lib/useTrains", () => ({ useTrains: () => null }));
+const source = vi.hoisted(() => ({ linesReady: true, dataReady: true, error: false, failures: 0, online: true, empty: false, generatedAt: 100_000 }));
+vi.mock("@/lib/subwayData", () => ({ useLines: () => source.linesReady ? {} : null, useSubwayDataStatus: () => ({ error: source.error }) }));
+vi.mock("@/lib/useTrains", () => ({ useTrains: () => source.dataReady ? { generatedAt: source.generatedAt, trains: [], arrivals: [] } : null, useFeedHealth: () => ({ consecutiveFailures: source.failures }) }));
+vi.mock("@/lib/useOnline", () => ({ useOnline: () => source.online }));
 vi.mock("@/lib/useNow", () => ({ useNow: () => 100_000 }));
 // The projection is covered in lib/nearbyGlance.test.ts. This fixture isolates
 // surface eligibility against the real shared location lifecycle and callbacks.
 vi.mock("@/lib/nearbyGlance", () => ({
   glanceEta: () => "2m",
-  nearbyGlanceRows: () => [{
+  nearbyGlanceRows: () => source.empty ? [] : [{
     station: { stopId: "127", name: "Times Sq" }, color: "#ee352e",
     routes: [{ routeId: "1", id: "1", color: "#ee352e", textColor: "white" }],
     northEta: 220, southEta: null, northRouteId: "1", southRouteId: null,
@@ -28,6 +30,8 @@ const region = () => screen.queryByRole("region", { name: "Nearby train arrivals
 
 beforeEach(() => {
   vi.resetModules();
+  Object.assign(source, { linesReady: true, dataReady: true, error: false, failures: 0, online: true, empty: false, generatedAt: 100_000 });
+  vi.spyOn(Date, "now").mockReturnValue(100_000);
   width = 350; height = 200; visibility = "visible"; success = [];
   permission = Object.assign(new EventTarget(), { state: "granted" as PermissionState });
   Object.defineProperty(navigator, "permissions", { configurable: true, value: { query: vi.fn().mockResolvedValue(permission) } });
@@ -48,14 +52,14 @@ beforeEach(() => {
     disconnect = disconnect;
   });
 });
-afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
+afterEach(() => { cleanup(); vi.clearAllTimers(); vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
 async function mount() {
   const { default: NearbyGlance } = await import("./NearbyGlance");
   const onStationOpen = vi.fn();
   let view!: ReturnType<typeof render>;
   await act(async () => { view = render(<NearbyGlance onStationOpen={onStationOpen} />); });
-  return { ...view, onStationOpen };
+  return { ...view, onStationOpen, refresh: (hidden = false) => view.rerender(<NearbyGlance hidden={hidden} onStationOpen={onStationOpen} />) };
 }
 function permissionChange(state: PermissionState) {
   act(() => { permission.state = state; permission.dispatchEvent(new Event("change")); });
@@ -152,5 +156,98 @@ describe("automatic nearby location lifecycle", () => {
     await mount();
     expect(geo.watchPosition).not.toHaveBeenCalled();
     expect(region()).toBeNull();
+  });
+});
+
+
+describe("initial nearby arrival discovery", () => {
+  it("shows a compact loading status then arrivals on fresh load without a tap", async () => {
+    await mount();
+    expect(screen.getByRole("status").textContent).toBe("Finding nearby arrivals");
+    expect(geo.watchPosition).toHaveBeenCalledTimes(1);
+    expect(region()).toBeNull();
+    act(() => success[0](position));
+    expect(region()).toBeTruthy();
+    expect(screen.queryByRole("status")).toBeNull();
+  });
+
+  it("bounds slow location loading and recovers when a late valid fix arrives", async () => {
+    vi.useFakeTimers(); vi.setSystemTime(100_000);
+    await mount();
+    await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
+    expect(screen.getByRole("status").textContent).toBe("Nearby arrivals taking longer");
+    expect(region()).toBeNull();
+    act(() => success[0](position));
+    expect(region()).toBeTruthy();
+    expect(geo.watchPosition).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps placeholders until both station and live-feed data arrive", async () => {
+    source.linesReady = false;
+    source.dataReady = false;
+    const view = await mount();
+    act(() => success[0](position));
+    expect(region()).toBeNull();
+    expect(screen.getByRole("status").textContent).toBe("Finding nearby arrivals");
+    source.linesReady = true;
+    view.refresh();
+    expect(region()).toBeNull();
+    source.dataReady = true;
+    view.refresh();
+    expect(region()).toBeTruthy();
+    expect(geo.watchPosition).toHaveBeenCalledTimes(1);
+  });
+
+  it("reports unavailable location without inventing arrivals", async () => {
+    Object.defineProperty(navigator, "geolocation", { configurable: true, value: undefined });
+    await mount();
+    expect(screen.getByRole("status").textContent).toBe("Location unavailable");
+    expect(region()).toBeNull();
+  });
+
+  it("bounds stalled permission queries without prompting, and accepts a late permission result", async () => {
+    vi.useFakeTimers(); vi.setSystemTime(100_000);
+    let finish!: (permission: EventTarget) => void;
+    Object.defineProperty(navigator, "permissions", { configurable: true, value: { query: () => new Promise(resolve => { finish = resolve; }) } });
+    await mount();
+    await act(async () => { await vi.advanceTimersByTimeAsync(5_000); });
+    expect(screen.getByRole("status").textContent).toBe("Use Near me for arrivals");
+    expect(geo.watchPosition).not.toHaveBeenCalled();
+    await act(async () => { finish(permission); });
+    expect(geo.watchPosition).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ["feed failure", { failures: 1, dataReady: false }, "Arrival update delayed"],
+    ["retained failed feed", { failures: 1 }, "Arrival update delayed"],
+    ["stale feed", { generatedAt: -20_000 }, "Waiting for fresh arrivals"],
+    ["offline", { online: false }, "Offline · arrivals unavailable"],
+    ["static failure", { error: true }, "Stations unavailable"],
+    ["empty arrivals", { empty: true }, "No nearby arrivals"],
+  ] as const)("shows truthful %s state and recovers with updated data", async (_name, patch, message) => {
+    Object.assign(source, patch);
+    const view = await mount();
+    act(() => success[0](position));
+    expect(screen.getByRole("status").textContent).toBe(message);
+    expect(region()).toBeNull();
+    Object.assign(source, { failures: 0, dataReady: true, generatedAt: 100_000, online: true, error: false, empty: false });
+    view.refresh();
+    expect(region()).toBeTruthy();
+    expect(geo.watchPosition).toHaveBeenCalledTimes(1);
+  });
+
+  it("retains discovery across panel handoff without duplicate watches or another permission query", async () => {
+    const view = await mount();
+    act(() => success[0](position));
+    const { useGeolocation } = await import("@/lib/useGeolocation");
+    const panel = renderHook(() => useGeolocation(true));
+    view.refresh(true);
+    expect(region()).toBeNull();
+    expect(geo.clearWatch).not.toHaveBeenCalled();
+    view.refresh(false);
+    expect(region()).toBeTruthy();
+    panel.unmount();
+    expect(geo.watchPosition).toHaveBeenCalledTimes(1);
+    expect(navigator.permissions.query).toHaveBeenCalledTimes(1);
   });
 });
