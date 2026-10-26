@@ -133,7 +133,7 @@ Append to #191 only for meaningful completed work, important risks, intentional 
 
 ### Location
 
-- Do not trigger surprise location permission prompts.
+- Mobile map startup intentionally requests location access for nearby arrival badges, as Thomas approved in #251. Show accessible loading while awaiting consent or a fix; preserve denied/error states and hidden/background cleanup. Other location prompts should follow explicit rider intent.
 - Do not continue presenting location-derived information as current after location access or a location watch becomes invalid.
 - Avoid unnecessary continuous high-accuracy location work, especially on UI that is not visible.
 
