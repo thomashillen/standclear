@@ -58,66 +58,29 @@ function RouteBullet({
 }) {
   const fg = textColor === "black" ? "#000" : "#fff";
 
-  if (variant === "diamond") {
-    // Bounding box matches the circle size so bullets line up in a row.
-    // Inner rotated square is sized so its diagonal ≈ circle diameter.
-    const boxDim = size === "sm" ? "w-5 h-5 text-[11px]" : "w-7 h-7 text-[14px]";
-    const diamondSize = size === "sm" ? 14 : 20;
-    const outer = `nyc-bullet inline-flex items-center justify-center flex-shrink-0 relative ${boxDim}`;
-    const diamondStyle: React.CSSProperties = {
-      width: diamondSize,
-      height: diamondSize,
-      backgroundColor: color,
-      transform: "rotate(45deg)",
-      borderRadius: 2,
-    };
-    const labelStyle: React.CSSProperties = { color: fg };
-    const labelClass = `relative leading-none ${size === "sm" ? "text-[11px]" : "text-[14px]"}`;
-    const inner = (
-      <>
-        <span className="absolute inset-0 flex items-center justify-center">
-          <span style={diamondStyle} />
-        </span>
-        <span className={labelClass} style={labelStyle}>
-          {id}
-        </span>
-      </>
-    );
-    if (onClick) {
-      return (
-        <button
-          type="button"
-          onClick={onClick}
-          className={`${outer} press touch-manipulation hover:scale-105 active:scale-95 transition-transform`}
-          aria-label={`View ${id} express line`}
-        >
-          {inner}
-        </button>
-      );
-    }
-    return <span className={outer}>{inner}</span>;
-  }
-
-  const dim = size === "sm" ? "w-5 h-5 text-[12px]" : "w-7 h-7 text-[16px]";
-  const base = `nyc-bullet inline-flex items-center justify-center rounded-full leading-none flex-shrink-0 ${dim}`;
-  const style = { backgroundColor: color, color: fg };
-  if (onClick) {
-    return (
-      <button
-        type="button"
-        onClick={onClick}
-        className={`${base} press touch-manipulation hover:scale-105 active:scale-95 transition-transform`}
-        style={style}
-        aria-label={`View ${id} line`}
-      >
-        {id}
-      </button>
-    );
-  }
-  return (
-    <span className={base} style={style}>
-      {id}
+  const dim = size === "sm" ? "w-5 h-5" : "w-7 h-7";
+  const artwork = variant === "diamond" ? (
+    <span className={`nyc-bullet inline-flex items-center justify-center flex-shrink-0 relative ${dim}`}>
+      <span className="absolute inset-0 flex items-center justify-center">
+        <span style={{ width: size === "sm" ? 14 : 20, height: size === "sm" ? 14 : 20, backgroundColor: color, transform: "rotate(45deg)", borderRadius: 2 }} />
+      </span>
+      <span className={`relative leading-none ${size === "sm" ? "text-[11px]" : "text-[14px]"}`} style={{ color: fg }}>{id}</span>
     </span>
+  ) : (
+    <span className={`nyc-bullet inline-flex items-center justify-center rounded-full leading-none flex-shrink-0 ${dim} ${size === "sm" ? "text-[12px]" : "text-[16px]"}`} style={{ backgroundColor: color, color: fg }}>{id}</span>
+  );
+  if (!onClick) return artwork;
+  // The native button owns the hit area; small route artwork stays centered.
+  // Do not scale the target on press or overlap neighboring controls.
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="inline-flex w-11 h-11 flex-shrink-0 items-center justify-center rounded-full touch-manipulation hover:bg-white/[0.08] active:bg-white/[0.12] focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-white/80"
+      aria-label={`View ${id}${variant === "diamond" ? " express" : ""} line`}
+    >
+      {artwork}
+    </button>
   );
 }
 
@@ -188,7 +151,7 @@ export function ArrivalRow({
   const isImminent = arrival.eta - now / 1000 < 90;
   const staleLabel = staleness?.label ?? null;
   return (
-    <div className="flex items-center gap-3 px-4 py-2.5 border-b border-white/[0.04] last:border-b-0">
+    <div className="flex items-center gap-3 px-4 py-2.5 [@media(max-height:420px)]:py-1 border-b border-white/[0.04] last:border-b-0">
       {badge ? (
         <RouteBullet
           id={badge.id}
@@ -556,7 +519,7 @@ export default function StationPanel({ stopId, onClose, onSelectLine, onStartDir
       />
 
       <div
-        className="flex flex-col gap-3 px-4 pt-2 pb-3 flex-shrink-0 border-b border-white/[0.06] sm:cursor-auto cursor-grab active:cursor-grabbing touch-none"
+        className="flex flex-col gap-3 px-4 pt-2 pb-3 [@media(max-height:420px)]:gap-1 [@media(max-height:420px)]:py-1 flex-shrink-0 border-b border-white/[0.06] sm:cursor-auto cursor-grab active:cursor-grabbing touch-none"
         onPointerDown={handlers.onPointerDown}
         onPointerMove={handlers.onPointerMove}
         onPointerUp={handlers.onPointerUp}
@@ -567,22 +530,6 @@ export default function StationPanel({ stopId, onClose, onSelectLine, onStartDir
             <h2 className="text-[18px] font-black tracking-tight text-white leading-tight">
               {station.name}
             </h2>
-            <div className="flex items-center gap-1.5 mt-2 flex-wrap">
-              {station.routes.map((r) => {
-                const info = routeInfo.get(r.routeId);
-                if (!info) return null;
-                return (
-                  <RouteBullet
-                    key={r.routeId}
-                    id={info.id}
-                    color={info.color}
-                    textColor={info.textColor}
-                    size="sm"
-                    onClick={() => onSelectLine(r.routeId)}
-                  />
-                );
-              })}
-            </div>
           </div>
           {/* Action buttons sit inline with the station name to keep
               the header compact. Directions is the primary action (blue
@@ -617,6 +564,23 @@ export default function StationPanel({ stopId, onClose, onSelectLine, onStartDir
           >
             <X className="w-[18px] h-[18px]" strokeWidth={2.5} />
           </button>
+        </div>
+        {/* Full-width wrapping keeps route targets out of the title/action column. */}
+        <div className="flex items-center flex-wrap">
+          {station.routes.map((r) => {
+            const info = routeInfo.get(r.routeId);
+            if (!info) return null;
+            return (
+              <RouteBullet
+                key={r.routeId}
+                id={info.id}
+                color={info.color}
+                textColor={info.textColor}
+                size="sm"
+                onClick={() => onSelectLine(r.routeId)}
+              />
+            );
+          })}
         </div>
       </div>
 
@@ -750,7 +714,7 @@ export function DirectionSection({
 
   return (
     <section>
-      <div className="flex items-center gap-2 px-4 pt-3 pb-2 text-gray-400">
+      <div className="flex items-center gap-2 px-4 pt-3 pb-2 [@media(max-height:420px)]:py-1 text-gray-400">
         <span className="flex-shrink-0">{icon}</span>
         <span className="text-[11px] font-semibold uppercase tracking-wider">
           {label}

@@ -81,8 +81,9 @@ try {
       await station().waitFor();
       await station().getByRole("button", { name: "Add to favorites", exact: true }).click();
       assert.equal(await station().getByRole("button", { name: "Remove from favorites", exact: true }).getAttribute("aria-pressed"), "true");
-      // Save measured target sizes as audit evidence, not a blanket accessibility pass.
+      // Native route buttons must have non-overlapping, comfortably sized targets.
       const targets = await station().getByRole("button", { name: /^View .* line$/ }).evaluateAll(elements => elements.map(e => ({ name: e.getAttribute("aria-label"), width: e.getBoundingClientRect().width, height: e.getBoundingClientRect().height })));
+      for (const target of targets) assert.ok(target.width >= 43.99 && target.height >= 43.99, `${target.name}: ${target.width}x${target.height}`);
       results.push({ viewport: key, name: "station route target measurements", targets });
       await screenshot("station");
       await home();
