@@ -519,7 +519,7 @@ export default function StationPanel({ stopId, onClose, onSelectLine, onStartDir
       />
 
       <div
-        className="flex flex-col gap-3 px-4 pt-2 pb-3 flex-shrink-0 border-b border-white/[0.06] sm:cursor-auto cursor-grab active:cursor-grabbing touch-none"
+        className="flex flex-col gap-3 px-4 pt-2 pb-3 [@media(max-height:420px)]:gap-1 [@media(max-height:420px)]:py-1 flex-shrink-0 border-b border-white/[0.06] sm:cursor-auto cursor-grab active:cursor-grabbing touch-none"
         onPointerDown={handlers.onPointerDown}
         onPointerMove={handlers.onPointerMove}
         onPointerUp={handlers.onPointerUp}

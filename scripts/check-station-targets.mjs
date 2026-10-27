@@ -22,7 +22,8 @@ try {
       await page.route("**/api/alerts", route => route.fulfill({ json: { generatedAt: Date.now(), alerts: [] } }));
       const station = () => page.getByRole("region", { name: "Times Sq-42 St station", exact: true });
       const open = async () => {
-        await page.goto(origin, { waitUntil: "domcontentloaded" });
+        const line = page.getByRole("region", { name: / line$/ });
+        if (await line.count()) await line.getByRole("button", { name: "Close panel", exact: true }).click();
         await page.getByRole("button", { name: "Search stations and plan trips", exact: true }).filter({ visible: true }).click();
         await page.getByRole("searchbox", { name: "Search NYC" }).fill("Times");
         await page.getByRole("button", { name: /Times Sq-42 St/ }).first().click();
@@ -30,11 +31,13 @@ try {
         await station().getByRole("button", { name: "View 6 express line", exact: true }).waitFor();
         await page.evaluate(async () => { await document.fonts.ready; });
       };
+      await page.goto(origin, { waitUntil: "domcontentloaded" });
       await open();
       const targets = await station().getByRole("button").evaluateAll(elements => elements.map(e => {
         const r = e.getBoundingClientRect(), art = e.querySelector(".nyc-bullet")?.getBoundingClientRect();
         return { name: e.getAttribute("aria-label"), x: r.x, y: r.y, width: r.width, height: r.height, art: art ? { width: art.width, height: art.height } : null };
       }));
+      await page.screenshot({ path: path.join(output, `${viewport.width}-${motion}.png`) });
       const routes = targets.filter(t => /^View .* line$/.test(t.name));
       assert.ok(routes.length >= 9, "crowded interchange and fixture arrival routes must be present");
       for (const t of targets.filter(t => t.name !== "Expand panel" && t.name !== "Collapse panel")) {
@@ -45,9 +48,9 @@ try {
       for (const [i, a] of targets.entries()) for (const b of targets.slice(i + 1)) {
         assert.ok(a.x + a.width <= b.x + 0.5 || b.x + b.width <= a.x + 0.5 || a.y + a.height <= b.y + 0.5 || b.y + b.height <= a.y + 0.5, `${a.name} overlaps ${b.name}`);
       }
-      assert.ok(routes.every(t => t.art && [20, 28].includes(t.art.width) && t.art.width === t.art.height), "artwork keeps its original dimensions");
+      assert.ok(routes.every(t => t.art && [20, 28].some(size => Math.abs(t.art.width - size) < 0.01 && Math.abs(t.art.height - size) < 0.01)), "artwork keeps its original dimensions");
       const scroller = await station().locator(".ios-scroll").boundingBox();
-      assert.ok(Math.min(scroller.y + scroller.height, viewport.height) - scroller.y >= 64, "header must leave visible arrival content");
+      assert.ok(Math.min(scroller.y + scroller.height, viewport.height) - scroller.y >= 64, `header must leave visible arrival content: ${JSON.stringify(scroller)}, viewport ${viewport.height}`);
       assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
       await page.screenshot({ path: path.join(output, `${viewport.width}-${motion}.png`) });
       // Hit padding outside the small artwork: header and circular/express arrivals.
