@@ -95,7 +95,8 @@ export default function MarketingShell({
             </p>
           )}
         </div>
-        <article className="text-[15px] text-gray-300 leading-relaxed space-y-5 [&_h2]:text-xl [&_h2]:font-bold [&_h2]:text-white [&_h2]:tracking-tight [&_h2]:mt-10 [&_h2]:mb-2 [&_h3]:text-base [&_h3]:font-semibold [&_h3]:text-white [&_h3]:mt-6 [&_h3]:mb-1 [&_p]:leading-relaxed [&_a]:text-emerald-300 [&_a]:underline [&_a]:underline-offset-4 [&_a:hover]:text-emerald-200 [&_ul]:list-disc [&_ul]:pl-5 [&_ul]:space-y-1.5 [&_ol]:list-decimal [&_ol]:pl-5 [&_ol]:space-y-1.5 [&_strong]:text-white [&_code]:text-emerald-200 [&_code]:bg-white/[0.06] [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:rounded">
+        {/* Arrival CTAs own their foreground color against a light background. */}
+        <article className="text-[15px] text-gray-300 leading-relaxed space-y-5 [&_h2]:text-xl [&_h2]:font-bold [&_h2]:text-white [&_h2]:tracking-tight [&_h2]:mt-10 [&_h2]:mb-2 [&_h3]:text-base [&_h3]:font-semibold [&_h3]:text-white [&_h3]:mt-6 [&_h3]:mb-1 [&_p]:leading-relaxed [&_a:not([data-arrival-cta])]:text-emerald-300 [&_a]:underline [&_a]:underline-offset-4 [&_a:not([data-arrival-cta]):hover]:text-emerald-200 [&_ul]:list-disc [&_ul]:pl-5 [&_ul]:space-y-1.5 [&_ol]:list-decimal [&_ol]:pl-5 [&_ol]:space-y-1.5 [&_strong]:text-white [&_code]:text-emerald-200 [&_code]:bg-white/[0.06] [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:rounded">
           {children}
         </article>
       </main>
