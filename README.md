@@ -175,6 +175,8 @@ npm run build
 
 CI runs the repository's validation checks on pull requests. The source-available license permits a public GitHub fork only as needed to prepare and submit a contribution to this official repository.
 
+For repeatable production-browser rider-flow checks and the visual findings, see the [October 2026 UI audit](docs/ui-audit-2026-10-27.md).
+
 ## License
 
 StandClear is **source-available, not open source**. You may inspect the code, run it privately for evaluation/development/testing/education, and contribute changes back to the official project. The current license does not permit rebranding, redistribution, public deployment, or competing/commercial derivatives. See [LICENSE](./LICENSE) for the exact terms.

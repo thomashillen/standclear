@@ -1,5 +1,6 @@
+import { useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { TrainsResponse, Train } from "@/app/api/trains/route";
 import type { Lines, SubwayLine } from "@/lib/subwayData";
 
@@ -268,5 +269,25 @@ describe("LiveTrainsPopup", () => {
     expect(screen.getByText(/Feed issue — showing last-known data/)).toBeTruthy();
     expect(screen.getByText("trains in the last-known snapshot")).toBeTruthy();
     expect(screen.queryByText(/Live · refreshed/)).toBeNull();
+  });
+});
+
+
+describe("System Pulse keyboard return focus", () => {
+  it.each(["Escape", "close button"])("returns focus to its external opener after %s", async method => {
+    function Harness() {
+      const [open, setOpen] = useState(false);
+      return <><button onClick={() => setOpen(true)}>Live</button>
+        <LiveTrainsPopup open={open} onClose={() => setOpen(false)} /></>;
+    }
+    render(<Harness />);
+    const opener = screen.getByRole("button", { name: "Live" });
+    opener.focus();
+    fireEvent.click(opener);
+    const dialog = await screen.findByRole("dialog", { name: "System Pulse" });
+    if (method === "Escape") fireEvent.keyDown(dialog, { key: "Escape" });
+    else fireEvent.click(within(dialog).getByRole("button", { name: "Close" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "System Pulse" })).toBeNull());
+    await waitFor(() => expect(document.activeElement).toBe(opener));
   });
 });
