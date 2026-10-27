@@ -51,6 +51,9 @@ try {
       assert.ok(routes.every(t => t.art && [20, 28].some(size => Math.abs(t.art.width - size) < 0.01 && Math.abs(t.art.height - size) < 0.01)), "artwork keeps its original dimensions");
       const scroller = await station().locator(".ios-scroll").boundingBox();
       assert.ok(Math.min(scroller.y + scroller.height, viewport.height) - scroller.y >= 64, `header must leave visible arrival content: ${JSON.stringify(scroller)}, viewport ${viewport.height}`);
+      const firstArrival = station().getByRole("button", { name: "View 1 line", exact: true }).last();
+      const firstArrivalBox = await firstArrival.boundingBox();
+      assert.ok(firstArrivalBox.y + firstArrivalBox.height <= viewport.height + 0.01, "first arrival route target must be fully visible without scrolling");
       assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
       await page.screenshot({ path: path.join(output, `${viewport.width}-${motion}.png`) });
       // Hit padding outside the small artwork: header and circular/express arrivals.
