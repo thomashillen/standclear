@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useRef } from "react";
 import Link from "next/link";
 import { Activity, ArrowDown, ArrowUp, ChevronRight, Radio, Train } from "lucide-react";
 import {
@@ -27,6 +27,7 @@ interface Props {
 // now, direction split, status mix (dwelling vs. moving vs. arriving),
 // and a busiest-lines breakdown. Refreshes implicitly with `useTrains`.
 export default function LiveTrainsPopup({ open, onClose }: Props) {
+  const returnFocus = useRef<HTMLElement | null>(null);
   const data = useTrains();
   const health = useFeedHealth();
   const feedDegraded = health.online && health.degraded;
@@ -118,7 +119,19 @@ export default function LiveTrainsPopup({ open, onClose }: Props) {
 
   return (
     <Dialog open={open} onOpenChange={(o) => (!o ? onClose() : undefined)}>
-      <DialogContent className="ios-glass ios-glass--modal border-white/[0.08] text-white rounded-t-[28px] sm:rounded-[22px] max-h-[85dvh] sm:max-h-[80dvh] overflow-hidden flex flex-col p-0 pb-[env(safe-area-inset-bottom)] sm:pb-0 gap-0 shadow-[0_20px_60px_-10px_rgba(0,0,0,0.6)]">
+      <DialogContent
+        onOpenAutoFocus={() => {
+          returnFocus.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+        }}
+        onCloseAutoFocus={(event) => {
+          // This controlled dialog has an external Live button rather than a
+          // Radix DialogTrigger, so Radix cannot restore its focus for us.
+          if (returnFocus.current?.isConnected) {
+            event.preventDefault();
+            returnFocus.current.focus();
+          }
+        }}
+        className="ios-glass ios-glass--modal border-white/[0.08] text-white rounded-t-[28px] sm:rounded-[22px] max-h-[85dvh] sm:max-h-[80dvh] overflow-hidden flex flex-col p-0 pb-[env(safe-area-inset-bottom)] sm:pb-0 gap-0 shadow-[0_20px_60px_-10px_rgba(0,0,0,0.6)]">
         <DialogHeader className="px-5 pt-5 pb-3 flex-shrink-0 text-left pr-16">
           <DialogTitle className="text-white text-xl font-black tracking-tight flex items-center gap-2">
             <span className="relative inline-flex w-2.5 h-2.5">

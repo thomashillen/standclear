@@ -14,6 +14,21 @@ const station: StationEntry = {
 };
 
 describe("PlannerField editing and clearing", () => {
+  it.each(["From", "To"])("keeps the selected %s endpoint visible and described while editing", label => {
+    const onQueryChange = vi.fn();
+    const props = { label, station, active: true, query: "", onQueryChange,
+      placeholder: "Search station", accent: "sky" as const, onTap: vi.fn(), onClear: vi.fn() };
+    const view = render(<PlannerField {...props} />);
+    const input = screen.getByRole("textbox", { name: `${label} station search` }) as HTMLInputElement;
+    expect(input.placeholder).toBe("1 Av");
+    expect(document.getElementById(input.getAttribute("aria-describedby")!)?.textContent?.trim()).toBe(`Selected ${label.toLowerCase()}: 1 Av. Type to change it.`);
+    fireEvent.change(input, { target: { value: "Union" } });
+    expect(onQueryChange).toHaveBeenLastCalledWith("Union");
+    view.rerender(<PlannerField {...props} station={null} />);
+    expect(input.placeholder).toBe("Search station");
+    expect(input.hasAttribute("aria-describedby")).toBe(false);
+  });
+
   it.each(["From", "To"])("exposes separate native %s activation and clear actions", (label) => {
     const onTap = vi.fn();
     const onClear = vi.fn();

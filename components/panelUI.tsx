@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef } from "react";
+import { useId, useMemo, useRef } from "react";
 import {
   ArrowUp,
   ArrowDown,
@@ -480,6 +480,7 @@ export function PlannerField({
   onClear: () => void;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
+  const selectionDescriptionId = useId();
   const dot =
     accent === "emerald"
       ? "bg-emerald-400 ring-emerald-300/30"
@@ -509,13 +510,17 @@ export function PlannerField({
           autoFocus
           value={query}
           onChange={(e) => onQueryChange(e.target.value)}
-          placeholder={station ? `Change ${label.toLowerCase()}` : placeholder}
+          placeholder={station ? station.name : placeholder}
+          aria-describedby={station ? selectionDescriptionId : undefined}
           aria-label={`${label} station search`}
           // 16px font-size prevents iOS Safari from auto-zooming
           // the page on focus, which leaves the layout shifted
           // behind the Dynamic Island even after blur.
           className="flex-1 min-w-0 h-full pr-3 bg-transparent text-[16px] text-gray-50 placeholder-gray-400 focus:outline-none"
         />
+        {station && <span id={selectionDescriptionId} className="sr-only">
+          Selected {label.toLowerCase()}: {station.name}. Type to change it.
+        </span>}
         {query && (
           <button
             type="button"
