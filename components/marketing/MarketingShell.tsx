@@ -33,10 +33,10 @@ export default function MarketingShell({
   return (
     <div className="min-h-dvh bg-gray-950 text-white flex flex-col">
       <header className="sticky top-0 z-30 backdrop-blur-md bg-gray-950/75 border-b border-white/[0.06]">
-        <div className="max-w-3xl mx-auto px-4 sm:px-6 h-14 flex items-center justify-between gap-4">
+        <div className="max-w-3xl mx-auto px-4 sm:px-6 h-14 flex items-center justify-between gap-2 sm:gap-4">
           <Link
             href="/"
-            className="flex items-center gap-2 text-[15px] font-bold tracking-tight hover:opacity-90"
+            className="flex min-h-11 min-w-11 items-center gap-2 rounded text-[15px] font-bold tracking-tight hover:opacity-90 touch-manipulation focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white/70"
           >
             <span aria-hidden className="text-lg leading-none">
               🚇
@@ -49,13 +49,13 @@ export default function MarketingShell({
           >
             <Link
               href="/about"
-              className="hidden sm:inline px-2 py-1 rounded hover:text-white transition-colors"
+              className="hidden min-h-11 min-w-11 items-center justify-center px-2 rounded hover:text-white transition-colors sm:inline-flex touch-manipulation focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white/70"
             >
               About
             </Link>
             <Link
               href="/changelog"
-              className="hidden sm:inline px-2 py-1 rounded hover:text-white transition-colors"
+              className="hidden min-h-11 min-w-11 items-center justify-center px-2 rounded hover:text-white transition-colors sm:inline-flex touch-manipulation focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white/70"
             >
               Changelog
             </Link>
@@ -64,16 +64,19 @@ export default function MarketingShell({
               target="_blank"
               rel="noopener noreferrer"
               aria-label="GitHub"
-              className="px-2 py-1 rounded text-gray-400 hover:text-white transition-colors flex items-center gap-1.5"
+              className="flex min-h-11 min-w-11 items-center justify-center gap-1.5 px-2 rounded text-gray-400 hover:text-white transition-colors touch-manipulation focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white/70"
             >
               <GithubIcon className="w-4 h-4" />
               <span className="hidden sm:inline">GitHub</span>
             </a>
             <Link
               href="/"
-              className="ml-1 px-3.5 py-1.5 rounded-full bg-white text-gray-950 font-semibold text-[12px] hover:bg-gray-100 active:bg-gray-200 transition-colors"
+              className="group inline-flex min-h-11 min-w-11 shrink-0 whitespace-nowrap items-center justify-center rounded-full text-gray-950 font-semibold text-[12px] touch-manipulation focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white/70"
             >
-              Open app
+              {/* Keep the 30px capsule inside a full 44px native link target. */}
+              <span className="inline-flex items-center px-3.5 py-1.5 rounded-full bg-white group-hover:bg-gray-100 group-active:bg-gray-200 transition-colors">
+                Open app
+              </span>
             </Link>
           </nav>
         </div>

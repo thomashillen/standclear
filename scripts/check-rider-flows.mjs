@@ -193,7 +193,10 @@ try {
         const response = await page.goto(new URL(route, origin).href, { waitUntil: "domcontentloaded" });
         assert.equal(response.status(), 200);
         await page.getByRole("heading", { level: 1 }).waitFor();
-        const targets = await page.locator("header a").evaluateAll(elements => elements.map(e => ({ name: e.getAttribute("aria-label") || e.textContent?.trim(), width: e.getBoundingClientRect().width, height: e.getBoundingClientRect().height, top: e.getBoundingClientRect().top })));
+        const targets = await page.getByRole("banner").locator("a").evaluateAll(elements => elements.map(e => ({ name: e.getAttribute("aria-label") || e.textContent?.trim(), width: e.getBoundingClientRect().width, height: e.getBoundingClientRect().height, top: e.getBoundingClientRect().top })));
+        for (const target of targets.filter(target => target.width > 0 && target.height > 0)) {
+          assert.ok(target.width >= 44 && target.height >= 44, `${route} ${target.name}: public header target is below 44px`);
+        }
         results.push({ viewport: key, name: `public header target measurements ${route}`, targets });
         assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
         const arrivalCtas = await page.getByRole("link", { name: /See live/ }).evaluateAll(elements => elements.map(e => {
