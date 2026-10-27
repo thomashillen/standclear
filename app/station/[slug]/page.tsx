@@ -159,6 +159,7 @@ export default async function StationPage({ params }: Params) {
       <div className="not-prose mt-7">
         <Link
           href={liveLink}
+          data-arrival-cta
           className="inline-flex items-center gap-2 px-5 py-3 rounded-full bg-white text-gray-950 font-semibold text-[14px] hover:bg-gray-100 active:bg-gray-200 transition-colors"
         >
           <span aria-hidden>🚇</span>

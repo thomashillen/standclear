@@ -204,6 +204,9 @@ try {
           const luminance = rgb.map(v => { v /= 255; return v <= .04045 ? v / 12.92 : ((v + .055) / 1.055) ** 2.4; }).reduce((sum, v, i) => sum + v * [.2126, .7152, .0722][i], 0);
           return { text: e.textContent, color: style.color, background: style.backgroundColor, contrastOnWhite: style.backgroundColor === "rgb(255, 255, 255)" ? 1.05 / (luminance + .05) : null };
         }));
+        for (const cta of arrivalCtas) {
+          if (cta.contrastOnWhite !== null) assert.ok(cta.contrastOnWhite >= 4.5, `${route}: arrival link contrast ${cta.contrastOnWhite.toFixed(2)}:1 is below 4.5:1`);
+        }
         if (arrivalCtas.length) results.push({ viewport: key, name: `arrival CTA contrast measurement ${route}`, measurements: arrivalCtas });
         await screenshot(`public-${route.slice(1).replaceAll("/", "-")}`);
       });
