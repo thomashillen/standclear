@@ -179,6 +179,7 @@
 }
 @media (min-width: 640px) {
   .map-home-controls, .map-home-actions { display: contents; }
+  .map-glance-space { display: none; }
   .map-toolbar {
     position: absolute;
     z-index: 30;
@@ -188,6 +189,22 @@
     padding-top: calc(max(var(--safe-top), 0.5rem) + 0.5rem);
     padding-left: max(var(--safe-left), 0.75rem);
     padding-right: max(var(--safe-right), 0.75rem);
+  }
+}
+
+/* A wide touch viewport can be an unfolded phone. Keep arrivals available
+   beneath the toolbar instead of treating width alone as desktop intent.
+   Fine-pointer desktops retain their existing location/prompt behavior. */
+@media (min-width: 640px) and (pointer: coarse) {
+  .map-glance-space:not(.hidden) {
+    display: block;
+    position: absolute;
+    z-index: 20;
+    left: max(var(--safe-left), 0.75rem);
+    top: var(--map-panel-top);
+    bottom: calc(max(var(--safe-bottom), 0.5rem) + 2rem);
+    width: 230px;
+    pointer-events: none;
   }
 }
 

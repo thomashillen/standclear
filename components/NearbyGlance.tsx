@@ -47,7 +47,7 @@ export default function NearbyGlance({
     const content = contentRef.current;
     if (!space || !content) return;
     // Measure the allocated grid cell, not the arrival rows: location is
-    // needed before rows exist. CSS owns the desktop/short-screen cutoffs.
+    // needed before rows exist. CSS owns the input-capability and short-screen cutoffs.
     const update = () => {
       const bounds = space.getBoundingClientRect();
       setVisible(document.visibilityState === "visible" &&
@@ -175,12 +175,12 @@ export default function NearbyGlance({
   const showRows = eligible && !waiting && !message;
 
   return (
-    <div ref={spaceRef} className={`map-glance-space sm:hidden ${hidden ? "hidden" : ""}`}>
+    <div ref={spaceRef} className={`map-glance-space ${hidden ? "hidden" : ""}`}>
       <div
         ref={contentRef}
         role={showRows && rows.length ? "region" : undefined}
         aria-label={showRows && rows.length ? "Nearby train arrivals" : undefined}
-        className="nearby-glance flex flex-col items-start gap-1.5 sm:hidden"
+        className="nearby-glance flex flex-col items-start gap-1.5"
       >
         {eligible && (waiting ? <LoadingGlance /> : message ? <GlanceStatus message={message} /> : null)}
         {(showRows ? rows : []).map((row) => {
