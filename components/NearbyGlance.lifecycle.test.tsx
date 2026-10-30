@@ -98,6 +98,21 @@ describe("automatic nearby location lifecycle", () => {
     expect(region()).toBeTruthy();
   });
 
+  it("retains arrivals and one shared watch when folding between visible touch layouts", async () => {
+    await mount();
+    act(() => success[0](position));
+    expect(region()).toBeTruthy();
+    // The real-browser regression verifies CSS eligibility across 640px.
+    // This test verifies the shared location lifecycle once both cells fit.
+    for (const nextWidth of [230, 350, 230]) {
+      act(() => { width = nextWidth; height = 400; resize(); window.dispatchEvent(new Event("resize")); });
+      expect(region()).toBeTruthy();
+      expect(geo.watchPosition).toHaveBeenCalledTimes(1);
+      expect(geo.getCurrentPosition).toHaveBeenCalledTimes(1);
+      expect(geo.clearWatch).not.toHaveBeenCalled();
+    }
+  });
+
   it("stops when the CSS container query hides the glance on a cramped screen", async () => {
     const view = await mount();
     act(() => success[0](position));
