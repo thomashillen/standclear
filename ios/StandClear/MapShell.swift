@@ -21,6 +21,7 @@ struct MapShell: View {
     @State private var selectedTrip: NativeTripPlan?
     @State private var tripFocusRevision = 0
     @State private var searchQuery = ""
+    @FocusState private var stationSearchFocused: Bool
     @State private var arrivalStatusMessage = ""
     @State private var showingArrivalStatus = false
     @State private var mapError = false
@@ -105,6 +106,9 @@ struct MapShell: View {
             }
             .onGeometryChange(for: CGSize.self) { $0.size } action: { windowSize = $0 }
             .onChange(of: expanded) { _, isExpanded in
+                // The old searchable navigation region is about to disappear.
+                // Release its focus so its keyboard cannot cover the new layout.
+                stationSearchFocused = false
                 guard isExpanded, let activePanel = panel else { return }
                 expandedPanel = activePanel
                 panel = nil
@@ -377,7 +381,7 @@ struct MapShell: View {
     }
 
     private func stationBrowser(search: Bool) -> some View {
-        StationBrowser(store: store, location: location, search: search, query: $searchQuery,
+        StationBrowser(store: store, location: location, search: search, query: $searchQuery, searchFocus: $stationSearchFocused,
                        directionsSelection: $directionsSelection, onDirectionsHere: beginDirections,
                        onSelectTrip: selectTrip, onShowTripMap: showTripOnMap)
         { station in
