@@ -1,0 +1,63 @@
+name: StandClear
+options:
+  bundleIdPrefix: app.standclear
+  deploymentTarget:
+    iOS: '26.0'
+packages:
+  MapboxMaps:
+    url: https://github.com/mapbox/mapbox-maps-ios.git
+    exactVersion: 11.26.0
+settings:
+  base:
+    SWIFT_VERSION: '6.0'
+    SWIFT_STRICT_CONCURRENCY: complete
+    CODE_SIGN_STYLE: Automatic
+    DEVELOPMENT_TEAM: ''
+targets:
+  StandClear:
+    type: application
+    platform: iOS
+    sources: [StandClear]
+    dependencies:
+      - package: MapboxMaps
+    configFiles:
+      Debug: Config/App.xcconfig
+      Release: Config/App.xcconfig
+    info:
+      path: StandClear/Info.plist
+      properties:
+        CFBundleDisplayName: StandClear
+        UILaunchScreen: {}
+        MBXAccessToken: $(MAPBOX_PUBLIC_TOKEN)
+        NSLocationWhenInUseUsageDescription: StandClear uses your location to find nearby subway stations and arrivals.
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: app.standclear.native
+        TARGETED_DEVICE_FAMILY: '1,2'
+        GENERATE_INFOPLIST_FILE: NO
+  StandClearTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources: [StandClearTests]
+    dependencies:
+      - target: StandClear
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+  StandClearUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources: [StandClearUITests]
+    dependencies:
+      - target: StandClear
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+schemes:
+  StandClear:
+    build:
+      targets:
+        StandClear: all
+    test:
+      targets: [StandClearTests, StandClearUITests]

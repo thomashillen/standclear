@@ -1,0 +1,173 @@
+import Foundation
+@testable import StandClear
+import XCTest
+
+@MainActor
+final class TransitStoreTests: XCTestCase {
+    func testStopCancelsInFlightRequestAndDoesNotPublishItsResult() async throws {
+        let fixture = ResponseFixture()
+        let (store, session) = makeStore(fixture)
+        defer { session.invalidateAndCancel() }
+        let run = Task { await store.run() }
+        defer { run.cancel(); store.stop() }
+        try await waitUntil { fixture.requestCount == 1 }
+
+        store.stop()
+        try await waitUntil { fixture.cancellationCount == 1 }
+        XCTAssertNil(store.snapshot)
+        XCTAssertFalse(store.feedError, "Cancellation must not appear as an outage")
+        await store.refresh()
+        XCTAssertEqual(fixture.requestCount, 1, "A stopped store must not start network work")
+    }
+
+    func testOverlappingRefreshesShareOneRequest() async throws {
+        let fixture = ResponseFixture()
+        let (store, session) = makeStore(fixture)
+        defer { session.invalidateAndCancel() }
+        let run = Task { await store.run() }
+        defer { run.cancel(); store.stop() }
+        try await waitUntil { fixture.requestCount == 1 }
+
+        var entered = 0
+        let secondRefresh = Task { entered += 1; await store.refresh() }
+        let thirdRefresh = Task { entered += 1; await store.refresh() }
+        try await waitUntil { entered == 2 }
+        XCTAssertEqual(fixture.requestCount, 1)
+        fixture.respond(generatedAt: 1_800_000_000_000)
+        await secondRefresh.value
+        await thirdRefresh.value
+        XCTAssertEqual(store.snapshot?.generatedAt, 1_800_000_000_000)
+        XCTAssertEqual(fixture.requestCount, 1)
+    }
+
+    func testOlderSnapshotCannotReplaceNewerPredictions() async throws {
+        let fixture = ResponseFixture()
+        let (store, session) = makeStore(fixture)
+        defer { session.invalidateAndCancel() }
+        let run = Task { await store.run() }
+        defer { run.cancel(); store.stop() }
+        try await waitUntil { fixture.requestCount == 1 }
+        fixture.respond(generatedAt: 1_800_000_000_000)
+        try await waitUntil { store.snapshot != nil }
+
+        let refresh = Task { await store.refresh() }
+        try await waitUntil { fixture.requestCount == 2 }
+        fixture.respond(generatedAt: 1_799_999_990_000)
+        await refresh.value
+        XCTAssertEqual(store.snapshot?.generatedAt, 1_800_000_000_000)
+    }
+
+    func testCompletedResponseCannotPublishAfterStoreStops() async throws {
+        let fixture = ResponseFixture()
+        let (store, session) = makeStore(fixture)
+        defer { session.invalidateAndCancel() }
+        let run = Task { await store.run() }
+        defer { run.cancel(); store.stop() }
+        try await waitUntil { fixture.requestCount == 1 }
+        // The response has been handed to URLSession, but the main actor has not
+        // yielded to the refresh continuation. Backgrounding wins this race.
+        fixture.respond(generatedAt: 1_800_000_000_000)
+        store.stop()
+        for _ in 0 ..< 10 {
+            await Task.yield()
+        }
+        XCTAssertNil(store.snapshot)
+        XCTAssertFalse(store.feedError)
+    }
+
+    private func makeStore(_ fixture: ResponseFixture) -> (TransitStore, URLSession) {
+        let host = "fixture-\(UUID().uuidString.lowercased()).example"
+        FixtureRegistry.shared.register(fixture, host: host)
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [FixtureURLProtocol.self]
+        let session = URLSession(configuration: configuration)
+        let store = TransitStore(session: session, baseURL: URL(string: "https://\(host)")!)
+        // These tests isolate train polling; static-data parsing has separate coverage.
+        store.lines = [SubwayLine(id: "1", routeId: "1", color: "EE352E", stops: [], shape: [])]
+        return (store, session)
+    }
+
+    private func waitUntil(_ condition: () -> Bool) async throws {
+        let deadline = Date().addingTimeInterval(3)
+        while !condition() {
+            guard Date() < deadline else {
+                XCTFail("Timed out waiting for controlled request lifecycle")
+                throw URLError(.timedOut)
+            }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+    }
+}
+
+/// URLProtocol callbacks run on URLSession's threads; all mutable fixture state
+/// lives behind a lock, and each test uses a unique host to avoid shared handlers.
+private final class FixtureRegistry: @unchecked Sendable {
+    static let shared = FixtureRegistry()
+    private let lock = NSLock()
+    private var fixtures: [String: ResponseFixture] = [:]
+    func register(_ fixture: ResponseFixture, host: String) {
+        lock.lock(); defer { lock.unlock() }
+        fixtures[host] = fixture
+    }
+
+    func fixture(for request: URLRequest) -> ResponseFixture? {
+        lock.lock(); defer { lock.unlock() }
+        return fixtures[request.url?.host ?? ""]
+    }
+}
+
+private final class ResponseFixture: @unchecked Sendable {
+    private let lock = NSLock()
+    private var pending: FixtureURLProtocol?
+    private var requests = 0
+    private var cancellations = 0
+    var requestCount: Int {
+        lock.lock(); defer { lock.unlock() }; return requests
+    }
+
+    var cancellationCount: Int {
+        lock.lock(); defer { lock.unlock() }; return cancellations
+    }
+
+    func started(_ request: FixtureURLProtocol) {
+        lock.lock(); defer { lock.unlock() }
+        pending = request
+        requests += 1
+    }
+
+    func stopped() {
+        lock.lock(); defer { lock.unlock() }
+        pending = nil
+        cancellations += 1
+    }
+
+    func respond(generatedAt: Double) {
+        lock.lock()
+        let request = pending
+        pending = nil
+        lock.unlock()
+        guard let request, let url = request.request.url else { return }
+        let data = Data("{\"generatedAt\":\(generatedAt),\"trains\":[],\"arrivals\":[]}".utf8)
+        request.client?.urlProtocol(request, didReceive: HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil)!, cacheStoragePolicy: .notAllowed)
+        request.client?.urlProtocol(request, didLoad: data)
+        request.client?.urlProtocolDidFinishLoading(request)
+    }
+}
+
+private final class FixtureURLProtocol: URLProtocol, @unchecked Sendable {
+    override class func canInit(with request: URLRequest) -> Bool {
+        FixtureRegistry.shared.fixture(for: request) != nil
+    }
+
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest {
+        request
+    }
+
+    override func startLoading() {
+        FixtureRegistry.shared.fixture(for: request)?.started(self)
+    }
+
+    override func stopLoading() {
+        FixtureRegistry.shared.fixture(for: request)?.stopped()
+    }
+}

@@ -1,0 +1,4 @@
+// Copy to Local.xcconfig (ignored). Supply a public native Mapbox token locally.
+MAPBOX_PUBLIC_TOKEN =
+// Optional for physical devices only:
+// DEVELOPMENT_TEAM = your-personal-team-id

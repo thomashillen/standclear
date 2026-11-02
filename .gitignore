@@ -42,3 +42,10 @@ next-env.d.ts
 # claude code agent config (launch configs, local settings)
 /.claude/
 
+
+# Native iOS local configuration and generated output
+/ios/Config/Local.xcconfig
+/ios/build/
+/ios/DerivedData/
+**/xcuserdata/
+*.xcuserstate

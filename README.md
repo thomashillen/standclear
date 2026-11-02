@@ -83,6 +83,10 @@ public/
   gtfsData.json     Pre-built subway geometry + stop data
 ```
 
+## Native iOS proof of concept
+
+A separate SwiftUI Xcode project lives in [`ios/`](ios/README.md), alongside the web application. It uses the native Mapbox SDK and the existing static-data and realtime endpoints. Open `ios/StandClear.xcodeproj`; see the native guide for local configuration, simulator validation, architecture, and migration limits. This is an incremental development client, not an App Store release or web feature parity.
+
 ## Rebuilding static GTFS data
 
 The repository ships with a pre-built `public/gtfsData.json`. To refresh it:
@@ -132,6 +136,10 @@ Use separate tokens in production:
 - `NEXT_PUBLIC_MAPBOX_TOKEN` — client-visible, for Mapbox GL map rendering. Restrict this token to the production domain in Mapbox.
 
 If `MAPBOX_TOKEN` is absent, server routes can fall back to `NEXT_PUBLIC_MAPBOX_TOKEN`, but a dedicated server token is the recommended production setup.
+
+### Native development configuration
+
+The native client uses an ignored `ios/Config/Local.xcconfig` for `MAPBOX_PUBLIC_TOKEN`. Use a public rendering token appropriate for native clients; web URL restrictions may prevent native rendering. No secret download token, signing team, new backend service, or paid developer membership is required for simulator work. Do not commit local configuration or built applications. See [`ios/README.md`](ios/README.md).
 
 ### Observability
 
