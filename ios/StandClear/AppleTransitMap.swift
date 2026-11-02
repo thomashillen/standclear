@@ -9,12 +9,15 @@ struct AppleTransitMap: View {
     let markers: [TrainMapMarker]
     let focusedCoordinate: CLLocationCoordinate2D?
     let currentLocation: CLLocationCoordinate2D?
+    let tripOverlays: [TripMapOverlay]
+    let tripFocusRevision: Int
     var focusRevision: Int = 0
     var coveredWidth: CGFloat = 0
     var coveredBottom: CGFloat = 0
 
     init(lines: [SubwayLine], markers: [TrainMapMarker], focusedCoordinate: CLLocationCoordinate2D?,
-         focusRevision: Int = 0, coveredWidth: CGFloat = 0, coveredBottom: CGFloat = 0, currentLocation: CLLocationCoordinate2D? = nil)
+         focusRevision: Int = 0, coveredWidth: CGFloat = 0, coveredBottom: CGFloat = 0, currentLocation: CLLocationCoordinate2D? = nil,
+         tripOverlays: [TripMapOverlay] = [], tripFocusRevision: Int = 0)
     {
         // Rebuilt when the parent supplies transit inputs, never when this view's
         // camera state changes. Exact shape changes update without a hash per frame.
@@ -25,6 +28,8 @@ struct AppleTransitMap: View {
         self.focusRevision = focusRevision
         self.coveredWidth = coveredWidth
         self.coveredBottom = coveredBottom
+        self.tripOverlays = tripOverlays
+        self.tripFocusRevision = tripFocusRevision
     }
 
     @State private var position = MapCameraPosition.region(MKCoordinateRegion(
@@ -40,6 +45,13 @@ struct AppleTransitMap: View {
                     MapPolyline(coordinates: line.coordinates)
                         .stroke(Color(uiColor: transitColor(line.color)),
                                 style: StrokeStyle(lineWidth: 3, lineCap: .round, lineJoin: .round))
+                }
+                ForEach(tripOverlays) { overlay in
+                    MapPolyline(coordinates: overlay.coordinates)
+                        .stroke(.white, style: StrokeStyle(lineWidth: 10, lineCap: .round, lineJoin: .round))
+                    MapPolyline(coordinates: overlay.coordinates)
+                        .stroke(Color(uiColor: transitColor(overlay.color)),
+                                style: StrokeStyle(lineWidth: 6, lineCap: .round, lineJoin: .round))
                 }
                 ForEach(markers) { marker in
                     Annotation("Route \(marker.displayLetter) train", coordinate: marker.coordinate) {
@@ -81,6 +93,11 @@ struct AppleTransitMap: View {
                     center: focusedCoordinate,
                     span: MKCoordinateSpan(latitudeDelta: 0.018, longitudeDelta: 0.014)
                 ))
+            }
+            .onChange(of: tripFocusRevision, initial: true) { _, _ in
+                if let region = TripMapOverlay.region(for: tripOverlays) {
+                    position = .region(region)
+                }
             }
             // Apple uses the safe region for its controls and camera framing; the map
             // itself can continue under the native trailing control presentation.

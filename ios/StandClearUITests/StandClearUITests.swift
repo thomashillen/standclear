@@ -161,6 +161,83 @@ final class StandClearUITests: XCTestCase {
     }
 
     @MainActor
+    func testStationDirectionsAndSwap() throws {
+        try checkStationDirectionsAndSwap(provider: "Apple Maps")
+    }
+
+    @MainActor
+    func testMapboxStationDirectionsAndSwap() throws {
+        try checkStationDirectionsAndSwap(provider: "Mapbox")
+    }
+
+    @MainActor
+    private func checkStationDirectionsAndSwap(provider: String) throws {
+        let app = XCUIApplication()
+        app.terminate()
+        app.resetAuthorizationStatus(for: .location)
+        app.launchArguments = ["-mapProvider", provider]
+        addUIInterruptionMonitor(withDescription: "Location permission") { alert in
+            let deny = alert.buttons["Don’t Allow"]
+            if deny.exists {
+                deny.tap(); return true
+            }
+            return false
+        }
+        app.launch()
+        XCTAssertTrue(app.buttons["moreButton"].waitForExistence(timeout: 15))
+        // Trigger permission handling on the inert title, not the map center,
+        // which can contain the large-text Open Settings link.
+        app.navigationBars["StandClear"].staticTexts["StandClear"].tap()
+        if provider == "Mapbox", app.staticTexts["Map configuration needed"].exists {
+            throw XCTSkip("Mapbox rendering needs an ignored local public token. CI verifies its missing-configuration state separately.")
+        }
+        app.buttons["moreButton"].tap()
+        XCTAssertTrue(app.buttons["directionsButton"].waitForExistence(timeout: 5))
+        app.buttons["directionsButton"].tap()
+        XCTAssertTrue(app.navigationBars["Directions"].waitForExistence(timeout: 5))
+        let origin = app.buttons["originPicker"]
+        expectation(for: NSPredicate(format: "enabled == true"), evaluatedWith: origin)
+        waitForExpectations(timeout: 30)
+        origin.tap()
+        let originSearch = app.searchFields.firstMatch
+        XCTAssertTrue(originSearch.waitForExistence(timeout: 5))
+        originSearch.tap()
+        originSearch.typeText("Wall")
+        app.buttons["stationChoice-419"].tap()
+        app.buttons["destinationPicker"].tap()
+        let destinationSearch = app.searchFields.firstMatch
+        XCTAssertTrue(destinationSearch.waitForExistence(timeout: 5))
+        destinationSearch.tap()
+        destinationSearch.typeText("59")
+        app.buttons["stationChoice-629"].tap()
+        let northbound = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "tripPlan-4:N:419>629")).firstMatch
+        XCTAssertTrue(northbound.waitForExistence(timeout: 10))
+        northbound.tap()
+        XCTAssertTrue(app.navigationBars["Trip details"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["5 stops · Direct"].exists)
+        let screenshot = XCTAttachment(screenshot: app.screenshot())
+        screenshot.name = "Native station itinerary and highlighted route"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+        app.buttons["Show route on map"].tap()
+        XCTAssertTrue(app.buttons["moreButton"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.navigationBars["Trip details"].exists)
+        let routeMap = XCTAttachment(screenshot: app.screenshot())
+        routeMap.name = "Selected itinerary on " + provider
+        routeMap.lifetime = .keepAlways
+        add(routeMap)
+        app.buttons["moreButton"].tap()
+        XCTAssertTrue(app.buttons["directionsButton"].waitForExistence(timeout: 5))
+        app.buttons["directionsButton"].tap()
+        XCTAssertTrue(app.buttons["swapStations"].waitForExistence(timeout: 5))
+        app.buttons["swapStations"].tap()
+        let southbound = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "tripPlan-4:S:629>419")).firstMatch
+        XCTAssertTrue(southbound.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["originPicker"].label.contains("59 St"))
+        XCTAssertTrue(app.buttons["destinationPicker"].label.contains("Wall St"))
+    }
+
+    @MainActor
     private func waitForLayout(in app: XCUIApplication, expanded: Bool) {
         // Rotation can return before the simulator window and accessibility frames
         // settle. Check geometry before asking XCTest to calculate a hit point.

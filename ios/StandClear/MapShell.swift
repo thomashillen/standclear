@@ -15,7 +15,10 @@ struct MapShell: View {
     @State private var panel: Panel?
     @State private var sheetDetent: PresentationDetent = .medium
     @State private var windowSize: CGSize = .zero
-    @State private var expandedSearch = false
+    @State private var expandedPanel: Panel = .nearby
+    @State private var directionsSelection = DirectionsSelection()
+    @State private var selectedTrip: NativeTripPlan?
+    @State private var tripFocusRevision = 0
     @State private var searchQuery = ""
     @State private var mapError = false
     @State private var mapLoaded = false
@@ -31,7 +34,7 @@ struct MapShell: View {
     }
 
     enum Panel: String, Identifiable {
-        case search, nearby
+        case search, nearby, directions
         var id: String {
             rawValue
         }
@@ -52,10 +55,10 @@ struct MapShell: View {
                     ZStack(alignment: .trailing) {
                         map(statusWidth: statusWidth, coveredWidth: geometry.size.width - statusWidth, coveredBottom: 0, maximumGlanceHeight: geometry.size.height * 0.55)
                         VStack(spacing: 0) {
-                            NavigationStack { stationBrowser(search: expandedSearch) }
-                                .id(expandedSearch)
+                            NavigationStack { panelContent(expandedPanel) }
+                                .id(expandedPanel)
                             ControlGroup {
-                                Button("Search", systemImage: "magnifyingglass") { focus.cancelPending(); expandedSearch = true }
+                                Button("Search", systemImage: "magnifyingglass") { focus.cancelPending(); expandedPanel = .search }
                                     .accessibilityIdentifier("searchButton")
                                 Button("Nearby", systemImage: "location") {
                                     showNearby(expanded: true)
@@ -72,7 +75,7 @@ struct MapShell: View {
                     }
                 } else {
                     NavigationStack {
-                        map(statusWidth: statusWidth, coveredWidth: 0, coveredBottom: panel == .nearby && sheetDetent == .medium ? geometry.size.height / 2 : 0, maximumGlanceHeight: geometry.size.height * 0.55)
+                        map(statusWidth: statusWidth, coveredWidth: 0, coveredBottom: (panel == .nearby || panel == .directions) && sheetDetent == .medium ? geometry.size.height / 2 : 0, maximumGlanceHeight: geometry.size.height * 0.55)
                             .navigationTitle("StandClear")
                             .navigationBarTitleDisplayMode(.inline)
                             .toolbar {
@@ -91,17 +94,17 @@ struct MapShell: View {
             .onGeometryChange(for: CGSize.self) { $0.size } action: { windowSize = $0 }
             .onChange(of: expanded) { _, isExpanded in
                 guard isExpanded, let activePanel = panel else { return }
-                expandedSearch = activePanel == .search
+                expandedPanel = activePanel
                 panel = nil
             }
             .onChange(of: panel) { _, selection in
-                if selection == .search || (selection == nil && !expanded) {
+                if selection == .search || selection == .directions || (selection == nil && !expanded) {
                     focus.cancelPending()
                 }
             }
             .sheet(item: $panel) { panel in
                 NavigationStack {
-                    stationBrowser(search: panel == .search)
+                    panelContent(panel)
                         .toolbar {
                             ToolbarItem(placement: .confirmationAction) { Button("Done") { self.panel = nil } }
                         }
@@ -143,13 +146,21 @@ struct MapShell: View {
                                         markers: TrainMapProjection.markers(snapshot: store.snapshot, lines: store.lines,
                                                                             now: timeline.date, feedUnavailable: store.feedError),
                                         focusedCoordinate: focus.coordinate, focusRevision: focus.revision, coveredWidth: coveredWidth, coveredBottom: coveredBottom,
-                                        currentLocation: location.availableCoordinate)
+                                        currentLocation: location.availableCoordinate, tripOverlays: tripOverlays, tripFocusRevision: tripFocusRevision)
                     } else {
                         Map(viewport: $viewport) {
                             ForEvery(store.lines, id: \.routeId) { line in
                                 PolylineAnnotation(lineCoordinates: line.coordinates)
                                     .lineColor(StyleColor(transitColor(line.color)))
                                     .lineWidth(3)
+                            }
+                            ForEvery(tripOverlays) { overlay in
+                                PolylineAnnotation(lineCoordinates: overlay.coordinates)
+                                    .lineColor(.white)
+                                    .lineWidth(10)
+                                PolylineAnnotation(lineCoordinates: overlay.coordinates)
+                                    .lineColor(StyleColor(transitColor(overlay.color)))
+                                    .lineWidth(6)
                             }
                             let projected = TrainMapProjection.markers(snapshot: store.snapshot, lines: store.lines,
                                                                        now: timeline.date, feedUnavailable: store.feedError)
@@ -227,6 +238,16 @@ struct MapShell: View {
 
     private var moreMenu: some View {
         Menu("More", systemImage: "ellipsis") {
+            Button("Directions", systemImage: "arrow.triangle.turn.up.right.diamond") {
+                focus.cancelPending()
+                if windowSize.width >= 640, !typeSize.isAccessibilitySize {
+                    expandedPanel = .directions
+                } else {
+                    sheetDetent = .large
+                    panel = .directions
+                }
+            }
+            .accessibilityIdentifier("directionsButton")
             Picker("Map provider", selection: $mapProvider) {
                 ForEach(MapProvider.allCases) { provider in Text(provider.rawValue).tag(provider) }
             }
@@ -259,9 +280,10 @@ struct MapShell: View {
     }
 
     private func showNearby(expanded: Bool) {
+        selectedTrip = nil
         sheetDetent = .medium
         if expanded {
-            expandedSearch = false
+            expandedPanel = .nearby
         } else {
             panel = .nearby
         }
@@ -274,7 +296,7 @@ struct MapShell: View {
     private var focusPadding: SwiftUI.EdgeInsets {
         let expanded = windowSize.width >= 640 && !typeSize.isAccessibilitySize
         let right = expanded ? min(windowSize.width * 0.4, 380) : 0
-        let bottom = !expanded && panel == .nearby && sheetDetent == .medium ? windowSize.height / 2 : 0
+        let bottom = !expanded && (panel == .nearby || panel == .directions) && sheetDetent == .medium ? windowSize.height / 2 : 0
         return SwiftUI.EdgeInsets(top: 0, leading: 0, bottom: bottom, trailing: right)
     }
 
@@ -283,8 +305,39 @@ struct MapShell: View {
         viewport = .camera(center: coordinate, zoom: 14).padding(focusPadding)
     }
 
+    private var tripOverlays: [TripMapOverlay] {
+        TripMapOverlay.make(plan: selectedTrip, lines: store.lines)
+    }
+
+    @ViewBuilder private func panelContent(_ mode: Panel) -> some View {
+        if mode == .directions {
+            DirectionsView(store: store, selection: $directionsSelection, onSelect: selectTrip) { plan in
+                if windowSize.width < 640 || typeSize.isAccessibilitySize {
+                    panel = nil
+                }
+                selectTrip(plan)
+            }
+        } else {
+            stationBrowser(search: mode == .search)
+        }
+    }
+
+    private func selectTrip(_ plan: NativeTripPlan?) {
+        focus.cancelPending()
+        selectedTrip = plan
+        guard plan != nil else { return }
+        tripFocusRevision += 1
+        let coordinates = tripOverlays.flatMap(\.coordinates)
+        if coordinates.count >= 2 {
+            viewport = .overview(geometry: LineString(coordinates),
+                                 geometryPadding: SwiftUI.EdgeInsets(top: 32, leading: 32, bottom: 32, trailing: 32),
+                                 maxZoom: 14).padding(focusPadding)
+        }
+    }
+
     private func stationBrowser(search: Bool) -> some View {
         StationBrowser(store: store, location: location, search: search, query: $searchQuery) { station in
+            selectedTrip = nil
             if focus.focus(on: station.stop.coordinate) {
                 applyFocus()
             }

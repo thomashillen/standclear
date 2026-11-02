@@ -117,7 +117,7 @@ The [original proof-of-concept validation record](docs/validation.md) describes 
 
 ## Limits and next increments
 
-This is a map/search/nearby-arrivals shell, not web feature parity. It has no trip planner, address geocoding, service-alert presentation, saved commutes, favorites, persistence/offline cache, background arrivals, push notifications, settings screen, or complete station-details feature. Nearby selection uses straight-line distance, not walking directions. It does not synthesize “Now” rows from stopped trains. Search is local station-name matching, without address suggestions or the web client’s full suggestion behavior. Native CI and physical Duo acceptance must be assessed separately from the existing web CI.
+This is a map/search/nearby-arrivals client with basic station directions, not web feature parity. It has no address geocoding, service-alert presentation, saved commutes, favorites, persistence/offline cache, background arrivals, push notifications, settings screen, or complete station-details feature. Nearby selection uses straight-line distance, not walking directions. It does not synthesize “Now” rows from stopped trains. Search is local station-name matching, without address suggestions or the web client’s full suggestion behavior. Native CI and physical Duo acceptance must be assessed separately from the existing web CI.
 
 Continue in small reviewed increments: location lifecycle and automatic nearby presentation; arrival freshness and outage behavior; train-marker parity; search suggestions; station details; navigation/trip planning; settings and secondary menus. Preserve cancellation, location efficiency, accessibility, and reduced-motion behavior at each step.
 
@@ -136,3 +136,11 @@ SwiftUI supplies the glass effect on a soft rounded rectangle. The panel uses th
 Near Me now opens the appropriate native presentation and recenters/zooms around the usable coarse location fix. If a fix is pending, it applies once; search, station selection, dismissal, and backgrounding cancel the pending intent. A medium nearby sheet reserves visible map space, and the compact glance hides while a narrow sheet is open.
 
 Queued basics: station-to-station directions should reuse the web's direct/one-transfer planning logic. A selected-journey Live Activity is deferred until those basics are validated. It must preserve truthful freshness and background-update limits; no push infrastructure or paid service is authorized by this milestone.
+
+## Basic station directions
+
+Choose **More → Directions**, then select From and To stations. Native lists, search fields, navigation links, and buttons provide station selection, swap/clear, up to four route alternatives, and boarding/transfer/alighting instructions. Selecting an itinerary highlights its route geometry and frames it in either map engine. Selections are stored by station identity and survive adaptive presentation changes; delayed data never chooses a different station for the rider.
+
+`TripPlanner` ports the existing `lib/commuteRouting.ts` direct/one-transfer graph and curated complex membership. Platform IDs remain distinct from complex IDs. Equivalent routes share an option; express/local options with different stop counts remain separate. Plans are ranked by transfers and stops, not total journey time. Geometry uses existing static shapes and rejects malformed data.
+
+The first boarding prediction uses the existing strict freshness filters, matching each route's actual boarding platform and direction. It is separate from the static itinerary and is not a promise that the rider can catch that train or make a connection. Missing predictions do not establish no service. This increment does not include service-alert routing, total-duration estimates, walking/accessibility routing, address search, current-location origins, or Live Activities. It adds no endpoint, account, or paid service.
