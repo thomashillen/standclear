@@ -161,11 +161,21 @@ final class StandClearUITests: XCTestCase {
     }
 
     @MainActor
-    func testStationDirectionsAndSwap() {
+    func testStationDirectionsAndSwap() throws {
+        try checkStationDirectionsAndSwap(provider: "Apple Maps")
+    }
+
+    @MainActor
+    func testMapboxStationDirectionsAndSwap() throws {
+        try checkStationDirectionsAndSwap(provider: "Mapbox")
+    }
+
+    @MainActor
+    private func checkStationDirectionsAndSwap(provider: String) throws {
         let app = XCUIApplication()
         app.terminate()
         app.resetAuthorizationStatus(for: .location)
-        app.launchArguments = ["-mapProvider", "Apple Maps"]
+        app.launchArguments = ["-mapProvider", provider]
         addUIInterruptionMonitor(withDescription: "Location permission") { alert in
             let deny = alert.buttons["Don’t Allow"]
             if deny.exists {
@@ -176,6 +186,9 @@ final class StandClearUITests: XCTestCase {
         app.launch()
         XCTAssertTrue(app.buttons["moreButton"].waitForExistence(timeout: 15))
         app.tap()
+        if provider == "Mapbox", app.staticTexts["Map configuration needed"].exists {
+            throw XCTSkip("Mapbox rendering needs an ignored local public token. CI verifies its missing-configuration state separately.")
+        }
         app.buttons["moreButton"].tap()
         app.buttons["directionsButton"].tap()
         XCTAssertTrue(app.navigationBars["Directions"].waitForExistence(timeout: 5))
@@ -207,7 +220,7 @@ final class StandClearUITests: XCTestCase {
         XCTAssertTrue(app.buttons["moreButton"].waitForExistence(timeout: 5))
         XCTAssertFalse(app.navigationBars["Trip details"].exists)
         let routeMap = XCTAttachment(screenshot: app.screenshot())
-        routeMap.name = "Selected itinerary on Apple Maps"
+        routeMap.name = "Selected itinerary on " + provider
         routeMap.lifetime = .keepAlways
         add(routeMap)
         app.buttons["moreButton"].tap()
