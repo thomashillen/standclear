@@ -1124,7 +1124,6 @@ export default function SearchSheet({
               className="panel-action press -ml-1"
             >
               <ArrowLeft className="w-[16px] h-[16px]" strokeWidth={2.5} />
-              <CompactControlHitArea />
             </button>
           )}
           {mode === "search" ? (
@@ -1152,7 +1151,6 @@ export default function SearchSheet({
             aria-label="Close panel"
           >
             <X className="w-[16px] h-[16px]" strokeWidth={2.5} />
-            <CompactControlHitArea />
           </button>
         </div>
       </div>

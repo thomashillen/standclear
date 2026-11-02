@@ -51,4 +51,13 @@ describe("primary panel surfaces", () => {
     expect(source.split('panel-group divide-y divide-white/[0.06]')).toHaveLength(4);
     expect(source).not.toContain('px-3 py-2.5 rounded-xl bg-white/[0.04] hover:bg-white/[0.08]');
   });
+
+  it("keeps route-header actions independently contrasted", () => {
+    const line = readFileSync(resolve(__dirname, "LinePanel.tsx"), "utf8");
+    const css = readFileSync(resolve(__dirname, "../app/globals.css"), "utf8");
+
+    expect(line).toContain('className="panel-action panel-action--route press"');
+    expect(css).toContain(".panel-action--route {");
+    expect(css).toContain("rgb(0 0 0 / 0.62)");
+  });
 });

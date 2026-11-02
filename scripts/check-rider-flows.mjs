@@ -175,6 +175,18 @@ try {
     await check("More to line browsing and station navigation", async () => {
       await visibleButton("More options").click();
       await page.getByRole("button", { name: "Browse lines", exact: true }).click();
+      await page.getByRole("button", { name: /^N —/ }).click();
+      const yellowLine = page.getByRole("region", { name: "N line", exact: true });
+      await yellowLine.waitFor();
+      await assertUnifiedSurface(yellowLine);
+      const yellowClose = await yellowLine.getByRole("button", { name: "Close panel" }).evaluate(element => {
+        const style = getComputedStyle(element);
+        return { color: style.color, background: style.backgroundImage };
+      });
+      assert.equal(yellowClose.color, "rgb(255, 255, 255)");
+      assert.match(yellowClose.background, /rgba?\(0, 0, 0/);
+      await yellowLine.getByRole("button", { name: "Close panel" }).click();
+      await visibleButton("More options").click();
       await page.getByRole("button", { name: /^1 —/ }).click();
       const line = page.getByRole("region", { name: "1 line", exact: true });
       await line.waitFor();

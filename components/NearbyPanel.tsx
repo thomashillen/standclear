@@ -916,7 +916,6 @@ export default function NearbyPanel({
           aria-label="Close panel"
         >
           <X className="w-[16px] h-[16px]" strokeWidth={2.5} />
-          <CompactControlHitArea />
         </button>
       </div>
 

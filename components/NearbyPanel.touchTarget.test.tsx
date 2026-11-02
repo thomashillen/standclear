@@ -61,11 +61,12 @@ describe("NearbyPanel expanded control behavior", () => {
   it("closes from the expanded target without initiating the header drag", () => {
     const onClose = vi.fn();
     render(<NearbyPanel open onClose={onClose} onStationOpen={vi.fn()} />);
-    const area = hitArea(screen.getByRole("button", { name: "Close panel" }));
+    const close = screen.getByRole("button", { name: "Close panel" });
+    expect(close.querySelector("[data-compact-control-hit-area]")).toBeNull();
 
-    fireEvent.pointerDown(area, { clientY: 80, pointerId: 1 });
+    fireEvent.pointerDown(close, { clientY: 80, pointerId: 1 });
     expect(screen.getByRole("region", { name: "Near me" }).hasAttribute("data-glass-active")).toBe(false);
-    fireEvent.click(area);
+    fireEvent.click(close);
     expect(onClose).toHaveBeenCalledOnce();
   });
 });
