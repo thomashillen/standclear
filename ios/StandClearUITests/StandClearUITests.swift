@@ -172,6 +172,83 @@ final class StandClearUITests: XCTestCase {
     }
 
     @MainActor
+    func testStationSearchDirectionsHerePreservesBackAndQuery() {
+        checkStationSearchDirectionsHere(expanded: false)
+    }
+
+    @MainActor
+    func testExpandedStationSearchDirectionsHere() {
+        checkStationSearchDirectionsHere(expanded: true)
+    }
+
+    @MainActor
+    private func checkStationSearchDirectionsHere(expanded: Bool) {
+        let app = XCUIApplication()
+        app.terminate()
+        app.resetAuthorizationStatus(for: .location)
+        app.launchArguments = ["-mapProvider", "Apple Maps"]
+        addUIInterruptionMonitor(withDescription: "Location permission") { alert in
+            let deny = alert.buttons["Don’t Allow"]
+            if deny.exists {
+                deny.tap(); return true
+            }
+            return false
+        }
+        app.launch()
+        XCTAssertTrue(app.buttons["searchButton"].waitForExistence(timeout: 15))
+        app.navigationBars["StandClear"].staticTexts["StandClear"].tap()
+        if expanded {
+            XCUIDevice.shared.orientation = .landscapeLeft
+            waitForLayout(in: app, expanded: true)
+        }
+        defer { XCUIDevice.shared.orientation = .portrait }
+        app.buttons["searchButton"].tap()
+        let search = app.searchFields.firstMatch
+        XCTAssertTrue(search.waitForExistence(timeout: 5))
+        search.tap()
+        search.typeText("Wall")
+        let station = app.buttons["station-419"]
+        XCTAssertTrue(station.waitForExistence(timeout: 30))
+        station.tap()
+        XCTAssertTrue(app.buttons["directionsHere"].waitForExistence(timeout: 5))
+        app.buttons["directionsHere"].tap()
+        XCTAssertTrue(app.buttons["destinationPicker"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["destinationPicker"].label.contains("Wall St"))
+        XCTAssertTrue(app.buttons["originPicker"].label.contains("Choose station"))
+        app.buttons["originPicker"].tap()
+        let origins = app.searchFields.firstMatch
+        XCTAssertTrue(origins.waitForExistence(timeout: 5))
+        origins.tap()
+        origins.typeText("59")
+        app.buttons["stationChoice-629"].tap()
+        XCTAssertTrue(app.buttons["originPicker"].waitForExistence(timeout: 5))
+        app.navigationBars["Directions"].buttons.element(boundBy: 0).tap()
+        XCTAssertTrue(app.buttons["directionsHere"].waitForExistence(timeout: 5))
+        app.navigationBars["Wall St"].buttons.element(boundBy: 0).tap()
+        XCTAssertTrue(app.searchFields.firstMatch.waitForExistence(timeout: 5))
+        XCTAssertTrue((app.searchFields.firstMatch.value as? String)?.contains("Wall") == true)
+        station.tap()
+        app.buttons["directionsHere"].tap()
+        XCTAssertTrue(app.buttons["originPicker"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["originPicker"].label.contains("59 St"))
+        let plan = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "tripPlan-4:S:629>419")).firstMatch
+        XCTAssertTrue(plan.waitForExistence(timeout: 10))
+        plan.tap()
+        XCTAssertTrue(app.navigationBars["Trip details"].waitForExistence(timeout: 5))
+        let capture = XCTAttachment(screenshot: app.screenshot())
+        capture.name = "Station search to directions with preserved origin"
+        capture.lifetime = .keepAlways
+        add(capture)
+        app.buttons["Show route on map"].tap()
+        XCTAssertTrue(app.buttons["searchButton"].waitForExistence(timeout: 5))
+        XCTAssertEqual(app.navigationBars["Trip details"].exists, expanded)
+        let mapCapture = XCTAttachment(screenshot: app.screenshot())
+        mapCapture.name = expanded ? "Station-entry route in expanded region" : "Station-entry route after sheet dismissal"
+        mapCapture.lifetime = .keepAlways
+        add(mapCapture)
+    }
+
+    @MainActor
     func testStationDirectionsAndSwap() throws {
         try checkStationDirectionsAndSwap(provider: "Apple Maps")
     }

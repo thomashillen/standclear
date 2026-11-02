@@ -321,15 +321,23 @@ struct MapShell: View {
 
     @ViewBuilder private func panelContent(_ mode: Panel) -> some View {
         if mode == .directions {
-            DirectionsView(store: store, selection: $directionsSelection, onSelect: selectTrip) { plan in
-                if windowSize.width < 640 || typeSize.isAccessibilitySize {
-                    panel = nil
-                }
-                selectTrip(plan)
-            }
+            DirectionsView(store: store, selection: $directionsSelection, onSelect: selectTrip, onShowMap: showTripOnMap)
         } else {
             stationBrowser(search: mode == .search)
         }
+    }
+
+    private func showTripOnMap(_ plan: NativeTripPlan) {
+        if windowSize.width < 640 || typeSize.isAccessibilitySize {
+            panel = nil
+        }
+        selectTrip(plan)
+    }
+
+    private func beginDirections(to station: Station) {
+        directionsSelection.setDestination(station.id)
+        selectTrip(nil)
+        sheetDetent = .large
     }
 
     private func selectTrip(_ plan: NativeTripPlan?) {
@@ -346,7 +354,10 @@ struct MapShell: View {
     }
 
     private func stationBrowser(search: Bool) -> some View {
-        StationBrowser(store: store, location: location, search: search, query: $searchQuery) { station in
+        StationBrowser(store: store, location: location, search: search, query: $searchQuery,
+                       directionsSelection: $directionsSelection, onDirectionsHere: beginDirections,
+                       onSelectTrip: selectTrip, onShowTripMap: showTripOnMap)
+        { station in
             selectedTrip = nil
             if focus.focus(on: station.stop.coordinate) {
                 applyFocus()

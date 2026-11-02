@@ -39,6 +39,31 @@ final class DirectionsSelectionTests: XCTestCase {
         XCTAssertEqual(selection.originID, "635", "Missing data must not silently select a replacement")
     }
 
+    func testDirectionsHerePreservesManualOriginAndReplacesDestination() {
+        var selection = DirectionsSelection(originID: "419", destinationID: "629")
+        selection.setDestination("635")
+        XCTAssertEqual(selection.originID, "419")
+        XCTAssertEqual(selection.destinationID, "635")
+        selection.swap()
+        XCTAssertEqual(selection.originID, "635")
+        XCTAssertEqual(selection.destinationID, "419")
+    }
+
+    func testDirectionsHereDoesNotInferUnsetOriginWhenDataLoads() {
+        var selection = DirectionsSelection()
+        selection.setDestination("635")
+        XCTAssertNil(selection.originID)
+        XCTAssertNil(selection.destination(in: []))
+        let loaded = [station("419"), station("635")]
+        XCTAssertNil(selection.origin(in: loaded))
+        XCTAssertEqual(selection.destination(in: loaded)?.id, "635")
+        selection.destinationID = "419"
+        XCTAssertEqual(selection.destination(in: loaded)?.id, "419", "Resolution must preserve later rider edits")
+        selection.clear()
+        XCTAssertNil(selection.originID)
+        XCTAssertNil(selection.destinationID)
+    }
+
     private func station(_ id: String) -> Station {
         Station(id: id, stop: Stop(id: id, name: id, lat: 40.7, lng: -74, shapeIdx: 0), stopIDs: [id], routes: ["4"])
     }
