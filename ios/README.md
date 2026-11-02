@@ -155,4 +155,4 @@ From Search or Nearby, open a station and choose **Directions here** to push Dir
 
 While a route is highlighted, **Clear route** is directly available in the narrow map toolbar or expanded control region. One tap removes the highlight while preserving From and To. **Clear directions** in Directions still clears both endpoints.
 
-Accessibility Dynamic Type sizes use the native large sheet so station results and endpoint controls have usable space. Ordinary text sizes retain medium and large detents; map framing tracks the actual presentation.
+Search opens in a native large sheet so keyboard activation does not have to promote a medium sheet. Accessibility Dynamic Type sizes also use the large sheet for station results and endpoint controls. Other presentations retain medium and large detents at ordinary text sizes; map framing tracks the actual presentation.

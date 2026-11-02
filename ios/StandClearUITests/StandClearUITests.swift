@@ -250,6 +250,8 @@ final class StandClearUITests: XCTestCase {
         let search = app.searchFields.firstMatch
         XCTAssertTrue(search.waitForExistence(timeout: 5))
         search.tap()
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 10),
+                      "Tapping Search must present a usable keyboard before entering a station")
         search.typeText("Wall\n")
         let station = app.buttons["station-419"]
         XCTAssertTrue(station.waitForExistence(timeout: 30))

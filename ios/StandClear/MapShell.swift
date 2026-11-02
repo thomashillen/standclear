@@ -127,7 +127,7 @@ struct MapShell: View {
                 if selection != .search {
                     stationSearchFocused = false
                 }
-                if typeSize.isAccessibilitySize {
+                if selection == .search || typeSize.isAccessibilitySize {
                     sheetDetent = .large
                 }
                 if selection == .search || selection == .directions || (selection == nil && !expanded) {
@@ -141,7 +141,8 @@ struct MapShell: View {
                             ToolbarItem(placement: .confirmationAction) { Button("Done") { self.panel = nil } }
                         }
                 }
-                .presentationDetents(typeSize.isAccessibilitySize ? [.large] : [.medium, .large], selection: $sheetDetent)
+                // Search starts with room for its keyboard instead of promoting a medium sheet during focus.
+                .presentationDetents(panel == .search || typeSize.isAccessibilitySize ? [.large] : [.medium, .large], selection: $sheetDetent)
                 .presentationDragIndicator(.visible)
             }
         }
