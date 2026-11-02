@@ -44,6 +44,7 @@ final class StandClearUITests: XCTestCase {
             return false
         }
         app.terminate()
+        app.resetAuthorizationStatus(for: .location)
         app.launch()
         XCTAssertTrue(app.buttons["moreButton"].waitForExistence(timeout: 15))
         app.tap()
