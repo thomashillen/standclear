@@ -70,6 +70,13 @@ try {
       await assertUnifiedSurface(page.getByRole("region", { name: "Search and directions", exact: true }));
       const field = page.getByRole("searchbox", { name: "Search NYC" });
       await field.fill(query);
+      const focus = await field.evaluate(element => {
+        const style = getComputedStyle(element);
+        return { width: style.outlineWidth, style: style.outlineStyle, color: style.outlineColor };
+      });
+      assert.equal(focus.width, "2px");
+      assert.equal(focus.style, "solid");
+      assert.notEqual(focus.color, "rgba(0, 0, 0, 0)");
       return field;
     };
     const station = () => page.getByRole("region", { name: "Times Sq-42 St station", exact: true });

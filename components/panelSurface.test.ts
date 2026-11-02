@@ -60,4 +60,12 @@ describe("primary panel surfaces", () => {
     expect(css).toContain(".panel-action--route {");
     expect(css).toContain("rgb(0 0 0 / 0.62)");
   });
+
+  it("keeps a visible keyboard focus indicator on recessed fields", () => {
+    const css = readFileSync(resolve(__dirname, "../app/globals.css"), "utf8");
+    const focus = css.match(/\.panel-field:focus-visible \{([\s\S]*?)\n\}/)?.[1];
+
+    expect(focus).toContain("outline: 2px solid");
+    expect(focus).toContain("outline-offset: 2px");
+  });
 });
