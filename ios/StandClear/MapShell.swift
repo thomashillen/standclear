@@ -21,6 +21,8 @@ struct MapShell: View {
     @State private var selectedTrip: NativeTripPlan?
     @State private var tripFocusRevision = 0
     @State private var searchQuery = ""
+    @State private var arrivalStatusMessage = ""
+    @State private var showingArrivalStatus = false
     @State private var mapError = false
     @State private var mapLoaded = false
     @State private var mapID = UUID()
@@ -125,6 +127,11 @@ struct MapShell: View {
                 .presentationDetents(typeSize.isAccessibilitySize ? [.large] : [.medium, .large], selection: $sheetDetent)
                 .presentationDragIndicator(.visible)
             }
+        }
+        .alert("Arrival status", isPresented: $showingArrivalStatus) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(arrivalStatusMessage)
         }
         .onChange(of: panel) { _, _ in viewport = viewport.padding(focusPadding) }
         .onChange(of: sheetDetent) { _, _ in viewport = viewport.padding(focusPadding) }
@@ -271,17 +278,25 @@ struct MapShell: View {
             }
             .pickerStyle(.inline)
             .accessibilityIdentifier("mapProviderPicker")
-            Menu("Arrival status", systemImage: "info.circle") {
-                Text(store.feedLabel(at: Date()))
-                Text("Predictions are estimates. A dash means no prediction within 45 minutes, not no service.")
-                if let snapshot = store.snapshot, snapshot.isFresh(at: Date()) {
-                    Text("Updated \(Date(timeIntervalSince1970: snapshot.generatedAt / 1000).formatted(date: .omitted, time: .standard))")
-                }
-            }
+            Button("Arrival status", systemImage: "info.circle", action: showArrivalStatus)
+                .accessibilityIdentifier("arrivalStatusButton")
             Button("Refresh arrivals", systemImage: "arrow.clockwise") { Task { await store.refresh() } }
             Link("Open web app", destination: URL(string: "https://standclear.vercel.app")!)
         }
         .accessibilityIdentifier("moreButton")
+    }
+
+    private func showArrivalStatus() {
+        // Capture on explicit request: changing feed data must not rebuild an
+        // open native menu or imply that this alert updates continuously.
+        let now = Date()
+        var lines = ["Status when opened: \(store.feedLabel(at: now))"]
+        if let snapshot = store.snapshot, snapshot.isFresh(at: now) {
+            lines.append("Feed updated \(Date(timeIntervalSince1970: snapshot.generatedAt / 1000).formatted(date: .omitted, time: .standard)).")
+        }
+        lines.append("Predictions are estimates. A dash means no prediction within 45 minutes, not no service.")
+        arrivalStatusMessage = lines.joined(separator: "\n\n")
+        showingArrivalStatus = true
     }
 
     private func ornaments(coveredWidth: CGFloat) -> OrnamentOptions {

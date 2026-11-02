@@ -62,7 +62,7 @@ Nearby now presents native station sections with up to three real predictions pe
 
 On map open, one compact native glass panel shows up to three nearby station/service groups, with the next northbound and southbound predictions. It replaces the automatic sheet so the map stays visible. Nearby and the panel open the full list on demand. Expanded layouts continue using the native right-side region. Location denial, outside-service-area location, waiting for a fix, feed failure, stale data, and fresh-but-empty predictions have distinct native states. The permission state uses compact native rows so it remains readable in a short landscape panel.
 
-The More menu reports **Arrival feed connected** when fresh data is available and exposes its update time; healthy status does not occupy Nearby list space. Arrival rows remain estimates and do not synthesize “Now” arrivals. Invalid or future-dated vehicle reports cannot qualify stale predictions as current. No endpoint or backend changes are required.
+More → Arrival status opens a native alert with feed status and update time captured when requested. Healthy status does not occupy Nearby list space. Arrival rows remain estimates and do not synthesize “Now” arrivals. Invalid or future-dated vehicle reports cannot qualify stale predictions as current. No endpoint or backend changes are required.
 
 ## Existing APIs and truthfulness
 
@@ -129,7 +129,7 @@ MapKit is not a replacement for the existing MTA data contracts or subway-routin
 
 Both renderers show a blue approximate-location dot from the existing expiring coarse fix. No independent map location manager or continuous high-accuracy tracking is added. Permission revocation, fix expiration, and background cleanup remove the dot and location-dependent predictions.
 
-The glance mirrors the web grouping: station complexes remain distinct, services sharing a route color are grouped at that station, and only stations within 900 metres are considered. Up to three groups use stable distance/identity ordering. Both directions show the next valid prediction within 45 minutes; dashes do not imply no service. Native freshness and failed-request gates remain in force, with no synthesized “Now” rows. A status menu contains feed status and recovery actions.
+The glance mirrors the web grouping: station complexes remain distinct, services sharing a route color are grouped at that station, and only stations within 900 metres are considered. Up to three groups use stable distance/identity ordering. Both directions show the next valid prediction within 45 minutes; dashes do not imply no service. Native freshness and failed-request gates remain in force, with no synthesized “Now” rows. More opens a point-in-time arrival-status alert and provides recovery actions.
 
 SwiftUI supplies the glass effect on a soft rounded rectangle. The panel uses three tight rows with no separate header; feed status remains in the native More menu. Reduce Transparency uses a semantic opaque background; typography scales with Dynamic Type, and taller content can scroll within a geometry-bounded panel. No custom animation is introduced.
 

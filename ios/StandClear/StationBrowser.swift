@@ -270,7 +270,7 @@ private struct ArrivalRow: View {
             .frame(minHeight: 44, alignment: .leading)
             .accessibilityElement(children: .combine)
         }
-        .accessibilityIdentifier("arrivalRow")
+        .accessibilityIdentifier("arrivalRow-\(arrival.id)")
     }
 
     private var routeAndDirection: some View {
