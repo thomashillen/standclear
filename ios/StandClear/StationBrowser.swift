@@ -6,6 +6,11 @@ struct StationBrowser: View {
     let location: LocationStore
     let search: Bool
     @Binding var query: String
+    var searchFocus: FocusState<Bool>.Binding
+    @Binding var directionsSelection: DirectionsSelection
+    let onDirectionsHere: (Station) -> Void
+    let onSelectTrip: (NativeTripPlan?) -> Void
+    let onShowTripMap: (NativeTripPlan) -> Void
     let select: (Station) -> Void
 
     private var results: [Station] {
@@ -20,6 +25,8 @@ struct StationBrowser: View {
         Group {
             if search {
                 content.searchable(text: $query, prompt: "Search subway stations")
+                    .searchFocused(searchFocus)
+                    .onDisappear { searchFocus.wrappedValue = false }
             } else {
                 content
             }
@@ -118,7 +125,8 @@ struct StationBrowser: View {
 
     private func stationLink(_ station: Station) -> some View {
         NavigationLink {
-            StationArrivals(station: station, store: store)
+            StationArrivals(station: station, store: store, directionsSelection: $directionsSelection,
+                            onDirectionsHere: onDirectionsHere, onSelectTrip: onSelectTrip, onShowTripMap: onShowTripMap)
                 .onAppear { select(station) }
         } label: {
             ViewThatFits(in: .horizontal) {
@@ -157,10 +165,29 @@ struct StationBrowser: View {
 struct StationArrivals: View {
     let station: Station
     let store: TransitStore
+    @Binding var directionsSelection: DirectionsSelection
+    let onDirectionsHere: (Station) -> Void
+    let onSelectTrip: (NativeTripPlan?) -> Void
+    let onShowTripMap: (NativeTripPlan) -> Void
+    @State private var showingDirections = false
+
     var body: some View {
         TimelineView(.periodic(from: .now, by: 5)) { context in
             let arrivals = Transit.arrivals(for: station, snapshot: store.snapshot, now: context.date)
             List {
+                Button {
+                    // Prefill only on this explicit action, never when navigation
+                    // reappears after a rider edits an endpoint or goes back.
+                    onDirectionsHere(station)
+                    showingDirections = true
+                } label: {
+                    Label("Directions here", systemImage: "arrow.triangle.turn.up.right.diamond")
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentShape(Rectangle())
+                }
+                .accessibilityHint("Plan a subway trip to this station. Choose or edit your starting station.")
+                .accessibilityIdentifier("directionsHere")
+                .listRowBackground(Color.clear)
                 Section {
                     ArrivalFeedState(store: store, now: context.date)
                     if !store.feedError, store.snapshot?.isFresh(at: context.date) == true {
@@ -187,6 +214,10 @@ struct StationArrivals: View {
         .navigationTitle(station.stop.name)
         .navigationBarTitleDisplayMode(.inline)
         .containerBackground(.clear, for: .navigation)
+        .navigationDestination(isPresented: $showingDirections) {
+            DirectionsView(store: store, selection: $directionsSelection,
+                           onSelect: onSelectTrip, onShowMap: onShowTripMap)
+        }
     }
 }
 

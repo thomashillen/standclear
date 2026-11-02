@@ -21,6 +21,7 @@ struct MapShell: View {
     @State private var selectedTrip: NativeTripPlan?
     @State private var tripFocusRevision = 0
     @State private var searchQuery = ""
+    @FocusState private var stationSearchFocused: Bool
     @State private var arrivalStatusMessage = ""
     @State private var showingArrivalStatus = false
     @State private var mapError = false
@@ -105,11 +106,17 @@ struct MapShell: View {
             }
             .onGeometryChange(for: CGSize.self) { $0.size } action: { windowSize = $0 }
             .onChange(of: expanded) { _, isExpanded in
+                // The old searchable navigation region is about to disappear.
+                // Release its focus so its keyboard cannot cover the new layout.
+                stationSearchFocused = false
                 guard isExpanded, let activePanel = panel else { return }
                 expandedPanel = activePanel
                 panel = nil
             }
             .onChange(of: panel) { _, selection in
+                if typeSize.isAccessibilitySize {
+                    sheetDetent = .large
+                }
                 if selection == .search || selection == .directions || (selection == nil && !expanded) {
                     focus.cancelPending()
                 }
@@ -121,7 +128,7 @@ struct MapShell: View {
                             ToolbarItem(placement: .confirmationAction) { Button("Done") { self.panel = nil } }
                         }
                 }
-                .presentationDetents([.medium, .large], selection: $sheetDetent)
+                .presentationDetents(typeSize.isAccessibilitySize ? [.large] : [.medium, .large], selection: $sheetDetent)
                 .presentationDragIndicator(.visible)
             }
         }
@@ -133,7 +140,12 @@ struct MapShell: View {
         .onChange(of: panel) { _, _ in viewport = viewport.padding(focusPadding) }
         .onChange(of: sheetDetent) { _, _ in viewport = viewport.padding(focusPadding) }
         .onChange(of: windowSize) { _, _ in viewport = viewport.padding(focusPadding) }
-        .onChange(of: typeSize) { _, _ in viewport = viewport.padding(focusPadding) }
+        .onChange(of: typeSize, initial: true) { _, _ in
+            if typeSize.isAccessibilitySize {
+                sheetDetent = .large
+            }
+            viewport = viewport.padding(focusPadding)
+        }
         .onChange(of: scenePhase) { _, phase in
             if phase != .active {
                 location.stop(); store.stop()
@@ -306,7 +318,7 @@ struct MapShell: View {
 
     private func showNearby(expanded: Bool) {
         selectedTrip = nil
-        sheetDetent = .medium
+        sheetDetent = typeSize.isAccessibilitySize ? .large : .medium
         if expanded {
             expandedPanel = .nearby
         } else {
@@ -336,15 +348,23 @@ struct MapShell: View {
 
     @ViewBuilder private func panelContent(_ mode: Panel) -> some View {
         if mode == .directions {
-            DirectionsView(store: store, selection: $directionsSelection, onSelect: selectTrip) { plan in
-                if windowSize.width < 640 || typeSize.isAccessibilitySize {
-                    panel = nil
-                }
-                selectTrip(plan)
-            }
+            DirectionsView(store: store, selection: $directionsSelection, onSelect: selectTrip, onShowMap: showTripOnMap)
         } else {
             stationBrowser(search: mode == .search)
         }
+    }
+
+    private func showTripOnMap(_ plan: NativeTripPlan) {
+        if windowSize.width < 640 || typeSize.isAccessibilitySize {
+            panel = nil
+        }
+        selectTrip(plan)
+    }
+
+    private func beginDirections(to station: Station) {
+        directionsSelection.setDestination(station.id)
+        selectTrip(nil)
+        sheetDetent = .large
     }
 
     private func selectTrip(_ plan: NativeTripPlan?) {
@@ -361,7 +381,10 @@ struct MapShell: View {
     }
 
     private func stationBrowser(search: Bool) -> some View {
-        StationBrowser(store: store, location: location, search: search, query: $searchQuery) { station in
+        StationBrowser(store: store, location: location, search: search, query: $searchQuery, searchFocus: $stationSearchFocused,
+                       directionsSelection: $directionsSelection, onDirectionsHere: beginDirections,
+                       onSelectTrip: selectTrip, onShowTripMap: showTripOnMap)
+        { station in
             selectedTrip = nil
             if focus.focus(on: station.stop.coordinate) {
                 applyFocus()

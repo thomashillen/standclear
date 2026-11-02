@@ -179,9 +179,13 @@ final class StandClearUITests: XCTestCase {
         XCTAssertTrue((app.searchFields.firstMatch.value as? String)?.contains("Times") == true)
         XCTAssertFalse(app.navigationBars["Nearby arrivals"].exists)
         XCTAssertGreaterThan(app.buttons["searchButton"].frame.midX, app.frame.midX)
+        // Exercise departure from expanded Search with its keyboard active too.
+        app.searchFields.firstMatch.tap()
+        app.searchFields.firstMatch.typeText(" Sq")
         XCUIDevice.shared.orientation = .portrait
         waitForLayout(in: app, expanded: false)
         XCTAssertTrue(app.navigationBars["StandClear"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.keyboards.firstMatch.exists, "Search keyboard must leave with its presentation")
         let nearbyIsReady = NSPredicate(format: "hittable == true")
         expectation(for: nearbyIsReady, evaluatedWith: app.buttons["nearbyButton"])
         waitForExpectations(timeout: 5)
@@ -193,6 +197,90 @@ final class StandClearUITests: XCTestCase {
         waitForExpectations(timeout: 5)
         XCTAssertTrue(app.navigationBars["Nearby arrivals"].exists)
         XCTAssertFalse(app.navigationBars["Search stations"].exists)
+    }
+
+    @MainActor
+    func testStationSearchDirectionsHerePreservesBackAndQuery() {
+        checkStationSearchDirectionsHere(expanded: false)
+    }
+
+    @MainActor
+    func testExpandedStationSearchDirectionsHere() {
+        checkStationSearchDirectionsHere(expanded: true)
+    }
+
+    @MainActor
+    private func checkStationSearchDirectionsHere(expanded: Bool) {
+        let app = XCUIApplication()
+        app.terminate()
+        XCUIDevice.shared.orientation = .portrait
+        app.resetAuthorizationStatus(for: .location)
+        app.launchArguments = ["-mapProvider", "Apple Maps"]
+        addUIInterruptionMonitor(withDescription: "Location permission") { alert in
+            let deny = alert.buttons["Don’t Allow"]
+            if deny.exists {
+                deny.tap(); return true
+            }
+            return false
+        }
+        app.launch()
+        XCTAssertTrue(app.buttons["searchButton"].waitForExistence(timeout: 15))
+        let title = app.navigationBars["StandClear"].staticTexts["StandClear"]
+        XCTAssertTrue(title.waitForExistence(timeout: 20))
+        title.tap()
+        if expanded {
+            XCUIDevice.shared.orientation = .landscapeLeft
+            waitForLayout(in: app, expanded: true)
+        }
+        defer { XCUIDevice.shared.orientation = .portrait }
+        app.buttons["searchButton"].tap()
+        let search = app.searchFields.firstMatch
+        XCTAssertTrue(search.waitForExistence(timeout: 5))
+        search.tap()
+        search.typeText("Wall\n")
+        let station = app.buttons["station-419"]
+        XCTAssertTrue(station.waitForExistence(timeout: 30))
+        station.tap()
+        XCTAssertTrue(app.buttons["directionsHere"].waitForExistence(timeout: 5))
+        app.buttons["directionsHere"].tap()
+        XCTAssertTrue(app.buttons["destinationPicker"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["destinationPicker"].label.contains("Wall St"))
+        XCTAssertTrue(app.buttons["originPicker"].label.contains("Choose station"))
+        app.buttons["originPicker"].tap()
+        let origins = app.searchFields.firstMatch
+        XCTAssertTrue(origins.waitForExistence(timeout: 5))
+        origins.tap()
+        origins.typeText("59\n")
+        app.buttons["stationChoice-629"].tap()
+        XCTAssertTrue(app.buttons["originPicker"].waitForExistence(timeout: 5))
+        app.navigationBars["Directions"].buttons.element(boundBy: 0).tap()
+        XCTAssertTrue(app.buttons["directionsHere"].waitForExistence(timeout: 5))
+        app.navigationBars["Wall St"].buttons.element(boundBy: 0).tap()
+        XCTAssertTrue(app.searchFields.firstMatch.waitForExistence(timeout: 5))
+        XCTAssertTrue((app.searchFields.firstMatch.value as? String)?.contains("Wall") == true)
+        station.tap()
+        app.buttons["directionsHere"].tap()
+        XCTAssertTrue(app.buttons["originPicker"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["originPicker"].label.contains("59 St"))
+        let plan = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "tripPlan-4:S:629>419")).firstMatch
+        // A short expanded region keeps endpoint controls above route results.
+        for _ in 0 ..< 3 where !plan.exists {
+            app.collectionViews.firstMatch.swipeUp()
+        }
+        XCTAssertTrue(plan.waitForExistence(timeout: 10))
+        plan.tap()
+        XCTAssertTrue(app.navigationBars["Trip details"].waitForExistence(timeout: 5))
+        let capture = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        capture.name = "Station search to directions with preserved origin"
+        capture.lifetime = .keepAlways
+        add(capture)
+        app.buttons["Show route on map"].tap()
+        XCTAssertTrue(app.buttons["searchButton"].waitForExistence(timeout: 5))
+        XCTAssertEqual(app.navigationBars["Trip details"].exists, expanded)
+        let mapCapture = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        mapCapture.name = expanded ? "Station-entry route in expanded region" : "Station-entry route after sheet dismissal"
+        mapCapture.lifetime = .keepAlways
+        add(mapCapture)
     }
 
     @MainActor

@@ -14,6 +14,12 @@ struct DirectionsSelection: Equatable {
         stations.first { $0.id == destinationID }
     }
 
+    /// An explicit station-details action replaces only the destination. An
+    /// unset origin stays unset; location and delayed data must not guess it.
+    mutating func setDestination(_ stationID: String) {
+        destinationID = stationID
+    }
+
     mutating func swap() {
         (originID, destinationID) = (destinationID, originID)
     }
