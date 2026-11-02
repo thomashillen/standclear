@@ -144,3 +144,9 @@ Choose **More → Directions**, then select From and To stations. Native lists, 
 `TripPlanner` ports the existing `lib/commuteRouting.ts` direct/one-transfer graph and curated complex membership. Platform IDs remain distinct from complex IDs. Equivalent routes share an option; express/local options with different stop counts remain separate. Plans are ranked by transfers and stops, not total journey time. Geometry uses existing static shapes and rejects malformed data.
 
 The first boarding prediction uses the existing strict freshness filters, matching each route's actual boarding platform and direction. It is separate from the static itinerary and is not a promise that the rider can catch that train or make a connection. Missing predictions do not establish no service. This increment does not include service-alert routing, total-duration estimates, walking/accessibility routing, address search, current-location origins, or Live Activities. It adds no endpoint, account, or paid service.
+
+## Compact native arrivals
+
+Nearby prioritizes station and arrival information: healthy-feed status remains in More rather than occupying a list section. Loading, stale/error recovery, and location-permission states remain visible. Station badges fit beside names when space permits. Arrival rows keep route, direction, countdown, and reported destination visible; expand a native disclosure to read the prediction's clock time. Text adapts instead of shrinking to fit.
+
+The three-group map glance uses route bullets for each direction in a narrower native glass surface. Expanded controls use system material over the map, with transparent navigation/list backgrounds and an opaque semantic fallback for Reduce Transparency. No custom blur implementation or movement animation is introduced. Track-following interpolation remains a later increment, with freshness, lifecycle, and Reduce Motion safeguards required.

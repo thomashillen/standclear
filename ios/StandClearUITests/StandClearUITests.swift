@@ -31,6 +31,13 @@ final class StandClearUITests: XCTestCase {
         XCTAssertTrue(app.navigationBars["Nearby arrivals"].waitForExistence(timeout: 5))
         let station = app.buttons["station-127"]
         XCTAssertTrue(station.waitForExistence(timeout: 10), "Times Square should be nearby the simulated location")
+        XCTAssertFalse(app.staticTexts["Arrival feed connected"].exists, "Healthy status must not displace nearby predictions")
+        let arrival = app.buttons.matching(identifier: "arrivalRow").firstMatch
+        if arrival.exists, arrival.isHittable {
+            arrival.tap()
+            XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Predicted arrival:")).firstMatch.waitForExistence(timeout: 5))
+            arrival.tap()
+        }
         let capture = XCTAttachment(screenshot: app.screenshot())
         capture.name = "Automatic nearby arrivals with granted location"
         capture.lifetime = .keepAlways
@@ -92,6 +99,7 @@ final class StandClearUITests: XCTestCase {
             return false
         }
         app.terminate()
+        app.launchArguments = ["-mapProvider", "Apple Maps"]
         app.launch()
         let search = app.buttons["searchButton"]
         XCTAssertTrue(search.waitForExistence(timeout: 15))
@@ -114,6 +122,9 @@ final class StandClearUITests: XCTestCase {
         add(nearby)
         app.buttons["Done"].tap()
         XCTAssertTrue(search.exists)
+        app.buttons["nearbyButton"].tap()
+        XCTAssertTrue(app.staticTexts["Location access is off"].waitForExistence(timeout: 5))
+        app.buttons["Done"].tap()
         XCUIDevice.shared.orientation = .landscapeLeft
         defer { XCUIDevice.shared.orientation = .portrait }
         waitForLayout(in: app, expanded: true)

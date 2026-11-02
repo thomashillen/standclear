@@ -88,6 +88,8 @@ struct DirectionsView: View {
         }
         .navigationTitle("Directions")
         .navigationBarTitleDisplayMode(.inline)
+        .scrollContentBackground(.hidden)
+        .containerBackground(.clear, for: .navigation)
         .toolbar {
             ToolbarItem(placement: .secondaryAction) {
                 Button("Clear directions", systemImage: "xmark.circle") { selection.clear() }
@@ -138,6 +140,8 @@ private struct DirectionStationPicker: View {
         .searchable(text: $query, prompt: "Search subway stations")
         .navigationTitle(title)
         .navigationBarTitleDisplayMode(.inline)
+        .scrollContentBackground(.hidden)
+        .containerBackground(.clear, for: .navigation)
     }
 }
 
@@ -174,6 +178,8 @@ private struct TripItineraryView: View {
         }
         .navigationTitle("Trip details")
         .navigationBarTitleDisplayMode(.inline)
+        .scrollContentBackground(.hidden)
+        .containerBackground(.clear, for: .navigation)
     }
 
     private func stopName(_ id: String) -> String {

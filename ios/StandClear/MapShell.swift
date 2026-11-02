@@ -4,6 +4,7 @@ import SwiftUI
 
 struct MapShell: View {
     @Environment(\.accessibilityDifferentiateWithoutColor) private var differentiateWithoutColor
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.dynamicTypeSize) private var typeSize
@@ -55,8 +56,11 @@ struct MapShell: View {
                     ZStack(alignment: .trailing) {
                         map(statusWidth: statusWidth, coveredWidth: geometry.size.width - statusWidth, coveredBottom: 0, maximumGlanceHeight: geometry.size.height * 0.55)
                         VStack(spacing: 0) {
-                            NavigationStack { panelContent(expandedPanel) }
-                                .id(expandedPanel)
+                            NavigationStack {
+                                panelContent(expandedPanel)
+                                    .containerBackground(.clear, for: .navigation)
+                            }
+                            .id(expandedPanel)
                             ControlGroup {
                                 Button("Search", systemImage: "magnifyingglass") { focus.cancelPending(); expandedPanel = .search }
                                     .accessibilityIdentifier("searchButton")
@@ -71,7 +75,13 @@ struct MapShell: View {
                             .padding()
                         }
                         .frame(width: controlWidth)
-                        .background(.regularMaterial)
+                        .background {
+                            if reduceTransparency {
+                                Color(uiColor: .systemBackground)
+                            } else {
+                                Rectangle().fill(.regularMaterial)
+                            }
+                        }
                     }
                 } else {
                     NavigationStack {
@@ -223,7 +233,7 @@ struct MapShell: View {
                                           openNearby: {
                                               showNearby(expanded: coveredWidth > 0)
                                           })
-                                          .frame(maxWidth: min(260, max(0, statusWidth - 32)))
+                                          .frame(maxWidth: min(typeSize.isAccessibilitySize ? 260 : 220, max(0, statusWidth - 32)))
                                           .padding()
                                           .frame(maxWidth: statusWidth, alignment: .leading)
                     }
