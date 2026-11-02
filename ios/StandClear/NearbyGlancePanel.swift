@@ -9,6 +9,7 @@ struct NearbyGlancePanel: View {
     let mapUnavailable: Bool
     let retryMap: () -> Void
     let openNearby: () -> Void
+    @Environment(\.dynamicTypeSize) private var typeSize
     @State private var contentHeight: CGFloat = 1
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
@@ -28,42 +29,11 @@ struct NearbyGlancePanel: View {
     }
 
     private var content: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack {
-                Button(action: openNearby) {
-                    Text("Nearby")
-                        .font(.subheadline.weight(.semibold))
-                        .frame(minHeight: 44)
-                        .contentShape(Rectangle())
-                }
-                .accessibilityHint("Open the full nearby arrival list")
-                .accessibilityIdentifier("glanceNearbyButton")
-                Spacer()
-                Menu {
-                    Text(store.feedLabel(at: now))
-                    Text("Predictions are estimates. A dash means no prediction within 45 minutes, not no service.")
-                    if let snapshot = store.snapshot, snapshot.isFresh(at: now) {
-                        Text("Updated \(Date(timeIntervalSince1970: snapshot.generatedAt / 1000), style: .relative) ago")
-                    }
-                    Button("Refresh arrivals") { Task { await store.refresh() } }
-                    if store.error != nil {
-                        Button("Retry subway data") { Task { await store.loadLines() } }
-                    }
-                    if mapUnavailable {
-                        Button("Retry map", action: retryMap)
-                    }
-                } label: {
-                    Image(systemName: "info.circle")
-                        .frame(width: 44, height: 44)
-                        .contentShape(Rectangle())
-                        .accessibilityLabel("Arrival status")
-                }
-            }
-            .buttonStyle(.borderless)
-            .frame(minHeight: 44)
+        VStack(alignment: .leading, spacing: 0) {
             if mapUnavailable {
                 Label("Map unavailable", systemImage: "map")
                     .font(.caption)
+                Button("Retry map", action: retryMap)
             }
             if location.availableCoordinate == nil {
                 locationState
@@ -80,10 +50,12 @@ struct NearbyGlancePanel: View {
                     Text(store.feedLabel(at: now)).font(.caption)
                     Button("Retry arrivals") { Task { await store.refresh() } }
                 }
-                ForEach(rows) { row in
-                    Divider()
+                ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
+                    if index > 0 {
+                        Divider()
+                    }
                     Button(action: openNearby) {
-                        VStack(alignment: .leading, spacing: 4) {
+                        VStack(alignment: .leading, spacing: 2) {
                             HStack(alignment: .firstTextBaseline) {
                                 Image(systemName: "circle.fill")
                                     .font(.caption2)
@@ -93,6 +65,7 @@ struct NearbyGlancePanel: View {
                                     .font(.caption.weight(.bold))
                                 Text(row.station.stop.name)
                                     .font(.caption.weight(.medium))
+                                    .lineLimit(typeSize.isAccessibilitySize ? nil : 1)
                             }
                             ViewThatFits(in: .horizontal) {
                                 HStack {
@@ -118,7 +91,7 @@ struct NearbyGlancePanel: View {
                 }
             }
         }
-        .padding(12)
+        .padding(8)
     }
 
     @ViewBuilder private var locationState: some View {
@@ -135,7 +108,7 @@ struct NearbyGlancePanel: View {
     }
 
     private func prediction(_ arrival: Arrival?, direction: String, symbol: String) -> some View {
-        let summary = arrival.map { "\(RouteBadge.displayID($0.routeId)) · \($0.countdown(at: now) ?? "—")" } ?? "—"
+        let summary = arrival.map { "\(RouteBadge.displayID($0.routeId)) · \(($0.countdown(at: now) ?? "—").replacingOccurrences(of: " min", with: "m"))" } ?? "—"
         return Label(summary, systemImage: symbol)
             .foregroundStyle(.primary)
             .accessibilityLabel(arrival.map {
@@ -148,9 +121,9 @@ private struct GlanceSurface: ViewModifier {
     let opaque: Bool
     func body(content: Content) -> some View {
         if opaque {
-            content.background(Color(uiColor: .secondarySystemBackground), in: ConcentricRectangle())
+            content.background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 20))
         } else {
-            content.glassEffect(.regular, in: ConcentricRectangle())
+            content.glassEffect(.regular, in: RoundedRectangle(cornerRadius: 20))
         }
     }
 }

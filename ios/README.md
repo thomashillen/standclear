@@ -131,6 +131,6 @@ Both renderers show a blue approximate-location dot from the existing expiring c
 
 The glance mirrors the web grouping: station complexes remain distinct, services sharing a route color are grouped at that station, and only stations within 900 metres are considered. Up to three groups use stable distance/identity ordering. Both directions show the next valid prediction within 45 minutes; dashes do not imply no service. Native freshness and failed-request gates remain in force, with no synthesized “Now” rows. A status menu contains feed status and recovery actions.
 
-SwiftUI supplies the glass effect and concentric container shape. Reduce Transparency uses a semantic opaque background; typography scales with Dynamic Type, and taller content can scroll within a geometry-bounded panel. No custom animation is introduced.
+SwiftUI supplies the glass effect on a soft rounded rectangle. The panel uses three tight rows with no separate header; feed status remains in the native More menu. Reduce Transparency uses a semantic opaque background; typography scales with Dynamic Type, and taller content can scroll within a geometry-bounded panel. No custom animation is introduced.
 
 Queued basics: Near Me should also recenter/zoom around the current usable fix; station-to-station directions should reuse the web's direct/one-transfer planning logic. A selected-journey Live Activity is deferred until those basics are validated. It must preserve truthful freshness and background-update limits; no push infrastructure or paid service is authorized by this milestone.

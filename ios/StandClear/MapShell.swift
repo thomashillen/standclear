@@ -197,7 +197,7 @@ struct MapShell: View {
                                               panel = .nearby
                                           }
                                       })
-                                      .frame(maxWidth: min(310, max(0, statusWidth - 32)))
+                                      .frame(maxWidth: min(260, max(0, statusWidth - 32)))
                                       .padding()
                                       .frame(maxWidth: statusWidth, alignment: .leading)
                 }
@@ -216,6 +216,13 @@ struct MapShell: View {
             }
             .pickerStyle(.menu)
             .accessibilityIdentifier("mapProviderPicker")
+            Menu("Arrival status", systemImage: "info.circle") {
+                Text(store.feedLabel(at: Date()))
+                Text("Predictions are estimates. A dash means no prediction within 45 minutes, not no service.")
+                if let snapshot = store.snapshot, snapshot.isFresh(at: Date()) {
+                    Text("Updated \(Date(timeIntervalSince1970: snapshot.generatedAt / 1000), style: .relative) ago")
+                }
+            }
             Button("Refresh arrivals", systemImage: "arrow.clockwise") { Task { await store.refresh() } }
             Link("Open web app", destination: URL(string: "https://standclear.vercel.app")!)
         }

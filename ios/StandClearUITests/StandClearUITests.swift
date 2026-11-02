@@ -27,7 +27,7 @@ final class StandClearUITests: XCTestCase {
         mapCapture.name = "Location dot and compact nearby glance"
         mapCapture.lifetime = .keepAlways
         add(mapCapture)
-        app.buttons["glanceNearbyButton"].tap()
+        app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "glance-")).firstMatch.tap()
         XCTAssertTrue(app.navigationBars["Nearby arrivals"].waitForExistence(timeout: 5))
         let station = app.buttons["station-127"]
         XCTAssertTrue(station.waitForExistence(timeout: 10), "Times Square should be nearby the simulated location")
