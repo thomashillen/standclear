@@ -271,11 +271,11 @@ struct MapShell: View {
         location.start()
     }
 
-    private var focusPadding: EdgeInsets {
+    private var focusPadding: SwiftUI.EdgeInsets {
         let expanded = windowSize.width >= 640 && !typeSize.isAccessibilitySize
         let right = expanded ? min(windowSize.width * 0.4, 380) : 0
         let bottom = !expanded && panel == .nearby && sheetDetent == .medium ? windowSize.height / 2 : 0
-        return EdgeInsets(top: 0, leading: 0, bottom: bottom, trailing: right)
+        return SwiftUI.EdgeInsets(top: 0, leading: 0, bottom: bottom, trailing: right)
     }
 
     private func applyFocus() {
