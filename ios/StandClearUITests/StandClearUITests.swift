@@ -184,28 +184,9 @@ final class StandClearUITests: XCTestCase {
         app.searchFields.firstMatch.tap()
         app.searchFields.firstMatch.typeText(" Sq")
         XCUIDevice.shared.orientation = .portrait
-        waitForLayout(in: app, expanded: false)
+        waitForLayout(in: app, expanded: false, readyControl: "nearbyButton")
         XCTAssertTrue(app.navigationBars["StandClear"].waitForExistence(timeout: 5))
         XCTAssertFalse(app.keyboards.firstMatch.exists, "Search keyboard must leave with its presentation")
-        let nearbyIsReady = NSPredicate { _, _ in
-            MainActor.assumeIsolated {
-                let window = app.windows.firstMatch
-                let nearby = app.buttons["nearbyButton"]
-                guard window.exists, nearby.exists else { return false }
-                let bounds = window.frame
-                let frame = nearby.frame
-                // Accessibility may briefly report null window geometry after rotation.
-                // Wait for usable frames before asking XCTest to compute a hit point.
-                guard !bounds.isNull, !bounds.isInfinite, !frame.isNull, !frame.isInfinite,
-                      bounds.width > 0, bounds.height > 0,
-                      frame.width > 0, frame.height > 0,
-                      bounds.contains(frame)
-                else { return false }
-                return nearby.isHittable
-            }
-        }
-        expectation(for: nearbyIsReady, evaluatedWith: app.buttons["nearbyButton"])
-        waitForExpectations(timeout: 5)
         app.buttons["nearbyButton"].tap()
         XCTAssertTrue(app.buttons["Done"].waitForExistence(timeout: 5))
         XCUIDevice.shared.orientation = .landscapeLeft
@@ -430,23 +411,24 @@ final class StandClearUITests: XCTestCase {
     }
 
     @MainActor
-    private func waitForLayout(in app: XCUIApplication, expanded: Bool) {
+    private func waitForLayout(in app: XCUIApplication, expanded: Bool, readyControl: String = "searchButton") {
         // Rotation can return before the simulator window and accessibility frames
         // settle. Check geometry before asking XCTest to calculate a hit point.
         let ready = NSPredicate { _, _ in
             MainActor.assumeIsolated {
                 let window = app.windows.firstMatch
-                let search = app.buttons["searchButton"]
-                guard window.exists, search.exists else { return false }
+                let control = app.buttons[readyControl]
+                guard window.exists, control.exists else { return false }
                 let bounds = window.frame
-                let frame = search.frame
-                guard bounds.width > 0, bounds.height > 0,
+                let frame = control.frame
+                guard !bounds.isNull, !bounds.isInfinite, !frame.isNull, !frame.isInfinite,
+                      bounds.width > 0, bounds.height > 0,
                       (bounds.width > bounds.height) == expanded,
                       frame.width > 0, frame.height > 0,
                       bounds.contains(frame),
                       !expanded || frame.midX > bounds.midX
                 else { return false }
-                return search.isHittable
+                return control.isHittable
             }
         }
         expectation(for: ready, evaluatedWith: app)
