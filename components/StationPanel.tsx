@@ -559,7 +559,7 @@ export default function StationPanel({ stopId, onClose, onSelectLine, onStartDir
           </button>
           <button
             onClick={onClose}
-            className="press text-white opacity-85 hover:opacity-100 w-11 h-11 -mt-0.5 flex items-center justify-center rounded-full bg-white/[0.08] hover:bg-white/[0.12] touch-manipulation flex-shrink-0"
+            className="panel-action press -mt-0.5"
             aria-label="Close panel"
           >
             <X className="w-[18px] h-[18px]" strokeWidth={2.5} />

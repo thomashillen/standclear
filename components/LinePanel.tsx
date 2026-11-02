@@ -423,7 +423,7 @@ export default function LinePanel({ lineId, focusStopId, onClose, onStationOpen 
         </div>
         <button
           onClick={onClose}
-          className={`${textClass} press opacity-85 hover:opacity-100 w-11 h-11 -mr-1 flex items-center justify-center rounded-full bg-black/15 touch-manipulation`}
+          className={`${textClass} panel-action press bg-black/15`}
           aria-label="Close panel"
         >
           <X className="w-[18px] h-[18px]" strokeWidth={2.5} />

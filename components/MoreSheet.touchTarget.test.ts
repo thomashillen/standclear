@@ -38,7 +38,7 @@ describe("MoreSheet close-button touch target", () => {
   });
 
   it("sizes the close button to the 44px HIG minimum (principle #3)", () => {
-    expect(SRC).toContain("opacity-85 hover:opacity-100 w-11 h-11 -mr-1");
+    expect(SRC).toContain('className="panel-action press"');
   });
 
   it("no longer carries the old sub-44px close-button size", () => {
