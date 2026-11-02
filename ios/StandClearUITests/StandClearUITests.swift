@@ -6,6 +6,7 @@ final class StandClearUITests: XCTestCase {
     func testNearbyGlanceKeepsMapVisibleForGrantedLocation() {
         let app = XCUIApplication()
         app.terminate()
+        XCUIDevice.shared.orientation = .portrait
         app.resetAuthorizationStatus(for: .location)
         XCUIDevice.shared.location = XCUILocation(location: CLLocation(latitude: 40.7553, longitude: -73.987))
         defer { XCUIDevice.shared.location = nil }
@@ -19,7 +20,7 @@ final class StandClearUITests: XCTestCase {
         }
         app.launch()
         XCTAssertTrue(app.buttons["moreButton"].waitForExistence(timeout: 15))
-        app.tap()
+        activatePermissionPrompt(in: app)
         XCTAssertTrue(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "glance-")).firstMatch.waitForExistence(timeout: 30))
         XCTAssertFalse(app.navigationBars["Nearby arrivals"].exists, "The glance panel should keep the map visible at startup")
         XCTAssertTrue(app.descendants(matching: .any)["userLocationDot"].exists)
@@ -31,10 +32,33 @@ final class StandClearUITests: XCTestCase {
         XCTAssertTrue(app.navigationBars["Nearby arrivals"].waitForExistence(timeout: 5))
         let station = app.buttons["station-127"]
         XCTAssertTrue(station.waitForExistence(timeout: 10), "Times Square should be nearby the simulated location")
-        let capture = XCTAttachment(screenshot: app.screenshot())
+        XCTAssertFalse(app.staticTexts["Arrival feed connected"].exists, "Healthy status must not displace nearby predictions")
+        let capture = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         capture.name = "Automatic nearby arrivals with granted location"
         capture.lifetime = .keepAlways
         add(capture)
+        // Expand the native sheet before testing a disclosure. A medium sheet can
+        // expose a lazy row in AX before it has a usable activation frame.
+        app.buttons["Sheet Grabber"].doubleTap()
+        // Scope live-row queries to the list; resolving labels across the map
+        // also traverses hundreds of independently updating train annotations.
+        let arrivalsList = app.collectionViews["stationList"]
+        XCTAssertTrue(arrivalsList.waitForExistence(timeout: 5))
+        let candidate = arrivalsList.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND NOT label CONTAINS %@", "arrivalRow-", "<1 min")).firstMatch
+        if candidate.exists {
+            let arrival = arrivalsList.buttons[candidate.identifier]
+            let usable = NSPredicate { _, _ in
+                MainActor.assumeIsolated {
+                    guard arrival.exists else { return false }
+                    let frame = arrival.frame
+                    return frame.width > 0 && frame.height > 0 && app.frame.contains(frame)
+                }
+            }
+            expectation(for: usable, evaluatedWith: arrival)
+            waitForExpectations(timeout: 20)
+            arrival.tap()
+            XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Predicted arrival:")).firstMatch.waitForExistence(timeout: 5))
+        }
         app.buttons["Done"].tap()
         let neighborhood = XCTAttachment(screenshot: app.screenshot())
         neighborhood.name = "Near Me recentered neighborhood"
@@ -56,10 +80,11 @@ final class StandClearUITests: XCTestCase {
             return false
         }
         app.terminate()
+        XCUIDevice.shared.orientation = .portrait
         app.resetAuthorizationStatus(for: .location)
         app.launch()
         XCTAssertTrue(app.buttons["moreButton"].waitForExistence(timeout: 15))
-        app.tap()
+        activatePermissionPrompt(in: app)
         for (provider, mapID) in [("Apple Maps", "appleTransitMap"), ("Mapbox", "mapboxTransitMap")] {
             app.buttons["moreButton"].tap()
             let option = app.buttons[provider]
@@ -78,6 +103,11 @@ final class StandClearUITests: XCTestCase {
             capture.lifetime = .keepAlways
             add(capture)
         }
+        app.buttons["moreButton"].tap()
+        app.buttons["arrivalStatusButton"].tap()
+        XCTAssertTrue(app.alerts["Arrival status"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.alerts.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Status when opened:")).firstMatch.exists)
+        app.alerts.buttons["OK"].tap()
     }
 
     @MainActor
@@ -92,10 +122,12 @@ final class StandClearUITests: XCTestCase {
             return false
         }
         app.terminate()
+        XCUIDevice.shared.orientation = .portrait
+        app.launchArguments = ["-mapProvider", "Apple Maps"]
         app.launch()
         let search = app.buttons["searchButton"]
         XCTAssertTrue(search.waitForExistence(timeout: 15))
-        app.tap() // Let XCTest handle the system permission interruption if present.
+        activatePermissionPrompt(in: app)
         search.tap()
         XCTAssertTrue(app.navigationBars["Search stations"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.searchFields.firstMatch.exists)
@@ -114,6 +146,9 @@ final class StandClearUITests: XCTestCase {
         add(nearby)
         app.buttons["Done"].tap()
         XCTAssertTrue(search.exists)
+        app.buttons["nearbyButton"].tap()
+        XCTAssertTrue(app.staticTexts["Location access is off"].waitForExistence(timeout: 5))
+        app.buttons["Done"].tap()
         XCUIDevice.shared.orientation = .landscapeLeft
         defer { XCUIDevice.shared.orientation = .portrait }
         waitForLayout(in: app, expanded: true)
@@ -174,6 +209,7 @@ final class StandClearUITests: XCTestCase {
     private func checkStationDirectionsAndSwap(provider: String) throws {
         let app = XCUIApplication()
         app.terminate()
+        XCUIDevice.shared.orientation = .portrait
         app.resetAuthorizationStatus(for: .location)
         app.launchArguments = ["-mapProvider", provider]
         addUIInterruptionMonitor(withDescription: "Location permission") { alert in
@@ -187,7 +223,7 @@ final class StandClearUITests: XCTestCase {
         XCTAssertTrue(app.buttons["moreButton"].waitForExistence(timeout: 15))
         // Trigger permission handling on the inert title, not the map center,
         // which can contain the large-text Open Settings link.
-        app.navigationBars["StandClear"].staticTexts["StandClear"].tap()
+        activatePermissionPrompt(in: app)
         if provider == "Mapbox", app.staticTexts["Map configuration needed"].exists {
             throw XCTSkip("Mapbox rendering needs an ignored local public token. CI verifies its missing-configuration state separately.")
         }
@@ -235,6 +271,13 @@ final class StandClearUITests: XCTestCase {
         XCTAssertTrue(southbound.waitForExistence(timeout: 5))
         XCTAssertTrue(app.buttons["originPicker"].label.contains("59 St"))
         XCTAssertTrue(app.buttons["destinationPicker"].label.contains("Wall St"))
+    }
+
+    @MainActor
+    private func activatePermissionPrompt(in app: XCUIApplication) {
+        let title = app.navigationBars["StandClear"].staticTexts["StandClear"]
+        XCTAssertTrue(title.waitForExistence(timeout: 20))
+        title.tap()
     }
 
     @MainActor

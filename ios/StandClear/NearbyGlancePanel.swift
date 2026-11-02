@@ -56,26 +56,18 @@ struct NearbyGlancePanel: View {
                     }
                     Button(action: openNearby) {
                         VStack(alignment: .leading, spacing: 2) {
-                            HStack(alignment: .firstTextBaseline) {
-                                Image(systemName: "circle.fill")
-                                    .font(.caption2)
-                                    .foregroundStyle(Color(uiColor: transitColor(row.color)))
-                                    .accessibilityHidden(true)
-                                Text(row.routes.map(RouteBadge.displayID).joined(separator: " · "))
-                                    .font(.caption.weight(.bold))
-                                Text(row.station.stop.name)
-                                    .font(.caption.weight(.medium))
-                                    .lineLimit(typeSize.isAccessibilitySize ? nil : 1)
-                            }
+                            Text(row.station.stop.name)
+                                .font(.caption.weight(.semibold))
+                                .fixedSize(horizontal: false, vertical: true)
                             ViewThatFits(in: .horizontal) {
                                 HStack {
-                                    prediction(row.north, direction: "Northbound", symbol: "arrow.up")
+                                    prediction(row.north, routes: row.routes, color: row.color, direction: "Northbound", symbol: "arrow.up")
                                     Spacer(minLength: 8)
-                                    prediction(row.south, direction: "Southbound", symbol: "arrow.down")
+                                    prediction(row.south, routes: row.routes, color: row.color, direction: "Southbound", symbol: "arrow.down")
                                 }
                                 VStack(alignment: .leading, spacing: 4) {
-                                    prediction(row.north, direction: "Northbound", symbol: "arrow.up")
-                                    prediction(row.south, direction: "Southbound", symbol: "arrow.down")
+                                    prediction(row.north, routes: row.routes, color: row.color, direction: "Northbound", symbol: "arrow.up")
+                                    prediction(row.south, routes: row.routes, color: row.color, direction: "Southbound", symbol: "arrow.down")
                                 }
                             }
                             .font(.caption)
@@ -107,13 +99,30 @@ struct NearbyGlancePanel: View {
         }
     }
 
-    private func prediction(_ arrival: Arrival?, direction: String, symbol: String) -> some View {
-        let summary = arrival.map { "\(RouteBadge.displayID($0.routeId)) · \(($0.countdown(at: now) ?? "—").replacingOccurrences(of: " min", with: "m"))" } ?? "—"
-        return Label(summary, systemImage: symbol)
-            .foregroundStyle(.primary)
-            .accessibilityLabel(arrival.map {
-                "\(direction), route \(RouteBadge.displayID($0.routeId)), predicted in \($0.countdown(at: now) ?? "unavailable")"
-            } ?? "\(direction), prediction unavailable")
+    private func prediction(_ arrival: Arrival?, routes: [String], color: String, direction: String, symbol: String) -> some View {
+        HStack(spacing: 3) {
+            if let arrival {
+                RouteBadge(routeID: arrival.routeId, color: color)
+            } else {
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 3) {
+                        ForEach(routes, id: \.self) { route in
+                            RouteBadge(routeID: route, color: color)
+                        }
+                    }
+                    Text(routes.map(RouteBadge.displayID).joined(separator: " · "))
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            Image(systemName: symbol)
+            Text(arrival?.countdown(at: now)?.replacingOccurrences(of: " min", with: "m") ?? "—")
+        }
+        .fixedSize(horizontal: false, vertical: true)
+        .foregroundStyle(.primary)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(arrival.map {
+            "\(direction), route \(RouteBadge.displayID($0.routeId)), predicted in \($0.countdown(at: now) ?? "unavailable")"
+        } ?? "\(direction), routes \(routes.map(RouteBadge.displayID).joined(separator: ", ")), prediction unavailable")
     }
 }
 
