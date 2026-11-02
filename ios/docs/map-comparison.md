@@ -26,7 +26,9 @@ Primary references:
 
 ## Validation
 
-The comparison builds and passes static analysis with Xcode 27.2 / iOS 27.2. All 29 native unit tests passed, including nine projection regressions covering heading, unknown direction, duplicate vertices, freshness, invalid reports, and train deduplication. Simulator UI validation and final rendered captures are recorded below when completed.
+The comparison builds and passes static analysis with Xcode 27.2 / iOS 27.2. All 29 native unit tests passed, including nine projection regressions covering heading, unknown direction, duplicate vertices, freshness, invalid reports, and train deduplication. Both simulator UI tests passed: provider switching retains the native entry points, and search/nearby preserve a single presentation and search text across narrow/expanded transitions. The full local run took about 14.5 minutes because XCTest repeatedly waited 60 seconds for animation quiescence after Mapbox rotations; assertions passed without disabling idle checks. This timing is a test reliability limitation to investigate, not a performance benchmark.
+
+Rendered Mapbox output was inspected on iPhone 18 Pro and Duo simulators, including the Duo dark appearance and system-provided right-side toolbar. Provider and adaptive-layout captures are retained in the local xcresult bundle. Simulator observations do not establish physical device acceptance. Current-head CI and review status are recorded in [PR #267](https://github.com/thomashillen/standclear/pull/267).
 
 The unchanged web application passed lint, TypeScript checking, all 992 tests in 94 files, and its production build (971 generated pages).
 
