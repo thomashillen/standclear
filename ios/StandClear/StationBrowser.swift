@@ -6,6 +6,7 @@ struct StationBrowser: View {
     let location: LocationStore
     let search: Bool
     @Binding var query: String
+    var searchFocus: FocusState<Bool>.Binding
     @Binding var directionsSelection: DirectionsSelection
     let onDirectionsHere: (Station) -> Void
     let onSelectTrip: (NativeTripPlan?) -> Void
@@ -24,6 +25,8 @@ struct StationBrowser: View {
         Group {
             if search {
                 content.searchable(text: $query, prompt: "Search subway stations")
+                    .searchFocused(searchFocus)
+                    .onDisappear { searchFocus.wrappedValue = false }
             } else {
                 content
             }
@@ -172,11 +175,15 @@ struct StationArrivals: View {
         TimelineView(.periodic(from: .now, by: 5)) { context in
             let arrivals = Transit.arrivals(for: station, snapshot: store.snapshot, now: context.date)
             List {
-                Button("Directions here", systemImage: "arrow.triangle.turn.up.right.diamond") {
+                Button {
                     // Prefill only on this explicit action, never when navigation
                     // reappears after a rider edits an endpoint or goes back.
                     onDirectionsHere(station)
                     showingDirections = true
+                } label: {
+                    Label("Directions here", systemImage: "arrow.triangle.turn.up.right.diamond")
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentShape(Rectangle())
                 }
                 .accessibilityHint("Plan a subway trip to this station. Choose or edit your starting station.")
                 .accessibilityIdentifier("directionsHere")

@@ -179,9 +179,13 @@ final class StandClearUITests: XCTestCase {
         XCTAssertTrue((app.searchFields.firstMatch.value as? String)?.contains("Times") == true)
         XCTAssertFalse(app.navigationBars["Nearby arrivals"].exists)
         XCTAssertGreaterThan(app.buttons["searchButton"].frame.midX, app.frame.midX)
+        // Exercise departure from expanded Search with its keyboard active too.
+        app.searchFields.firstMatch.tap()
+        app.searchFields.firstMatch.typeText(" Sq")
         XCUIDevice.shared.orientation = .portrait
         waitForLayout(in: app, expanded: false)
         XCTAssertTrue(app.navigationBars["StandClear"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.keyboards.firstMatch.exists, "Search keyboard must leave with its presentation")
         let nearbyIsReady = NSPredicate(format: "hittable == true")
         expectation(for: nearbyIsReady, evaluatedWith: app.buttons["nearbyButton"])
         waitForExpectations(timeout: 5)
