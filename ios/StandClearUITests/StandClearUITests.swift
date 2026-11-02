@@ -312,9 +312,13 @@ final class StandClearUITests: XCTestCase {
             app.buttons["directionsButton"].tap()
         }
         XCTAssertTrue(app.navigationBars["Directions"].waitForExistence(timeout: 5))
-        // Returning from details preserves the native list scroll position.
+        // Returning from details preserves scroll position. Start below the
+        // native navigation bar: a default swipe can start on that bar in a
+        // short expanded window and never reach the scrollable content.
+        let directionsList = app.collectionViews["directionsList"]
         for _ in 0 ..< 3 where !app.buttons["originPicker"].exists {
-            app.collectionViews.firstMatch.swipeDown()
+            directionsList.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+                .press(forDuration: 0.05, thenDragTo: directionsList.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.9)))
         }
         XCTAssertTrue(app.buttons["originPicker"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.buttons["originPicker"].label.contains("59 St"))

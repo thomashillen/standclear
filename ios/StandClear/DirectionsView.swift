@@ -92,6 +92,7 @@ struct DirectionsView: View {
                                        description: Text("Plan a direct subway trip or a route with one transfer."))
             }
         }
+        .accessibilityIdentifier("directionsList")
         .navigationTitle("Directions")
         .navigationBarTitleDisplayMode(.inline)
         .scrollContentBackground(.hidden)
