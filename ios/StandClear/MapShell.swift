@@ -22,7 +22,6 @@ struct MapShell: View {
     @State private var mapZoom: Double = 11
     @State private var focusedStation: Station?
     @State private var focusRevision = 0
-    @State private var presentedInitialNearby = false
     enum MapProvider: String, CaseIterable, Identifiable {
         case mapbox = "Mapbox", apple = "Apple Maps"
         var id: String {
@@ -50,7 +49,7 @@ struct MapShell: View {
             Group {
                 if expanded {
                     ZStack(alignment: .trailing) {
-                        map(statusWidth: statusWidth, coveredWidth: geometry.size.width - statusWidth)
+                        map(statusWidth: statusWidth, coveredWidth: geometry.size.width - statusWidth, maximumGlanceHeight: geometry.size.height * 0.55)
                         VStack(spacing: 0) {
                             NavigationStack { stationBrowser(search: expandedSearch) }
                                 .id(expandedSearch)
@@ -73,7 +72,7 @@ struct MapShell: View {
                     }
                 } else {
                     NavigationStack {
-                        map(statusWidth: statusWidth, coveredWidth: 0)
+                        map(statusWidth: statusWidth, coveredWidth: 0, maximumGlanceHeight: geometry.size.height * 0.55)
                             .navigationTitle("StandClear")
                             .navigationBarTitleDisplayMode(.inline)
                             .toolbar {
@@ -93,20 +92,6 @@ struct MapShell: View {
                 guard isExpanded, let activePanel = panel else { return }
                 expandedSearch = activePanel == .search
                 panel = nil
-            }
-            .onChange(of: !store.stations.isEmpty && location.availableCoordinate != nil, initial: true) { _, ready in
-                guard ready, !presentedInitialNearby else { return }
-                presentedInitialNearby = true
-                // Present useful arrivals once, without reopening a dismissed sheet
-                // on each coarse location refresh or interrupting station search.
-                if !expanded, panel == nil {
-                    panel = .nearby
-                }
-            }
-            .onChange(of: panel) { _, selection in
-                if selection != nil {
-                    presentedInitialNearby = true
-                }
             }
             .sheet(item: $panel) { panel in
                 NavigationStack {
@@ -131,7 +116,7 @@ struct MapShell: View {
         }
     }
 
-    @ViewBuilder private func map(statusWidth: CGFloat, coveredWidth: CGFloat) -> some View {
+    @ViewBuilder private func map(statusWidth: CGFloat, coveredWidth: CGFloat, maximumGlanceHeight: CGFloat) -> some View {
         if hasToken || mapProvider == .apple {
             TimelineView(.periodic(from: .now, by: 5)) { timeline in
                 ZStack(alignment: .topLeading) {
@@ -139,7 +124,8 @@ struct MapShell: View {
                         AppleTransitMap(lines: store.lines,
                                         markers: TrainMapProjection.markers(snapshot: store.snapshot, lines: store.lines,
                                                                             now: timeline.date, feedUnavailable: store.feedError),
-                                        focusedStation: focusedStation, focusRevision: focusRevision, coveredWidth: coveredWidth)
+                                        focusedStation: focusedStation, focusRevision: focusRevision, coveredWidth: coveredWidth,
+                                        currentLocation: location.availableCoordinate)
                     } else {
                         Map(viewport: $viewport) {
                             ForEvery(store.lines, id: \.routeId) { line in
@@ -176,6 +162,13 @@ struct MapShell: View {
                             }
                             .textRotationAlignment(.viewport)
                             .textAllowOverlap(true)
+                            if let coordinate = location.availableCoordinate {
+                                CircleAnnotation(centerCoordinate: coordinate)
+                                    .circleRadius(6)
+                                    .circleColor(StyleColor(UIColor.systemBlue))
+                                    .circleStrokeWidth(3)
+                                    .circleStrokeColor(.white)
+                            }
                         }
                         .mapStyle(colorScheme == .dark ? .dark : .light)
                         .ornamentOptions(ornaments(coveredWidth: coveredWidth))
@@ -192,44 +185,20 @@ struct MapShell: View {
                         .ignoresSafeArea(edges: .top)
                         .id(mapID)
                     }
-                    Menu {
-                        Text(store.feedLabel(at: timeline.date))
-                        if let snapshot = store.snapshot {
-                            Text("Updated \(Date(timeIntervalSince1970: snapshot.generatedAt / 1000), style: .relative) ago")
-                        }
-                        if let snapshot = store.snapshot, snapshot.isFresh(at: timeline.date) {
-                            let stale = snapshot.uniqueTrains.filter {
-                                timeline.date.timeIntervalSince1970 - ($0.lastReportedAt ?? snapshot.generatedAt / 1000) > 90
-                            }.count
-                            if stale > 0 {
-                                Text("\(stale) train positions are over 90 seconds old; dimmed or hidden on map.")
-                            }
-                        }
-                        if store.feedError || store.snapshot?.isFresh(at: timeline.date) == false {
-                            Button("Retry arrivals") { Task { await store.refresh() } }
-                        }
-                        if let error = store.error {
-                            Text(error)
-                            Button("Retry subway data") { Task { await store.loadLines() } }
-                        }
-                        if mapError, mapProvider == .mapbox {
-                            Text("Map unavailable. Station search remains available.")
-                            Button("Retry map") { mapError = false; mapLoaded = false; mapID = UUID() }
-                        }
-                    } label: {
-                        let title = store.error != nil ? "Subway data unavailable" : mapError && mapProvider == .mapbox ? "Map unavailable" :
-                            store.loading || (mapProvider == .mapbox && !mapLoaded) ? "Loading subway map…" : store.feedLabel(at: timeline.date)
-                        if typeSize.isAccessibilitySize {
-                            Image(systemName: "info.circle")
-                                .accessibilityLabel(title)
-                        } else {
-                            Label(title, systemImage: "info.circle")
-                        }
-                    }
-                    .buttonStyle(.glass)
-                    .controlSize(.large)
-                    .padding()
-                    .frame(maxWidth: statusWidth, alignment: .leading)
+                    NearbyGlancePanel(store: store, location: location, now: timeline.date,
+                                      maximumHeight: maximumGlanceHeight,
+                                      mapUnavailable: mapError && mapProvider == .mapbox,
+                                      retryMap: { mapError = false; mapLoaded = false; mapID = UUID() },
+                                      openNearby: {
+                                          if coveredWidth > 0 {
+                                              expandedSearch = false
+                                          } else {
+                                              panel = .nearby
+                                          }
+                                      })
+                                      .frame(maxWidth: min(310, max(0, statusWidth - 32)))
+                                      .padding()
+                                      .frame(maxWidth: statusWidth, alignment: .leading)
                 }
             }
         } else {

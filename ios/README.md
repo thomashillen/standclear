@@ -60,7 +60,7 @@ The map extends behind the native window’s system chrome; interactive controls
 
 Nearby now presents native station sections with up to three real predictions per station. Each prediction includes the route badge, exact reported destination when known, direction, rounded-up minutes remaining, and scheduled prediction clock time. Station details show additional predictions. Missing destinations and unknown directions are not inferred from static termini.
 
-On a narrow window, Nearby opens once when both usable location and station data are ready. Dismissing it or opening Search suppresses further automatic presentation during that app session. Expanded layouts continue using the native right-side region. Location denial, outside-service-area location, waiting for a fix, feed failure, stale data, and fresh-but-empty predictions have distinct native states. The permission state uses compact native rows so it remains readable in a short landscape panel.
+On map open, one compact native glass panel shows up to three nearby station/service groups, with the next northbound and southbound predictions. It replaces the automatic sheet so the map stays visible. Nearby and the panel open the full list on demand. Expanded layouts continue using the native right-side region. Location denial, outside-service-area location, waiting for a fix, feed failure, stale data, and fresh-but-empty predictions have distinct native states. The permission state uses compact native rows so it remains readable in a short landscape panel.
 
 The map status says **Arrival feed connected** when fresh data is available; the menu exposes its update age. Arrival rows remain estimates and do not synthesize “Now” arrivals. Invalid or future-dated vehicle reports cannot qualify stale predictions as current. No endpoint or backend changes are required.
 
@@ -124,3 +124,13 @@ Continue in small reviewed increments: location lifecycle and automatic nearby p
 Mapbox remains the default while the optional MapKit comparison tests the core overlays and shared train artwork. The comparison does not establish Mapbox basemap-style parity, pitched-map behavior, dense-marker performance, selection behavior, or smooth realtime interpolation. No benchmark or full migration is claimed. Apple’s basemap has different styling controls; use the comparison record to separate those differences from missing transit behavior.
 
 MapKit is not a replacement for the existing MTA data contracts or subway-routing logic. This milestone does not add MapKit directions or transit-ETA requests. Apple’s transit ETA capability is not a drop-in subway itinerary planner, so retain StandClear’s backend and transit graph when evaluating future routing. Evaluate costs, offline requirements, accessibility, attribution, and platform terms separately before choosing a production engine.
+
+## Location and compact map glance
+
+Both renderers show a blue approximate-location dot from the existing expiring coarse fix. No independent map location manager or continuous high-accuracy tracking is added. Permission revocation, fix expiration, and background cleanup remove the dot and location-dependent predictions.
+
+The glance mirrors the web grouping: station complexes remain distinct, services sharing a route color are grouped at that station, and only stations within 900 metres are considered. Up to three groups use stable distance/identity ordering. Both directions show the next valid prediction within 45 minutes; dashes do not imply no service. Native freshness and failed-request gates remain in force, with no synthesized “Now” rows. A status menu contains feed status and recovery actions.
+
+SwiftUI supplies the glass effect and concentric container shape. Reduce Transparency uses a semantic opaque background; typography scales with Dynamic Type, and taller content can scroll within a geometry-bounded panel. No custom animation is introduced.
+
+Queued basics: Near Me should also recenter/zoom around the current usable fix; station-to-station directions should reuse the web's direct/one-transfer planning logic. A selected-journey Live Activity is deferred until those basics are validated. It must preserve truthful freshness and background-update limits; no push infrastructure or paid service is authorized by this milestone.
