@@ -124,6 +124,9 @@ struct MapShell: View {
                 panel = nil
             }
             .onChange(of: panel) { _, selection in
+                if selection != .search {
+                    stationSearchFocused = false
+                }
                 if typeSize.isAccessibilitySize {
                     sheetDetent = .large
                 }
@@ -148,6 +151,11 @@ struct MapShell: View {
             Text(arrivalStatusMessage)
         }
         .onChange(of: panel) { _, _ in viewport = viewport.padding(focusPadding) }
+        .onChange(of: expandedPanel) { _, selection in
+            if selection != .search {
+                stationSearchFocused = false
+            }
+        }
         .onChange(of: sheetDetent) { _, _ in viewport = viewport.padding(focusPadding) }
         .onChange(of: windowSize) { _, _ in viewport = viewport.padding(focusPadding) }
         .onChange(of: typeSize, initial: true) { _, _ in
@@ -402,6 +410,7 @@ struct MapShell: View {
                        directionsSelection: $directionsSelection, onDirectionsHere: beginDirections,
                        onSelectTrip: selectTrip, onShowTripMap: showTripOnMap)
         { station in
+            stationSearchFocused = false
             selectedTrip = nil
             if focus.focus(on: station.stop.coordinate) {
                 applyFocus()

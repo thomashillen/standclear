@@ -26,7 +26,6 @@ struct StationBrowser: View {
             if search {
                 content.searchable(text: $query, prompt: "Search subway stations")
                     .searchFocused(searchFocus)
-                    .onDisappear { searchFocus.wrappedValue = false }
             } else {
                 content
             }
