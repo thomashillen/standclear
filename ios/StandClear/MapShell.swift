@@ -214,13 +214,13 @@ struct MapShell: View {
             Picker("Map provider", selection: $mapProvider) {
                 ForEach(MapProvider.allCases) { provider in Text(provider.rawValue).tag(provider) }
             }
-            .pickerStyle(.menu)
+            .pickerStyle(.inline)
             .accessibilityIdentifier("mapProviderPicker")
             Menu("Arrival status", systemImage: "info.circle") {
                 Text(store.feedLabel(at: Date()))
                 Text("Predictions are estimates. A dash means no prediction within 45 minutes, not no service.")
                 if let snapshot = store.snapshot, snapshot.isFresh(at: Date()) {
-                    Text("Updated \(Date(timeIntervalSince1970: snapshot.generatedAt / 1000), style: .relative) ago")
+                    Text("Updated \(Date(timeIntervalSince1970: snapshot.generatedAt / 1000).formatted(date: .omitted, time: .standard))")
                 }
             }
             Button("Refresh arrivals", systemImage: "arrow.clockwise") { Task { await store.refresh() } }
