@@ -70,7 +70,7 @@ struct MapShell: View {
                                     .padding(.horizontal)
                             }
                             ControlGroup {
-                                Button("Search", systemImage: "magnifyingglass") { focus.cancelPending(); expandedPanel = .search }
+                                Button("Search", systemImage: "magnifyingglass") { showSearch(expanded: true) }
                                     .accessibilityIdentifier("searchButton")
                                 Button("Nearby", systemImage: "location") {
                                     showNearby(expanded: true)
@@ -103,7 +103,7 @@ struct MapShell: View {
                                     }
                                 }
                                 ToolbarItemGroup(placement: .bottomBar) {
-                                    Button("Search", systemImage: "magnifyingglass") { focus.cancelPending(); panel = .search }
+                                    Button("Search", systemImage: "magnifyingglass") { showSearch(expanded: false) }
                                         .accessibilityIdentifier("searchButton")
                                     Spacer()
                                     Button("Nearby", systemImage: "location") { showNearby(expanded: false) }
@@ -324,6 +324,20 @@ struct MapShell: View {
     private var markerScale: Double {
         let scale = TrainMarkerSizing.scale(zoom: mapZoom)
         return differentiateWithoutColor ? max(0.85, scale) : scale
+    }
+
+    private func showSearch(expanded: Bool) {
+        focus.cancelPending()
+        if expanded {
+            expandedPanel = .search
+        } else {
+            panel = .search
+        }
+        Task { @MainActor in
+            await Task.yield()
+            guard expanded ? expandedPanel == .search : panel == .search else { return }
+            stationSearchFocused = true
+        }
     }
 
     private func showNearby(expanded: Bool) {
