@@ -307,6 +307,11 @@ final class StandClearUITests: XCTestCase {
             app.buttons["moreButton"].tap()
             app.buttons["directionsButton"].tap()
         }
+        XCTAssertTrue(app.navigationBars["Directions"].waitForExistence(timeout: 5))
+        // Returning from details preserves the native list scroll position.
+        for _ in 0 ..< 3 where !app.buttons["originPicker"].exists {
+            app.collectionViews.firstMatch.swipeDown()
+        }
         XCTAssertTrue(app.buttons["originPicker"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.buttons["originPicker"].label.contains("59 St"))
         XCTAssertTrue(app.buttons["destinationPicker"].label.contains("Wall St"))
