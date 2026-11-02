@@ -56,6 +56,14 @@ Navigation stacks, toolbars, buttons, menus, searchable lists, navigation links,
 
 The map extends behind the native window’s system chrome; interactive controls remain within native safe-area layouts. With at least 640 points of available width, a bounded right-side control region appears, opening to Nearby by default. Narrow windows and accessibility Dynamic Type sizes use conventional toolbar entry points and native sheets. Native Search and Nearby buttons in a ControlGroup switch the expanded region between station search and nearby arrivals; More remains a native menu. The map’s status presentation is constrained to the remaining map area. An open compact sheet transfers to the matching expanded region when the window widens, preserving station-search text. Layout follows window geometry rather than a device model or fixed screen resolution. This is not a claim of verified physical Duo behavior.
 
+## Nearby arrivals increment
+
+Nearby now presents native station sections with up to three real predictions per station. Each prediction includes the route badge, exact reported destination when known, direction, rounded-up minutes remaining, and scheduled prediction clock time. Station details show additional predictions. Missing destinations and unknown directions are not inferred from static termini.
+
+On a narrow window, Nearby opens once when both usable location and station data are ready. Dismissing it or opening Search suppresses further automatic presentation during that app session. Expanded layouts continue using the native right-side region. Location denial, outside-service-area location, waiting for a fix, feed failure, stale data, and fresh-but-empty predictions have distinct native states. The permission state uses compact native rows so it remains readable in a short landscape panel.
+
+The map status says **Arrival feed connected** when fresh data is available; the menu exposes its update age. Arrival rows remain estimates and do not synthesize “Now” arrivals. Invalid or future-dated vehicle reports cannot qualify stale predictions as current. No endpoint or backend changes are required.
+
 ## Existing APIs and truthfulness
 
 The proof of concept calls the existing public deployment without adding backend endpoints or authentication:

@@ -45,6 +45,35 @@ struct Arrival: Decodable, Identifiable {
     var id: String {
         "\(tripId):\(stopId):\(direction)"
     }
+
+    var directionLabel: String {
+        switch direction {
+        case "N": "Northbound"
+        case "S": "Southbound"
+        default: "Direction unavailable"
+        }
+    }
+
+    func destinationName(in lines: [SubwayLine]) -> String? {
+        guard let destStopId else { return nil }
+        // Resolve the reported destination itself, not the complex's canonical
+        // name or a static terminus that could mislabel short-turn service.
+        let routeStop = lines.first { $0.routeId == routeId }?.stops.first { $0.id == destStopId }
+        let stop = routeStop ?? lines.lazy.flatMap(\.stops).first { $0.id == destStopId }
+        guard let name = stop?.name.trimmingCharacters(in: .whitespacesAndNewlines), !name.isEmpty else { return nil }
+        return name
+    }
+
+    func countdown(at now: Date) -> String? {
+        let remaining = eta - now.timeIntervalSince1970
+        guard remaining.isFinite, remaining >= 0 else { return nil }
+        if remaining < 60 {
+            return "<1 min"
+        }
+        let minutes = ceil(remaining / 60)
+        guard minutes < Double(Int.max) else { return nil }
+        return "\(Int(minutes)) min"
+    }
 }
 
 struct Snapshot: Decodable {
@@ -123,9 +152,15 @@ enum Transit {
         for arrival in snapshot.arrivals {
             unique[arrival.id] = arrival
         }
-        return unique.values.filter {
-            station.stopIDs.contains($0.stopId) && $0.eta.isFinite && $0.eta >= now.timeIntervalSince1970 &&
-                trains[$0.tripId].map { now.timeIntervalSince1970 - ($0.lastReportedAt ?? snapshot.generatedAt / 1000) <= 90 } != false
+        return unique.values.filter { arrival in
+            guard station.stopIDs.contains(arrival.stopId), arrival.eta.isFinite,
+                  arrival.eta >= now.timeIntervalSince1970 else { return false }
+            // Trip updates need not have a paired vehicle position. When one
+            // exists, invalid/future reports cannot qualify as fresh evidence.
+            guard let train = trains[arrival.tripId] else { return true }
+            let timestamp = train.lastReportedAt ?? snapshot.generatedAt / 1000
+            return timestamp.isFinite && timestamp > 0 && timestamp <= now.timeIntervalSince1970 + 5 &&
+                now.timeIntervalSince1970 - timestamp <= 90
         }.sorted { $0.eta == $1.eta ? $0.id < $1.id : $0.eta < $1.eta }
     }
 

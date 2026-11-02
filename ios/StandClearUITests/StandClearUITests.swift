@@ -1,6 +1,38 @@
+import CoreLocation
 import XCTest
 
 final class StandClearUITests: XCTestCase {
+    @MainActor
+    func testNearbyAutomaticallyOpensForGrantedLocation() {
+        let app = XCUIApplication()
+        app.terminate()
+        app.resetAuthorizationStatus(for: .location)
+        XCUIDevice.shared.location = XCUILocation(location: CLLocation(latitude: 40.7553, longitude: -73.987))
+        defer { XCUIDevice.shared.location = nil }
+        app.launchArguments = ["-mapProvider", "Apple Maps"]
+        addUIInterruptionMonitor(withDescription: "Location permission") { alert in
+            let allow = alert.buttons["Allow While Using App"]
+            if allow.exists {
+                allow.tap(); return true
+            }
+            return false
+        }
+        app.launch()
+        XCTAssertTrue(app.buttons["moreButton"].waitForExistence(timeout: 15))
+        app.tap()
+        XCTAssertTrue(app.navigationBars["Nearby arrivals"].waitForExistence(timeout: 30))
+        let station = app.buttons["station-127"]
+        XCTAssertTrue(station.waitForExistence(timeout: 10), "Times Square should be nearby the simulated location")
+        let capture = XCTAttachment(screenshot: app.screenshot())
+        capture.name = "Automatic nearby arrivals with granted location"
+        capture.lifetime = .keepAlways
+        add(capture)
+        app.buttons["Done"].tap()
+        app.buttons["searchButton"].tap()
+        XCTAssertTrue(app.navigationBars["Search stations"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.navigationBars["Nearby arrivals"].exists, "Automatic nearby must not interrupt manual search")
+    }
+
     @MainActor
     func testMapProviderComparisonKeepsNativeControls() {
         let app = XCUIApplication()
