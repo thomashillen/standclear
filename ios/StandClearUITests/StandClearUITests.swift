@@ -46,7 +46,8 @@ final class StandClearUITests: XCTestCase {
         XCTAssertTrue(arrivalsList.waitForExistence(timeout: 5))
         let candidate = arrivalsList.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND NOT label CONTAINS %@", "arrivalRow-", "<1 min")).firstMatch
         if candidate.exists {
-            let arrival = arrivalsList.buttons[candidate.identifier]
+            let arrivalID = candidate.identifier
+            let arrival = arrivalsList.buttons[arrivalID]
             let usable = NSPredicate { _, _ in
                 MainActor.assumeIsolated {
                     guard arrival.exists else { return false }
@@ -57,7 +58,7 @@ final class StandClearUITests: XCTestCase {
             expectation(for: usable, evaluatedWith: arrival)
             waitForExpectations(timeout: 20)
             arrival.tap()
-            XCTAssertTrue(arrivalsList.staticTexts.matching(NSPredicate(format: "identifier == %@ AND label BEGINSWITH %@", "arrivalClockTime", "Predicted arrival:")).firstMatch.waitForExistence(timeout: 5))
+            XCTAssertTrue(arrivalsList.staticTexts.matching(NSPredicate(format: "identifier == %@ AND label BEGINSWITH %@", arrivalID, "Predicted arrival:")).firstMatch.waitForExistence(timeout: 5))
         }
         app.buttons["Done"].tap()
         let neighborhood = XCTAttachment(screenshot: app.screenshot())
