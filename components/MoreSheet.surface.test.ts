@@ -7,10 +7,9 @@ const source = readFileSync(resolve(__dirname, "MoreSheet.tsx"), "utf8");
 
 describe("MoreSheet grouped reading surfaces", () => {
   it("groups related rows with subtle separators", () => {
-    const groupedList =
-      'overflow-hidden rounded-2xl border border-white/[0.06] bg-white/[0.025] divide-y divide-white/[0.06]';
+    const groupedList = 'panel-group divide-y divide-white/[0.06]';
 
-    expect(source.split(groupedList)).toHaveLength(3);
+    expect(source.split(groupedList)).toHaveLength(4);
   });
 
   it("does not box each grouped row as its own card", () => {

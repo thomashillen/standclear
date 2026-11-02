@@ -64,14 +64,11 @@ const DialogContent = React.forwardRef<
       {...props}
     >
       {children}
-      {/* Keep the 36px glass circle in its original position while
-          extending the native button by 4px on every side, so riders
-          get a 44px target without shifting the dialog chrome. */}
       <DialogPrimitive.Close
-        className="group press absolute right-3 top-3 w-11 h-11 flex items-center justify-center rounded-full text-white opacity-85 hover:opacity-100 touch-manipulation focus:outline-none focus:ring-2 focus:ring-white/30 focus:ring-offset-0 disabled:pointer-events-none transition-opacity"
+        className="panel-action press absolute right-3 top-3 disabled:pointer-events-none"
         aria-label="Close"
       >
-        <span aria-hidden="true" className="flex w-9 h-9 items-center justify-center rounded-full bg-white/[0.08] group-hover:bg-white/[0.12]">
+        <span aria-hidden="true" className="flex size-full items-center justify-center rounded-full">
           <X className="w-[16px] h-[16px]" strokeWidth={2.5} />
         </span>
         <span className="sr-only">Close</span>

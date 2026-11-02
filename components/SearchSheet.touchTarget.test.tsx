@@ -51,9 +51,9 @@ describe("SearchSheet expanded control behavior", () => {
     expect(onClose).not.toHaveBeenCalled();
 
     const close = screen.getByRole("button", { name: "Close panel" });
-    fireEvent.pointerDown(hitArea(close), { clientY: 80, pointerId: 1 });
+    fireEvent.pointerDown(close, { clientY: 80, pointerId: 1 });
     expect(screen.getByRole("region", { name: "Search and directions" }).hasAttribute("data-glass-active")).toBe(false);
-    fireEvent.click(hitArea(close));
+    fireEvent.click(close);
     expect(onClose).toHaveBeenCalledOnce();
   });
 
@@ -69,12 +69,10 @@ describe("SearchSheet expanded control behavior", () => {
     expect(swap.disabled).toBe(true);
 
     const back = screen.getByRole("button", { name: "Back to search" });
-    const area = hitArea(back);
-    expect(area.getAttribute("aria-hidden")).toBe("true");
-    expect(area.querySelector("button, [tabindex]")).toBeNull();
-    fireEvent.pointerDown(area, { clientY: 80, pointerId: 1 });
+    expect(back.querySelector("[data-compact-control-hit-area]")).toBeNull();
+    fireEvent.pointerDown(back, { clientY: 80, pointerId: 1 });
     expect(screen.getByRole("region", { name: "Search and directions" }).hasAttribute("data-glass-active")).toBe(false);
-    fireEvent.click(area);
+    fireEvent.click(back);
     expect(screen.getByRole("searchbox", { name: "Search NYC" })).toBeTruthy();
     expect(onTripSelect).toHaveBeenLastCalledWith(null);
     expect(onClose).not.toHaveBeenCalled();

@@ -1121,10 +1121,9 @@ export default function SearchSheet({
               aria-label={
                 expandedPlan ? "Back to route options" : "Back to search"
               }
-              className="press relative w-8 h-8 -ml-1 flex items-center justify-center rounded-full bg-white/[0.08] hover:bg-white/[0.14] touch-manipulation flex-shrink-0"
+              className="panel-action press -ml-1"
             >
               <ArrowLeft className="w-[16px] h-[16px]" strokeWidth={2.5} />
-              <CompactControlHitArea />
             </button>
           )}
           {mode === "search" ? (
@@ -1142,17 +1141,16 @@ export default function SearchSheet({
         </div>
         <div className="flex items-center gap-2 shrink-0">
           {onOpenMore && (
-            <button type="button" onClick={onOpenMore} aria-label="More options" className="press size-11 flex items-center justify-center rounded-full bg-white/[0.08] touch-manipulation sm:hidden">
+            <button type="button" onClick={onOpenMore} aria-label="More options" className="panel-action press sm:hidden">
               <MoreHorizontal className="size-5" aria-hidden="true" />
             </button>
           )}
           <button
             onClick={onClose}
-            className="press relative text-white opacity-85 hover:opacity-100 w-9 h-9 -mr-1 flex items-center justify-center rounded-full bg-white/[0.08] hover:bg-white/[0.12] touch-manipulation flex-shrink-0"
+            className="panel-action press"
             aria-label="Close panel"
           >
             <X className="w-[16px] h-[16px]" strokeWidth={2.5} />
-            <CompactControlHitArea />
           </button>
         </div>
       </div>
@@ -1174,7 +1172,7 @@ export default function SearchSheet({
               // reset on blur — leaving the top floating UI shifted
               // behind the Dynamic Island. Same constraint applies
               // to every other input in the app.
-              className="w-full h-11 pl-10 pr-11 rounded-xl bg-white/[0.08] border border-white/[0.06] text-[16px] text-gray-50 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-white/25 focus:border-transparent transition-shadow"
+              className="panel-field w-full h-12 pl-10 pr-11 rounded-2xl text-[16px] text-gray-50 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-white/30 focus:border-transparent transition-shadow"
               autoFocus
             />
             {query && (
@@ -1359,7 +1357,7 @@ export default function SearchSheet({
                   <h3 className="px-2 pb-1.5 text-[10px] font-semibold uppercase tracking-wider text-gray-500">
                     Favorites
                   </h3>
-                  <div className="space-y-1">
+                  <div className="panel-group divide-y divide-white/[0.06]">
                     {/* Commute — only renders when BOTH anchors are
                         set. Tapping plans an explicit Home→Work trip
                         from the rider's current location's nearest
@@ -1380,7 +1378,7 @@ export default function SearchSheet({
                             setTripTo(w);
                             setActiveField(null);
                           }}
-                          className="press w-full flex items-center gap-3 px-3 py-2.5 rounded-xl bg-white/[0.04] hover:bg-white/[0.08] text-left touch-manipulation"
+                          className="press w-full flex items-center gap-3 px-3 py-2.5 hover:bg-white/[0.08] text-left touch-manipulation"
                         >
                           <span className="flex items-center justify-center w-9 h-9 rounded-full bg-emerald-300/15 text-emerald-200 ring-1 ring-emerald-300/30 flex-shrink-0">
                             <Compass className="w-4 h-4" />
@@ -1410,7 +1408,7 @@ export default function SearchSheet({
                           type="button"
                           onClick={() => startDirectionsTo(h)}
                           aria-label="Directions to Home"
-                          className="press w-full flex items-center gap-3 px-3 py-2.5 rounded-xl bg-white/[0.04] hover:bg-white/[0.08] text-left touch-manipulation"
+                          className="press w-full flex items-center gap-3 px-3 py-2.5 hover:bg-white/[0.08] text-left touch-manipulation"
                         >
                           <span className="flex items-center justify-center w-9 h-9 rounded-full bg-emerald-300/15 text-emerald-200 ring-1 ring-emerald-300/30 flex-shrink-0">
                             <Home className="w-4 h-4" />
@@ -1440,7 +1438,7 @@ export default function SearchSheet({
                           type="button"
                           onClick={() => startDirectionsTo(w)}
                           aria-label="Directions to Work"
-                          className="press w-full flex items-center gap-3 px-3 py-2.5 rounded-xl bg-white/[0.04] hover:bg-white/[0.08] text-left touch-manipulation"
+                          className="press w-full flex items-center gap-3 px-3 py-2.5 hover:bg-white/[0.08] text-left touch-manipulation"
                         >
                           <span className="flex items-center justify-center w-9 h-9 rounded-full bg-sky-300/15 text-sky-200 ring-1 ring-sky-300/30 flex-shrink-0">
                             <Briefcase className="w-4 h-4" />
@@ -1471,7 +1469,7 @@ export default function SearchSheet({
                   <h3 className="px-2 pb-1.5 text-[10px] font-semibold uppercase tracking-wider text-gray-500">
                     Nearby stations
                   </h3>
-                  <div className="space-y-1">
+                  <div className="panel-group divide-y divide-white/[0.06]">
                     {nearbyStations.map((s) => (
                       <button
                         key={`nearby-${s.stopId}`}
@@ -1484,7 +1482,7 @@ export default function SearchSheet({
                           }
                           onStationOpen(s.stopId);
                         }}
-                        className="press w-full flex items-center gap-3 px-3 py-2.5 rounded-xl bg-white/[0.04] hover:bg-white/[0.08] text-left touch-manipulation"
+                        className="press w-full flex items-center gap-3 px-3 py-2.5 hover:bg-white/[0.08] text-left touch-manipulation"
                       >
                         <span className="flex items-center gap-1 flex-shrink-0">
                           {s.routes.slice(0, 3).map((r) => (
@@ -1530,7 +1528,7 @@ export default function SearchSheet({
                       Clear
                     </button>
                   </div>
-                  <div className="space-y-1">
+                  <div className="panel-group divide-y divide-white/[0.06]">
                     {recents.map((r) => {
                       if (r.kind === "station") {
                         return (
@@ -1538,7 +1536,7 @@ export default function SearchSheet({
                             key={`recent-station-${r.stopId}`}
                             type="button"
                             onClick={() => onStationOpen(r.stopId)}
-                            className="press w-full flex items-center gap-3 px-3 py-2.5 rounded-xl bg-white/[0.04] hover:bg-white/[0.08] text-left touch-manipulation"
+                            className="press w-full flex items-center gap-3 px-3 py-2.5 hover:bg-white/[0.08] text-left touch-manipulation"
                           >
                             <span className="w-8 h-8 rounded-full bg-white/[0.08] border border-white/[0.10] flex items-center justify-center flex-shrink-0">
                               <Search className="w-3.5 h-3.5 text-gray-300" />
@@ -1581,7 +1579,7 @@ export default function SearchSheet({
                               },
                             });
                           }}
-                          className="press w-full flex items-center gap-3 px-3 py-2.5 rounded-xl bg-white/[0.04] hover:bg-white/[0.08] text-left touch-manipulation"
+                          className="press w-full flex items-center gap-3 px-3 py-2.5 hover:bg-white/[0.08] text-left touch-manipulation"
                         >
                           <span className="w-8 h-8 rounded-full bg-white/[0.08] border border-white/[0.10] flex items-center justify-center flex-shrink-0">
                             <MapPin className="w-3.5 h-3.5 text-gray-300" />

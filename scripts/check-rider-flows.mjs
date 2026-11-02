@@ -38,6 +38,28 @@ try {
       await page.route("**/api/geocode?**", route => geocodeFailure ? route.fulfill({ status: 503, body: "unavailable" }) : route.fulfill({ json: { suggestions: [] } }));
     }
     const visibleButton = name => page.getByRole("button", { name, exact: true }).filter({ visible: true });
+    const assertUnifiedSurface = async region => {
+      const surface = await region.evaluate(element => {
+        const style = getComputedStyle(element);
+        return { background: style.backgroundImage, backdropFilter: style.backdropFilter };
+      });
+      assert.match(surface.background, /gradient/, "panel should retain the shared dimensional material");
+      assert.match(surface.backdropFilter, /blur\(34px\)/, "panel should use the shared blur depth");
+      const controls = region.locator(".panel-action").filter({ visible: true });
+      const boxes = await controls.evaluateAll(elements => elements.map(element => {
+        const box = element.getBoundingClientRect();
+        return { label: element.getAttribute("aria-label"), width: box.width, height: box.height };
+      }));
+      assert.ok(boxes.length > 0, "surface should expose a shared header action");
+      for (const box of boxes) {
+        assert.ok(Math.abs(box.width - 44) < 0.02 && Math.abs(box.height - 44) < 0.02, `${box.label}: ${box.width}x${box.height}`);
+      }
+      results.push({ viewport: key, name: "unified panel material and controls", controls: boxes });
+    };
+    const assertDialogControl = async dialog => {
+      const box = await dialog.getByRole("button", { name: "Close", exact: true }).boundingBox();
+      assert.ok(Math.abs(box.width - 44) < 0.02 && Math.abs(box.height - 44) < 0.02, `dialog close: ${box.width}x${box.height}`);
+    };
     const screenshot = name => page.screenshot({ path: path.join(output, `${key}-${name}.png`) });
     const home = async () => {
       await page.goto(origin, { waitUntil: "domcontentloaded" });
@@ -45,8 +67,20 @@ try {
     };
     const search = async query => {
       await visibleButton("Search stations and plan trips").click();
+      const sheet = page.getByRole("region", { name: "Search and directions", exact: true });
+      await assertUnifiedSurface(sheet);
+      if (viewport.width >= 640) {
+        assert.equal(await sheet.getByRole("button", { name: "More options", exact: true }).filter({ visible: true }).count(), 0);
+      }
       const field = page.getByRole("searchbox", { name: "Search NYC" });
       await field.fill(query);
+      const focus = await field.evaluate(element => {
+        const style = getComputedStyle(element);
+        return { width: style.outlineWidth, style: style.outlineStyle, color: style.outlineColor };
+      });
+      assert.equal(focus.width, "2px");
+      assert.equal(focus.style, "solid");
+      assert.notEqual(focus.color, "rgba(0, 0, 0, 0)");
       return field;
     };
     const station = () => page.getByRole("region", { name: "Times Sq-42 St station", exact: true });
@@ -54,6 +88,7 @@ try {
       await search("Times");
       await page.getByRole("button", { name: /Times Sq-42 St/ }).first().click();
       await station().waitFor();
+      await assertUnifiedSurface(station());
     };
     const check = async (name, run) => {
       try { await run(); results.push({ viewport: key, name, passed: true }); console.log(`PASS ${key}: ${name}`); }
@@ -142,6 +177,7 @@ try {
     await check("Near me panel dismissal restores the map without competing sheets", async () => {
       await visibleButton("Find nearby stations").click();
       await page.getByRole("region", { name: "Near me", exact: true }).waitFor();
+      await assertUnifiedSurface(page.getByRole("region", { name: "Near me", exact: true }));
       assert.equal(await page.getByRole("region", { name: "Search and directions" }).count(), 0);
       await screenshot("nearby");
       await visibleButton("Close panel").click();
@@ -150,9 +186,22 @@ try {
     await check("More to line browsing and station navigation", async () => {
       await visibleButton("More options").click();
       await page.getByRole("button", { name: "Browse lines", exact: true }).click();
+      await page.getByRole("button", { name: /^N —/ }).click();
+      const yellowLine = page.getByRole("region", { name: "N line", exact: true });
+      await yellowLine.waitFor();
+      await assertUnifiedSurface(yellowLine);
+      const yellowClose = await yellowLine.getByRole("button", { name: "Close panel" }).evaluate(element => {
+        const style = getComputedStyle(element);
+        return { color: style.color, background: style.backgroundImage };
+      });
+      assert.equal(yellowClose.color, "rgb(255, 255, 255)");
+      assert.match(yellowClose.background, /rgba?\(0, 0, 0/);
+      await yellowLine.getByRole("button", { name: "Close panel" }).click();
+      await visibleButton("More options").click();
       await page.getByRole("button", { name: /^1 —/ }).click();
       const line = page.getByRole("region", { name: "1 line", exact: true });
       await line.waitFor();
+      await assertUnifiedSurface(line);
       await screenshot("line");
       await line.getByRole("button", { name: /See all trains at Times Sq/ }).click();
       await station().waitFor();
@@ -163,10 +212,12 @@ try {
       for (const [row, title] of [[/^Service alerts/, "Service alerts"], [/^About StandClear/, "StandClear"]]) {
         await visibleButton("More options").click();
         const more = page.getByRole("region", { name: "More", exact: true });
+        await assertUnifiedSurface(more);
         await screenshot("more");
         await more.getByRole("button", { name: row }).click();
         const dialog = page.getByRole("dialog", { name: title, exact: true });
         await dialog.waitFor();
+        await assertDialogControl(dialog);
         assert.equal(await more.count(), 0);
         const box = await dialog.boundingBox();
         assert.ok(box.x >= -1 && box.y >= -1 && box.x + box.width <= viewport.width + 1 && box.y + box.height <= viewport.height + 1);
@@ -183,6 +234,7 @@ try {
       await page.keyboard.press("Enter");
       const dialog = page.getByRole("dialog", { name: "System Pulse", exact: true });
       await dialog.waitFor();
+      await assertDialogControl(dialog);
       await screenshot("pulse");
       await page.keyboard.press("Escape");
       await dialog.waitFor({ state: "hidden" });

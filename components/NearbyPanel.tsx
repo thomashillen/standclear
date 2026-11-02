@@ -912,11 +912,10 @@ export default function NearbyPanel({
         </div>
         <button
           onClick={onClose}
-          className="press relative text-white opacity-85 hover:opacity-100 w-9 h-9 -mr-1 flex items-center justify-center rounded-full bg-white/[0.08] hover:bg-white/[0.12] touch-manipulation"
+          className="panel-action press"
           aria-label="Close panel"
         >
           <X className="w-[16px] h-[16px]" strokeWidth={2.5} />
-          <CompactControlHitArea />
         </button>
       </div>
 

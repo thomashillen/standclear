@@ -162,7 +162,7 @@ export default function MoreSheet({ open, onClose, onSetHome, onSetWork, onSelec
               height — nothing else reflows. */}
           <button
             onClick={onClose}
-            className="press text-white opacity-85 hover:opacity-100 w-11 h-11 -mr-1 flex items-center justify-center rounded-full bg-white/[0.08] hover:bg-white/[0.12] touch-manipulation"
+            className="panel-action press"
             aria-label="Close panel"
           >
             <X className="w-[16px] h-[16px]" strokeWidth={2.5} />
@@ -181,7 +181,7 @@ export default function MoreSheet({ open, onClose, onSetHome, onSetWork, onSelec
             <h3 className="px-2 pb-1.5 text-[10px] font-semibold uppercase tracking-wider text-gray-500">
               System
             </h3>
-            <div className="overflow-hidden rounded-2xl bg-white/[0.04] divide-y divide-white/[0.06]">
+            <div className="panel-group divide-y divide-white/[0.06]">
             <button
               type="button"
               onClick={() => {
@@ -285,7 +285,7 @@ export default function MoreSheet({ open, onClose, onSetHome, onSetWork, onSelec
             <h3 className="px-2 pb-1.5 text-[10px] font-semibold uppercase tracking-wider text-gray-500">
               Commute
             </h3>
-            <div className="overflow-hidden rounded-2xl border border-white/[0.06] bg-white/[0.025] divide-y divide-white/[0.06]">
+            <div className="panel-group divide-y divide-white/[0.06]">
               <AnchorRow
                 icon={<Home className="w-4 h-4" />}
                 label="Home"
@@ -325,7 +325,7 @@ export default function MoreSheet({ open, onClose, onSetHome, onSetWork, onSelec
             <h3 className="px-2 pb-1.5 text-[10px] font-semibold uppercase tracking-wider text-gray-500">
               About
             </h3>
-            <div className="overflow-hidden rounded-2xl border border-white/[0.06] bg-white/[0.025] divide-y divide-white/[0.06]">
+            <div className="panel-group divide-y divide-white/[0.06]">
               <button
                 type="button"
                 onClick={() => {
@@ -515,8 +515,8 @@ function AboutDialog({
             <div className="px-3 py-2.5 rounded-xl bg-white/[0.04] text-[12px] text-gray-300 leading-relaxed">
               <p>
                 Built with Next.js 16, React 19, TypeScript, Mapbox-GL,
-                and Tailwind v4. Designed in the iOS-26 visual idiom —
-                Liquid Glass, continuous corners, spring transitions.
+                and Tailwind v4. Designed in the current iOS visual idiom —
+                restrained Liquid Glass, continuous corners, and calm motion.
               </p>
               <p className="mt-2 text-gray-500 text-[11px]">
                 MTA, the M logo, route bullets, and station names are

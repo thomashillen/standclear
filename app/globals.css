@@ -71,7 +71,7 @@
   --chart-5: 27 87% 67%;
   --radius: 0.5rem;
 
-  /* iOS 26 tokens — continuous corners, spring transitions, safe-area inset
+  /* Current iOS-inspired tokens — continuous corners, spring transitions, safe-area inset
      aliases so components can reference `var(--safe-top)` directly. */
   --safe-top: env(safe-area-inset-top, 0px);
   --safe-right: env(safe-area-inset-right, 0px);
@@ -345,17 +345,75 @@
   --glass-specular: 1.15;
 }
 
-/* Primary map panels are reading surfaces, not floating controls. Keep their
-   text contrast steady as streets, route colors, and train markers move below
-   them; reserve the glass treatment for compact navigation and
-   transient modal surfaces. */
+/* Shared liquid-glass reading surface. Panels stay substantially darker than
+   the compact controls so text and realtime data remain legible, while the
+   map's colour and motion can still read softly through the material. */
 .panel-surface {
   isolation: isolate;
-  background-color: rgb(15 18 24 / 0.97);
+  background:
+    radial-gradient(120% 75% at 50% 0%, rgb(255 255 255 / 0.075), transparent 58%),
+    linear-gradient(145deg, rgb(20 24 32 / 0.84), rgb(8 10 16 / 0.78));
+  -webkit-backdrop-filter: saturate(150%) blur(34px);
+  backdrop-filter: saturate(150%) blur(34px);
   box-shadow:
-    inset 0 1px 0 rgb(255 255 255 / 0.08),
-    inset 0 -1px 0 rgb(255 255 255 / 0.025),
-    0 0 0 0.5px rgb(255 255 255 / 0.05);
+    inset 0 1px 0 rgb(255 255 255 / 0.13),
+    inset 0 -1px 0 rgb(255 255 255 / 0.035),
+    0 0 0 0.5px rgb(255 255 255 / 0.08),
+    0 24px 70px rgb(0 0 0 / 0.48);
+}
+
+/* One control grammar for every sheet and modal header. The visible circle is
+   the full accessible target, preventing the mismatched 36/44px appearance
+   that previously made adjacent More and Close controls look unrelated. */
+@layer components {
+  .panel-action {
+    width: 2.75rem;
+    height: 2.75rem;
+    flex: 0 0 2.75rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 999px;
+    color: rgb(255 255 255 / 0.92);
+    background: linear-gradient(145deg, rgb(255 255 255 / 0.13), rgb(255 255 255 / 0.065));
+    border: 1px solid rgb(255 255 255 / 0.09);
+    box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.11), 0 5px 16px rgb(0 0 0 / 0.18);
+    touch-action: manipulation;
+  }
+  .panel-action:hover { background-color: rgb(255 255 255 / 0.15); }
+  .panel-action--route {
+    color: white;
+    background: linear-gradient(145deg, rgb(0 0 0 / 0.62), rgb(0 0 0 / 0.44));
+    border-color: rgb(255 255 255 / 0.24);
+    box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.18), 0 4px 14px rgb(0 0 0 / 0.2);
+  }
+  .panel-action--route:hover {
+    background: rgb(0 0 0 / 0.68);
+  }
+  .panel-action:focus-visible {
+    outline: 2px solid rgb(255 255 255 / 0.82);
+    outline-offset: 2px;
+  }
+}
+
+/* Recessed controls and grouped content share concentric corners and a single
+   translucency level. Rows may still use semantic colour in their icons. */
+.panel-field {
+  background: linear-gradient(145deg, rgb(255 255 255 / 0.105), rgb(255 255 255 / 0.055));
+  border: 1px solid rgb(255 255 255 / 0.10);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.055);
+}
+.panel-field:focus-visible {
+  outline: 2px solid rgb(255 255 255 / 0.82);
+  outline-offset: 2px;
+  border-color: transparent;
+}
+.panel-group {
+  overflow: hidden;
+  border-radius: 1rem;
+  background: linear-gradient(145deg, rgb(255 255 255 / 0.07), rgb(255 255 255 / 0.035));
+  border: 1px solid rgb(255 255 255 / 0.075);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.045);
 }
 
 /* Authentic NYC subway bullet typography. The MTA standard (Vignelli,
@@ -449,6 +507,14 @@
   }
   .ios-glass::before, .ios-glass::after {
     display: none;
+  }
+  .panel-surface {
+    background: rgb(12 15 21);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+  .panel-action, .panel-field, .panel-group {
+    background: rgb(30 34 42);
   }
 }
 @media (prefers-contrast: more) {
