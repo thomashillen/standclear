@@ -1,10 +1,20 @@
-# StandClear for iOS — native proof of concept
+# StandClear for iOS — native transit map comparison
 
-This Xcode project is an incremental native client alongside the existing Next.js web application. The web app and backend remain the production application. The native client uses SwiftUI and the native Mapbox Maps SDK, pinned to **11.26.0** through Swift Package Manager. It targets iOS 26 or later and is developed with Xcode 27.2 / the iOS 27.2 SDK.
+This Xcode project is an incremental native client alongside the existing Next.js web application. The web app and backend remain the production application. The SwiftUI client now offers a bounded comparison between the native Mapbox Maps SDK, pinned to **11.26.0** through Swift Package Manager, and Apple MapKit. Both engines run natively; neither uses a WebView. Mapbox remains the default. Choose **More → Map provider** to switch engines; the choice persists between launches. This comparison does not establish complete feature or performance parity.
+
+The project targets iOS 26 or later and is developed with Xcode 27.2 / the iOS 27.2 SDK. See [the map comparison record](docs/map-comparison.md) for the comparison’s scope, observations, and validation results.
 
 ## Open and configure
 
-Open `ios/StandClear.xcodeproj` and select the shared **StandClear** scheme and an installed iPhone Simulator. Simulator builds do not require a development team, a paid Apple Developer Program membership, or device signing.
+Open the actual `ios/StandClear.xcodeproj` project, rather than opening `project.yml` or the repository as a folder workspace. From the repository root:
+
+```sh
+open ios/StandClear.xcodeproj
+```
+
+Select the shared **StandClear** scheme and an installed iPhone simulator, then press **⌘R** to build and run. In Xcode 27, simulators appear in **Device Hub**, available from **Xcode → Open Developer Tool → Device Hub**. Simulator builds do not require a development team, a paid Apple Developer Program membership, or device signing.
+
+Xcode reads the same local source files being edited in this checkout. Press **⌘R** after code changes to rebuild and relaunch. Realtime data refreshes independently while the application is running.
 
 Create `ios/Config/Local.xcconfig`, which is ignored by Git:
 
@@ -16,7 +26,9 @@ Use an appropriate public rendering token for a native application; a token rest
 
 Do not commit tokens, signing files, credentials, or machine-specific configuration. Keep build products and DerivedData outside the repository, or in the ignored `ios/build/` or `ios/DerivedData/` directories. Never commit an application archive containing local configuration.
 
-When physical-device testing becomes necessary, use a free Apple Personal Team. Keep the selected `DEVELOPMENT_TEAM` in local configuration and adjust the bundle identifier locally if Xcode requires it. No team identifier is stored in the project. Free provisioning is sufficient for development; App Store distribution is outside this milestone.
+For physical-device testing, use a free Apple Personal Team. Keep the selected `DEVELOPMENT_TEAM` in local configuration and adjust the bundle identifier locally if Xcode requires it. No team identifier is stored in the project. Free provisioning is sufficient for development; App Store distribution is outside this milestone.
+
+After pairing the phone with this Mac and completing the device’s Developer Mode and developer-profile trust steps, it can receive development builds wirelessly. Keep the Mac and phone on the same Wi-Fi network with IPv6 enabled, select the physical phone as Xcode’s run destination, and press **⌘R**. A cable is not required for every update. Device Hub also offers **Add Device → Pair Nearby Device** for supported devices. See [Apple’s Device Hub pairing instructions](https://developer.apple.com/documentation/xcode/managing-your-simulated-and-physical-devices-in-device-hub).
 
 The checked-in project is generated from `ios/project.yml` with XcodeGen. Regenerate it after changing target settings, dependencies, or source membership:
 
@@ -29,11 +41,16 @@ Ordinary Xcode builds do not require XcodeGen. Commit the generated project and 
 ## Architecture and native presentation
 
 - `StandClearApp` configures Mapbox and opens `MapShell`.
-- `MapShell` owns the observable stores and a Mapbox SwiftUI `Map`. Subway lines use polyline annotations and train positions use circle annotations. The SDK’s UIKit map view is not wrapped in a custom representable.
+- `MapShell` owns the observable stores, the native provider menu, and adaptive controls. Mapbox uses its supported SwiftUI `Map` and annotation APIs; its UIKit map view is not wrapped in a custom representable.
+- `AppleTransitMap` uses SwiftUI MapKit polylines and custom annotations on a flat Apple basemap. Pitch is deliberately disabled for this comparison; rotated train bodies and upright route text are evaluated in the flat-map presentation.
+- `TrainMapProjection` supplies both engines with the same estimated positions, route identity, and freshness. Travel heading follows the shape segment. A parked train uses its next known trip arrival as direction evidence; when the feed cannot establish a direction, the map uses a neutral round marker rather than a directed car. Reports fade after 90 seconds and markers are hidden after 360 seconds; stale or failed snapshots do not provide current markers.
+- `TransitArtwork` draws the shared subway-car silhouette and route badges with SwiftUI. The car body rotates while its route label stays upright. Mapbox’s image annotation API requires a `UIImage`, so `TrainSpriteCache` uses SwiftUI `ImageRenderer` once per route/color and caches the result; no custom UIKit map bridge or UIKit drawing implementation is introduced.
+- `TrainMarkerSizing` carries the native car-size curve shared with the web’s transit artwork. MapKit estimates a comparable zoom from the visible longitude span and available width; this remains approximate, especially during rotation. Route text fades at wider map views to avoid labels overflowing tiny cars.
 - `TransitStore` loads the existing static dataset and polls the existing train endpoint. Active-scene polling uses an eight-second interval after successful requests and a longer delay on failure. Requests have a timeout; realtime work is stopped when the scene becomes inactive.
 - `LocationStore` uses Core Location with when-in-use permission, hundred-meter accuracy, foreground one-shot fixes, 30-second fix expiration, and inactive-scene cleanup.
 - `TransitModels` decodes the shared contracts and implements the small native station/arrival projection. Station complexes use the web client’s explicit allowlist rather than merging unrelated stations by name or proximity. Train deduplication is trip-only, preserving legitimate trains queued at a terminus.
-- `StationBrowser` provides station search and a nearby station list, with navigation to native arrival rows.
+- `StationBrowser` provides station search and a nearby station list, with route-color badges and navigation to native arrival rows.
+- The application icon reuses the existing `public` 512-pixel StandClear artwork, upscaled to the 1024-pixel asset required by the native app icon catalog. This preserves the existing identity; it does not add new illustration detail.
 
 Navigation stacks, toolbars, buttons, menus, searchable lists, navigation links, sheets, presentation detents, progress views, unavailable states, typography, and semantic materials come from SwiftUI. The operating system supplies their appearance, including supported Liquid Glass behavior. Custom visuals are limited to transit geometry, route colors, and train markers. There are no custom glass gradients, blur recipes, shadows, or animation replicas.
 
@@ -88,7 +105,7 @@ npm test
 npm run build
 ```
 
-See [the validation record](docs/validation.md) for executed local checks, screenshots, and remaining device/accessibility checks. The Native iOS workflow builds, analyzes, and runs simulator tests without credentials alongside the existing web CI.
+The [original proof-of-concept validation record](docs/validation.md) describes the first milestone’s checks and screenshots. See [the map comparison record](docs/map-comparison.md) for results specific to the current artwork/provider comparison; earlier results alone do not validate these changes. The Native iOS workflow builds, analyzes, and runs simulator tests without credentials alongside the existing web CI.
 
 ## Limits and next increments
 
@@ -96,4 +113,6 @@ This is a map/search/nearby-arrivals shell, not web feature parity. It has no tr
 
 Continue in small reviewed increments: location lifecycle and automatic nearby presentation; arrival freshness and outage behavior; train-marker parity; search suggestions; station details; navigation/trip planning; settings and secondary menus. Preserve cancellation, location efficiency, accessibility, and reduced-motion behavior at each step.
 
-Mapbox remains the map engine for this proof of concept. A future, separate MapKit evaluation could compare operating cost, offline requirements, overlay support, and accessibility parity against the established Mapbox styling and transit behavior. It is not a prerequisite for this migration and does not imply a map-engine switch.
+Mapbox remains the default while the optional MapKit comparison tests the core overlays and shared train artwork. The comparison does not establish Mapbox basemap-style parity, pitched-map behavior, dense-marker performance, selection behavior, or smooth realtime interpolation. No benchmark or full migration is claimed. Apple’s basemap has different styling controls; use the comparison record to separate those differences from missing transit behavior.
+
+MapKit is not a replacement for the existing MTA data contracts or subway-routing logic. This milestone does not add MapKit directions or transit-ETA requests. Apple’s transit ETA capability is not a drop-in subway itinerary planner, so retain StandClear’s backend and transit graph when evaluating future routing. Evaluate costs, offline requirements, accessibility, attribution, and platform terms separately before choosing a production engine.

@@ -68,8 +68,15 @@ struct StationBrowser: View {
                 } label: {
                     VStack(alignment: .leading) {
                         Text(station.stop.name)
-                        Text(station.routes.joined(separator: " · "))
-                            .font(.subheadline).foregroundStyle(.secondary)
+                        ViewThatFits(in: .horizontal) {
+                            HStack {
+                                ForEach(station.routes, id: \.self) { route in
+                                    RouteBadge(routeID: route, color: store.lines.first { $0.routeId == route }?.color ?? "808080")
+                                }
+                            }
+                            Text(station.routes.map(RouteBadge.displayID).joined(separator: " · "))
+                                .font(.subheadline).foregroundStyle(.secondary)
+                        }
                         if !search {
                             TimelineView(.periodic(from: .now, by: 5)) { context in
                                 let arrivals = Transit.arrivals(for: station, snapshot: store.snapshot, now: context.date)
@@ -107,7 +114,11 @@ struct StationArrivals: View {
                     } else {
                         ForEach(Array(arrivals.prefix(20))) { arrival in
                             VStack(alignment: .leading) {
-                                Text("\(arrival.routeId) · \(arrival.direction == "N" ? "Uptown / northbound" : "Downtown / southbound")")
+                                HStack {
+                                    RouteBadge(routeID: arrival.routeId,
+                                               color: store.lines.first { $0.routeId == arrival.routeId }?.color ?? "808080")
+                                    Text(arrival.direction == "N" ? "Uptown / northbound" : "Downtown / southbound")
+                                }
                                 if let id = arrival.destStopId,
                                    let destination = store.stations.first(where: { $0.stopIDs.contains(id) })
                                 {
