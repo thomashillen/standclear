@@ -40,9 +40,13 @@ final class StandClearUITests: XCTestCase {
         // Expand the native sheet before testing a disclosure. A medium sheet can
         // expose a lazy row in AX before it has a usable activation frame.
         app.buttons["Sheet Grabber"].doubleTap()
-        let candidate = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND NOT label CONTAINS %@", "arrivalRow-", "<1 min")).firstMatch
+        // Scope live-row queries to the list; resolving labels across the map
+        // also traverses hundreds of independently updating train annotations.
+        let arrivalsList = app.collectionViews["stationList"]
+        XCTAssertTrue(arrivalsList.waitForExistence(timeout: 5))
+        let candidate = arrivalsList.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND NOT label CONTAINS %@", "arrivalRow-", "<1 min")).firstMatch
         if candidate.exists {
-            let arrival = app.buttons[candidate.identifier]
+            let arrival = arrivalsList.buttons[candidate.identifier]
             let usable = NSPredicate { _, _ in
                 MainActor.assumeIsolated {
                     guard arrival.exists else { return false }

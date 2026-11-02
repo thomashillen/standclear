@@ -90,6 +90,7 @@ struct StationBrowser: View {
                 .listRowBackground(Color.clear)
                 .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
             }
+            .accessibilityIdentifier("stationList")
             .listStyle(.plain)
             .scrollContentBackground(.hidden)
             .listSectionSpacing(.compact)
