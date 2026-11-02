@@ -185,6 +185,7 @@ final class StandClearUITests: XCTestCase {
     private func checkStationSearchDirectionsHere(expanded: Bool) {
         let app = XCUIApplication()
         app.terminate()
+        XCUIDevice.shared.orientation = .portrait
         app.resetAuthorizationStatus(for: .location)
         app.launchArguments = ["-mapProvider", "Apple Maps"]
         addUIInterruptionMonitor(withDescription: "Location permission") { alert in
@@ -196,7 +197,9 @@ final class StandClearUITests: XCTestCase {
         }
         app.launch()
         XCTAssertTrue(app.buttons["searchButton"].waitForExistence(timeout: 15))
-        app.navigationBars["StandClear"].staticTexts["StandClear"].tap()
+        let title = app.navigationBars["StandClear"].staticTexts["StandClear"]
+        XCTAssertTrue(title.waitForExistence(timeout: 20))
+        title.tap()
         if expanded {
             XCUIDevice.shared.orientation = .landscapeLeft
             waitForLayout(in: app, expanded: true)
@@ -206,7 +209,7 @@ final class StandClearUITests: XCTestCase {
         let search = app.searchFields.firstMatch
         XCTAssertTrue(search.waitForExistence(timeout: 5))
         search.tap()
-        search.typeText("Wall")
+        search.typeText("Wall\n")
         let station = app.buttons["station-419"]
         XCTAssertTrue(station.waitForExistence(timeout: 30))
         station.tap()
@@ -219,7 +222,7 @@ final class StandClearUITests: XCTestCase {
         let origins = app.searchFields.firstMatch
         XCTAssertTrue(origins.waitForExistence(timeout: 5))
         origins.tap()
-        origins.typeText("59")
+        origins.typeText("59\n")
         app.buttons["stationChoice-629"].tap()
         XCTAssertTrue(app.buttons["originPicker"].waitForExistence(timeout: 5))
         app.navigationBars["Directions"].buttons.element(boundBy: 0).tap()
@@ -232,6 +235,10 @@ final class StandClearUITests: XCTestCase {
         XCTAssertTrue(app.buttons["originPicker"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.buttons["originPicker"].label.contains("59 St"))
         let plan = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "tripPlan-4:S:629>419")).firstMatch
+        // A short expanded region keeps endpoint controls above route results.
+        for _ in 0 ..< 3 where !plan.exists {
+            app.collectionViews.firstMatch.swipeUp()
+        }
         XCTAssertTrue(plan.waitForExistence(timeout: 10))
         plan.tap()
         XCTAssertTrue(app.navigationBars["Trip details"].waitForExistence(timeout: 5))

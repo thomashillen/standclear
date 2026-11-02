@@ -62,7 +62,7 @@ Nearby now presents native station sections with up to three real predictions pe
 
 On map open, one compact native glass panel shows up to three nearby station/service groups, with the next northbound and southbound predictions. It replaces the automatic sheet so the map stays visible. Nearby and the panel open the full list on demand. Expanded layouts continue using the native right-side region. Location denial, outside-service-area location, waiting for a fix, feed failure, stale data, and fresh-but-empty predictions have distinct native states. The permission state uses compact native rows so it remains readable in a short landscape panel.
 
-The map status says **Arrival feed connected** when fresh data is available; the menu exposes its update time. Arrival rows remain estimates and do not synthesize “Now” arrivals. Invalid or future-dated vehicle reports cannot qualify stale predictions as current. No endpoint or backend changes are required.
+The More menu reports **Arrival feed connected** when fresh data is available and exposes its update time; healthy status does not occupy Nearby list space. Arrival rows remain estimates and do not synthesize “Now” arrivals. Invalid or future-dated vehicle reports cannot qualify stale predictions as current. No endpoint or backend changes are required.
 
 ## Existing APIs and truthfulness
 
