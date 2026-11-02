@@ -18,6 +18,17 @@ struct MapShell: View {
     @State private var mapError = false
     @State private var mapLoaded = false
     @State private var mapID = UUID()
+    @AppStorage("mapProvider") private var mapProvider = MapProvider.mapbox
+    @State private var mapZoom: Double = 11
+    @State private var focusedStation: Station?
+    @State private var focusRevision = 0
+    enum MapProvider: String, CaseIterable, Identifiable {
+        case mapbox = "Mapbox", apple = "Apple Maps"
+        var id: String {
+            rawValue
+        }
+    }
+
     enum Panel: String, Identifiable {
         case search, nearby
         var id: String {
@@ -106,42 +117,66 @@ struct MapShell: View {
     }
 
     @ViewBuilder private func map(statusWidth: CGFloat, coveredWidth: CGFloat) -> some View {
-        if hasToken {
+        if hasToken || mapProvider == .apple {
             TimelineView(.periodic(from: .now, by: 5)) { timeline in
                 ZStack(alignment: .topLeading) {
-                    Map(viewport: $viewport) {
-                        ForEvery(store.lines, id: \.routeId) { line in
-                            PolylineAnnotation(lineCoordinates: line.coordinates)
-                                .lineColor(StyleColor(transitColor(line.color)))
-                                .lineWidth(3)
-                        }
-                        if let snapshot = store.snapshot, snapshot.isFresh(at: timeline.date), !store.feedError {
-                            CircleAnnotationGroup(markers(snapshot, at: timeline.date)) { marker in
+                    if mapProvider == .apple {
+                        AppleTransitMap(lines: store.lines,
+                                        markers: TrainMapProjection.markers(snapshot: store.snapshot, lines: store.lines,
+                                                                            now: timeline.date, feedUnavailable: store.feedError),
+                                        focusedStation: focusedStation, focusRevision: focusRevision, coveredWidth: coveredWidth)
+                    } else {
+                        Map(viewport: $viewport) {
+                            ForEvery(store.lines, id: \.routeId) { line in
+                                PolylineAnnotation(lineCoordinates: line.coordinates)
+                                    .lineColor(StyleColor(transitColor(line.color)))
+                                    .lineWidth(3)
+                            }
+                            let projected = TrainMapProjection.markers(snapshot: store.snapshot, lines: store.lines,
+                                                                       now: timeline.date, feedUnavailable: store.feedError)
+                            CircleAnnotationGroup(projected.filter { $0.bearingDegrees == nil }) { marker in
                                 CircleAnnotation(centerCoordinate: marker.coordinate)
                                     .circleColor(StyleColor(transitColor(marker.color)))
-                                    .circleRadius(5)
-                                    .circleStrokeWidth(2)
+                                    .circleRadius(12 * markerScale)
+                                    .circleStrokeWidth(1.5)
                                     .circleStrokeColor(.white)
-                                    .circleOpacity(marker.stale ? 0.4 : 1)
+                                    .circleOpacity(marker.opacity)
                             }
-                            if differentiateWithoutColor {
-                                PointAnnotationGroup(markers(snapshot, at: timeline.date)) { marker in
-                                    PointAnnotation(coordinate: marker.coordinate)
-                                        .textField(marker.routeID)
-                                        .textColor(.black)
-                                        .textHaloColor(.white)
-                                        .textHaloWidth(2)
-                                }
+                            PointAnnotationGroup(projected.filter { $0.bearingDegrees != nil }) { marker in
+                                PointAnnotation(coordinate: marker.coordinate)
+                                    .image(.init(image: TrainSpriteCache.shared.image(routeID: marker.routeID, color: marker.color),
+                                                 name: "car-\(marker.routeID)-\(marker.color)"))
+                                    .iconRotate((marker.bearingDegrees ?? 90) - 90)
+                                    .iconSize(markerScale)
+                                    .iconOpacity(marker.opacity)
+                            }
+                            .iconRotationAlignment(.map)
+                            .iconAllowOverlap(true)
+                            PointAnnotationGroup(projected) { marker in
+                                PointAnnotation(coordinate: marker.coordinate)
+                                    .textField(RouteBadge.displayID(marker.displayLetter))
+                                    .textColor(StyleColor(marker.textColor == "black" ? UIColor.black : UIColor.white))
+                                    .textSize(max(9, 12 * markerScale))
+                                    .textOpacity(marker.opacity * (differentiateWithoutColor ? 1 : TrainMarkerSizing.labelOpacity(zoom: mapZoom)))
+                            }
+                            .textRotationAlignment(.viewport)
+                            .textAllowOverlap(true)
+                        }
+                        .mapStyle(colorScheme == .dark ? .dark : .light)
+                        .ornamentOptions(ornaments(coveredWidth: coveredWidth))
+                        .onCameraChanged { event in
+                            let quantized = (event.cameraState.zoom * 4).rounded() / 4
+                            if mapZoom != quantized {
+                                mapZoom = quantized
                             }
                         }
+                        .onMapLoaded { _ in mapLoaded = true; mapError = false }
+                        .onMapLoadingError { _ in mapError = true }
+                        .accessibilityLabel("Subway map. Use Search or Nearby for accessible station arrivals.")
+                        .accessibilityIdentifier("mapboxTransitMap")
+                        .ignoresSafeArea(edges: .top)
+                        .id(mapID)
                     }
-                    .mapStyle(colorScheme == .dark ? .dark : .light)
-                    .ornamentOptions(ornaments(coveredWidth: coveredWidth))
-                    .onMapLoaded { _ in mapLoaded = true; mapError = false }
-                    .onMapLoadingError { _ in mapError = true }
-                    .accessibilityLabel("Subway map. Use Search or Nearby for accessible station arrivals.")
-                    .ignoresSafeArea(edges: .top)
-                    .id(mapID)
                     Menu {
                         Text(store.feedLabel(at: timeline.date))
                         if let snapshot = store.snapshot, snapshot.isFresh(at: timeline.date) {
@@ -159,13 +194,13 @@ struct MapShell: View {
                             Text(error)
                             Button("Retry subway data") { Task { await store.loadLines() } }
                         }
-                        if mapError {
+                        if mapError, mapProvider == .mapbox {
                             Text("Map unavailable. Station search remains available.")
                             Button("Retry map") { mapError = false; mapLoaded = false; mapID = UUID() }
                         }
                     } label: {
-                        let title = store.error != nil ? "Subway data unavailable" : mapError ? "Map unavailable" :
-                            store.loading || !mapLoaded ? "Loading subway map…" : store.feedLabel(at: timeline.date)
+                        let title = store.error != nil ? "Subway data unavailable" : mapError && mapProvider == .mapbox ? "Map unavailable" :
+                            store.loading || (mapProvider == .mapbox && !mapLoaded) ? "Loading subway map…" : store.feedLabel(at: timeline.date)
                         if typeSize.isAccessibilitySize {
                             Image(systemName: "info.circle")
                                 .accessibilityLabel(title)
@@ -182,14 +217,21 @@ struct MapShell: View {
         } else {
             ContentUnavailableView("Map configuration needed", systemImage: "map",
                                    description: Text("Add a public Mapbox token to the local Xcode configuration. Station search remains available."))
+                .accessibilityIdentifier("mapboxConfigurationUnavailable")
         }
     }
 
     private var moreMenu: some View {
         Menu("More", systemImage: "ellipsis") {
+            Picker("Map provider", selection: $mapProvider) {
+                ForEach(MapProvider.allCases) { provider in Text(provider.rawValue).tag(provider) }
+            }
+            .pickerStyle(.menu)
+            .accessibilityIdentifier("mapProviderPicker")
             Button("Refresh arrivals", systemImage: "arrow.clockwise") { Task { await store.refresh() } }
             Link("Open web app", destination: URL(string: "https://standclear.vercel.app")!)
         }
+        .accessibilityIdentifier("moreButton")
     }
 
     private func ornaments(coveredWidth: CGFloat) -> OrnamentOptions {
@@ -200,26 +242,15 @@ struct MapShell: View {
         return options
     }
 
-    private struct TrainMarker: Identifiable {
-        let id: String
-        let coordinate: CLLocationCoordinate2D
-        let color: String
-        let routeID: String
-        let stale: Bool
-    }
-
-    private func markers(_ snapshot: Snapshot, at date: Date) -> [TrainMarker] {
-        snapshot.uniqueTrains.compactMap { train in
-            guard let line = store.lines.first(where: { $0.routeId == train.routeId }),
-                  let coordinate = Transit.coordinate(train, line: line) else { return nil }
-            let age = date.timeIntervalSince1970 - (train.lastReportedAt ?? snapshot.generatedAt / 1000)
-            guard age <= 360 else { return nil }
-            return TrainMarker(id: train.id, coordinate: coordinate, color: line.color, routeID: line.id, stale: age > 90)
-        }
+    private var markerScale: Double {
+        let scale = TrainMarkerSizing.scale(zoom: mapZoom)
+        return differentiateWithoutColor ? max(0.85, scale) : scale
     }
 
     private func stationBrowser(search: Bool) -> some View {
         StationBrowser(store: store, location: location, search: search, query: $searchQuery) { station in
+            focusedStation = station
+            focusRevision += 1
             viewport = .camera(center: station.stop.coordinate, zoom: 14)
         }
     }

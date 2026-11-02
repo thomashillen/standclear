@@ -2,6 +2,43 @@ import XCTest
 
 final class StandClearUITests: XCTestCase {
     @MainActor
+    func testMapProviderComparisonKeepsNativeControls() {
+        let app = XCUIApplication()
+        addUIInterruptionMonitor(withDescription: "Location permission") { alert in
+            let deny = alert.buttons["Don’t Allow"]
+            if deny.exists {
+                deny.tap(); return true
+            }
+            return false
+        }
+        app.terminate()
+        app.launch()
+        XCTAssertTrue(app.buttons["moreButton"].waitForExistence(timeout: 15))
+        app.tap()
+        for (provider, mapID) in [("Apple Maps", "appleTransitMap"), ("Mapbox", "mapboxTransitMap")] {
+            app.buttons["moreButton"].tap()
+            let option = app.buttons[provider]
+            if !option.exists {
+                app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Map provider")).firstMatch.tap()
+            }
+            XCTAssertTrue(option.waitForExistence(timeout: 5))
+            option.tap()
+            let unavailable = app.descendants(matching: .any)["mapboxConfigurationUnavailable"]
+            if provider == "Mapbox", unavailable.exists {
+                XCTAssertTrue(app.staticTexts["Map configuration needed"].exists, "CI should retain an explicit missing-token state")
+            } else {
+                XCTAssertTrue(app.descendants(matching: .any)[mapID].waitForExistence(timeout: 10))
+            }
+            XCTAssertTrue(app.buttons["searchButton"].exists)
+            XCTAssertTrue(app.buttons["nearbyButton"].exists)
+            let capture = XCTAttachment(screenshot: app.screenshot())
+            capture.name = provider + " transit comparison"
+            capture.lifetime = .keepAlways
+            add(capture)
+        }
+    }
+
+    @MainActor
     func testSearchAndNearbyPresentOneNativeSheet() {
         let app = XCUIApplication()
         app.resetAuthorizationStatus(for: .location)
@@ -12,6 +49,7 @@ final class StandClearUITests: XCTestCase {
             }
             return false
         }
+        app.terminate()
         app.launch()
         let search = app.buttons["searchButton"]
         XCTAssertTrue(search.waitForExistence(timeout: 15))
@@ -63,6 +101,9 @@ final class StandClearUITests: XCTestCase {
         XCTAssertGreaterThan(app.buttons["searchButton"].frame.midX, app.frame.midX)
         XCUIDevice.shared.orientation = .portrait
         XCTAssertTrue(app.navigationBars["StandClear"].waitForExistence(timeout: 5))
+        let nearbyIsReady = NSPredicate(format: "hittable == true")
+        expectation(for: nearbyIsReady, evaluatedWith: app.buttons["nearbyButton"])
+        waitForExpectations(timeout: 5)
         app.buttons["nearbyButton"].tap()
         XCTAssertTrue(app.buttons["Done"].waitForExistence(timeout: 5))
         XCUIDevice.shared.orientation = .landscapeLeft
