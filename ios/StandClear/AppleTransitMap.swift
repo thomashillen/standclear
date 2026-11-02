@@ -7,22 +7,24 @@ import SwiftUI
 struct AppleTransitMap: View {
     private let routeGeometry: [AppleRoutePolyline]
     let markers: [TrainMapMarker]
-    let focusedStation: Station?
+    let focusedCoordinate: CLLocationCoordinate2D?
     let currentLocation: CLLocationCoordinate2D?
     var focusRevision: Int = 0
     var coveredWidth: CGFloat = 0
+    var coveredBottom: CGFloat = 0
 
-    init(lines: [SubwayLine], markers: [TrainMapMarker], focusedStation: Station?,
-         focusRevision: Int = 0, coveredWidth: CGFloat = 0, currentLocation: CLLocationCoordinate2D? = nil)
+    init(lines: [SubwayLine], markers: [TrainMapMarker], focusedCoordinate: CLLocationCoordinate2D?,
+         focusRevision: Int = 0, coveredWidth: CGFloat = 0, coveredBottom: CGFloat = 0, currentLocation: CLLocationCoordinate2D? = nil)
     {
         // Rebuilt when the parent supplies transit inputs, never when this view's
         // camera state changes. Exact shape changes update without a hash per frame.
         routeGeometry = lines.map { AppleRoutePolyline(id: $0.routeId, color: $0.color, coordinates: $0.coordinates) }
         self.markers = markers
-        self.focusedStation = focusedStation
+        self.focusedCoordinate = focusedCoordinate
         self.currentLocation = currentLocation
         self.focusRevision = focusRevision
         self.coveredWidth = coveredWidth
+        self.coveredBottom = coveredBottom
     }
 
     @State private var position = MapCameraPosition.region(MKCoordinateRegion(
@@ -74,9 +76,9 @@ struct AppleTransitMap: View {
                                                                 viewportWidth: max(1, geometry.size.width - max(0, coveredWidth))))
             }
             .onChange(of: focusRevision, initial: true) { _, _ in
-                guard let focusedStation else { return }
+                guard let focusedCoordinate else { return }
                 position = .region(MKCoordinateRegion(
-                    center: focusedStation.stop.coordinate,
+                    center: focusedCoordinate,
                     span: MKCoordinateSpan(latitudeDelta: 0.018, longitudeDelta: 0.014)
                 ))
             }
@@ -84,6 +86,9 @@ struct AppleTransitMap: View {
             // itself can continue under the native trailing control presentation.
             .safeAreaInset(edge: .trailing, spacing: 0) {
                 Color.clear.frame(width: max(0, coveredWidth)).allowsHitTesting(false)
+            }
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                Color.clear.frame(height: max(0, coveredBottom)).allowsHitTesting(false)
             }
             .ignoresSafeArea(edges: .top)
             .accessibilityIdentifier("appleTransitMap")

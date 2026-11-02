@@ -36,9 +36,13 @@ final class StandClearUITests: XCTestCase {
         capture.lifetime = .keepAlways
         add(capture)
         app.buttons["Done"].tap()
+        let neighborhood = XCTAttachment(screenshot: app.screenshot())
+        neighborhood.name = "Near Me recentered neighborhood"
+        neighborhood.lifetime = .keepAlways
+        add(neighborhood)
         app.buttons["searchButton"].tap()
         XCTAssertTrue(app.navigationBars["Search stations"].waitForExistence(timeout: 5))
-        XCTAssertFalse(app.navigationBars["Nearby arrivals"].exists, "Automatic nearby must not interrupt manual search")
+        XCTAssertFalse(app.navigationBars["Nearby arrivals"].exists, "Nearby must not interrupt manual search")
     }
 
     @MainActor
@@ -59,9 +63,6 @@ final class StandClearUITests: XCTestCase {
         for (provider, mapID) in [("Apple Maps", "appleTransitMap"), ("Mapbox", "mapboxTransitMap")] {
             app.buttons["moreButton"].tap()
             let option = app.buttons[provider]
-            if !option.exists {
-                app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Map provider")).firstMatch.tap()
-            }
             XCTAssertTrue(option.waitForExistence(timeout: 5))
             option.tap()
             let unavailable = app.descendants(matching: .any)["mapboxConfigurationUnavailable"]
