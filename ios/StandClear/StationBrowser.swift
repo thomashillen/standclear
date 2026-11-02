@@ -5,8 +5,8 @@ struct StationBrowser: View {
     let store: TransitStore
     let location: LocationStore
     let search: Bool
+    @Binding var query: String
     let select: (Station) -> Void
-    @State private var query = ""
 
     private var results: [Station] {
         if search {

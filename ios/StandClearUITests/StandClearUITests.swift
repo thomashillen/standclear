@@ -46,5 +46,29 @@ final class StandClearUITests: XCTestCase {
         expanded.name = "Expanded native control region"
         expanded.lifetime = .keepAlways
         add(expanded)
+        XCUIDevice.shared.orientation = .portrait
+        XCTAssertTrue(app.navigationBars["StandClear"].waitForExistence(timeout: 5))
+        app.buttons["searchButton"].tap()
+        XCTAssertTrue(app.buttons["Done"].waitForExistence(timeout: 5))
+        let field = app.searchFields.firstMatch
+        field.tap()
+        field.typeText("Times")
+        XCUIDevice.shared.orientation = .landscapeLeft
+        XCTAssertTrue(app.navigationBars["Search stations"].waitForExistence(timeout: 5))
+        let sheetDismissed = NSPredicate(format: "exists == false")
+        expectation(for: sheetDismissed, evaluatedWith: app.buttons["Done"])
+        waitForExpectations(timeout: 5)
+        XCTAssertTrue((app.searchFields.firstMatch.value as? String)?.contains("Times") == true)
+        XCTAssertFalse(app.navigationBars["Nearby arrivals"].exists)
+        XCTAssertGreaterThan(app.buttons["searchButton"].frame.midX, app.frame.midX)
+        XCUIDevice.shared.orientation = .portrait
+        XCTAssertTrue(app.navigationBars["StandClear"].waitForExistence(timeout: 5))
+        app.buttons["nearbyButton"].tap()
+        XCTAssertTrue(app.buttons["Done"].waitForExistence(timeout: 5))
+        XCUIDevice.shared.orientation = .landscapeLeft
+        expectation(for: sheetDismissed, evaluatedWith: app.buttons["Done"])
+        waitForExpectations(timeout: 5)
+        XCTAssertTrue(app.navigationBars["Nearby arrivals"].exists)
+        XCTAssertFalse(app.navigationBars["Search stations"].exists)
     }
 }

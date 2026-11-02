@@ -7,13 +7,13 @@
 - SwiftFormat 0.64.5 formatted and linted the native Swift files.
 - `xcodebuild build analyze test CODE_SIGNING_ALLOWED=NO` passed on iPhone 18 Pro / iOS 27.2. **20 unit tests and one UI test passed.** No signing team or paid developer membership used.
 - Unit tests cover timestamp units/boundaries, expired and stale predictions, trip-only train deduplication, duplicate arrival records, station-complex allowlist/centroid semantics, separate Rector Street stations, nearest-five and outside-NYC handling, train geometry/clamping, coalesced refreshes, cancellation, late responses, and older-snapshot rejection. Network lifecycle tests use controlled URLProtocol responses, not the live service.
-- UI test covers native Search and Nearby presentation, mutually exclusive sheets, native denied-permission recovery, dismissal, rotation to the right control region, and control placement within the right half of the window. The UI test does not require live network data or a Mapbox token.
+- UI test covers native Search and Nearby presentation, mutually exclusive sheets, native denied-permission recovery, dismissal, rotation to the right control region, control placement within the right half of the window, and transfer of open Search/Nearby sheets into the expanded region. Search text survives the transfer. The UI test does not require live network data or a Mapbox token.
 - Installed and launched in iPhone 18 Pro, iPhone Duo, and iPad mini (A20 Pro) simulators. Real public endpoints rendered Mapbox tiles, subway lines, train markers, nearby station rows, and arrival predictions using a simulated Times Square location. Screenshots were visually inspected.
 - Largest accessibility Dynamic Type and Increased Contrast inspected on the Duo cover display. A status panel that crowded the map was replaced with a standard native status Menu; its accessible label remains available when the visible label becomes an icon at accessibility sizes.
 - Web validation passed: `npm run lint`, `npx tsc --noEmit`, `npm test` (**992 tests in 94 files**), and `npm run build` (**971 static pages**). Local Node 26.11.1 differs from CI's Node 24. No web application or server implementation changed.
 - Native configuration is ignored; a credential-pattern scan of publishable native source passed. Build results stay outside Git.
 
-The local result bundle is `/tmp/StandClearReleaseCheck.xcresult`; results are ephemeral and are not committed. CI uploads its own result bundle. The harmless Xcode App Intents metadata warning reflects the absence of an AppIntents dependency.
+The local result bundle is `/tmp/StandClearAdaptiveVerified.xcresult` (full build/analysis/unit/UI run) and `/tmp/StandClearAdaptiveUITest.xcresult` (expanded transfer regression); results are ephemeral and are not committed. CI uploads its own result bundle. The harmless Xcode App Intents metadata warning reflects the absence of an AppIntents dependency.
 
 ## Rendered evidence
 

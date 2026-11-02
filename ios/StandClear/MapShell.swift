@@ -14,6 +14,7 @@ struct MapShell: View {
     )
     @State private var panel: Panel?
     @State private var expandedSearch = false
+    @State private var searchQuery = ""
     @State private var mapError = false
     @State private var mapLoaded = false
     @State private var mapID = UUID()
@@ -75,6 +76,11 @@ struct MapShell: View {
                             }
                     }
                 }
+            }
+            .onChange(of: expanded) { _, isExpanded in
+                guard isExpanded, let activePanel = panel else { return }
+                expandedSearch = activePanel == .search
+                panel = nil
             }
             .sheet(item: $panel) { panel in
                 NavigationStack {
@@ -213,7 +219,7 @@ struct MapShell: View {
     }
 
     private func stationBrowser(search: Bool) -> some View {
-        StationBrowser(store: store, location: location, search: search) { station in
+        StationBrowser(store: store, location: location, search: search, query: $searchQuery) { station in
             viewport = .camera(center: station.stop.coordinate, zoom: 14)
         }
     }
