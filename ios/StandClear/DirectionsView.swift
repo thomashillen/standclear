@@ -26,6 +26,12 @@ struct DirectionsView: View {
                 }
                 .accessibilityIdentifier("originPicker")
                 .disabled(store.stations.isEmpty)
+                if selection.originWasSuggested {
+                    Text("Suggested nearby station from your location. Walking to the station is not included.")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .accessibilityIdentifier("originSuggestion")
+                }
                 Button { editing = .destination } label: {
                     LabeledContent("To", value: selection.destination(in: store.stations)?.stop.name ?? "Choose station")
                 }

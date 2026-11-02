@@ -63,6 +63,11 @@ struct MapShell: View {
                                     .containerBackground(.clear, for: .navigation)
                             }
                             .id(expandedPanel)
+                            if selectedTrip != nil {
+                                clearRouteButton
+                                    .buttonStyle(.bordered)
+                                    .padding(.horizontal)
+                            }
                             ControlGroup {
                                 Button("Search", systemImage: "magnifyingglass") { focus.cancelPending(); expandedPanel = .search }
                                     .accessibilityIdentifier("searchButton")
@@ -91,6 +96,11 @@ struct MapShell: View {
                             .navigationTitle("StandClear")
                             .navigationBarTitleDisplayMode(.inline)
                             .toolbar {
+                                ToolbarItem(placement: .topBarTrailing) {
+                                    if selectedTrip != nil {
+                                        clearRouteButton
+                                    }
+                                }
                                 ToolbarItemGroup(placement: .bottomBar) {
                                     Button("Search", systemImage: "magnifyingglass") { focus.cancelPending(); panel = .search }
                                         .accessibilityIdentifier("searchButton")
@@ -350,6 +360,12 @@ struct MapShell: View {
         }
     }
 
+    private var clearRouteButton: some View {
+        Button("Clear route", systemImage: "xmark") { selectTrip(nil) }
+            .accessibilityIdentifier("clearMapRoute")
+            .accessibilityHint("Remove the highlighted route. Your From and To stations are kept.")
+    }
+
     private func showTripOnMap(_ plan: NativeTripPlan) {
         if windowSize.width < 640 || typeSize.isAccessibilitySize {
             panel = nil
@@ -359,6 +375,7 @@ struct MapShell: View {
 
     private func beginDirections(to station: Station) {
         directionsSelection.setDestination(station.id)
+        directionsSelection.suggestOrigin(stations: store.stations, coordinate: location.availableCoordinate)
         selectTrip(nil)
         sheetDetent = .large
     }

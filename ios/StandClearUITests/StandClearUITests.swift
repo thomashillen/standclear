@@ -206,14 +206,23 @@ final class StandClearUITests: XCTestCase {
     }
 
     @MainActor
-    private func checkStationSearchDirectionsHere(expanded: Bool) {
+    func testDirectionsHereSuggestsEditableNearbyOrigin() {
+        checkStationSearchDirectionsHere(expanded: false, locationGranted: true)
+    }
+
+    @MainActor
+    private func checkStationSearchDirectionsHere(expanded: Bool, locationGranted: Bool = false) {
         let app = XCUIApplication()
         app.terminate()
         XCUIDevice.shared.orientation = .portrait
         app.resetAuthorizationStatus(for: .location)
+        if locationGranted {
+            XCUIDevice.shared.location = XCUILocation(location: CLLocation(latitude: 40.7553, longitude: -73.987))
+        }
+        defer { XCUIDevice.shared.location = nil }
         app.launchArguments = ["-mapProvider", "Apple Maps"]
         addUIInterruptionMonitor(withDescription: "Location permission") { alert in
-            let deny = alert.buttons["Don’t Allow"]
+            let deny = alert.buttons[locationGranted ? "Allow While Using App" : "Don’t Allow"]
             if deny.exists {
                 deny.tap(); return true
             }
@@ -224,6 +233,10 @@ final class StandClearUITests: XCTestCase {
         let title = app.navigationBars["StandClear"].staticTexts["StandClear"]
         XCTAssertTrue(title.waitForExistence(timeout: 20))
         title.tap()
+        if locationGranted {
+            XCTAssertTrue(app.descendants(matching: .any)["userLocationDot"].waitForExistence(timeout: 30),
+                          "Location must be available before testing the one-time origin suggestion")
+        }
         if expanded {
             XCUIDevice.shared.orientation = .landscapeLeft
             waitForLayout(in: app, expanded: true)
@@ -241,7 +254,12 @@ final class StandClearUITests: XCTestCase {
         app.buttons["directionsHere"].tap()
         XCTAssertTrue(app.buttons["destinationPicker"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.buttons["destinationPicker"].label.contains("Wall St"))
-        XCTAssertTrue(app.buttons["originPicker"].label.contains("Choose station"))
+        if locationGranted {
+            XCTAssertTrue(app.buttons["originPicker"].label.contains("Times Sq"))
+            XCTAssertTrue(app.staticTexts["originSuggestion"].exists)
+        } else {
+            XCTAssertTrue(app.buttons["originPicker"].label.contains("Choose station"))
+        }
         app.buttons["originPicker"].tap()
         let origins = app.searchFields.firstMatch
         XCTAssertTrue(origins.waitForExistence(timeout: 5))
@@ -249,6 +267,7 @@ final class StandClearUITests: XCTestCase {
         origins.typeText("59\n")
         app.buttons["stationChoice-629"].tap()
         XCTAssertTrue(app.buttons["originPicker"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.staticTexts["originSuggestion"].exists, "A manual origin replaces the location suggestion")
         app.navigationBars["Directions"].buttons.element(boundBy: 0).tap()
         XCTAssertTrue(app.buttons["directionsHere"].waitForExistence(timeout: 5))
         app.navigationBars["Wall St"].buttons.element(boundBy: 0).tap()
@@ -277,6 +296,20 @@ final class StandClearUITests: XCTestCase {
         mapCapture.name = expanded ? "Station-entry route in expanded region" : "Station-entry route after sheet dismissal"
         mapCapture.lifetime = .keepAlways
         add(mapCapture)
+        let clearRoute = app.buttons["clearMapRoute"]
+        XCTAssertTrue(clearRoute.waitForExistence(timeout: 5))
+        XCTAssertTrue(clearRoute.isHittable)
+        clearRoute.tap()
+        XCTAssertFalse(clearRoute.exists, "One map action clears the selected route")
+        if expanded {
+            app.navigationBars["Trip details"].buttons.element(boundBy: 0).tap()
+        } else {
+            app.buttons["moreButton"].tap()
+            app.buttons["directionsButton"].tap()
+        }
+        XCTAssertTrue(app.buttons["originPicker"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["originPicker"].label.contains("59 St"))
+        XCTAssertTrue(app.buttons["destinationPicker"].label.contains("Wall St"))
     }
 
     @MainActor
