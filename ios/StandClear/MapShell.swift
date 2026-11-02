@@ -108,6 +108,9 @@ struct MapShell: View {
                 panel = nil
             }
             .onChange(of: panel) { _, selection in
+                if typeSize.isAccessibilitySize {
+                    sheetDetent = .large
+                }
                 if selection == .search || selection == .directions || (selection == nil && !expanded) {
                     focus.cancelPending()
                 }
@@ -119,14 +122,19 @@ struct MapShell: View {
                             ToolbarItem(placement: .confirmationAction) { Button("Done") { self.panel = nil } }
                         }
                 }
-                .presentationDetents([.medium, .large], selection: $sheetDetent)
+                .presentationDetents(typeSize.isAccessibilitySize ? [.large] : [.medium, .large], selection: $sheetDetent)
                 .presentationDragIndicator(.visible)
             }
         }
         .onChange(of: panel) { _, _ in viewport = viewport.padding(focusPadding) }
         .onChange(of: sheetDetent) { _, _ in viewport = viewport.padding(focusPadding) }
         .onChange(of: windowSize) { _, _ in viewport = viewport.padding(focusPadding) }
-        .onChange(of: typeSize) { _, _ in viewport = viewport.padding(focusPadding) }
+        .onChange(of: typeSize, initial: true) { _, _ in
+            if typeSize.isAccessibilitySize {
+                sheetDetent = .large
+            }
+            viewport = viewport.padding(focusPadding)
+        }
         .onChange(of: scenePhase) { _, phase in
             if phase != .active {
                 location.stop(); store.stop()
@@ -291,7 +299,7 @@ struct MapShell: View {
 
     private func showNearby(expanded: Bool) {
         selectedTrip = nil
-        sheetDetent = .medium
+        sheetDetent = typeSize.isAccessibilitySize ? .large : .medium
         if expanded {
             expandedPanel = .nearby
         } else {
