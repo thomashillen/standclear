@@ -107,6 +107,13 @@ final class StandClearUITests: XCTestCase {
         XCUIDevice.shared.orientation = .landscapeLeft
         defer { XCUIDevice.shared.orientation = .portrait }
         XCTAssertTrue(app.navigationBars["Nearby arrivals"].waitForExistence(timeout: 5))
+        let wideSearchReady = NSPredicate { _, _ in
+            MainActor.assumeIsolated {
+                app.buttons["searchButton"].isHittable && app.buttons["searchButton"].frame.midX > app.frame.midX
+            }
+        }
+        expectation(for: wideSearchReady, evaluatedWith: app)
+        waitForExpectations(timeout: 5)
         app.buttons["searchButton"].tap()
         XCTAssertTrue(app.navigationBars["Search stations"].waitForExistence(timeout: 5))
         XCTAssertFalse(app.buttons["Done"].exists, "Wide controls should occupy the right region, not a sheet")
