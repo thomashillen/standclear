@@ -67,7 +67,11 @@ try {
     };
     const search = async query => {
       await visibleButton("Search stations and plan trips").click();
-      await assertUnifiedSurface(page.getByRole("region", { name: "Search and directions", exact: true }));
+      const sheet = page.getByRole("region", { name: "Search and directions", exact: true });
+      await assertUnifiedSurface(sheet);
+      if (viewport.width >= 640) {
+        assert.equal(await sheet.getByRole("button", { name: "More options", exact: true }).filter({ visible: true }).count(), 0);
+      }
       const field = page.getByRole("searchbox", { name: "Search NYC" });
       await field.fill(query);
       const focus = await field.evaluate(element => {
