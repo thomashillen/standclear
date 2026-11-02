@@ -24,7 +24,7 @@ struct StationBrowser: View {
     var body: some View {
         Group {
             if search {
-                content.searchable(text: $query, prompt: "Search subway stations")
+                content.searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search subway stations")
                     .searchFocused(searchFocus)
             } else {
                 content

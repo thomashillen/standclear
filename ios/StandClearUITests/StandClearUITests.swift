@@ -57,7 +57,7 @@ final class StandClearUITests: XCTestCase {
             expectation(for: usable, evaluatedWith: arrival)
             waitForExpectations(timeout: 20)
             arrival.tap()
-            XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Predicted arrival:")).firstMatch.waitForExistence(timeout: 5))
+            XCTAssertTrue(arrivalsList.staticTexts.matching(NSPredicate(format: "identifier == %@ AND label BEGINSWITH %@", "arrivalClockTime", "Predicted arrival:")).firstMatch.waitForExistence(timeout: 5))
         }
         app.buttons["Done"].tap()
         let neighborhood = XCTAttachment(screenshot: app.screenshot())

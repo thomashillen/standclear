@@ -144,7 +144,7 @@ private struct DirectionStationPicker: View {
                 .accessibilityIdentifier("stationChoice-\(station.id)")
             }
         }
-        .searchable(text: $query, prompt: "Search subway stations")
+        .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search subway stations")
         .navigationTitle(title)
         .navigationBarTitleDisplayMode(.inline)
         .scrollContentBackground(.hidden)
