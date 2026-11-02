@@ -191,6 +191,23 @@ describe("LinePicker", () => {
     expect(close.classList.contains("h-9")).toBe(false);
   });
 
+  it("clears the opening drag-lockout timer when unmounted", () => {
+    const clearTimeout = vi.spyOn(window, "clearTimeout");
+    const { unmount } = render(
+      <LinePicker
+        lines={makeLines()}
+        selectedLine={null}
+        onSelect={vi.fn()}
+      />,
+    );
+
+    openPicker();
+    unmount();
+
+    expect(clearTimeout).toHaveBeenCalled();
+    clearTimeout.mockRestore();
+  });
+
   it("flags the selected bullet with aria-pressed=true and the deselect aria-label", () => {
     render(
       <LinePicker

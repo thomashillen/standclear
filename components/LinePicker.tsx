@@ -2,7 +2,7 @@
 
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { AlertTriangle, ChevronDown, Train, X } from "lucide-react";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   LINE_GROUPS,
   retryLoadLines,
@@ -73,6 +73,13 @@ export default function LinePicker({ lines, selectedLine, onSelect }: LinePicker
   // wrapper transform. Toggled in onOpenChange below.
   const [canDrag, setCanDrag] = useState(false);
   const dragLockoutTimer = useRef<number | null>(null);
+  useEffect(() => () => {
+    if (dragLockoutTimer.current !== null) {
+      window.clearTimeout(dragLockoutTimer.current);
+      dragLockoutTimer.current = null;
+    }
+  }, []);
+
   const handleOpenChange = (next: boolean) => {
     setOpen(next);
     if (dragLockoutTimer.current !== null) {
