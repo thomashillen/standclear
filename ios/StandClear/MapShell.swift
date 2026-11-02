@@ -13,6 +13,8 @@ struct MapShell: View {
         center: CLLocationCoordinate2D(latitude: 40.754, longitude: -73.984), zoom: 11
     )
     @State private var panel: Panel?
+    @State private var sheetDetent: PresentationDetent = .medium
+    @State private var windowSize: CGSize = .zero
     @State private var expandedSearch = false
     @State private var searchQuery = ""
     @State private var mapError = false
@@ -20,8 +22,7 @@ struct MapShell: View {
     @State private var mapID = UUID()
     @AppStorage("mapProvider") private var mapProvider = MapProvider.mapbox
     @State private var mapZoom: Double = 11
-    @State private var focusedStation: Station?
-    @State private var focusRevision = 0
+    @State private var focus = MapFocusState()
     enum MapProvider: String, CaseIterable, Identifiable {
         case mapbox = "Mapbox", apple = "Apple Maps"
         var id: String {
@@ -49,16 +50,15 @@ struct MapShell: View {
             Group {
                 if expanded {
                     ZStack(alignment: .trailing) {
-                        map(statusWidth: statusWidth, coveredWidth: geometry.size.width - statusWidth, maximumGlanceHeight: geometry.size.height * 0.55)
+                        map(statusWidth: statusWidth, coveredWidth: geometry.size.width - statusWidth, coveredBottom: 0, maximumGlanceHeight: geometry.size.height * 0.55)
                         VStack(spacing: 0) {
                             NavigationStack { stationBrowser(search: expandedSearch) }
                                 .id(expandedSearch)
                             ControlGroup {
-                                Button("Search", systemImage: "magnifyingglass") { expandedSearch = true }
+                                Button("Search", systemImage: "magnifyingglass") { focus.cancelPending(); expandedSearch = true }
                                     .accessibilityIdentifier("searchButton")
                                 Button("Nearby", systemImage: "location") {
-                                    expandedSearch = false
-                                    location.start()
+                                    showNearby(expanded: true)
                                 }
                                 .accessibilityIdentifier("nearbyButton")
                                 moreMenu
@@ -72,15 +72,15 @@ struct MapShell: View {
                     }
                 } else {
                     NavigationStack {
-                        map(statusWidth: statusWidth, coveredWidth: 0, maximumGlanceHeight: geometry.size.height * 0.55)
+                        map(statusWidth: statusWidth, coveredWidth: 0, coveredBottom: panel == .nearby && sheetDetent == .medium ? geometry.size.height / 2 : 0, maximumGlanceHeight: geometry.size.height * 0.55)
                             .navigationTitle("StandClear")
                             .navigationBarTitleDisplayMode(.inline)
                             .toolbar {
                                 ToolbarItemGroup(placement: .bottomBar) {
-                                    Button("Search", systemImage: "magnifyingglass") { panel = .search }
+                                    Button("Search", systemImage: "magnifyingglass") { focus.cancelPending(); panel = .search }
                                         .accessibilityIdentifier("searchButton")
                                     Spacer()
-                                    Button("Nearby", systemImage: "location") { panel = .nearby; location.start() }
+                                    Button("Nearby", systemImage: "location") { showNearby(expanded: false) }
                                         .accessibilityIdentifier("nearbyButton")
                                     moreMenu
                                 }
@@ -88,10 +88,16 @@ struct MapShell: View {
                     }
                 }
             }
+            .onGeometryChange(for: CGSize.self) { $0.size } action: { windowSize = $0 }
             .onChange(of: expanded) { _, isExpanded in
                 guard isExpanded, let activePanel = panel else { return }
                 expandedSearch = activePanel == .search
                 panel = nil
+            }
+            .onChange(of: panel) { _, selection in
+                if selection == .search || (selection == nil && !expanded) {
+                    focus.cancelPending()
+                }
             }
             .sheet(item: $panel) { panel in
                 NavigationStack {
@@ -100,13 +106,25 @@ struct MapShell: View {
                             ToolbarItem(placement: .confirmationAction) { Button("Done") { self.panel = nil } }
                         }
                 }
-                .presentationDetents([.medium, .large])
+                .presentationDetents([.medium, .large], selection: $sheetDetent)
                 .presentationDragIndicator(.visible)
             }
         }
+        .onChange(of: panel) { _, _ in viewport = viewport.padding(focusPadding) }
+        .onChange(of: sheetDetent) { _, _ in viewport = viewport.padding(focusPadding) }
+        .onChange(of: windowSize) { _, _ in viewport = viewport.padding(focusPadding) }
+        .onChange(of: typeSize) { _, _ in viewport = viewport.padding(focusPadding) }
         .onChange(of: scenePhase) { _, phase in
             if phase != .active {
                 location.stop(); store.stop()
+            }
+            if phase == .background {
+                focus.cancelPending()
+            }
+        }
+        .onChange(of: location.availableCoordinate != nil) { _, available in
+            if available, focus.receiveLocation(location.availableCoordinate) {
+                applyFocus()
             }
         }
         .task(id: scenePhase) {
@@ -116,7 +134,7 @@ struct MapShell: View {
         }
     }
 
-    @ViewBuilder private func map(statusWidth: CGFloat, coveredWidth: CGFloat, maximumGlanceHeight: CGFloat) -> some View {
+    @ViewBuilder private func map(statusWidth: CGFloat, coveredWidth: CGFloat, coveredBottom: CGFloat, maximumGlanceHeight: CGFloat) -> some View {
         if hasToken || mapProvider == .apple {
             TimelineView(.periodic(from: .now, by: 5)) { timeline in
                 ZStack(alignment: .topLeading) {
@@ -124,7 +142,7 @@ struct MapShell: View {
                         AppleTransitMap(lines: store.lines,
                                         markers: TrainMapProjection.markers(snapshot: store.snapshot, lines: store.lines,
                                                                             now: timeline.date, feedUnavailable: store.feedError),
-                                        focusedStation: focusedStation, focusRevision: focusRevision, coveredWidth: coveredWidth,
+                                        focusedCoordinate: focus.coordinate, focusRevision: focus.revision, coveredWidth: coveredWidth, coveredBottom: coveredBottom,
                                         currentLocation: location.availableCoordinate)
                     } else {
                         Map(viewport: $viewport) {
@@ -186,20 +204,18 @@ struct MapShell: View {
                         .ignoresSafeArea(edges: .top)
                         .id(mapID)
                     }
-                    NearbyGlancePanel(store: store, location: location, now: timeline.date,
-                                      maximumHeight: maximumGlanceHeight,
-                                      mapUnavailable: mapError && mapProvider == .mapbox,
-                                      retryMap: { mapError = false; mapLoaded = false; mapID = UUID() },
-                                      openNearby: {
-                                          if coveredWidth > 0 {
-                                              expandedSearch = false
-                                          } else {
-                                              panel = .nearby
-                                          }
-                                      })
-                                      .frame(maxWidth: min(260, max(0, statusWidth - 32)))
-                                      .padding()
-                                      .frame(maxWidth: statusWidth, alignment: .leading)
+                    if panel == nil || coveredWidth > 0 {
+                        NearbyGlancePanel(store: store, location: location, now: timeline.date,
+                                          maximumHeight: maximumGlanceHeight,
+                                          mapUnavailable: mapError && mapProvider == .mapbox,
+                                          retryMap: { mapError = false; mapLoaded = false; mapID = UUID() },
+                                          openNearby: {
+                                              showNearby(expanded: coveredWidth > 0)
+                                          })
+                                          .frame(maxWidth: min(260, max(0, statusWidth - 32)))
+                                          .padding()
+                                          .frame(maxWidth: statusWidth, alignment: .leading)
+                    }
                 }
             }
         } else {
@@ -242,11 +258,36 @@ struct MapShell: View {
         return differentiateWithoutColor ? max(0.85, scale) : scale
     }
 
+    private func showNearby(expanded: Bool) {
+        sheetDetent = .medium
+        if expanded {
+            expandedSearch = false
+        } else {
+            panel = .nearby
+        }
+        if focus.requestNearby(location.availableCoordinate) {
+            applyFocus()
+        }
+        location.start()
+    }
+
+    private var focusPadding: SwiftUI.EdgeInsets {
+        let expanded = windowSize.width >= 640 && !typeSize.isAccessibilitySize
+        let right = expanded ? min(windowSize.width * 0.4, 380) : 0
+        let bottom = !expanded && panel == .nearby && sheetDetent == .medium ? windowSize.height / 2 : 0
+        return SwiftUI.EdgeInsets(top: 0, leading: 0, bottom: bottom, trailing: right)
+    }
+
+    private func applyFocus() {
+        guard let coordinate = focus.coordinate else { return }
+        viewport = .camera(center: coordinate, zoom: 14).padding(focusPadding)
+    }
+
     private func stationBrowser(search: Bool) -> some View {
         StationBrowser(store: store, location: location, search: search, query: $searchQuery) { station in
-            focusedStation = station
-            focusRevision += 1
-            viewport = .camera(center: station.stop.coordinate, zoom: 14)
+            if focus.focus(on: station.stop.coordinate) {
+                applyFocus()
+            }
         }
     }
 }

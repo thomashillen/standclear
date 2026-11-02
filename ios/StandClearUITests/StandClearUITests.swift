@@ -36,9 +36,13 @@ final class StandClearUITests: XCTestCase {
         capture.lifetime = .keepAlways
         add(capture)
         app.buttons["Done"].tap()
+        let neighborhood = XCTAttachment(screenshot: app.screenshot())
+        neighborhood.name = "Near Me recentered neighborhood"
+        neighborhood.lifetime = .keepAlways
+        add(neighborhood)
         app.buttons["searchButton"].tap()
         XCTAssertTrue(app.navigationBars["Search stations"].waitForExistence(timeout: 5))
-        XCTAssertFalse(app.navigationBars["Nearby arrivals"].exists, "Automatic nearby must not interrupt manual search")
+        XCTAssertFalse(app.navigationBars["Nearby arrivals"].exists, "Nearby must not interrupt manual search")
     }
 
     @MainActor
@@ -59,9 +63,6 @@ final class StandClearUITests: XCTestCase {
         for (provider, mapID) in [("Apple Maps", "appleTransitMap"), ("Mapbox", "mapboxTransitMap")] {
             app.buttons["moreButton"].tap()
             let option = app.buttons[provider]
-            if !option.exists {
-                app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Map provider")).firstMatch.tap()
-            }
             XCTAssertTrue(option.waitForExistence(timeout: 5))
             option.tap()
             let unavailable = app.descendants(matching: .any)["mapboxConfigurationUnavailable"]
@@ -115,14 +116,8 @@ final class StandClearUITests: XCTestCase {
         XCTAssertTrue(search.exists)
         XCUIDevice.shared.orientation = .landscapeLeft
         defer { XCUIDevice.shared.orientation = .portrait }
-        XCTAssertTrue(app.navigationBars["Nearby arrivals"].waitForExistence(timeout: 5))
-        let wideSearchReady = NSPredicate { _, _ in
-            MainActor.assumeIsolated {
-                app.buttons["searchButton"].isHittable && app.buttons["searchButton"].frame.midX > app.frame.midX
-            }
-        }
-        expectation(for: wideSearchReady, evaluatedWith: app)
-        waitForExpectations(timeout: 5)
+        waitForLayout(in: app, expanded: true)
+        XCTAssertTrue(app.navigationBars["Nearby arrivals"].exists)
         app.buttons["searchButton"].tap()
         XCTAssertTrue(app.navigationBars["Search stations"].waitForExistence(timeout: 5))
         XCTAssertFalse(app.buttons["Done"].exists, "Wide controls should occupy the right region, not a sheet")
@@ -133,6 +128,7 @@ final class StandClearUITests: XCTestCase {
         expanded.lifetime = .keepAlways
         add(expanded)
         XCUIDevice.shared.orientation = .portrait
+        waitForLayout(in: app, expanded: false)
         XCTAssertTrue(app.navigationBars["StandClear"].waitForExistence(timeout: 5))
         app.buttons["searchButton"].tap()
         XCTAssertTrue(app.buttons["Done"].waitForExistence(timeout: 5))
@@ -140,6 +136,7 @@ final class StandClearUITests: XCTestCase {
         field.tap()
         field.typeText("Times")
         XCUIDevice.shared.orientation = .landscapeLeft
+        waitForLayout(in: app, expanded: true)
         XCTAssertTrue(app.navigationBars["Search stations"].waitForExistence(timeout: 5))
         let sheetDismissed = NSPredicate(format: "exists == false")
         expectation(for: sheetDismissed, evaluatedWith: app.buttons["Done"])
@@ -148,6 +145,7 @@ final class StandClearUITests: XCTestCase {
         XCTAssertFalse(app.navigationBars["Nearby arrivals"].exists)
         XCTAssertGreaterThan(app.buttons["searchButton"].frame.midX, app.frame.midX)
         XCUIDevice.shared.orientation = .portrait
+        waitForLayout(in: app, expanded: false)
         XCTAssertTrue(app.navigationBars["StandClear"].waitForExistence(timeout: 5))
         let nearbyIsReady = NSPredicate(format: "hittable == true")
         expectation(for: nearbyIsReady, evaluatedWith: app.buttons["nearbyButton"])
@@ -155,9 +153,34 @@ final class StandClearUITests: XCTestCase {
         app.buttons["nearbyButton"].tap()
         XCTAssertTrue(app.buttons["Done"].waitForExistence(timeout: 5))
         XCUIDevice.shared.orientation = .landscapeLeft
+        waitForLayout(in: app, expanded: true)
         expectation(for: sheetDismissed, evaluatedWith: app.buttons["Done"])
         waitForExpectations(timeout: 5)
         XCTAssertTrue(app.navigationBars["Nearby arrivals"].exists)
         XCTAssertFalse(app.navigationBars["Search stations"].exists)
+    }
+
+    @MainActor
+    private func waitForLayout(in app: XCUIApplication, expanded: Bool) {
+        // Rotation can return before the simulator window and accessibility frames
+        // settle. Check geometry before asking XCTest to calculate a hit point.
+        let ready = NSPredicate { _, _ in
+            MainActor.assumeIsolated {
+                let window = app.windows.firstMatch
+                let search = app.buttons["searchButton"]
+                guard window.exists, search.exists else { return false }
+                let bounds = window.frame
+                let frame = search.frame
+                guard bounds.width > 0, bounds.height > 0,
+                      (bounds.width > bounds.height) == expanded,
+                      frame.width > 0, frame.height > 0,
+                      bounds.contains(frame),
+                      !expanded || frame.midX > bounds.midX
+                else { return false }
+                return search.isHittable
+            }
+        }
+        expectation(for: ready, evaluatedWith: app)
+        waitForExpectations(timeout: 20)
     }
 }
