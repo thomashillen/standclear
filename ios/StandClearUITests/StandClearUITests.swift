@@ -185,11 +185,14 @@ final class StandClearUITests: XCTestCase {
         }
         app.launch()
         XCTAssertTrue(app.buttons["moreButton"].waitForExistence(timeout: 15))
-        app.tap()
+        // Trigger permission handling on the inert title, not the map center,
+        // which can contain the large-text Open Settings link.
+        app.navigationBars["StandClear"].staticTexts["StandClear"].tap()
         if provider == "Mapbox", app.staticTexts["Map configuration needed"].exists {
             throw XCTSkip("Mapbox rendering needs an ignored local public token. CI verifies its missing-configuration state separately.")
         }
         app.buttons["moreButton"].tap()
+        XCTAssertTrue(app.buttons["directionsButton"].waitForExistence(timeout: 5))
         app.buttons["directionsButton"].tap()
         XCTAssertTrue(app.navigationBars["Directions"].waitForExistence(timeout: 5))
         let origin = app.buttons["originPicker"]
@@ -224,6 +227,7 @@ final class StandClearUITests: XCTestCase {
         routeMap.lifetime = .keepAlways
         add(routeMap)
         app.buttons["moreButton"].tap()
+        XCTAssertTrue(app.buttons["directionsButton"].waitForExistence(timeout: 5))
         app.buttons["directionsButton"].tap()
         XCTAssertTrue(app.buttons["swapStations"].waitForExistence(timeout: 5))
         app.buttons["swapStations"].tap()
