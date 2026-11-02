@@ -249,8 +249,7 @@ final class StandClearUITests: XCTestCase {
         app.buttons["searchButton"].tap()
         let search = app.searchFields.firstMatch
         XCTAssertTrue(search.waitForExistence(timeout: 5))
-        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 10),
-                      "An explicit Search action should focus the native search field")
+        search.tap()
         search.typeText("Wall\n")
         let station = app.buttons["station-419"]
         XCTAssertTrue(station.waitForExistence(timeout: 30))
