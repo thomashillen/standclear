@@ -3,7 +3,7 @@ import XCTest
 
 final class StandClearUITests: XCTestCase {
     @MainActor
-    func testNearbyAutomaticallyOpensForGrantedLocation() {
+    func testNearbyGlanceKeepsMapVisibleForGrantedLocation() {
         let app = XCUIApplication()
         app.terminate()
         app.resetAuthorizationStatus(for: .location)
@@ -20,7 +20,15 @@ final class StandClearUITests: XCTestCase {
         app.launch()
         XCTAssertTrue(app.buttons["moreButton"].waitForExistence(timeout: 15))
         app.tap()
-        XCTAssertTrue(app.navigationBars["Nearby arrivals"].waitForExistence(timeout: 30))
+        XCTAssertTrue(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "glance-")).firstMatch.waitForExistence(timeout: 30))
+        XCTAssertFalse(app.navigationBars["Nearby arrivals"].exists, "The glance panel should keep the map visible at startup")
+        XCTAssertTrue(app.descendants(matching: .any)["userLocationDot"].exists)
+        let mapCapture = XCTAttachment(screenshot: app.screenshot())
+        mapCapture.name = "Location dot and compact nearby glance"
+        mapCapture.lifetime = .keepAlways
+        add(mapCapture)
+        app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "glance-")).firstMatch.tap()
+        XCTAssertTrue(app.navigationBars["Nearby arrivals"].waitForExistence(timeout: 5))
         let station = app.buttons["station-127"]
         XCTAssertTrue(station.waitForExistence(timeout: 10), "Times Square should be nearby the simulated location")
         let capture = XCTAttachment(screenshot: app.screenshot())

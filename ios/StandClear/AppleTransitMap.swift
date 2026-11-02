@@ -8,17 +8,19 @@ struct AppleTransitMap: View {
     private let routeGeometry: [AppleRoutePolyline]
     let markers: [TrainMapMarker]
     let focusedStation: Station?
+    let currentLocation: CLLocationCoordinate2D?
     var focusRevision: Int = 0
     var coveredWidth: CGFloat = 0
 
     init(lines: [SubwayLine], markers: [TrainMapMarker], focusedStation: Station?,
-         focusRevision: Int = 0, coveredWidth: CGFloat = 0)
+         focusRevision: Int = 0, coveredWidth: CGFloat = 0, currentLocation: CLLocationCoordinate2D? = nil)
     {
         // Rebuilt when the parent supplies transit inputs, never when this view's
         // camera state changes. Exact shape changes update without a hash per frame.
         routeGeometry = lines.map { AppleRoutePolyline(id: $0.routeId, color: $0.color, coordinates: $0.coordinates) }
         self.markers = markers
         self.focusedStation = focusedStation
+        self.currentLocation = currentLocation
         self.focusRevision = focusRevision
         self.coveredWidth = coveredWidth
     }
@@ -40,6 +42,22 @@ struct AppleTransitMap: View {
                 ForEach(markers) { marker in
                     Annotation("Route \(marker.displayLetter) train", coordinate: marker.coordinate) {
                         AppleTrainAnnotation(marker: marker, cameraState: cameraState)
+                    }
+                    .annotationTitles(.hidden)
+                }
+                if let currentLocation {
+                    // Use the same expiring foreground fix as nearby arrivals.
+                    // UserAnnotation would introduce an independent location source.
+                    Annotation("Your approximate location", coordinate: currentLocation) {
+                        Circle()
+                            .fill(.white)
+                            .frame(width: 18, height: 18)
+                            .overlay {
+                                Circle().fill(Color(uiColor: .systemBlue)).frame(width: 12, height: 12)
+                            }
+                            .accessibilityElement(children: .ignore)
+                            .accessibilityLabel("Your approximate location")
+                            .accessibilityIdentifier("userLocationDot")
                     }
                     .annotationTitles(.hidden)
                 }

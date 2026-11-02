@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		0AC2485B8271FD740CF8777B /* NearbyGlanceProjection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 851BD9BEB9E72ACBAC056D62 /* NearbyGlanceProjection.swift */; };
 		1F0AFA3387AB388C2921D2DB /* StandClearApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = D7BBFEEB5973AF815C963CAF /* StandClearApp.swift */; };
 		2CB021138A40E20679449822 /* TrainMarkerSizing.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2296DCB0270DA162F4C97655 /* TrainMarkerSizing.swift */; };
 		2EA6D6ADDC47CAA564B0B664 /* TransitModelsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 630C5B37B119A48FBE398903 /* TransitModelsTests.swift */; };
@@ -14,12 +15,14 @@
 		4B9C2AA741FFA785A57C7856 /* AppleTransitMap.swift in Sources */ = {isa = PBXBuildFile; fileRef = 70232C08EEBC9234BA22DC33 /* AppleTransitMap.swift */; };
 		55D5360BB7F12C726EA2AB68 /* TrainMapProjection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 465384E96474BD24C1E9A28B /* TrainMapProjection.swift */; };
 		685B8271D931E78355936C1C /* TrainMapProjectionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 32F2D25AB20583AE9B7126B3 /* TrainMapProjectionTests.swift */; };
+		6D1253C9B4405BF03F3CFB99 /* NearbyGlanceProjectionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D8822EF08EE62E995BD3BDBB /* NearbyGlanceProjectionTests.swift */; };
 		7208C9B3087AF556BCC57EAD /* TransitStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC3131E8DB61456829CFA16D /* TransitStoreTests.swift */; };
 		7BC33DB10942959C9009E3A1 /* MapShell.swift in Sources */ = {isa = PBXBuildFile; fileRef = 597EEC59CF2249E02C6FDEF1 /* MapShell.swift */; };
 		841C58F282EA6582BEC983E2 /* TransitStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00FA5906605D147A7D5EB61E /* TransitStore.swift */; };
 		8A82BE15BE73987EDC479249 /* TransitArtwork.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7BE3BD88F9666E6953475A35 /* TransitArtwork.swift */; };
 		A9E2C37134A25B74AF5898D8 /* StandClearUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 81BB781E4177E2DD8495CF0F /* StandClearUITests.swift */; };
 		B02DF8855DAE79FF64845866 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 9F9DB9E4050A0250A349D3BB /* Assets.xcassets */; };
+		D4F81BFB73C04EC9EB72BD98 /* NearbyGlancePanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = F77AFCDE5C62F9A7CD702C17 /* NearbyGlancePanel.swift */; };
 		EE8D2437858A4FE0E0BB12FF /* TransitModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A1C8CBE609A31D126DBE78F /* TransitModels.swift */; };
 		F605A4DBCBA6C8AA22E0445C /* MapboxMaps in Frameworks */ = {isa = PBXBuildFile; productRef = 553BEA0939AFACE78815ED83 /* MapboxMaps */; };
 /* End PBXBuildFile section */
@@ -55,12 +58,15 @@
 		7A1C8CBE609A31D126DBE78F /* TransitModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TransitModels.swift; sourceTree = "<group>"; };
 		7BE3BD88F9666E6953475A35 /* TransitArtwork.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TransitArtwork.swift; sourceTree = "<group>"; };
 		81BB781E4177E2DD8495CF0F /* StandClearUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StandClearUITests.swift; sourceTree = "<group>"; };
+		851BD9BEB9E72ACBAC056D62 /* NearbyGlanceProjection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NearbyGlanceProjection.swift; sourceTree = "<group>"; };
 		9F9DB9E4050A0250A349D3BB /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		AC3FD068A4730A83D2B9AAC0 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		AD375FCE8BC663183E993992 /* StandClear.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = StandClear.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		BC3131E8DB61456829CFA16D /* TransitStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TransitStoreTests.swift; sourceTree = "<group>"; };
 		D26ABE8A77C717918EE789FB /* StandClearUITests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = StandClearUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		D7BBFEEB5973AF815C963CAF /* StandClearApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StandClearApp.swift; sourceTree = "<group>"; };
+		D8822EF08EE62E995BD3BDBB /* NearbyGlanceProjectionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NearbyGlanceProjectionTests.swift; sourceTree = "<group>"; };
+		F77AFCDE5C62F9A7CD702C17 /* NearbyGlancePanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NearbyGlancePanel.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -111,6 +117,8 @@
 				9F9DB9E4050A0250A349D3BB /* Assets.xcassets */,
 				AC3FD068A4730A83D2B9AAC0 /* Info.plist */,
 				597EEC59CF2249E02C6FDEF1 /* MapShell.swift */,
+				F77AFCDE5C62F9A7CD702C17 /* NearbyGlancePanel.swift */,
+				851BD9BEB9E72ACBAC056D62 /* NearbyGlanceProjection.swift */,
 				D7BBFEEB5973AF815C963CAF /* StandClearApp.swift */,
 				630E965BF832A0D8147FE2AE /* StationBrowser.swift */,
 				465384E96474BD24C1E9A28B /* TrainMapProjection.swift */,
@@ -133,6 +141,7 @@
 		EEDB85A84C86E667D6C6FB6E /* StandClearTests */ = {
 			isa = PBXGroup;
 			children = (
+				D8822EF08EE62E995BD3BDBB /* NearbyGlanceProjectionTests.swift */,
 				32F2D25AB20583AE9B7126B3 /* TrainMapProjectionTests.swift */,
 				630C5B37B119A48FBE398903 /* TransitModelsTests.swift */,
 				BC3131E8DB61456829CFA16D /* TransitStoreTests.swift */,
@@ -263,6 +272,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				6D1253C9B4405BF03F3CFB99 /* NearbyGlanceProjectionTests.swift in Sources */,
 				685B8271D931E78355936C1C /* TrainMapProjectionTests.swift in Sources */,
 				2EA6D6ADDC47CAA564B0B664 /* TransitModelsTests.swift in Sources */,
 				7208C9B3087AF556BCC57EAD /* TransitStoreTests.swift in Sources */,
@@ -283,6 +293,8 @@
 			files = (
 				4B9C2AA741FFA785A57C7856 /* AppleTransitMap.swift in Sources */,
 				7BC33DB10942959C9009E3A1 /* MapShell.swift in Sources */,
+				D4F81BFB73C04EC9EB72BD98 /* NearbyGlancePanel.swift in Sources */,
+				0AC2485B8271FD740CF8777B /* NearbyGlanceProjection.swift in Sources */,
 				1F0AFA3387AB388C2921D2DB /* StandClearApp.swift in Sources */,
 				31C8FFC03A8CEA0C10D003E1 /* StationBrowser.swift in Sources */,
 				55D5360BB7F12C726EA2AB68 /* TrainMapProjection.swift in Sources */,
