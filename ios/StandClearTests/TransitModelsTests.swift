@@ -151,6 +151,58 @@ final class TransitModelsTests: XCTestCase {
                        ["fresh", "no-vehicle", "missing-timestamp"])
     }
 
+    func testArrivalsRejectInvalidAndFutureVehicleReportsWithFiveSecondClockTolerance() {
+        let station = Station(id: "635", stop: stop("635"), stopIDs: ["635"], routes: ["6"])
+        let prediction = arrival("trip", stopID: "635", secondsFromNow: 60)
+        for timestamp in [Double.nan, .infinity, -.infinity, 0, -1, now.timeIntervalSince1970 + 5.001] {
+            let data = Snapshot(generatedAt: now.timeIntervalSince1970 * 1000,
+                                trains: [train(reportedAt: timestamp)], arrivals: [prediction])
+            XCTAssertTrue(Transit.arrivals(for: station, snapshot: data, now: now).isEmpty)
+        }
+        let tolerated = Snapshot(generatedAt: now.timeIntervalSince1970 * 1000,
+                                 trains: [train(reportedAt: now.timeIntervalSince1970 + 5)], arrivals: [prediction])
+        XCTAssertEqual(Transit.arrivals(for: station, snapshot: tolerated, now: now).map(\.tripId), ["trip"])
+    }
+
+    func testLatestVehicleReportControlsArrivalFreshnessWithoutMergingDirections() {
+        let station = Station(id: "635", stop: stop("635"), stopIDs: ["635"], routes: ["6"])
+        let north = arrival("trip", stopID: "635", secondsFromNow: 60)
+        let south = arrival("trip", stopID: "635", secondsFromNow: 90, direction: "S")
+        let staleLast = Snapshot(generatedAt: now.timeIntervalSince1970 * 1000,
+                                 trains: [train(reportedAt: now.timeIntervalSince1970),
+                                          train(reportedAt: now.timeIntervalSince1970 - 91)], arrivals: [north, south])
+        XCTAssertTrue(Transit.arrivals(for: station, snapshot: staleLast, now: now).isEmpty)
+        let freshLast = Snapshot(generatedAt: staleLast.generatedAt, trains: Array(staleLast.trains.reversed()), arrivals: [north, south])
+        XCTAssertEqual(Transit.arrivals(for: station, snapshot: freshLast, now: now).map(\.id),
+                       ["trip:635:N", "trip:635:S"])
+    }
+
+    func testCountdownRoundsUpMinutesAndNeverCallsAnEstimateNow() {
+        for (seconds, expected) in [(0.0, "<1 min"), (59.999, "<1 min"), (60, "1 min"), (60.001, "2 min"), (120, "2 min")] {
+            XCTAssertEqual(arrival("trip", stopID: "635", secondsFromNow: seconds).countdown(at: now), expected)
+        }
+        for seconds in [-0.001, Double.nan, .infinity, -.infinity, .greatestFiniteMagnitude] {
+            XCTAssertNil(arrival("trip", stopID: "635", secondsFromNow: seconds).countdown(at: now))
+        }
+    }
+
+    func testArrivalDestinationUsesExactReportedStopInsteadOfComplexNameOrStaticTerminus() {
+        let lines = [
+            line(route: "7", stops: [stop("719", name: "Court Sq")]),
+            line(route: "E", stops: [stop("F09", name: "Court Sq-23 St"), stop("end", name: "Full route terminus")]),
+        ]
+        let shortTurn = arrival("trip", stopID: "635", secondsFromNow: 60, destination: "F09")
+        XCTAssertEqual(shortTurn.destinationName(in: lines), "Court Sq-23 St")
+        XCTAssertNil(arrival("trip", stopID: "635", secondsFromNow: 60).destinationName(in: lines))
+        XCTAssertNil(arrival("trip", stopID: "635", secondsFromNow: 60, destination: "unknown").destinationName(in: lines))
+    }
+
+    func testUnknownDirectionIsNotInventedAsSouthbound() {
+        XCTAssertEqual(arrival("trip", stopID: "635", secondsFromNow: 60).directionLabel, "Northbound")
+        XCTAssertEqual(arrival("trip", stopID: "635", secondsFromNow: 60, direction: "S").directionLabel, "Southbound")
+        XCTAssertEqual(arrival("trip", stopID: "635", secondsFromNow: 60, direction: "?").directionLabel, "Direction unavailable")
+    }
+
     func testCoordinateFollowsForwardAndReverseShape() throws {
         let route = geometryLine()
         let forward = try XCTUnwrap(Transit.coordinate(train(progress: 0.25), line: route))
@@ -187,9 +239,11 @@ final class TransitModelsTests: XCTestCase {
         Snapshot(generatedAt: (now.timeIntervalSince1970 - age) * 1000, trains: [], arrivals: arrivals)
     }
 
-    private func arrival(_ trip: String, stopID: String, secondsFromNow: Double) -> Arrival {
-        Arrival(routeId: "6", stopId: stopID, direction: "N", eta: now.timeIntervalSince1970 + secondsFromNow,
-                tripId: trip, destStopId: nil)
+    private func arrival(_ trip: String, stopID: String, secondsFromNow: Double,
+                         direction: String = "N", destination: String? = nil) -> Arrival
+    {
+        Arrival(routeId: "6", stopId: stopID, direction: direction, eta: now.timeIntervalSince1970 + secondsFromNow,
+                tripId: trip, destStopId: destination)
     }
 
     private func train(id: String = "trip", progress: Double = 0, previous: String = "start",

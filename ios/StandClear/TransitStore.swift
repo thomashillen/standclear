@@ -115,7 +115,7 @@ final class TransitStore {
             return "Live arrivals unavailable"
         }
         guard let snapshot else { return "Connecting to live arrivals…" }
-        return snapshot.isFresh(at: now) ? "Latest arrival predictions" : "Arrival predictions are stale"
+        return snapshot.isFresh(at: now) ? "Arrival feed connected" : "Arrival predictions are stale"
     }
 }
 

@@ -22,6 +22,7 @@ struct MapShell: View {
     @State private var mapZoom: Double = 11
     @State private var focusedStation: Station?
     @State private var focusRevision = 0
+    @State private var presentedInitialNearby = false
     enum MapProvider: String, CaseIterable, Identifiable {
         case mapbox = "Mapbox", apple = "Apple Maps"
         var id: String {
@@ -92,6 +93,20 @@ struct MapShell: View {
                 guard isExpanded, let activePanel = panel else { return }
                 expandedSearch = activePanel == .search
                 panel = nil
+            }
+            .onChange(of: !store.stations.isEmpty && location.availableCoordinate != nil, initial: true) { _, ready in
+                guard ready, !presentedInitialNearby else { return }
+                presentedInitialNearby = true
+                // Present useful arrivals once, without reopening a dismissed sheet
+                // on each coarse location refresh or interrupting station search.
+                if !expanded, panel == nil {
+                    panel = .nearby
+                }
+            }
+            .onChange(of: panel) { _, selection in
+                if selection != nil {
+                    presentedInitialNearby = true
+                }
             }
             .sheet(item: $panel) { panel in
                 NavigationStack {
@@ -179,6 +194,9 @@ struct MapShell: View {
                     }
                     Menu {
                         Text(store.feedLabel(at: timeline.date))
+                        if let snapshot = store.snapshot {
+                            Text("Updated \(Date(timeIntervalSince1970: snapshot.generatedAt / 1000), style: .relative) ago")
+                        }
                         if let snapshot = store.snapshot, snapshot.isFresh(at: timeline.date) {
                             let stale = snapshot.uniqueTrains.filter {
                                 timeline.date.timeIntervalSince1970 - ($0.lastReportedAt ?? snapshot.generatedAt / 1000) > 90
