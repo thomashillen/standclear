@@ -30,12 +30,16 @@ struct NearbyGlancePanel: View {
     private var content: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
-                Button("Nearby", action: openNearby)
-                    .font(.subheadline.weight(.semibold))
-                    .accessibilityHint("Open the full nearby arrival list")
-                    .accessibilityIdentifier("glanceNearbyButton")
+                Button(action: openNearby) {
+                    Text("Nearby")
+                        .font(.subheadline.weight(.semibold))
+                        .frame(minHeight: 44)
+                        .contentShape(Rectangle())
+                }
+                .accessibilityHint("Open the full nearby arrival list")
+                .accessibilityIdentifier("glanceNearbyButton")
                 Spacer()
-                Menu("Arrival status", systemImage: "info.circle") {
+                Menu {
                     Text(store.feedLabel(at: now))
                     Text("Predictions are estimates. A dash means no prediction within 45 minutes, not no service.")
                     if let snapshot = store.snapshot, snapshot.isFresh(at: now) {
@@ -48,8 +52,12 @@ struct NearbyGlancePanel: View {
                     if mapUnavailable {
                         Button("Retry map", action: retryMap)
                     }
+                } label: {
+                    Image(systemName: "info.circle")
+                        .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
+                        .accessibilityLabel("Arrival status")
                 }
-                .labelStyle(.iconOnly)
             }
             .buttonStyle(.borderless)
             .frame(minHeight: 44)
@@ -105,7 +113,7 @@ struct NearbyGlancePanel: View {
                     }
                     .buttonStyle(.plain)
                     .accessibilityElement(children: .combine)
-                    .accessibilityHint("Open nearby station details")
+                    .accessibilityHint("Open the full nearby arrival list")
                     .accessibilityIdentifier("glance-\(row.id)")
                 }
             }

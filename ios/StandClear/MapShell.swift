@@ -182,6 +182,7 @@ struct MapShell: View {
                         .onMapLoadingError { _ in mapError = true }
                         .accessibilityLabel("Subway map. Use Search or Nearby for accessible station arrivals.")
                         .accessibilityIdentifier("mapboxTransitMap")
+                        .accessibilityValue(location.availableCoordinate == nil ? "Location unavailable" : "Your approximate location is shown")
                         .ignoresSafeArea(edges: .top)
                         .id(mapID)
                     }
