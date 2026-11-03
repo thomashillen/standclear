@@ -144,10 +144,7 @@ final class StandClearUITests: XCTestCase {
         south.tap()
         reveal(unknown, towardBottom: true)
         XCTAssertFalse(fifthSouth.exists)
-        let capture = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
-        capture.name = "Grouped Grand Central arrivals retain later southbound and unknown predictions"
-        capture.lifetime = .keepAlways
-        add(capture)
+        XCTAssertTrue(south.label.contains("2 more"), "Southbound should return to its four-row preview")
     }
 
     @MainActor
