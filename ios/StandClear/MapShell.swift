@@ -189,7 +189,7 @@ struct MapShell: View {
         if hasToken || mapProvider == .apple {
             ZStack(alignment: .topLeading) {
                 if mapProvider == .apple {
-                    AppleTransitMap(store: store, focusedCoordinate: focus.coordinate, focusRevision: focus.revision,
+                    AppleTransitMap(store: store, mapExposed: panel == nil || sheetDetent != .large, focusedCoordinate: focus.coordinate, focusRevision: focus.revision,
                                     coveredWidth: coveredWidth, coveredBottom: coveredBottom, currentLocation: location.availableCoordinate,
                                     tripOverlays: tripOverlays, tripFocusRevision: tripFocusRevision)
                 } else {
@@ -380,9 +380,7 @@ struct MapShell: View {
     }
 
     private func showTripOnMap(_ plan: NativeTripPlan) {
-        if windowSize.width < 640 || typeSize.isAccessibilitySize {
-            panel = nil
-        }
+        panel = nil
         selectTrip(plan)
     }
 

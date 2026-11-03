@@ -5,6 +5,7 @@ import SwiftUI
 /// MapKit renders cached subway geometry and samples train motion while visible.
 struct AppleTransitMap: View {
     let store: TransitStore
+    let mapExposed: Bool
     let focusedCoordinate: CLLocationCoordinate2D?
     var focusRevision: Int = 0
     var coveredWidth: CGFloat = 0
@@ -131,7 +132,7 @@ struct AppleTransitMap: View {
 
     private var motionInputs: MotionInputs {
         MotionInputs(linesRevision: store.linesRevision, feedRevision: store.feedError ? nil : store.motionSnapshotRevision,
-                     active: scenePhase == .active, reduceMotion: reduceMotion)
+                     active: scenePhase == .active, reduceMotion: reduceMotion || !mapExposed)
     }
 
     private func stopMotion() {
