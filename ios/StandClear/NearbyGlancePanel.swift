@@ -8,6 +8,7 @@ struct NearbyGlancePanel: View {
     let maximumHeight: CGFloat
     let mapUnavailable: Bool
     let retryMap: () -> Void
+    let openStation: (String) -> Void
     let openNearby: () -> Void
     @Environment(\.dynamicTypeSize) private var typeSize
     @State private var contentHeight: CGFloat = 1
@@ -54,7 +55,7 @@ struct NearbyGlancePanel: View {
                     if index > 0 {
                         Divider()
                     }
-                    Button(action: openNearby) {
+                    Button { openStation(row.station.id) } label: {
                         VStack(alignment: .leading, spacing: 2) {
                             Text(row.station.stop.name)
                                 .font(.caption.weight(.semibold))
@@ -78,7 +79,7 @@ struct NearbyGlancePanel: View {
                     }
                     .buttonStyle(.plain)
                     .accessibilityElement(children: .combine)
-                    .accessibilityHint("Open the full nearby arrival list")
+                    .accessibilityHint("Show arrivals and service alerts for this station")
                     .accessibilityIdentifier("glance-\(row.id)")
                 }
             }
