@@ -258,6 +258,7 @@ struct PlacePreview: View {
     var onEditingOriginChanged: (Bool) -> Void = { _ in }
     @Environment(\.dynamicTypeSize) private var typeSize
     @Environment(\.scenePhase) private var scenePhase
+    @State private var editingOrigin = false
     @State private var preview: Preview?
     @State private var walks = PlaceWalkMemory()
     @State private var revision = 0
@@ -366,16 +367,7 @@ struct PlacePreview: View {
         let current = key.active && preview?.request == key ? preview : nil
         List {
             Section {
-                NavigationLink {
-                    PlaceOriginPicker(stations: store.stations) { origin in
-                        if origin == .currentLocation, location.availableCoordinate == nil {
-                            location.start()
-                        }
-                        session.choose(origin)
-                    }
-                    .onAppear { onEditingOriginChanged(true) }
-                    .onDisappear { onEditingOriginChanged(false) }
-                } label: {
+                Button { editingOrigin = true } label: {
                     LabeledContent("From", value: originName)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .contentShape(Rectangle())
@@ -411,6 +403,17 @@ struct PlacePreview: View {
         .listStyle(.plain)
         .listSectionSpacing(.compact)
         .accessibilityIdentifier("placePreviewList")
+        .navigationDestination(isPresented: $editingOrigin) {
+            PlaceOriginPicker(stations: store.stations) { origin in
+                if origin == .currentLocation, location.availableCoordinate == nil {
+                    location.start()
+                }
+                session.choose(origin)
+                editingOrigin = false
+            }
+            .onAppear { onEditingOriginChanged(true) }
+            .onDisappear { onEditingOriginChanged(false) }
+        }
         .navigationTitle("Route preview")
         .navigationBarTitleDisplayMode(.inline)
         .scrollContentBackground(.hidden)
@@ -764,7 +767,6 @@ struct PlacePreview: View {
 private struct PlaceOriginPicker: View {
     let stations: [Station]
     let choose: (PlacePreviewSession.Origin) -> Void
-    @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
     @State private var searchPresented = false
     @FocusState private var searchFocused: Bool
@@ -792,10 +794,6 @@ private struct PlaceOriginPicker: View {
         searchPresented = false
         searchFocused = false
         choose(origin)
-        Task { @MainActor in
-            await Task.yield()
-            dismiss()
-        }
     }
 
     var body: some View {
