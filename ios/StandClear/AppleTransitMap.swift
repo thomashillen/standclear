@@ -102,7 +102,7 @@ struct AppleTransitMap: View {
             }
             .ignoresSafeArea(edges: .top)
             .accessibilityIdentifier("appleTransitMap")
-            .accessibilityLabel("Apple Maps subway comparison")
+            .accessibilityLabel("Subway map, Apple Maps")
             .accessibilityHint("Use Search or Nearby for accessible station arrivals.")
         }
         .onChange(of: TripGeometryInput(linesRevision: inputs.linesRevision, focus: tripFocusRevision, ids: tripOverlays.map(\.id)), initial: true) { _, _ in

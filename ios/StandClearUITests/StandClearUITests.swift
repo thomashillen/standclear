@@ -87,10 +87,25 @@ final class StandClearUITests: XCTestCase {
         defer { XCUIDevice.shared.orientation = .portrait }
         app.resetAuthorizationStatus(for: .location)
         app.launchArguments = ["--ui-test-fixture", "-mapProvider", "Apple Maps"]
+        addUIInterruptionMonitor(withDescription: "Location permission") { alert in
+            let deny = alert.buttons["Don’t Allow"]
+            guard deny.exists else { return false }
+            deny.tap()
+            return true
+        }
         app.launch()
-        let deny = XCUIApplication(bundleIdentifier: "com.apple.springboard").alerts.buttons["Don’t Allow"]
-        XCTAssertTrue(deny.waitForExistence(timeout: 20))
-        deny.tap()
+        // Nearby can request permission on demand. Compact exercises an actual
+        // denial. Expanded also supports the system waiting for its first fix.
+        let nearby = app.buttons["nearbyButton"]
+        XCTAssertTrue(nearby.waitForExistence(timeout: 20))
+        nearby.tap()
+        if expanded {
+            XCTAssertTrue(app.navigationBars["Nearby arrivals"].waitForExistence(timeout: 10))
+            XCTAssertFalse(app.descendants(matching: .any)["userLocationDot"].exists)
+        } else {
+            XCTAssertTrue(app.staticTexts["Location access is off"].firstMatch.waitForExistence(timeout: 10))
+            app.buttons["Done"].tap()
+        }
         waitForLayout(in: app, expanded: expanded)
         app.buttons["searchButton"].tap()
         let entry = app.buttons["placeSearchEntry"]
@@ -158,7 +173,7 @@ final class StandClearUITests: XCTestCase {
             option.tap()
             let unavailable = app.descendants(matching: .any)["mapboxConfigurationUnavailable"]
             if provider == "Mapbox", unavailable.exists {
-                XCTAssertTrue(app.staticTexts["Map configuration needed"].exists, "CI should retain an explicit missing-token state")
+                XCTAssertTrue(app.staticTexts["Mapbox unavailable"].exists, "CI should retain an explicit missing-token state")
             } else {
                 XCTAssertTrue(app.descendants(matching: .any)[mapID].waitForExistence(timeout: 10))
             }
@@ -168,6 +183,11 @@ final class StandClearUITests: XCTestCase {
             capture.name = provider + " transit comparison"
             capture.lifetime = .keepAlways
             add(capture)
+            if provider == "Mapbox", unavailable.exists {
+                app.buttons["Use Apple Maps"].tap()
+                XCTAssertTrue(app.descendants(matching: .any)["appleTransitMap"].waitForExistence(timeout: 10))
+                XCTAssertTrue(unavailable.waitForNonExistence(timeout: 5))
+            }
         }
         app.buttons["moreButton"].tap()
         app.buttons["arrivalStatusButton"].tap()
@@ -422,7 +442,7 @@ final class StandClearUITests: XCTestCase {
         // Trigger permission handling on the inert title, not the map center,
         // which can contain the large-text Open Settings link.
         activatePermissionPrompt(in: app)
-        if provider == "Mapbox", app.staticTexts["Map configuration needed"].exists {
+        if provider == "Mapbox", app.staticTexts["Mapbox unavailable"].exists {
             throw XCTSkip("Mapbox rendering needs an ignored local public token. CI verifies its missing-configuration state separately.")
         }
         app.buttons["moreButton"].tap()
