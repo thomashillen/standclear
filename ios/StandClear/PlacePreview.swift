@@ -681,14 +681,17 @@ struct PlacePreview: View {
                     }
                     .accessibilityElement(children: .combine)
                     .accessibilityIdentifier("placeTripLeg-\(leg.id)")
-                    TimelineView(.periodic(from: .now, by: 5)) { tick in
+                    TimelineView(.periodic(from: .now, by: 5)) { _ in
+                        // A new feed can redraw the card between scheduled ticks.
+                        // Compare its timestamps to the time of this render.
+                        let now = Date.now
                         let departures = TripPlanner.departures(for: leg, stations: store.stations, snapshot: store.snapshot,
-                                                                now: tick.date, feedUnavailable: store.feedError)
+                                                                now: now, feedUnavailable: store.feedError)
                         VStack(alignment: .leading, spacing: 2) {
-                            if let departure = departures.first, let countdown = departure.countdown(at: tick.date) {
+                            if let departure = departures.first, let countdown = departure.countdown(at: now) {
                                 Text("Next \(TransitRouteIdentity(departure.routeId).spokenName) boarding prediction: \(countdown).")
-                                if index == 0, let early = TripPlanner.EarlyDeparture(departures: departures, walkSeconds: option.access.connection?.seconds, now: tick.date) {
-                                    if let later = early.nextAfterWalk, let time = later.countdown(at: tick.date) {
+                                if index == 0, let early = TripPlanner.EarlyDeparture(departures: departures, walkSeconds: option.access.connection?.seconds, now: now) {
+                                    if let later = early.nextAfterWalk, let time = later.countdown(at: now) {
                                         Text("After the estimated walk and entry: \(TransitRouteIdentity(later.routeId).spokenName) in \(time) from now.")
                                     } else {
                                         Text("No later prediction reported after the estimated walk and entry.")
