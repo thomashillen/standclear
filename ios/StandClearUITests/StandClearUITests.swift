@@ -89,7 +89,7 @@ final class StandClearUITests: XCTestCase {
         let searchButton = app.buttons["searchButton"]
         searchButton.tap()
         let field = app.searchFields[unifiedSearchPrompt]
-        let recent = app.buttons["recentStation-419"]
+        let recent = app.buttons["recentStation-127"]
         let clearHistory = app.buttons["clearRecentStations"]
         let stations = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "station-")).firstMatch
         XCTAssertTrue(stations.waitForExistence(timeout: 10))
@@ -99,13 +99,20 @@ final class StandClearUITests: XCTestCase {
         XCTAssertFalse(recent.exists)
         XCTAssertTrue(field.waitForExistence(timeout: 5))
         field.tap()
-        field.typeText("Wall\n")
-        selectSearchResult("419", query: "Wall", in: app)
-        let detail = app.navigationBars["Wall St"]
+        field.typeText("Times Square\n")
+        let match = app.buttons["station-127"]
+        XCTAssertTrue(match.waitForExistence(timeout: 10))
+        XCTAssertTrue(match.label.contains("Times Sq-42 St"))
+        let matches = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        matches.name = "Times Square search finds the Times Sq-42 St station"
+        matches.lifetime = .keepAlways
+        add(matches)
+        selectSearchResult("127", query: "Times Square", in: app)
+        let detail = app.navigationBars["Times Sq-42 St"]
         XCTAssertTrue(detail.waitForExistence(timeout: 5))
         detail.buttons.element(boundBy: 0).tap()
         XCTAssertTrue(field.waitForExistence(timeout: 5))
-        XCTAssertEqual(field.value as? String, "Wall")
+        XCTAssertEqual(field.value as? String, "Times Square")
         XCTAssertFalse(recent.exists, "Recent stations appear only for an empty query")
         field.tap()
         let clearQuery = field.buttons["Clear text"]
@@ -118,7 +125,7 @@ final class StandClearUITests: XCTestCase {
         XCTAssertTrue(searchButton.waitForExistence(timeout: 15))
         searchButton.tap()
         XCTAssertTrue(recent.waitForExistence(timeout: 10))
-        XCTAssertTrue(recent.label.contains("Wall St"))
+        XCTAssertTrue(recent.label.contains("Times Sq-42 St"))
         let capture = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         capture.name = "Recent station in empty Search after relaunch"
         capture.lifetime = .keepAlways
@@ -443,6 +450,17 @@ final class StandClearUITests: XCTestCase {
         let origins = app.searchFields.firstMatch
         XCTAssertTrue(origins.waitForExistence(timeout: 5))
         origins.tap()
+        if locationGranted {
+            origins.typeText("Times Square\n")
+            selectStationResult("127", query: "Times Square", in: app)
+            let origin = app.buttons["originPicker"]
+            XCTAssertTrue(origin.waitForExistence(timeout: 5))
+            XCTAssertTrue(origin.label.contains("Times Sq-42 St"))
+            XCTAssertFalse(app.staticTexts["originSuggestion"].exists, "Selecting the matching station makes From a manual choice")
+            origin.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+            XCTAssertTrue(origins.waitForExistence(timeout: 5))
+            origins.tap()
+        }
         origins.typeText("59\n")
         selectStationResult("629", query: "59", in: app)
         XCTAssertTrue(app.buttons["originPicker"].waitForExistence(timeout: 5))
