@@ -766,6 +766,7 @@ private struct PlaceOriginPicker: View {
     let choose: (PlacePreviewSession.Origin) -> Void
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
+    @State private var searchPresented = false
     @FocusState private var searchFocused: Bool
     @State private var query = ""
     @State private var places: [PlaceResult] = []
@@ -785,9 +786,16 @@ private struct PlaceOriginPicker: View {
     }
 
     private func pick(_ origin: PlacePreviewSession.Origin) {
+        // End the native search presentation before leaving its navigation
+        // destination. Resigning keyboard focus alone leaves search chrome on
+        // the returning compact route sheet.
+        searchPresented = false
         searchFocused = false
         choose(origin)
-        dismiss()
+        Task { @MainActor in
+            await Task.yield()
+            dismiss()
+        }
     }
 
     var body: some View {
@@ -828,7 +836,7 @@ private struct PlaceOriginPicker: View {
                 }
             }
         }
-        .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Address, place or station")
+        .searchable(text: $query, isPresented: $searchPresented, placement: .navigationBarDrawer(displayMode: .always), prompt: "Address, place or station")
         .searchFocused($searchFocused)
         .navigationTitle("From").navigationBarTitleDisplayMode(.inline)
         .task(id: key) { [key] in
