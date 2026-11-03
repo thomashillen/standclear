@@ -446,10 +446,12 @@ final class StandClearUITests: XCTestCase {
         let picker = app.searchFields[unifiedSearchPrompt]
         XCTAssertTrue(picker.waitForExistence(timeout: 5))
         picker.tap()
-        picker.typeText("Wall\n")
-        let wall = app.buttons["stationChoice-419"]
-        revealPlaceElement(wall, in: app.collectionViews.firstMatch)
-        wall.tap()
+        picker.typeText("55 Wall Street\n")
+        let address = app.buttons["placeOriginResult-fixture-55-wall-street"]
+        XCTAssertTrue(address.waitForExistence(timeout: 10))
+        address.tap()
+        XCTAssertTrue(origin.waitForExistence(timeout: 5))
+        XCTAssertTrue(origin.label.contains("55 Wall Street"))
         let list = app.collectionViews["placePreviewList"]
         let inbound = "4:N:419>629"
         let outbound = "N:N:R11>R05"
@@ -475,6 +477,9 @@ final class StandClearUITests: XCTestCase {
         let rideNW = list.descendants(matching: .any)["placeTripLeg-\(outbound)"].firstMatch
         revealPlaceElement(rideNW, in: list)
         XCTAssertTrue(rideNW.label.contains("Lexington Av/59 St") && rideNW.label.contains("Broadway"))
+        app.buttons["placeBackToSearch"].tap()
+        XCTAssertTrue(museum.waitForExistence(timeout: 5))
+        XCTAssertEqual(field.value as? String, "Noguchi")
     }
 
     @MainActor

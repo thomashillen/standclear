@@ -195,6 +195,7 @@ private final class MapRequest<Value: Sendable> {
                                   seconds: seconds, meters: meters)
             }
             return [
+                walk([(40.7061, -74.0095), (40.70684, -74.01074), (40.707557, -74.011862)], meters: 275, seconds: 210), // 55 Wall Street to Wall St 419
                 walk([(40.75512, -73.98712), (40.75468, -73.98742), (40.754672, -73.986754)], from: fix, meters: 115, seconds: 95), // Times Sq R16
                 walk([(40.75643, -73.98611), (40.75934, -73.98399), (40.759901, -73.984139)], from: fix, meters: 660, seconds: 510), // 49 St R15
                 walk([(40.75502, -73.9869), (40.75001, -73.98809), (40.749567, -73.98795)], from: fix, meters: 765, seconds: 600), // Herald Sq R17
