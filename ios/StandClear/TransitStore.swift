@@ -146,12 +146,13 @@ final class TransitStore {
     /// Stable trips keep interaction tests independent of live prediction churn.
     private enum NativeUITestFixture {
         static func data(for path: String, now: Date) throws -> Data {
+            let includeExpress = ProcessInfo.processInfo.arguments.contains("--ui-test-express-arrivals")
             let payload: [String: Any]
             switch path {
             case "gtfsData.json":
                 // Stop identities, order, names, and coordinates come from the
                 // checked-in public/gtfsData.json. Geometry joins those stops.
-                payload = ["lines": [
+                var lines = [
                     "1": line(id: "1", color: "#D82233", stops: [
                         ("126", "50 St", 40.761728, -73.983849),
                         ("127", "Times Sq-42 St", 40.75529, -73.987495),
@@ -165,7 +166,17 @@ final class TransitStore {
                         ("418", "Fulton St", 40.710368, -74.009509),
                         ("419", "Wall St", 40.707557, -74.011862),
                     ]),
-                ]]
+                ]
+                if includeExpress {
+                    // Static GTFS lists the base service. Only the trip update
+                    // explicitly identifies the first Parkchester train as 6X.
+                    lines["6"] = line(id: "6", color: "#009952", stops: [
+                        ("601", "Pelham Bay Park", 40.852462, -73.828121),
+                        ("608", "Parkchester", 40.833226, -73.860816),
+                        ("613", "Hunts Point Av", 40.820948, -73.890549),
+                    ])
+                }
+                payload = ["lines": lines]
             case "api/alerts":
                 payload = ["available": true, "generatedAt": now.timeIntervalSince1970 * 1000,
                            "feedTimestamp": now.timeIntervalSince1970, "alerts": [
@@ -186,7 +197,10 @@ final class TransitStore {
                         arrival(id: "ui-fixture-1-s", route: "1", stop: "127", direction: "S", destination: "128", eta: timestamp + 300),
                         arrival(id: "ui-fixture-4-n", route: "4", stop: "419", direction: "N", destination: "629", eta: timestamp + 180),
                         arrival(id: "ui-fixture-4-s", route: "4", stop: "629", direction: "S", destination: "419", eta: timestamp + 240),
-                    ],
+                    ] + (includeExpress ? [
+                        arrival(id: "ui-fixture-6x-n", route: "6X", stop: "608", direction: "N", destination: "601", eta: timestamp + 120),
+                        arrival(id: "ui-fixture-6-s", route: "6", stop: "608", direction: "S", destination: "613", eta: timestamp + 240),
+                    ] : []),
                 ]
             default:
                 throw URLError(.unsupportedURL)
