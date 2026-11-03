@@ -85,12 +85,22 @@ struct RouteBadge: View {
 
     var body: some View {
         let palette = TransitPalette(hex: color)
-        Text(Self.displayID(routeID))
+        let route = TransitRouteIdentity(routeID)
+        Text(route.bullet)
             .font(.caption.weight(.bold))
             .foregroundStyle(palette.labelColor)
             .frame(minWidth: diameter, minHeight: diameter)
-            .background(palette.color, in: Circle())
-            .accessibilityLabel("Route \(Self.displayID(routeID))")
+            .background {
+                if route.isExpress {
+                    Image(systemName: "diamond.fill")
+                        .resizable()
+                        .foregroundStyle(palette.color)
+                        .accessibilityHidden(true)
+                } else {
+                    Circle().fill(palette.color)
+                }
+            }
+            .accessibilityLabel("Route \(route.spokenName)")
     }
 
     static func displayID(_ routeID: String) -> String {

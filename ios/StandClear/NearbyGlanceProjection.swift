@@ -44,7 +44,7 @@ enum NearbyGlanceProjection {
             }
             for color in byColor.keys.sorted() {
                 let routes = (byColor[color] ?? []).sorted()
-                let matching = arrivals.filter { routes.contains(baseRoute($0.routeId)) }
+                let matching = arrivals.filter { routes.contains(TransitRouteIdentity($0.routeId).baseID) }
                 result.append(NearbyGlanceRow(station: station, color: color, routes: routes, meters: meters,
                                               north: matching.first { $0.direction == "N" },
                                               south: matching.first { $0.direction == "S" }))
@@ -54,10 +54,6 @@ enum NearbyGlanceProjection {
             }
         }
         return result
-    }
-
-    private static func baseRoute(_ route: String) -> String {
-        route.hasSuffix("X") ? String(route.dropLast()) : route
     }
 
     private static func valid(_ coordinate: CLLocationCoordinate2D) -> Bool {

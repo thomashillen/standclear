@@ -121,7 +121,7 @@ struct NearbyGlancePanel: View {
         .foregroundStyle(.primary)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(arrival.map {
-            "\(direction), route \(RouteBadge.displayID($0.routeId)), predicted in \($0.countdown(at: now) ?? "unavailable")"
+            "\(direction), route \(TransitRouteIdentity($0.routeId).spokenName), predicted in \($0.countdown(at: now) ?? "unavailable")"
         } ?? "\(direction), routes \(routes.map(RouteBadge.displayID).joined(separator: ", ")), prediction unavailable")
     }
 }
