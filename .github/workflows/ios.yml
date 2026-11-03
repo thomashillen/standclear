@@ -18,7 +18,8 @@ jobs:
   simulator:
     name: Build, analyze, and test iOS
     runs-on: macos-26
-    timeout-minutes: 30
+    # The full serial simulator suite can take 30 minutes before xcresult finalization.
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@v7
       - name: Select an installed iPhone simulator
