@@ -466,6 +466,14 @@ final class StandClearUITests: XCTestCase {
         let ride4 = list.descendants(matching: .any)["placeTripLeg-\(inbound)"].firstMatch
         revealPlaceElement(ride4, in: list)
         XCTAssertTrue(ride4.label.contains("Wall St") && ride4.label.contains("Lexington Av/59 St"))
+        let firstPrediction = list.descendants(matching: .any)["placeDeparture-\(inbound)"].firstMatch
+        revealPlaceElement(firstPrediction, in: list)
+        XCTAssertTrue(firstPrediction.label.contains("Next 4 boarding prediction: 3 min."))
+        XCTAssertTrue(firstPrediction.label.contains("After the estimated walk and entry: 4 in 9 min from now."))
+        let predictionCapture = XCTAttachment(screenshot: app.screenshot())
+        predictionCapture.name = "Wall St platform prediction and later train after the walk"
+        predictionCapture.lifetime = .keepAlways
+        add(predictionCapture)
         let change = list.descendants(matching: .any)["placeTransferStep"].firstMatch
         revealPlaceElement(change, in: list)
         XCTAssertTrue(change.label.contains(interchange))
@@ -478,6 +486,9 @@ final class StandClearUITests: XCTestCase {
         let rideNW = list.descendants(matching: .any)["placeTripLeg-\(outbound)"].firstMatch
         revealPlaceElement(rideNW, in: list)
         XCTAssertTrue(rideNW.label.contains("Lexington Av/59 St") && rideNW.label.contains("Broadway"))
+        let transferPrediction = list.descendants(matching: .any)["placeDeparture-\(outbound)"].firstMatch
+        revealPlaceElement(transferPrediction, in: list)
+        XCTAssertEqual(transferPrediction.label, "Next N boarding prediction: 17 min.")
         app.buttons["placeBackToSearch"].tap()
         XCTAssertTrue(museum.waitForExistence(timeout: 5))
         XCTAssertEqual(field.value as? String, "Noguchi")

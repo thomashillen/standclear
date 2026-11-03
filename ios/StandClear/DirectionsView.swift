@@ -221,14 +221,15 @@ private struct DeparturePredictionView: View {
     let isTransfer: Bool
 
     var body: some View {
-        TimelineView(.periodic(from: .now, by: 5)) { context in
+        TimelineView(.periodic(from: .now, by: 5)) { _ in
+            let now = Date.now
             VStack(alignment: .leading) {
                 Text(isTransfer ? "Next departure at the transfer platform" : "Next boarding prediction").font(.subheadline)
                 if let arrival = TripPlanner.nextDeparture(for: leg, stations: store.stations,
-                                                           snapshot: store.snapshot, now: context.date,
+                                                           snapshot: store.snapshot, now: now,
                                                            feedUnavailable: store.feedError)
                 {
-                    Text("\(TransitRouteIdentity(arrival.routeId).spokenName) · \(arrival.countdown(at: context.date) ?? "Prediction elapsed")")
+                    Text("\(TransitRouteIdentity(arrival.routeId).spokenName) · \(arrival.countdown(at: now) ?? "Prediction elapsed")")
                         .font(.headline).monospacedDigit()
                     if let destination = arrival.destinationName(in: store.lines) {
                         Text("Train destination: \(destination)")
@@ -239,7 +240,7 @@ private struct DeparturePredictionView: View {
                 } else if store.snapshot == nil, !store.feedError {
                     ProgressView("Connecting to arrivals…")
                 } else {
-                    Text(store.feedError || store.snapshot?.isFresh(at: context.date) != true
+                    Text(store.feedError || store.snapshot?.isFresh(at: now) != true
                         ? "Current predictions unavailable."
                         : "No upcoming boarding prediction. This does not mean there is no service.")
                         .foregroundStyle(.secondary)

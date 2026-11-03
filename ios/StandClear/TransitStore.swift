@@ -273,7 +273,11 @@ final class TransitStore {
         private static func museumArrivals(at timestamp: Double) -> [[String: Any]] {
             // The two Broadway services use the same platforms. A sooner
             // southbound prediction cannot board a Queens-bound itinerary.
-            ["R16", "R15", "R17", "R14", "R13", "R11"].enumerated().flatMap { index, platform in
+            let wallStreet = [
+                arrival(id: "museum-4-s", route: "4", stop: "419", direction: "S", destination: "420", eta: timestamp + 360),
+                arrival(id: "museum-4-n-later", route: "4", stop: "419", direction: "N", destination: "629", eta: timestamp + 540),
+            ]
+            return wallStreet + ["R16", "R15", "R17", "R14", "R13", "R11"].enumerated().flatMap { index, platform in
                 let offset = Double(index * 90)
                 return [arrival(id: "museum-n-n", route: "N", stop: platform, direction: "N", destination: "R04", eta: timestamp + 540 + offset),
                         arrival(id: "museum-w-n", route: "W", stop: platform, direction: "N", destination: "R04", eta: timestamp + 720 + offset),
