@@ -10,7 +10,7 @@ final class StandClearUITests: XCTestCase {
         app.resetAuthorizationStatus(for: .location)
         XCUIDevice.shared.location = XCUILocation(location: CLLocation(latitude: 40.7553, longitude: -73.987))
         defer { XCUIDevice.shared.location = nil }
-        app.launchArguments = ["-mapProvider", "Apple Maps"]
+        app.launchArguments = ["--ui-test-fixture", "-mapProvider", "Apple Maps"]
         addUIInterruptionMonitor(withDescription: "Location permission") { alert in
             let allow = alert.buttons["Allow While Using App"]
             if allow.exists {
@@ -45,21 +45,20 @@ final class StandClearUITests: XCTestCase {
         let arrivalsList = app.collectionViews["stationList"]
         XCTAssertTrue(arrivalsList.waitForExistence(timeout: 5))
         let candidate = arrivalsList.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND NOT label CONTAINS %@", "arrivalRow-", "<1 min")).firstMatch
-        if candidate.exists {
-            let arrivalID = candidate.identifier
-            let arrival = arrivalsList.buttons[arrivalID]
-            let usable = NSPredicate { _, _ in
-                MainActor.assumeIsolated {
-                    guard arrival.exists else { return false }
-                    let frame = arrival.frame
-                    return frame.width > 0 && frame.height > 0 && app.frame.contains(frame)
-                }
+        XCTAssertTrue(candidate.waitForExistence(timeout: 10), "Fixture arrivals must be available for disclosure coverage")
+        let arrivalID = candidate.identifier
+        let arrival = arrivalsList.buttons[arrivalID]
+        let usable = NSPredicate { _, _ in
+            MainActor.assumeIsolated {
+                guard arrival.exists else { return false }
+                let frame = arrival.frame
+                return frame.width > 0 && frame.height > 0 && app.frame.contains(frame)
             }
-            expectation(for: usable, evaluatedWith: arrival)
-            waitForExpectations(timeout: 20)
-            arrival.tap()
-            XCTAssertTrue(arrivalsList.staticTexts.matching(NSPredicate(format: "identifier == %@ AND label BEGINSWITH %@", arrivalID, "Predicted arrival:")).firstMatch.waitForExistence(timeout: 5))
         }
+        expectation(for: usable, evaluatedWith: arrival)
+        waitForExpectations(timeout: 20)
+        arrival.tap()
+        XCTAssertTrue(arrivalsList.staticTexts.matching(NSPredicate(format: "identifier == %@ AND label BEGINSWITH %@", arrivalID, "Predicted arrival:")).firstMatch.waitForExistence(timeout: 5))
         app.buttons["Done"].tap()
         let neighborhood = XCTAttachment(screenshot: app.screenshot())
         neighborhood.name = "Near Me recentered neighborhood"
@@ -73,6 +72,7 @@ final class StandClearUITests: XCTestCase {
     @MainActor
     func testMapProviderComparisonKeepsNativeControls() {
         let app = XCUIApplication()
+        app.launchArguments = ["--ui-test-fixture"]
         addUIInterruptionMonitor(withDescription: "Location permission") { alert in
             let deny = alert.buttons["Don’t Allow"]
             if deny.exists {
@@ -124,7 +124,7 @@ final class StandClearUITests: XCTestCase {
         }
         app.terminate()
         XCUIDevice.shared.orientation = .portrait
-        app.launchArguments = ["-mapProvider", "Apple Maps"]
+        app.launchArguments = ["--ui-test-fixture", "-mapProvider", "Apple Maps"]
         app.launch()
         let search = app.buttons["searchButton"]
         XCTAssertTrue(search.waitForExistence(timeout: 15))
@@ -222,7 +222,7 @@ final class StandClearUITests: XCTestCase {
             XCUIDevice.shared.location = XCUILocation(location: CLLocation(latitude: 40.7553, longitude: -73.987))
         }
         defer { XCUIDevice.shared.location = nil }
-        app.launchArguments = ["-mapProvider", "Apple Maps"]
+        app.launchArguments = ["--ui-test-fixture", "-mapProvider", "Apple Maps"]
         addUIInterruptionMonitor(withDescription: "Location permission") { alert in
             let deny = alert.buttons[locationGranted ? "Allow While Using App" : "Don’t Allow"]
             if deny.exists {
@@ -253,7 +253,8 @@ final class StandClearUITests: XCTestCase {
         search.typeText("Wall\n")
         let station = app.buttons["station-419"]
         XCTAssertTrue(station.waitForExistence(timeout: 30))
-        station.tap()
+        // Exercise the row's empty center as well as its text and route badges.
+        station.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
         XCTAssertTrue(app.buttons["directionsHere"].waitForExistence(timeout: 5))
         app.buttons["directionsHere"].tap()
         XCTAssertTrue(app.buttons["destinationPicker"].waitForExistence(timeout: 5))
@@ -341,7 +342,7 @@ final class StandClearUITests: XCTestCase {
         app.terminate()
         XCUIDevice.shared.orientation = .portrait
         app.resetAuthorizationStatus(for: .location)
-        app.launchArguments = ["-mapProvider", provider]
+        app.launchArguments = ["--ui-test-fixture", "-mapProvider", provider]
         addUIInterruptionMonitor(withDescription: "Location permission") { alert in
             let deny = alert.buttons["Don’t Allow"]
             if deny.exists {

@@ -171,3 +171,30 @@ private final class FixtureURLProtocol: URLProtocol, @unchecked Sendable {
         FixtureRegistry.shared.fixture(for: request)?.stopped()
     }
 }
+
+/// Live integration coverage stays separate from deterministic interaction tests.
+/// Empty/stale realtime feeds are valid payloads; freshness behavior is covered by
+/// TransitModelsTests rather than requiring a particular live train to survive a tap.
+@MainActor
+final class LiveBackendContractTests: XCTestCase {
+    func testProductionEndpointsDecodeWithNativeContracts() async throws {
+        let session = URLSession(configuration: .ephemeral)
+        defer { session.invalidateAndCancel() }
+        func payload(_ path: String) async throws -> Data {
+            var request = try URLRequest(url: XCTUnwrap(URL(string: "https://standclear.vercel.app/\(path)")))
+            request.timeoutInterval = 20
+            request.cachePolicy = .reloadIgnoringLocalCacheData
+            let (data, response) = try await session.data(for: request)
+            XCTAssertEqual((response as? HTTPURLResponse)?.statusCode, 200)
+            return data
+        }
+        let staticData = try await JSONDecoder().decode(StaticData.self, from: payload("gtfsData.json"))
+        let stations = Transit.stations(Array(staticData.lines.values))
+        XCTAssertFalse(stations.isEmpty)
+        for id in ["127", "419", "629"] {
+            XCTAssertTrue(stations.contains { $0.id == id }, "Expected NYC station \(id) in the live static contract")
+        }
+        let snapshot = try await JSONDecoder().decode(Snapshot.self, from: payload("api/trains"))
+        XCTAssertTrue(snapshot.generatedAt.isFinite && snapshot.generatedAt > 0)
+    }
+}

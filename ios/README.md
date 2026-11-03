@@ -93,6 +93,10 @@ xcodebuild -project ios/StandClear.xcodeproj -scheme StandClear \
   -derivedDataPath /tmp/standclear-ios-derived CODE_SIGNING_ALLOWED=NO test
 ```
 
+UI interaction tests explicitly launch with `--ui-test-fixture`. This data source exists only in Debug simulator builds; ordinary launches, physical devices, and Release builds use the real endpoints. It supplies a small fixed station network and stable trip identities with fresh synthetic timestamps, through the same JSON decoding, polling, freshness, and cancellation paths. Core Location permission and native controls remain real. Nearby disclosure is required, rather than conditionally skipped when the live feed happens to lack a suitable arrival.
+
+`LiveBackendContractTests` separately fetches and decodes the production `gtfsData.json` and `api/trains` endpoints. It checks the actual station contract without requiring an ephemeral train to survive a multi-step interaction. Unit tests retain stale/expired-feed and lifecycle coverage. Fixture screenshots establish interaction/layout behavior, not live-data completeness or dense-map performance.
+
 To install and launch a simulator build:
 
 ```sh
