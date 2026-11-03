@@ -134,6 +134,28 @@ enum Transit {
         return result.sorted { $0.stop.name < $1.stop.name }
     }
 
+    /// Match the rider's terms anywhere in the name, as in the web station index.
+    static func searchStations(_ stations: [Station], query: String) -> [Station] {
+        func normalize(_ text: String) -> String {
+            text.folding(options: [.diacriticInsensitive, .widthInsensitive], locale: .current)
+                .lowercased()
+                .replacing(/\bsq\b/, with: "square")
+        }
+
+        let terms = normalize(query).split(whereSeparator: \.isWhitespace)
+        guard let first = terms.first else { return stations }
+        let phrase = terms.joined(separator: " ")
+        let matches = stations.compactMap { station -> (station: Station, score: Int)? in
+            let name = normalize(station.stop.name)
+            guard let firstMatch = name.range(of: first),
+                  terms.dropFirst().allSatisfy({ name.contains($0) })
+            else { return nil }
+            let score = name.hasPrefix(phrase) ? -1 : name.distance(from: name.startIndex, to: firstMatch.lowerBound)
+            return (station, score)
+        }
+        return matches.sorted { $0.score < $1.score }.map(\.station)
+    }
+
     static func nearby(_ stations: [Station], coordinate: CLLocationCoordinate2D) -> [Station] {
         let origin = CLLocation(latitude: coordinate.latitude, longitude: coordinate.longitude)
         let ranked = stations.sorted {

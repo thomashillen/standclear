@@ -115,7 +115,7 @@ struct DirectionStationPicker: View {
     @State private var query = ""
 
     private var matches: [Station] {
-        stations.filter { query.isEmpty || $0.stop.name.localizedStandardContains(query) }
+        Transit.searchStations(stations, query: query)
     }
 
     var body: some View {
