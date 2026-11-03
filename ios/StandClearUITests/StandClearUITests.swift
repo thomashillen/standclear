@@ -47,6 +47,7 @@ final class StandClearUITests: XCTestCase {
         XCTAssertTrue(app.navigationBars["Nearby arrivals"].waitForExistence(timeout: 5))
         let station = app.buttons["station-127"]
         XCTAssertTrue(station.waitForExistence(timeout: 10), "Times Square should be nearby the simulated location")
+        XCTAssertTrue(station.label.localizedCaseInsensitiveContains("straight line"), "A nearby station announces the approximate distance with its name")
         XCTAssertFalse(app.staticTexts["Arrival feed connected"].exists, "Healthy status must not displace nearby predictions")
         let capture = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         capture.name = "Automatic nearby arrivals with granted location"

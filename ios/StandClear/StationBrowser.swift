@@ -121,10 +121,10 @@ struct StationBrowser: View {
                             }
                             .listRowBackground(Color.clear)
                         }
-                        ForEach(results) { station in
+                        ForEach(results) { nearby in
                             Section {
-                                nearbyStationRow(station, savedOnly: false)
-                                arrivalRows(for: station, now: context.date)
+                                nearbyStationRow(nearby.station, savedOnly: false, meters: nearby.meters)
+                                arrivalRows(for: nearby.station, now: context.date)
                             }
                             .listRowBackground(Color.clear)
                             .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
@@ -193,9 +193,10 @@ struct StationBrowser: View {
         .accessibilityIdentifier(recent ? "recentStation-\(station.id)" : "station-\(station.id)")
     }
 
-    private func nearbyStationRow(_ station: Station, savedOnly: Bool) -> some View {
+    private func nearbyStationRow(_ station: Station, savedOnly: Bool, meters: Double? = nil) -> some View {
         Button { selectedStationID = station.id } label: {
-            stationLabel(station, starred: favoriteStations.contains(station.id))
+            stationLabel(station, starred: favoriteStations.contains(station.id), meters: meters)
+                .accessibilityElement(children: .combine)
         }
         .buttonStyle(.plain)
         .listRowBackground(Color.clear)
@@ -213,20 +214,34 @@ struct StationBrowser: View {
         }
     }
 
-    private func stationLabel(_ station: Station, starred: Bool = false) -> some View {
-        ViewThatFits(in: .horizontal) {
-            HStack {
-                stationName(station, starred: starred)
-                Spacer(minLength: 8)
-                routeBadges(station)
-            }
-            VStack(alignment: .leading, spacing: 4) {
-                stationName(station, starred: starred)
-                ViewThatFits(in: .horizontal) {
+    private func stationLabel(_ station: Station, starred: Bool = false, meters: Double? = nil) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            ViewThatFits(in: .horizontal) {
+                HStack {
+                    stationName(station, starred: starred)
+                    Spacer(minLength: 8)
                     routeBadges(station)
-                    Text(station.routes.map(RouteBadge.displayID).joined(separator: " · "))
-                        .font(.subheadline).foregroundStyle(.secondary)
                 }
+                VStack(alignment: .leading, spacing: 4) {
+                    stationName(station, starred: starred)
+                    ViewThatFits(in: .horizontal) {
+                        routeBadges(station)
+                        Text(station.routes.map(RouteBadge.displayID).joined(separator: " · "))
+                            .font(.subheadline).foregroundStyle(.secondary)
+                    }
+                }
+            }
+            if let meters {
+                let distance = Measurement(value: max(100, meters), unit: UnitLength.meters)
+                    .formatted(.measurement(width: .abbreviated, usage: .road, numberFormatStyle: .number.precision(.significantDigits(1 ... 2))))
+                Group {
+                    if meters < 100 {
+                        Text("Within about \(distance) in a straight line")
+                    } else {
+                        Text("About \(distance) away in a straight line")
+                    }
+                }
+                .font(.caption).foregroundStyle(.secondary)
             }
         }
         .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
