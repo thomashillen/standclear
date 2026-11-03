@@ -83,21 +83,15 @@ final class StandClearUITests: XCTestCase {
     private func checkPlaceSearchPreview(expanded: Bool) {
         let app = XCUIApplication()
         app.terminate()
-        XCUIDevice.shared.orientation = .portrait
+        XCUIDevice.shared.orientation = expanded ? .landscapeLeft : .portrait
         defer { XCUIDevice.shared.orientation = .portrait }
         app.resetAuthorizationStatus(for: .location)
         app.launchArguments = ["--ui-test-fixture", "-mapProvider", "Apple Maps"]
-        addUIInterruptionMonitor(withDescription: "Location permission") { alert in
-            let deny = alert.buttons["Don’t Allow"]
-            guard deny.exists else { return false }
-            deny.tap(); return true
-        }
         app.launch()
-        activatePermissionPrompt(in: app)
-        if expanded {
-            XCUIDevice.shared.orientation = .landscapeLeft
-            waitForLayout(in: app, expanded: true)
-        }
+        let deny = XCUIApplication(bundleIdentifier: "com.apple.springboard").alerts.buttons["Don’t Allow"]
+        XCTAssertTrue(deny.waitForExistence(timeout: 20))
+        deny.tap()
+        waitForLayout(in: app, expanded: expanded)
         app.buttons["searchButton"].tap()
         let entry = app.buttons["placeSearchEntry"]
         XCTAssertTrue(entry.waitForExistence(timeout: 10))
@@ -129,7 +123,7 @@ final class StandClearUITests: XCTestCase {
         }
         XCTAssertTrue(total.waitForExistence(timeout: 5))
         XCTAssertTrue(list.descendants(matching: .any)["placeDestinationWalk"].firstMatch.label.contains("550 Madison"))
-        let capture = XCTAttachment(screenshot: app.screenshot())
+        let capture = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         capture.name = expanded ? "Expanded place preview" : "Compact place preview"
         capture.lifetime = .keepAlways
         add(capture)
