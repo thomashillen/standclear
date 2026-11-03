@@ -2,36 +2,27 @@ import MapKit
 import Observation
 import SwiftUI
 
-/// A bounded, flat-map comparison using the same transit projection and artwork
-/// as Mapbox. It intentionally does not claim Mapbox's pitched symbol parity.
+/// MapKit renders cached subway geometry and samples train motion while visible.
 struct AppleTransitMap: View {
-    private let routeGeometry: [AppleRoutePolyline]
-    let markers: [TrainMapMarker]
+    let store: TransitStore
     let focusedCoordinate: CLLocationCoordinate2D?
-    let currentLocation: CLLocationCoordinate2D?
-    let tripOverlays: [TripMapOverlay]
-    let tripFocusRevision: Int
     var focusRevision: Int = 0
     var coveredWidth: CGFloat = 0
     var coveredBottom: CGFloat = 0
+    var currentLocation: CLLocationCoordinate2D?
+    var tripOverlays: [TripMapOverlay] = []
+    var tripFocusRevision: Int = 0
 
-    init(lines: [SubwayLine], markers: [TrainMapMarker], focusedCoordinate: CLLocationCoordinate2D?,
-         focusRevision: Int = 0, coveredWidth: CGFloat = 0, coveredBottom: CGFloat = 0, currentLocation: CLLocationCoordinate2D? = nil,
-         tripOverlays: [TripMapOverlay] = [], tripFocusRevision: Int = 0)
-    {
-        // Rebuilt when the parent supplies transit inputs, never when this view's
-        // camera state changes. Exact shape changes update without a hash per frame.
-        routeGeometry = lines.map { AppleRoutePolyline(id: $0.routeId, color: $0.color, coordinates: $0.coordinates) }
-        self.markers = markers
-        self.focusedCoordinate = focusedCoordinate
-        self.currentLocation = currentLocation
-        self.focusRevision = focusRevision
-        self.coveredWidth = coveredWidth
-        self.coveredBottom = coveredBottom
-        self.tripOverlays = tripOverlays
-        self.tripFocusRevision = tripFocusRevision
-    }
-
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var motion = TrainMotion(lines: [])
+    @State private var routeGeometry: [AppleRoutePolyline] = []
+    @State private var tripGeometry: [AppleRoutePolyline] = []
+    @State private var indexedLinesRevision: UInt64?
+    @State private var appliedFeedRevision: UUID?
+    @State private var markers: [TrainMapMarker] = []
+    @State private var entryGeneration: Double?
+    @State private var needsEntryAnchor = true
     @State private var position = MapCameraPosition.region(MKCoordinateRegion(
         center: CLLocationCoordinate2D(latitude: 40.754, longitude: -73.984),
         span: MKCoordinateSpan(latitudeDelta: 0.14, longitudeDelta: 0.11)
@@ -39,21 +30,22 @@ struct AppleTransitMap: View {
     @State private var cameraState = AppleTransitCameraState()
 
     var body: some View {
+        let inputs = motionInputs
         GeometryReader { geometry in
             MapKit.Map(position: $position, interactionModes: [.pan, .zoom, .rotate]) {
                 ForEach(routeGeometry) { line in
-                    MapPolyline(coordinates: line.coordinates)
-                        .stroke(Color(uiColor: transitColor(line.color)),
+                    MapPolyline(line.polyline)
+                        .stroke(line.color,
                                 style: StrokeStyle(lineWidth: 3, lineCap: .round, lineJoin: .round))
                 }
-                ForEach(tripOverlays) { overlay in
-                    MapPolyline(coordinates: overlay.coordinates)
+                ForEach(tripGeometry) { overlay in
+                    MapPolyline(overlay.polyline)
                         .stroke(.white, style: StrokeStyle(lineWidth: 10, lineCap: .round, lineJoin: .round))
-                    MapPolyline(coordinates: overlay.coordinates)
-                        .stroke(Color(uiColor: transitColor(overlay.color)),
+                    MapPolyline(overlay.polyline)
+                        .stroke(overlay.color,
                                 style: StrokeStyle(lineWidth: 6, lineCap: .round, lineJoin: .round))
                 }
-                ForEach(markers) { marker in
+                ForEach(inputs.feedRevision == nil || !inputs.active ? [] : markers) { marker in
                     Annotation("Route \(marker.displayLetter) train", coordinate: marker.coordinate) {
                         AppleTrainAnnotation(marker: marker, cameraState: cameraState)
                     }
@@ -112,13 +104,101 @@ struct AppleTransitMap: View {
             .accessibilityLabel("Apple Maps subway comparison")
             .accessibilityHint("Use Search or Nearby for accessible station arrivals.")
         }
+        .onChange(of: TripGeometryInput(linesRevision: inputs.linesRevision, focus: tripFocusRevision, ids: tripOverlays.map(\.id)), initial: true) { _, _ in
+            tripGeometry = tripOverlays.compactMap { AppleRoutePolyline(id: $0.id, color: $0.color, coordinates: $0.coordinates) }
+        }
+        .task(id: inputs) { await render(inputs) }
+        .onChange(of: scenePhase) { _, phase in
+            if phase != .active {
+                stopMotion()
+            }
+        }
+        .onDisappear { stopMotion() }
+    }
+
+    private struct TripGeometryInput: Equatable {
+        let linesRevision: UInt64
+        let focus: Int
+        let ids: [String]
+    }
+
+    private struct MotionInputs: Equatable {
+        let linesRevision: UInt64
+        let feedRevision: UUID?
+        let active: Bool
+        let reduceMotion: Bool
+    }
+
+    private var motionInputs: MotionInputs {
+        MotionInputs(linesRevision: store.linesRevision, feedRevision: store.feedError ? nil : store.motionSnapshotRevision,
+                     active: scenePhase == .active, reduceMotion: reduceMotion)
+    }
+
+    private func stopMotion() {
+        motion.reset()
+        markers = []
+        appliedFeedRevision = nil
+        needsEntryAnchor = true
+    }
+
+    private func render(_ inputs: MotionInputs) async {
+        guard !Task.isCancelled, inputs == motionInputs else { return }
+        if needsEntryAnchor {
+            // A newly visible map can show a fresh cached observation. Do not
+            // advance it through the time spent away or blend from that path.
+            entryGeneration = store.snapshot?.generatedAt
+            needsEntryAnchor = false
+        }
+        guard inputs.active else { stopMotion(); return }
+        if indexedLinesRevision != inputs.linesRevision {
+            let lines = store.lines
+            routeGeometry = lines.compactMap { AppleRoutePolyline(id: $0.routeId, color: $0.color, coordinates: $0.coordinates) }
+            motion = TrainMotion(lines: lines)
+            indexedLinesRevision = inputs.linesRevision
+            appliedFeedRevision = nil
+        }
+        guard let revision = inputs.feedRevision, let snapshot = store.snapshot else {
+            // After a failed refresh or lifecycle interruption, the previous
+            // generation can resume only as a discrete, fresh observation.
+            entryGeneration = store.snapshot?.generatedAt
+            motion.reset()
+            markers = []
+            appliedFeedRevision = nil
+            return
+        }
+        if let entryGeneration, snapshot.generatedAt > entryGeneration {
+            motion.reset()
+            self.entryGeneration = nil
+        }
+        if appliedFeedRevision != revision {
+            motion.update(snapshot: snapshot, now: .now, feedUnavailable: false)
+            appliedFeedRevision = revision
+        }
+        let discrete = inputs.reduceMotion || entryGeneration != nil
+        while !Task.isCancelled, inputs == motionInputs {
+            let now = Date()
+            markers = motion.markers(at: now, reduceMotion: discrete)
+            guard snapshot.isFresh(at: now) else { return }
+            // Wake exactly at feed expiry even when coarse sampling. Other
+            // input/lifecycle changes cancel this sleep and resample immediately.
+            let interval = !discrete && motion.hasActiveMotion(at: now) ? 0.25 : 5.0
+            let remaining = snapshot.generatedAt / 1000 + 60 - now.timeIntervalSince1970
+            do { try await Task.sleep(for: .seconds(min(interval, max(0.001, remaining)))) } catch { return }
+        }
     }
 }
 
 private struct AppleRoutePolyline: Identifiable {
     let id: String
-    let color: String
-    let coordinates: [CLLocationCoordinate2D]
+    let color: Color
+    let polyline: MKPolyline
+
+    init?(id: String, color: String, coordinates: [CLLocationCoordinate2D]) {
+        guard coordinates.count >= 2 else { return nil }
+        self.id = id
+        self.color = Color(uiColor: transitColor(color))
+        polyline = MKPolyline(coordinates: coordinates, count: coordinates.count)
+    }
 }
 
 /// The map view does not read these properties. Only individual marker views
