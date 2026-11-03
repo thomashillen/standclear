@@ -54,6 +54,51 @@ struct TransitRouteIdentity {
     }
 }
 
+enum ArrivalDirection: String, CaseIterable {
+    case north = "N", south = "S", unknown
+
+    init(_ reported: String) {
+        self = Self(rawValue: reported) ?? .unknown
+    }
+
+    var title: String {
+        switch self {
+        case .north: "Northbound"
+        case .south: "Southbound"
+        case .unknown: "Direction unavailable"
+        }
+    }
+}
+
+struct StationArrivalGroup: Identifiable {
+    let direction: ArrivalDirection
+    let arrivals: [Arrival]
+    var id: ArrivalDirection {
+        direction
+    }
+
+    private static let previewCount = 4
+    var overflowCount: Int {
+        max(0, arrivals.count - Self.previewCount)
+    }
+
+    func visible(expanded: Bool) -> ArraySlice<Arrival> {
+        arrivals.prefix(expanded ? arrivals.count : Self.previewCount)
+    }
+
+    /// Group after station/freshness filtering so each direction keeps the
+    /// existing ETA order and has access to every qualifying prediction.
+    static func groups(_ arrivals: [Arrival]) -> [Self] {
+        guard !arrivals.isEmpty else { return [] }
+        let byDirection = Dictionary(grouping: arrivals) { ArrivalDirection($0.direction) }
+        return ArrivalDirection.allCases.compactMap { direction in
+            let members = byDirection[direction] ?? []
+            guard direction != .unknown || !members.isEmpty else { return nil }
+            return Self(direction: direction, arrivals: members)
+        }
+    }
+}
+
 struct Arrival: Decodable, Identifiable {
     let routeId: String
     let stopId: String
@@ -66,11 +111,7 @@ struct Arrival: Decodable, Identifiable {
     }
 
     var directionLabel: String {
-        switch direction {
-        case "N": "Northbound"
-        case "S": "Southbound"
-        default: "Direction unavailable"
-        }
+        ArrivalDirection(direction).title
     }
 
     func destinationName(in lines: [SubwayLine]) -> String? {

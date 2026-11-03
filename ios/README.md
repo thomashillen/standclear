@@ -155,7 +155,7 @@ The first boarding prediction uses the existing strict freshness filters, matchi
 
 ## Compact native arrivals
 
-Nearby prioritizes station and arrival information: healthy-feed status remains in More rather than occupying a list section. Loading, stale/error recovery, and location-permission states remain visible. Station badges fit beside names when space permits. Arrival rows keep route, direction, countdown, and reported destination visible; expand a native disclosure to read the prediction's clock time. Text adapts instead of shrinking to fit.
+Nearby prioritizes station and arrival information: healthy-feed status remains in More rather than occupying a list section. Loading, stale/error recovery, and location-permission states remain visible. Station badges fit beside names when space permits. Station details show the first four predictions in each direction. Use Show all to expand one direction independently. Predictions with an unrecognized direction appear separately. Arrival rows keep route, direction, countdown, and reported destination visible; expand a native disclosure to read the prediction's clock time. Text adapts instead of shrinking to fit.
 
 The three-group map glance uses route bullets for each direction in a narrower native glass surface. Expanded controls use system material over the map, with transparent navigation/list backgrounds and an opaque semantic fallback for Reduce Transparency. MapKit can now advance eligible train estimates between feed updates. It follows the representative track toward a matching next-stop arrival, holds at the station, and uses discrete reported positions under Reduce Motion. See [train motion](docs/train-motion.md).
 

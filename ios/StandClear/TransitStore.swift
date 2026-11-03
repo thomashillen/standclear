@@ -200,12 +200,25 @@ final class TransitStore {
                     ] + (includeExpress ? [
                         arrival(id: "ui-fixture-6x-n", route: "6X", stop: "608", direction: "N", destination: "601", eta: timestamp + 120),
                         arrival(id: "ui-fixture-6-s", route: "6", stop: "608", direction: "S", destination: "613", eta: timestamp + 240),
-                    ] : []),
+                    ] : []) + groupedArrivals(at: timestamp),
                 ]
             default:
                 throw URLError(.unsupportedURL)
             }
             return try JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys])
+        }
+
+        private static func groupedArrivals(at timestamp: Double) -> [[String: Any]] {
+            guard ProcessInfo.processInfo.arguments.contains("--ui-test-grouped-arrivals") else { return [] }
+            // All northbound arrivals come before the first southbound arrival.
+            // A global first-20 cap would hide both the south and unknown groups.
+            let north = (1 ... 22).map { index in
+                arrival(id: "busy-n-\(index)", route: "4", stop: "631", direction: "N", destination: "629", eta: timestamp + Double(index * 30))
+            }
+            let south = (1 ... 6).map { index in
+                arrival(id: "busy-s-\(index)", route: "4", stop: "631", direction: "S", destination: "419", eta: timestamp + Double(720 + index * 30))
+            }
+            return north + south + [arrival(id: "busy-unknown", route: "4", stop: "631", direction: "?", destination: "419", eta: timestamp + 960)]
         }
 
         private static func line(id: String, color: String, stops: [(String, String, Double, Double)]) -> [String: Any] {
