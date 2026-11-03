@@ -1,0 +1,205 @@
+import CoreLocation
+import Foundation
+import MapKit
+
+struct PlaceResult: Identifiable, Hashable, Sendable {
+    let id: String
+    let name: String
+    let subtitle: String
+    let latitude: Double
+    let longitude: Double
+    var coordinate: CLLocationCoordinate2D {
+        .init(latitude: latitude, longitude: longitude)
+    }
+}
+
+struct WalkingConnection: Sendable {
+    let coordinates: [CLLocationCoordinate2D]
+    let seconds: Double
+    let meters: Double
+}
+
+enum PlaceServiceError: Error { case unavailable, noWalkingRoute }
+
+struct PlaceService: Sendable {
+    typealias Find = @MainActor @Sendable (String) async throws -> [PlaceResult]
+    typealias Route = @MainActor @Sendable (CLLocationCoordinate2D, CLLocationCoordinate2D) async throws -> WalkingConnection
+    private let find: Find
+    private let route: Route
+
+    init() {
+        #if DEBUG && targetEnvironment(simulator)
+            if ProcessInfo.processInfo.arguments.contains("--ui-test-fixture") {
+                self.init(find: PlaceFixture.find, route: PlaceFixture.route)
+                return
+            }
+        #endif
+        self.init(find: Self.findMapItems, route: Self.walkingRoute)
+    }
+
+    init(find: @escaping Find, route: @escaping Route) {
+        self.find = find
+        self.route = route
+    }
+
+    func search(_ query: String) async throws -> [PlaceResult] {
+        try Task.checkCancellation()
+        let query = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard query.count >= 2 else { return [] }
+        let places: [PlaceResult]
+        do {
+            places = try await find(query)
+        } catch {
+            try Task.checkCancellation()
+            if let error = error as? MKError, error.code == .placemarkNotFound {
+                return []
+            }
+            throw error
+        }
+        try Task.checkCancellation()
+        var ids = Set<String>()
+        return Array(places.filter {
+            Self.inNYC($0.coordinate) && !$0.name.isEmpty && ids.insert($0.id).inserted
+        }.prefix(10))
+    }
+
+    func walk(from: CLLocationCoordinate2D, to: CLLocationCoordinate2D) async throws -> WalkingConnection {
+        try Task.checkCancellation()
+        guard Self.inNYC(from), Self.inNYC(to) else { throw PlaceServiceError.noWalkingRoute }
+        let connection: WalkingConnection
+        do {
+            connection = try await route(from, to)
+        } catch {
+            try Task.checkCancellation()
+            if let error = error as? MKError, error.code == .directionsNotFound {
+                throw PlaceServiceError.noWalkingRoute
+            }
+            throw error
+        }
+        try Task.checkCancellation()
+        guard connection.seconds.isFinite, connection.seconds > 0, connection.meters.isFinite, connection.meters > 0,
+              let first = connection.coordinates.first, connection.coordinates.allSatisfy(Self.inNYC),
+              connection.coordinates.contains(where: { $0.latitude != first.latitude || $0.longitude != first.longitude })
+        else { throw PlaceServiceError.unavailable }
+        return connection
+    }
+
+    private static func inNYC(_ coordinate: CLLocationCoordinate2D) -> Bool {
+        (40.55 ... 40.92).contains(coordinate.latitude) && (-74.20 ... -73.70).contains(coordinate.longitude)
+    }
+
+    @MainActor private static func findMapItems(_ query: String) async throws -> [PlaceResult] {
+        let request = MKLocalSearch.Request()
+        request.naturalLanguageQuery = query
+        request.resultTypes = [.address, .pointOfInterest]
+        request.region = MKCoordinateRegion(center: .init(latitude: 40.735, longitude: -73.95),
+                                            span: .init(latitudeDelta: 0.37, longitudeDelta: 0.5))
+        request.regionPriority = .required
+        let search = MKLocalSearch(request: request)
+        return try await MapRequest<[PlaceResult]>().run(cancel: { search.cancel() }) { finish in
+            search.start { response, error in
+                guard let response else { return finish(.failure(error ?? PlaceServiceError.unavailable)) }
+                let places = response.mapItems.compactMap { item -> PlaceResult? in
+                    let name = (item.name ?? item.address?.shortAddress ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                    guard !name.isEmpty else { return nil }
+                    let coordinate = item.location.coordinate
+                    let id = item.identifier?.rawValue ?? "\(name)|\(coordinate.latitude),\(coordinate.longitude)"
+                    return PlaceResult(id: id, name: name, subtitle: item.address?.fullAddress ?? "",
+                                       latitude: coordinate.latitude, longitude: coordinate.longitude)
+                }
+                finish(.success(places))
+            }
+        }
+    }
+
+    @MainActor private static func walkingRoute(_ from: CLLocationCoordinate2D, _ to: CLLocationCoordinate2D) async throws -> WalkingConnection {
+        let request = MKDirections.Request()
+        request.source = MKMapItem(location: CLLocation(latitude: from.latitude, longitude: from.longitude), address: nil)
+        request.destination = MKMapItem(location: CLLocation(latitude: to.latitude, longitude: to.longitude), address: nil)
+        request.transportType = .walking
+        let directions = MKDirections(request: request)
+        return try await MapRequest<WalkingConnection>().run(cancel: { directions.cancel() }) { finish in
+            directions.calculate { response, error in
+                guard let response else { return finish(.failure(error ?? PlaceServiceError.unavailable)) }
+                guard let route = response.routes.first, route.polyline.pointCount >= 2 else {
+                    return finish(.failure(PlaceServiceError.noWalkingRoute))
+                }
+                var coordinates = Array(repeating: CLLocationCoordinate2D(), count: route.polyline.pointCount)
+                route.polyline.getCoordinates(&coordinates, range: NSRange(location: 0, length: coordinates.count))
+                finish(.success(WalkingConnection(coordinates: coordinates, seconds: route.expectedTravelTime, meters: route.distance)))
+            }
+        }
+    }
+}
+
+/// MapKit delivers these completions on the main queue. Finish once even when a
+/// native completion arrives after cancellation, and release the suspended caller
+/// if the underlying request stops without returning a result.
+@MainActor
+private final class MapRequest<Value: Sendable> {
+    private var continuation: CheckedContinuation<Value, Error>?
+
+    func run(cancel: @escaping @MainActor @Sendable () -> Void,
+             start: (@escaping @Sendable (Result<Value, Error>) -> Void) -> Void) async throws -> Value
+    {
+        try await withTaskCancellationHandler {
+            try Task.checkCancellation()
+            return try await withCheckedThrowingContinuation { continuation in
+                self.continuation = continuation
+                start { result in
+                    Task { @MainActor in self.finish(result) }
+                }
+            }
+        } onCancel: {
+            Task { @MainActor in
+                self.finish(.failure(CancellationError()))
+                cancel()
+            }
+        }
+    }
+
+    private func finish(_ result: Result<Value, Error>) {
+        let pending = continuation
+        continuation = nil
+        pending?.resume(with: result)
+    }
+}
+
+#if DEBUG && targetEnvironment(simulator)
+    private enum PlaceFixture {
+        static let addresses = [
+            PlaceResult(id: "fixture-550-madison", name: "550 Madison Avenue", subtitle: "Manhattan, New York",
+                        latitude: 40.7616, longitude: -73.9733),
+            PlaceResult(id: "fixture-bryant-park", name: "Bryant Park", subtitle: "Manhattan, New York",
+                        latitude: 40.7536, longitude: -73.9832),
+        ]
+
+        static func find(_ query: String) -> [PlaceResult] {
+            addresses.filter { $0.name.localizedCaseInsensitiveContains(query) }
+        }
+
+        static func route(_ from: CLLocationCoordinate2D, _ to: CLLocationCoordinate2D) throws -> WalkingConnection {
+            let routes = [
+                WalkingConnection(coordinates: [.init(latitude: 40.762526, longitude: -73.967967),
+                                                .init(latitude: 40.7638, longitude: -73.9712), addresses[0].coordinate],
+                                  seconds: 435, meters: 555),
+                WalkingConnection(coordinates: [.init(latitude: 40.75529, longitude: -73.987495),
+                                                .init(latitude: 40.7569, longitude: -73.9836), addresses[1].coordinate],
+                                  seconds: 410, meters: 530),
+            ]
+            func near(_ a: CLLocationCoordinate2D, _ b: CLLocationCoordinate2D) -> Bool {
+                abs(a.latitude - b.latitude) < 0.00001 && abs(a.longitude - b.longitude) < 0.00001
+            }
+            for route in routes {
+                guard let start = route.coordinates.first, let end = route.coordinates.last else { continue }
+                if near(from, start), near(to, end) {
+                    return route
+                }
+                if near(from, end), near(to, start) {
+                    return WalkingConnection(coordinates: Array(route.coordinates.reversed()), seconds: route.seconds, meters: route.meters)
+                }
+            }
+            throw PlaceServiceError.noWalkingRoute
+        }
+    }
+#endif

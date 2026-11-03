@@ -107,7 +107,7 @@ struct DirectionsView: View {
     }
 }
 
-private struct DirectionStationPicker: View {
+struct DirectionStationPicker: View {
     let stations: [Station]
     let title: String
     let choose: (Station) -> Void

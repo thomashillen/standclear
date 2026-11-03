@@ -1,6 +1,6 @@
 # StandClear for iOS — native transit map comparison
 
-This Xcode project is an incremental native client alongside the existing Next.js web application. The web app and backend remain the production application. The SwiftUI client now offers a bounded comparison between the native Mapbox Maps SDK, pinned to **11.26.0** through Swift Package Manager, and Apple MapKit. Both engines run natively; neither uses a WebView. Mapbox remains the default. Choose a map provider in **More** to switch engines; the choice persists between launches. This comparison does not establish complete feature or performance parity.
+This Xcode project is an incremental native client alongside the existing Next.js web application. The web app and backend remain the production application. The SwiftUI client now offers a bounded comparison between the native Mapbox Maps SDK, pinned to **11.26.0** through Swift Package Manager, and Apple MapKit. Both engines run natively; neither uses a WebView. MapKit is the default for new installations. Choose a map provider in **More** to switch engines; the choice persists between launches. This comparison does not establish complete feature or performance parity.
 
 The project targets iOS 26 or later and is developed with Xcode 27.2 / the iOS 27.2 SDK. See [the map comparison record](docs/map-comparison.md) for the comparison’s scope, observations, and validation results.
 
@@ -16,7 +16,7 @@ Select the shared **StandClear** scheme and an installed iPhone simulator, then 
 
 Xcode reads the same local source files being edited in this checkout. Press **⌘R** after code changes to rebuild and relaunch. Realtime data refreshes independently while the application is running.
 
-Create `ios/Config/Local.xcconfig`, which is ignored by Git:
+To enable the optional Mapbox renderer, create `ios/Config/Local.xcconfig`, which is ignored by Git:
 
 ```xcconfig
 MAPBOX_PUBLIC_TOKEN = <your public Mapbox rendering token>
@@ -121,13 +121,11 @@ The [original proof-of-concept validation record](docs/validation.md) describes 
 
 ## Limits and next increments
 
-This is a map/search/nearby-arrivals client with basic station directions, not web feature parity. It has no address geocoding, service-alert presentation, saved commutes, favorites, persistence/offline cache, background arrivals, push notifications, settings screen, or complete station-details feature. Nearby selection uses straight-line distance, not walking directions. It does not synthesize “Now” rows from stopped trains. Search is local station-name matching, without address suggestions or the web client’s full suggestion behavior. Native CI and physical Duo acceptance must be assessed separately from the existing web CI.
+In **Search → Addresses and places**, search for an NYC address or point of interest and open the result to preview a trip. MapKit looks up the place and supplies walking paths and estimated walking times. StandClear uses its subway graph to find direct and one-transfer trips. A recent location near a station supplies the starting point. Tap **From** to choose another station, including when location access is unavailable.
 
-Continue in small reviewed increments: location lifecycle and automatic nearby presentation; arrival freshness and outage behavior; train-marker parity; search suggestions; station details; navigation/trip planning; settings and secondary menus. Preserve cancellation, location efficiency, accessibility, and reduced-motion behavior at each step.
+The planner considers up to three destination station complexes within 900 metres. Once each required walking path is available, the preview shows both walking time and a typical trip duration. The latter uses regular-service assumptions of four minutes per train wait, 90 seconds per stop and three minutes per transfer. Station coordinates approximate entrances. The nearby-arrivals list continues to rank stations by straight-line distance. Service alerts, saved places, and alternative trip comparisons are future increments.
 
-Mapbox remains the default while the optional MapKit comparison tests the core overlays and shared train artwork. The comparison does not establish Mapbox basemap-style parity, pitched-map behavior, dense-marker performance, selection behavior, or smooth realtime interpolation. No benchmark or full migration is claimed. Apple’s basemap has different styling controls; use the comparison record to separate those differences from missing transit behavior.
-
-MapKit is not a replacement for the existing MTA data contracts or subway-routing logic. This milestone does not add MapKit directions or transit-ETA requests. Apple’s transit ETA capability is not a drop-in subway itinerary planner, so retain StandClear’s backend and transit graph when evaluating future routing. Evaluate costs, offline requirements, accessibility, attribution, and platform terms separately before choosing a production engine.
+MapKit is the primary native development path. Riders can still select the Mapbox renderer under **More**. See [the migration audit](docs/mapkit-migration.md) for the remaining dependencies and checks before retirement.
 
 ## Location and compact map glance
 
