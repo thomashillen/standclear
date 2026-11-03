@@ -85,6 +85,72 @@ final class StandClearUITests: XCTestCase {
     }
 
     @MainActor
+    func testBusyStationArrivalGroupsExpandIndependently() {
+        let app = XCUIApplication()
+        app.terminate()
+        XCUIDevice.shared.orientation = .portrait
+        app.resetAuthorizationStatus(for: .location)
+        app.launchArguments = ["--ui-test-fixture", "--ui-test-grouped-arrivals", "-mapProvider", "Apple Maps"]
+        addUIInterruptionMonitor(withDescription: "Location permission") { alert in
+            let deny = alert.buttons["Don’t Allow"]
+            guard deny.exists else { return false }
+            deny.tap()
+            return true
+        }
+        app.launch()
+        activatePermissionPrompt(in: app)
+        app.buttons["searchButton"].tap()
+        let field = app.searchFields[unifiedSearchPrompt]
+        XCTAssertTrue(field.waitForExistence(timeout: 5))
+        field.tap()
+        field.typeText("Grand Central\n")
+        selectSearchResult("631", query: "Grand Central", in: app)
+        XCTAssertTrue(app.navigationBars["Grand Central-42 St"].waitForExistence(timeout: 5))
+        let list = app.collectionViews["stationArrivalsList"]
+        XCTAssertTrue(list.waitForExistence(timeout: 5))
+        let north = list.buttons["stationArrivalToggle-N"]
+        let south = list.buttons["stationArrivalToggle-S"]
+        let fifthNorth = list.buttons["arrivalRow-busy-n-5:631:N"]
+        let fifthSouth = list.buttons["arrivalRow-busy-s-5:631:S"]
+        let unknown = list.buttons["arrivalRow-busy-unknown:631:?"]
+        func reveal(_ row: XCUIElement, towardBottom: Bool) {
+            for _ in 0 ..< 8 {
+                if row.exists, row.frame.height > 0, list.frame.contains(row.frame), row.isHittable {
+                    return
+                }
+                let start = list.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: towardBottom ? 0.8 : 0.35))
+                let end = list.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: towardBottom ? 0.35 : 0.8))
+                start.press(forDuration: 0.1, thenDragTo: end)
+            }
+            XCTFail("Could not reveal \(row)")
+        }
+        reveal(north, towardBottom: true)
+        XCTAssertTrue(north.label.contains("18 more"))
+        XCTAssertFalse(fifthNorth.exists)
+        north.tap()
+        XCTAssertTrue(fifthNorth.waitForExistence(timeout: 5))
+        reveal(south, towardBottom: true)
+        XCTAssertTrue(south.label.contains("2 more"), "Expanding north must leave south collapsed")
+        XCTAssertFalse(fifthSouth.exists)
+        south.tap()
+        XCTAssertTrue(fifthSouth.waitForExistence(timeout: 5))
+        reveal(unknown, towardBottom: true)
+        XCTAssertTrue(unknown.label.localizedCaseInsensitiveContains("direction unavailable"))
+        reveal(north, towardBottom: false)
+        XCTAssertTrue(north.label.contains("Show less"))
+        north.tap()
+        reveal(south, towardBottom: true)
+        XCTAssertTrue(south.label.contains("Show less"), "Collapsing north must leave south expanded")
+        south.tap()
+        reveal(unknown, towardBottom: true)
+        XCTAssertFalse(fifthSouth.exists)
+        let capture = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        capture.name = "Grouped Grand Central arrivals retain later southbound and unknown predictions"
+        capture.lifetime = .keepAlways
+        add(capture)
+    }
+
+    @MainActor
     func testExpressArrivalIdentifiesServiceAtParkchester() {
         let app = XCUIApplication()
         app.terminate()

@@ -20,6 +20,31 @@ final class TransitModelsTests: XCTestCase {
         XCTAssertEqual(results("  "), names)
     }
 
+    func testStationArrivalGroupsPreserveLaterDirectionsAndIndependentPreviews() throws {
+        let station = Station(id: "631", stop: stop("631"), stopIDs: ["631"], routes: ["4"])
+        func prediction(_ trip: String, _ direction: String, _ seconds: Int) -> Arrival {
+            Arrival(routeId: "4", stopId: "631", direction: direction, eta: now.timeIntervalSince1970 + Double(seconds), tripId: trip, destStopId: nil)
+        }
+        let north = (1 ... 22).map { prediction("n\($0)", "N", $0 * 30) }
+        let south = (1 ... 6).map { prediction("s\($0)", "S", 720 + $0 * 30) }
+        let unknown = prediction("unknown", "?", 960)
+        let feed = snapshot(arrivals: Array((north + south + [unknown]).reversed()))
+        let groups = StationArrivalGroup.groups(Transit.arrivals(for: station, snapshot: feed, now: now))
+        XCTAssertEqual(groups.map(\.direction), [.north, .south, .unknown])
+        let n = try XCTUnwrap(groups.first { $0.direction == .north })
+        let s = try XCTUnwrap(groups.first { $0.direction == .south })
+        XCTAssertEqual(n.visible(expanded: false).map(\.id), north.prefix(4).map(\.id))
+        XCTAssertEqual(s.visible(expanded: false).map(\.id), south.prefix(4).map(\.id))
+        XCTAssertEqual(n.visible(expanded: true).map(\.id), north.map(\.id))
+        XCTAssertEqual(s.visible(expanded: true).map(\.id), south.map(\.id))
+        XCTAssertEqual(groups.map(\.overflowCount), [18, 2, 0])
+        XCTAssertEqual(groups.last?.arrivals.map(\.id), [unknown.id])
+        XCTAssertTrue(StationArrivalGroup.groups([]).isEmpty)
+        let oneDirection = StationArrivalGroup.groups([north[0]])
+        XCTAssertEqual(oneDirection.map(\.direction), [.north, .south])
+        XCTAssertTrue(try XCTUnwrap(oneDirection.last).arrivals.isEmpty)
+    }
+
     func testSnapshotUsesMillisecondsAndExpiresAtSixtySeconds() {
         XCTAssertTrue(snapshot(age: 59.999).isFresh(at: now))
         XCTAssertFalse(snapshot(age: 60).isFresh(at: now))
