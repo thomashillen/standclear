@@ -5,29 +5,34 @@ struct DirectionsView: View {
     @Binding var selection: DirectionsSelection
     let onSelect: (NativeTripPlan?) -> Void
     let onShowMap: (NativeTripPlan) -> Void
-    @State private var editing: Endpoint?
-
-    private enum Endpoint: String, Identifiable, Hashable {
-        case origin, destination
-        var id: String {
-            rawValue
-        }
-
-        var title: String {
-            self == .origin ? "From station" : "To station"
-        }
-    }
-
     var body: some View {
         List {
             Section {
-                Button { editing = .origin } label: {
+                NavigationLink {
+                    DirectionStationPicker(stations: store.stations, title: "From station") { station in
+                        selection.originID = station.id
+                    }
+                } label: {
                     LabeledContent("From", value: selection.origin(in: store.stations)?.stop.name ?? "Choose station")
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentShape(Rectangle())
                 }
                 .accessibilityIdentifier("originPicker")
                 .disabled(store.stations.isEmpty)
-                Button { editing = .destination } label: {
+                if selection.originWasSuggested {
+                    Text("Suggested nearby station from your location. Walking to the station is not included.")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .accessibilityIdentifier("originSuggestion")
+                }
+                NavigationLink {
+                    DirectionStationPicker(stations: store.stations, title: "To station") { station in
+                        selection.destinationID = station.id
+                    }
+                } label: {
                     LabeledContent("To", value: selection.destination(in: store.stations)?.stop.name ?? "Choose station")
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentShape(Rectangle())
                 }
                 .accessibilityIdentifier("destinationPicker")
                 .disabled(store.stations.isEmpty)
@@ -86,6 +91,7 @@ struct DirectionsView: View {
                                        description: Text("Plan a direct subway trip or a route with one transfer."))
             }
         }
+        .accessibilityIdentifier("directionsList")
         .navigationTitle("Directions")
         .navigationBarTitleDisplayMode(.inline)
         .scrollContentBackground(.hidden)
@@ -97,16 +103,6 @@ struct DirectionsView: View {
                     .accessibilityIdentifier("clearDirections")
             }
         }
-        .navigationDestination(item: $editing) { endpoint in
-            DirectionStationPicker(stations: store.stations, title: endpoint.title) { station in
-                if endpoint == .origin {
-                    selection.originID = station.id
-                } else {
-                    selection.destinationID = station.id
-                }
-                editing = nil
-            }
-        }
         .onChange(of: selection) { _, _ in onSelect(nil) }
     }
 }
@@ -115,6 +111,7 @@ private struct DirectionStationPicker: View {
     let stations: [Station]
     let title: String
     let choose: (Station) -> Void
+    @Environment(\.dismiss) private var dismiss
     @State private var query = ""
 
     private var matches: [Station] {
@@ -127,7 +124,10 @@ private struct DirectionStationPicker: View {
                 ContentUnavailableView.search(text: query)
             }
             ForEach(matches) { station in
-                Button { choose(station) } label: {
+                Button {
+                    choose(station)
+                    dismiss()
+                } label: {
                     VStack(alignment: .leading) {
                         Text(station.stop.name)
                         Text(station.routes.map(RouteBadge.displayID).joined(separator: " · "))
@@ -137,7 +137,7 @@ private struct DirectionStationPicker: View {
                 .accessibilityIdentifier("stationChoice-\(station.id)")
             }
         }
-        .searchable(text: $query, prompt: "Search subway stations")
+        .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search subway stations")
         .navigationTitle(title)
         .navigationBarTitleDisplayMode(.inline)
         .scrollContentBackground(.hidden)

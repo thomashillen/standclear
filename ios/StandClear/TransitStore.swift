@@ -26,6 +26,12 @@ final class TransitStore {
     }
 
     private func fetch<T: Decodable>(_ path: String) async throws -> T {
+        #if DEBUG && targetEnvironment(simulator)
+            if ProcessInfo.processInfo.arguments.contains("--ui-test-fixture") {
+                let data = try NativeUITestFixture.data(for: path, now: .now)
+                return try JSONDecoder().decode(T.self, from: data)
+            }
+        #endif
         var request = URLRequest(url: baseURL.appendingPathComponent(path))
         request.timeoutInterval = 20
         request.cachePolicy = .reloadIgnoringLocalCacheData
@@ -118,6 +124,74 @@ final class TransitStore {
         return snapshot.isFresh(at: now) ? "Arrival feed connected" : "Arrival predictions are stale"
     }
 }
+
+#if DEBUG && targetEnvironment(simulator)
+    /// Explicit simulator-only UI data. Refresh still decodes payloads through
+    /// TransitStore and uses its normal polling, cancellation, and freshness gates.
+    /// Stable trips keep interaction tests independent of live prediction churn.
+    private enum NativeUITestFixture {
+        static func data(for path: String, now: Date) throws -> Data {
+            let payload: [String: Any]
+            switch path {
+            case "gtfsData.json":
+                // Stop identities, order, names, and coordinates come from the
+                // checked-in public/gtfsData.json. Geometry joins those stops.
+                payload = ["lines": [
+                    "1": line(id: "1", color: "#D82233", stops: [
+                        ("126", "50 St", 40.761728, -73.983849),
+                        ("127", "Times Sq-42 St", 40.75529, -73.987495),
+                        ("128", "34 St-Penn Station", 40.750373, -73.991057),
+                    ]),
+                    "4": line(id: "4", color: "#009952", stops: [
+                        ("629", "59 St", 40.762526, -73.967967),
+                        ("631", "Grand Central-42 St", 40.751776, -73.976848),
+                        ("635", "14 St-Union Sq", 40.734673, -73.989951),
+                        ("640", "Brooklyn Bridge-City Hall", 40.713065, -74.004131),
+                        ("418", "Fulton St", 40.710368, -74.009509),
+                        ("419", "Wall St", 40.707557, -74.011862),
+                    ]),
+                ]]
+            case "api/trains":
+                let timestamp = now.timeIntervalSince1970
+                payload = [
+                    "generatedAt": timestamp * 1000,
+                    "trains": [
+                        train(id: "ui-fixture-1-n", route: "1", direction: "N", previous: "128", next: "127", timestamp: timestamp),
+                        train(id: "ui-fixture-4-map", route: "4", direction: "N", previous: "631", next: "629", timestamp: timestamp),
+                    ],
+                    "arrivals": [
+                        arrival(id: "ui-fixture-1-n", route: "1", stop: "127", direction: "N", destination: "126", eta: timestamp + 180),
+                        arrival(id: "ui-fixture-1-s", route: "1", stop: "127", direction: "S", destination: "128", eta: timestamp + 300),
+                        arrival(id: "ui-fixture-4-n", route: "4", stop: "419", direction: "N", destination: "629", eta: timestamp + 180),
+                        arrival(id: "ui-fixture-4-s", route: "4", stop: "629", direction: "S", destination: "419", eta: timestamp + 240),
+                    ],
+                ]
+            default:
+                throw URLError(.unsupportedURL)
+            }
+            return try JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys])
+        }
+
+        private static func line(id: String, color: String, stops: [(String, String, Double, Double)]) -> [String: Any] {
+            [
+                "id": id, "routeId": id, "color": color,
+                "stops": stops.enumerated().map { index, stop in
+                    ["id": stop.0, "name": stop.1, "lat": stop.2, "lng": stop.3, "shapeIdx": index] as [String: Any]
+                },
+                "shape": stops.map { [$0.3, $0.2] },
+            ]
+        }
+
+        private static func train(id: String, route: String, direction: String, previous: String, next: String, timestamp: Double) -> [String: Any] {
+            ["id": id, "routeId": route, "direction": direction, "progress": 0.5,
+             "prevStopId": previous, "nextStopId": next, "status": "IN_TRANSIT_TO", "lastReportedAt": timestamp]
+        }
+
+        private static func arrival(id: String, route: String, stop: String, direction: String, destination: String, eta: Double) -> [String: Any] {
+            ["tripId": id, "routeId": route, "stopId": stop, "direction": direction, "destStopId": destination, "eta": eta]
+        }
+    }
+#endif
 
 @MainActor @Observable
 final class LocationStore: NSObject, @preconcurrency CLLocationManagerDelegate {
