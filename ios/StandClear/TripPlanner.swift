@@ -163,10 +163,30 @@ enum TripPlanner {
     static func nextDeparture(for leg: NativeTripLeg, stations: [Station], snapshot: Snapshot?, now: Date,
                               feedUnavailable: Bool) -> Arrival?
     {
-        guard !feedUnavailable, let station = stations.first(where: { $0.id == leg.boardComplexId }) else { return nil }
-        return Transit.arrivals(for: station, snapshot: snapshot, now: now).first {
+        departures(for: leg, stations: stations, snapshot: snapshot, now: now, feedUnavailable: feedUnavailable).first
+    }
+
+    static func departures(for leg: NativeTripLeg, stations: [Station], snapshot: Snapshot?, now: Date,
+                           feedUnavailable: Bool) -> [Arrival]
+    {
+        guard !feedUnavailable, let station = stations.first(where: { $0.id == leg.boardComplexId }) else { return [] }
+        return Transit.arrivals(for: station, snapshot: snapshot, now: now).filter {
             $0.stopId == (leg.boardingStopIDsByRoute[$0.routeId] ?? leg.boardStopId) &&
                 leg.routeIDs.contains($0.routeId) && $0.direction == leg.direction
+        }
+    }
+
+    /// Only compare a known pedestrian route. A missing later prediction is
+    /// distinct from a first train that is already later than the walk.
+    struct EarlyDeparture {
+        let nextAfterWalk: Arrival?
+
+        init?(departures: [Arrival], walkSeconds: Double?, now: Date) {
+            guard let first = departures.first, let walkSeconds, walkSeconds.isFinite, walkSeconds > 0 else { return nil }
+            // Shared assumption with the web station index's catchVerdict.
+            let estimatedEntry = now.timeIntervalSince1970 + walkSeconds + 20
+            guard estimatedEntry.isFinite, first.eta < estimatedEntry else { return nil }
+            nextAfterWalk = departures.dropFirst().first { $0.eta >= estimatedEntry }
         }
     }
 

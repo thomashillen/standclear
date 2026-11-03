@@ -682,14 +682,23 @@ struct PlacePreview: View {
                     .accessibilityElement(children: .combine)
                     .accessibilityIdentifier("placeTripLeg-\(leg.id)")
                     TimelineView(.periodic(from: .now, by: 5)) { tick in
-                        if let departure = TripPlanner.nextDeparture(for: leg, stations: store.stations, snapshot: store.snapshot,
-                                                                     now: tick.date, feedUnavailable: store.feedError),
-                            let countdown = departure.countdown(at: tick.date)
-                        {
-                            Text("Next \(RouteBadge.displayID(departure.routeId)) boarding prediction: \(countdown).")
-                        } else {
-                            Text("Boarding prediction unavailable.").foregroundStyle(.secondary)
+                        let departures = TripPlanner.departures(for: leg, stations: store.stations, snapshot: store.snapshot,
+                                                                now: tick.date, feedUnavailable: store.feedError)
+                        VStack(alignment: .leading, spacing: 2) {
+                            if let departure = departures.first, let countdown = departure.countdown(at: tick.date) {
+                                Text("Next \(TransitRouteIdentity(departure.routeId).spokenName) boarding prediction: \(countdown).")
+                                if index == 0, let early = TripPlanner.EarlyDeparture(departures: departures, walkSeconds: option.access.connection?.seconds, now: tick.date) {
+                                    if let later = early.nextAfterWalk, let time = later.countdown(at: tick.date) {
+                                        Text("After the estimated walk and entry: \(TransitRouteIdentity(later.routeId).spokenName) in \(time) from now.")
+                                    } else {
+                                        Text("No later prediction reported after the estimated walk and entry.")
+                                    }
+                                }
+                            } else {
+                                Text("Boarding prediction unavailable.").foregroundStyle(.secondary)
+                            }
                         }
+                        .accessibilityElement(children: .combine)
                     }
                     .font(.subheadline)
                     .accessibilityIdentifier("placeDeparture-\(leg.id)")
@@ -714,6 +723,9 @@ struct PlacePreview: View {
         } header: {
             Text("Itinerary")
         } footer: {
+            if option.access.connection != nil {
+                Text("The boarding comparison allows 20 seconds for station entry. Actual entry time varies.")
+            }
             Text("Walking routes use station coordinates. Entrances and step-free access are unverified. Typical times allow 4 minutes per train wait, 90 seconds per stop and 3 minutes per transfer. Transfer predictions show departures at that platform now. A connection is not guaranteed.")
         }
     }
