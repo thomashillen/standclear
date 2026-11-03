@@ -287,9 +287,16 @@ struct MapShell: View {
                 }
             }
         } else {
-            ContentUnavailableView("Map configuration needed", systemImage: "map",
-                                   description: Text("Add a public Mapbox token to the local Xcode configuration. Station search remains available."))
-                .accessibilityIdentifier("mapboxConfigurationUnavailable")
+            ContentUnavailableView {
+                Label("Mapbox unavailable", systemImage: "map")
+            } description: {
+                Text("You can view subway lines, trains and stations with Apple Maps.")
+            } actions: {
+                Button("Use Apple Maps") { mapProvider = .apple }
+            }
+            .frame(width: statusWidth)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .accessibilityIdentifier("mapboxConfigurationUnavailable")
         }
     }
 

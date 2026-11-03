@@ -158,7 +158,7 @@ final class StandClearUITests: XCTestCase {
             option.tap()
             let unavailable = app.descendants(matching: .any)["mapboxConfigurationUnavailable"]
             if provider == "Mapbox", unavailable.exists {
-                XCTAssertTrue(app.staticTexts["Map configuration needed"].exists, "CI should retain an explicit missing-token state")
+                XCTAssertTrue(app.staticTexts["Mapbox unavailable"].exists, "CI should retain an explicit missing-token state")
             } else {
                 XCTAssertTrue(app.descendants(matching: .any)[mapID].waitForExistence(timeout: 10))
             }
@@ -168,6 +168,11 @@ final class StandClearUITests: XCTestCase {
             capture.name = provider + " transit comparison"
             capture.lifetime = .keepAlways
             add(capture)
+            if provider == "Mapbox", unavailable.exists {
+                app.buttons["Use Apple Maps"].tap()
+                XCTAssertTrue(app.descendants(matching: .any)["appleTransitMap"].waitForExistence(timeout: 10))
+                XCTAssertTrue(unavailable.waitForNonExistence(timeout: 5))
+            }
         }
         app.buttons["moreButton"].tap()
         app.buttons["arrivalStatusButton"].tap()
@@ -422,7 +427,7 @@ final class StandClearUITests: XCTestCase {
         // Trigger permission handling on the inert title, not the map center,
         // which can contain the large-text Open Settings link.
         activatePermissionPrompt(in: app)
-        if provider == "Mapbox", app.staticTexts["Map configuration needed"].exists {
+        if provider == "Mapbox", app.staticTexts["Mapbox unavailable"].exists {
             throw XCTSkip("Mapbox rendering needs an ignored local public token. CI verifies its missing-configuration state separately.")
         }
         app.buttons["moreButton"].tap()
