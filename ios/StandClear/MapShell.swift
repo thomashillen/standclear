@@ -27,7 +27,7 @@ struct MapShell: View {
     @State private var mapError = false
     @State private var mapLoaded = false
     @State private var mapID = UUID()
-    @AppStorage("mapProvider") private var mapProvider = MapProvider.mapbox
+    @AppStorage("mapProvider") private var mapProvider = MapProvider.apple
     @State private var mapZoom: Double = 11
     @State private var focus = MapFocusState()
     enum MapProvider: String, CaseIterable, Identifiable {
