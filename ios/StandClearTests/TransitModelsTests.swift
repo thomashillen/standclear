@@ -5,6 +5,21 @@ import XCTest
 final class TransitModelsTests: XCTestCase {
     private let now = Date(timeIntervalSince1970: 1_800_000_000)
 
+    func testStationNameSearchRanksPrefixesAndMatchesReorderedAbbreviations() {
+        let names = ["14 St-Union Sq", "Times Sq-42 St", "Union Square", "Squire Road", "Cortelyou Rd"]
+        let stations = names.map { name in
+            Station(id: name, stop: Stop(id: name, name: name, lat: 0, lng: 0, shapeIdx: 0), stopIDs: [name], routes: [])
+        }
+        func results(_ query: String) -> [String] {
+            Transit.searchStations(stations, query: query).map(\.id)
+        }
+        XCTAssertEqual(results("  UNION   sq "), ["Union Square", "14 St-Union Sq"])
+        XCTAssertEqual(results("42 Square times"), ["Times Sq-42 St"])
+        XCTAssertEqual(results("square"), ["Times Sq-42 St", "Union Square", "14 St-Union Sq"])
+        XCTAssertEqual(results("times union"), [])
+        XCTAssertEqual(results("  "), names)
+    }
+
     func testSnapshotUsesMillisecondsAndExpiresAtSixtySeconds() {
         XCTAssertTrue(snapshot(age: 59.999).isFresh(at: now))
         XCTAssertFalse(snapshot(age: 60).isFresh(at: now))

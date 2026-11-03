@@ -57,7 +57,7 @@ struct PlaceSearchView<StationRow: View>: View {
 
     var body: some View {
         let text = request.text
-        let stations = text.isEmpty ? store.stations : store.stations.filter { $0.stop.name.localizedStandardContains(text) }
+        let stations = Transit.searchStations(store.stations, query: text)
         let recent = text.isEmpty ? recentStations.resolved(in: store.stations) : []
         List {
             if !recent.isEmpty {
