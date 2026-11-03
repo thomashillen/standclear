@@ -137,6 +137,8 @@ The glance mirrors the web grouping: station complexes remain distinct, services
 
 SwiftUI supplies the glass effect on a soft rounded rectangle. The panel uses three tight rows with no separate header; feed status remains in the native More menu. Reduce Transparency uses a semantic opaque background; typography scales with Dynamic Type, and taller content can scroll within a geometry-bounded panel. No custom animation is introduced.
 
+Use the star in station details to add or remove a favorite on this device. Open **Nearby** to find saved stations even when location is unavailable. A saved station already in the nearby results is marked with a star and appears just once.
+
 Tap a station on the nearby map glance to open its arrivals and service alerts directly. Use the Nearby toolbar button to browse the full list.
 
 Near Me now opens the appropriate native presentation and recenters/zooms around the usable coarse location fix. If a fix is pending, it applies once; search, station selection, dismissal, and backgrounding cancel the pending intent. A medium nearby sheet reserves visible map space, and the compact glance hides while a narrow sheet is open.

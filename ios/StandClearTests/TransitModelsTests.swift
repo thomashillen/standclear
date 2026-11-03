@@ -312,3 +312,32 @@ final class RecentStationsTests: XCTestCase {
         XCTAssertTrue(RecentStations(defaults: defaults).ids.isEmpty)
     }
 }
+
+@MainActor
+final class FavoriteStationsTests: XCTestCase {
+    func testFavoritesResolveCanonicalIDsInSaveOrderAndExcludeNearbyDuplicates() throws {
+        let domain = "StandClear.FavoriteStationsTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: domain))
+        defer { defaults.removePersistentDomain(forName: domain) }
+        let favorites = FavoriteStations(defaults: defaults)
+        func station(_ id: String, _ name: String, _ stopIDs: Set<String>) -> Station {
+            Station(id: id, stop: Stop(id: id, name: name, lat: 40.75, lng: -74, shapeIdx: 0), stopIDs: stopIDs, routes: ["4"])
+        }
+        let complex = station("127", "Times Sq-42 St", ["127", "725", "R16", "902"])
+        let wall = station("419", "Wall St", ["419"])
+        let otherWall = station("230", "Wall St", ["230"])
+        favorites.toggle(complex.id)
+        favorites.toggle(wall.id)
+        let restored = FavoriteStations(defaults: defaults)
+        XCTAssertEqual(restored.ids, ["127", "419"])
+        XCTAssertFalse(restored.contains("725"), "Store the complex identity once, not each platform separately")
+        XCTAssertFalse(restored.contains(otherWall.id), "A different station with the same name must remain independent")
+        XCTAssertTrue(restored.resolved(in: []).isEmpty)
+        let stations = [otherWall, wall, complex]
+        XCTAssertEqual(restored.resolved(in: stations).map(\.id), ["127", "419"])
+        XCTAssertEqual(restored.resolved(in: stations, excluding: [complex.id]).map(\.id), ["419"])
+        XCTAssertTrue(restored.contains(complex.id), "Showing a station in Nearby must not remove the favorite")
+        restored.toggle(wall.id)
+        XCTAssertEqual(FavoriteStations(defaults: defaults).ids, ["127"])
+    }
+}

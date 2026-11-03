@@ -24,6 +24,7 @@ struct MapShell: View {
     @State private var tripFocusRevision = 0
     @State private var searchQuery = ""
     @State private var recentStations = RecentStations()
+    @State private var favoriteStations = FavoriteStations()
     @FocusState private var stationSearchFocused: Bool
     @State private var arrivalStatusMessage = ""
     @State private var showingArrivalStatus = false
@@ -418,7 +419,7 @@ struct MapShell: View {
         switch mode {
         case let .station(id):
             if let station = store.stations.first(where: { $0.id == id }) {
-                StationArrivals(station: station, store: store, directionsSelection: $directionsSelection,
+                StationArrivals(station: station, store: store, favoriteStations: favoriteStations, directionsSelection: $directionsSelection,
                                 onDirectionsHere: beginDirections, onSelectTrip: selectTrip, onShowTripMap: showTripOnMap)
             } else {
                 ContentUnavailableView("Station unavailable", systemImage: "tram",
@@ -463,7 +464,7 @@ struct MapShell: View {
     }
 
     private func stationBrowser(search: Bool, expanded: Bool) -> some View {
-        StationBrowser(store: store, location: location, search: search, recentStations: recentStations, openWindowPreview: expanded ? { previewPlace = $0 } : nil, query: $searchQuery, searchFocus: $stationSearchFocused,
+        StationBrowser(store: store, location: location, search: search, recentStations: recentStations, favoriteStations: favoriteStations, openWindowPreview: expanded ? { previewPlace = $0 } : nil, query: $searchQuery, searchFocus: $stationSearchFocused,
                        directionsSelection: $directionsSelection, onDirectionsHere: beginDirections,
                        onSelectTrip: selectTrip, onShowTripMap: showTripOnMap, select: focusStation)
     }

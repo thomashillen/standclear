@@ -1,11 +1,49 @@
 import CoreLocation
 import SwiftUI
 
+/// Favorites store station identities in save order. Current station data supplies
+/// the names, route badges and arrivals each time Nearby displays them.
+@MainActor @Observable
+final class FavoriteStations {
+    static let storageKey = "favoriteStationIDs"
+    private let defaults: UserDefaults
+    private(set) var ids: [String]
+
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+        var seen = Set<String>()
+        ids = (defaults.stringArray(forKey: Self.storageKey) ?? []).filter {
+            !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && seen.insert($0).inserted
+        }
+    }
+
+    func contains(_ stationID: String) -> Bool {
+        ids.contains(stationID)
+    }
+
+    func toggle(_ stationID: String) {
+        guard !stationID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        if let index = ids.firstIndex(of: stationID) {
+            ids.remove(at: index)
+        } else {
+            ids.append(stationID)
+        }
+        defaults.set(ids, forKey: Self.storageKey)
+    }
+
+    func resolved(in stations: [Station], excluding nearbyIDs: Set<String> = []) -> [Station] {
+        guard !ids.isEmpty else { return [] }
+        let current = Dictionary(stations.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        return ids.compactMap { nearbyIDs.contains($0) ? nil : current[$0] }
+    }
+}
+
 struct StationBrowser: View {
     let store: TransitStore
     let location: LocationStore
     let search: Bool
     let recentStations: RecentStations
+    let favoriteStations: FavoriteStations
     let openWindowPreview: ((PlaceResult) -> Void)?
     @Binding var query: String
     var searchFocus: FocusState<Bool>.Binding
@@ -14,7 +52,7 @@ struct StationBrowser: View {
     let onSelectTrip: (NativeTripPlan?) -> Void
     let onShowTripMap: (NativeTripPlan) -> Void
     let select: (Station) -> Void
-    @State private var searchStationID: String?
+    @State private var selectedStationID: String?
 
     var body: some View {
         Group {
@@ -23,16 +61,17 @@ struct StationBrowser: View {
                                 query: $query, clearFocus: { searchFocus.wrappedValue = false }, stationRow: searchStationRow)
                     .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Address, place or station")
                     .searchFocused(searchFocus)
-                    .navigationDestination(item: $searchStationID) { id in
-                        if let station = store.stations.first(where: { $0.id == id }) {
-                            stationDetails(station)
-                        } else {
-                            ContentUnavailableView("Station unavailable", systemImage: "tram",
-                                                   description: Text("This station is no longer in the subway data."))
-                        }
-                    }
+
             } else {
                 nearby
+            }
+        }
+        .navigationDestination(item: $selectedStationID) { id in
+            if let station = store.stations.first(where: { $0.id == id }) {
+                stationDetails(station)
+            } else {
+                ContentUnavailableView("Station unavailable", systemImage: "tram",
+                                       description: Text("This station is no longer in the subway data."))
             }
         }
         .navigationTitle(search ? "Search" : "Nearby arrivals")
@@ -42,6 +81,7 @@ struct StationBrowser: View {
     private var nearby: some View {
         TimelineView(.periodic(from: .now, by: 5)) { context in
             let results = location.availableCoordinate.map { Transit.nearby(store.stations, coordinate: $0) } ?? []
+            let favorites = favoriteStations.resolved(in: store.stations, excluding: Set(results.map(\.id)))
             List {
                 Group {
                     if store.loading {
@@ -63,7 +103,7 @@ struct StationBrowser: View {
                                 .foregroundStyle(.secondary)
                         }
                     }
-                    if !results.isEmpty {
+                    if !results.isEmpty || !favorites.isEmpty {
                         if store.feedError || store.snapshot?.isFresh(at: context.date) != true {
                             Section {
                                 ArrivalFeedState(store: store, now: context.date)
@@ -71,20 +111,19 @@ struct StationBrowser: View {
                             .listRowBackground(Color.clear)
                             .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
                         }
+                        if !favorites.isEmpty {
+                            Section("Favorites") {
+                                ForEach(favorites) { station in
+                                    nearbyStationRow(station, savedOnly: true)
+                                    arrivalRows(for: station, now: context.date)
+                                }
+                            }
+                            .listRowBackground(Color.clear)
+                        }
                         ForEach(results) { station in
                             Section {
-                                stationLink(station)
-                                if !store.feedError, store.snapshot?.isFresh(at: context.date) == true {
-                                    let arrivals = Transit.arrivals(for: station, snapshot: store.snapshot, now: context.date)
-                                    if arrivals.isEmpty {
-                                        Text("No upcoming predictions. This does not mean there is no service.")
-                                            .foregroundStyle(.secondary)
-                                    } else {
-                                        ForEach(Array(arrivals.prefix(3))) { arrival in
-                                            ArrivalRow(arrival: arrival, store: store, now: context.date)
-                                        }
-                                    }
-                                }
+                                nearbyStationRow(station, savedOnly: false)
+                                arrivalRows(for: station, now: context.date)
                             }
                             .listRowBackground(Color.clear)
                             .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
@@ -98,6 +137,20 @@ struct StationBrowser: View {
             .listStyle(.plain)
             .scrollContentBackground(.hidden)
             .listSectionSpacing(.compact)
+        }
+    }
+
+    @ViewBuilder private func arrivalRows(for station: Station, now: Date) -> some View {
+        if !store.feedError, store.snapshot?.isFresh(at: now) == true {
+            let arrivals = Transit.arrivals(for: station, snapshot: store.snapshot, now: now)
+            if arrivals.isEmpty {
+                Text("No upcoming predictions. This does not mean there is no service.")
+                    .foregroundStyle(.secondary)
+            } else {
+                ForEach(Array(arrivals.prefix(3))) { arrival in
+                    ArrivalRow(arrival: arrival, store: store, now: now)
+                }
+            }
         }
     }
 
@@ -121,7 +174,7 @@ struct StationBrowser: View {
     }
 
     private func stationDetails(_ station: Station) -> some View {
-        StationArrivals(station: station, store: store, directionsSelection: $directionsSelection,
+        StationArrivals(station: station, store: store, favoriteStations: favoriteStations, directionsSelection: $directionsSelection,
                         onDirectionsHere: onDirectionsHere, onSelectTrip: onSelectTrip, onShowTripMap: onShowTripMap)
             .onAppear { select(station) }
     }
@@ -130,7 +183,7 @@ struct StationBrowser: View {
         Button {
             recentStations.record(station.id)
             searchFocus.wrappedValue = false
-            searchStationID = station.id
+            selectedStationID = station.id
         } label: {
             stationLabel(station)
         }
@@ -139,27 +192,35 @@ struct StationBrowser: View {
         .accessibilityIdentifier(recent ? "recentStation-\(station.id)" : "station-\(station.id)")
     }
 
-    private func stationLink(_ station: Station) -> some View {
-        NavigationLink {
-            stationDetails(station)
-        } label: {
-            stationLabel(station)
+    private func nearbyStationRow(_ station: Station, savedOnly: Bool) -> some View {
+        Button { selectedStationID = station.id } label: {
+            stationLabel(station, starred: favoriteStations.contains(station.id))
         }
+        .buttonStyle(.plain)
         .listRowBackground(Color.clear)
         .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
         .accessibilityHint("Show station arrivals and focus the map")
-        .accessibilityIdentifier("station-\(station.id)")
+        .accessibilityIdentifier(savedOnly ? "favoriteStation-\(station.id)" : "station-\(station.id)")
     }
 
-    private func stationLabel(_ station: Station) -> some View {
+    @ViewBuilder private func stationName(_ station: Station, starred: Bool) -> some View {
+        if starred {
+            Label(station.stop.name, systemImage: "star.fill")
+                .accessibilityLabel("\(station.stop.name), Favorite")
+        } else {
+            Text(station.stop.name)
+        }
+    }
+
+    private func stationLabel(_ station: Station, starred: Bool = false) -> some View {
         ViewThatFits(in: .horizontal) {
             HStack {
-                Text(station.stop.name)
+                stationName(station, starred: starred)
                 Spacer(minLength: 8)
                 routeBadges(station)
             }
             VStack(alignment: .leading, spacing: 4) {
-                Text(station.stop.name)
+                stationName(station, starred: starred)
                 ViewThatFits(in: .horizontal) {
                     routeBadges(station)
                     Text(station.routes.map(RouteBadge.displayID).joined(separator: " · "))
@@ -184,6 +245,7 @@ struct StationBrowser: View {
 struct StationArrivals: View {
     let station: Station
     let store: TransitStore
+    let favoriteStations: FavoriteStations
     @Binding var directionsSelection: DirectionsSelection
     let onDirectionsHere: (Station) -> Void
     let onSelectTrip: (NativeTripPlan?) -> Void
@@ -260,6 +322,16 @@ struct StationArrivals: View {
                     alerts = .failed
                 }
                 do { try await Task.sleep(for: .seconds(60)) } catch { return }
+            }
+        }
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                let saved = favoriteStations.contains(station.id)
+                Button(saved ? "Remove from favorites" : "Add to favorites", systemImage: saved ? "star.fill" : "star") {
+                    favoriteStations.toggle(station.id)
+                }
+                .labelStyle(.iconOnly)
+                .accessibilityIdentifier("favoriteStationToggle")
             }
         }
         .navigationTitle(station.stop.name)
