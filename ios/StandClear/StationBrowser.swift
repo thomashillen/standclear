@@ -5,6 +5,7 @@ struct StationBrowser: View {
     let store: TransitStore
     let location: LocationStore
     let search: Bool
+    let recentStations: RecentStations
     let openWindowPreview: ((PlaceResult) -> Void)?
     @Binding var query: String
     var searchFocus: FocusState<Bool>.Binding
@@ -13,14 +14,23 @@ struct StationBrowser: View {
     let onSelectTrip: (NativeTripPlan?) -> Void
     let onShowTripMap: (NativeTripPlan) -> Void
     let select: (Station) -> Void
+    @State private var searchStationID: String?
 
     var body: some View {
         Group {
             if search {
-                PlaceSearchView(store: store, location: location, openWindowPreview: openWindowPreview,
-                                query: $query, clearFocus: { searchFocus.wrappedValue = false }, stationRow: stationLink)
+                PlaceSearchView(store: store, location: location, recentStations: recentStations, openWindowPreview: openWindowPreview,
+                                query: $query, clearFocus: { searchFocus.wrappedValue = false }, stationRow: searchStationRow)
                     .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Address, place or station")
                     .searchFocused(searchFocus)
+                    .navigationDestination(item: $searchStationID) { id in
+                        if let station = store.stations.first(where: { $0.id == id }) {
+                            stationDetails(station)
+                        } else {
+                            ContentUnavailableView("Station unavailable", systemImage: "tram",
+                                                   description: Text("This station is no longer in the subway data."))
+                        }
+                    }
             } else {
                 nearby
             }
@@ -110,34 +120,55 @@ struct StationBrowser: View {
         }
     }
 
+    private func stationDetails(_ station: Station) -> some View {
+        StationArrivals(station: station, store: store, directionsSelection: $directionsSelection,
+                        onDirectionsHere: onDirectionsHere, onSelectTrip: onSelectTrip, onShowTripMap: onShowTripMap)
+            .onAppear { select(station) }
+    }
+
+    private func searchStationRow(_ station: Station, recent: Bool) -> some View {
+        Button {
+            recentStations.record(station.id)
+            searchFocus.wrappedValue = false
+            searchStationID = station.id
+        } label: {
+            stationLabel(station)
+        }
+        .buttonStyle(.plain)
+        .accessibilityHint("Show station arrivals and focus the map")
+        .accessibilityIdentifier(recent ? "recentStation-\(station.id)" : "station-\(station.id)")
+    }
+
     private func stationLink(_ station: Station) -> some View {
         NavigationLink {
-            StationArrivals(station: station, store: store, directionsSelection: $directionsSelection,
-                            onDirectionsHere: onDirectionsHere, onSelectTrip: onSelectTrip, onShowTripMap: onShowTripMap)
-                .onAppear { select(station) }
+            stationDetails(station)
         } label: {
-            ViewThatFits(in: .horizontal) {
-                HStack {
-                    Text(station.stop.name)
-                    Spacer(minLength: 8)
-                    routeBadges(station)
-                }
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(station.stop.name)
-                    ViewThatFits(in: .horizontal) {
-                        routeBadges(station)
-                        Text(station.routes.map(RouteBadge.displayID).joined(separator: " · "))
-                            .font(.subheadline).foregroundStyle(.secondary)
-                    }
-                }
-            }
-            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-            .contentShape(Rectangle())
+            stationLabel(station)
         }
         .listRowBackground(Color.clear)
         .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
         .accessibilityHint("Show station arrivals and focus the map")
         .accessibilityIdentifier("station-\(station.id)")
+    }
+
+    private func stationLabel(_ station: Station) -> some View {
+        ViewThatFits(in: .horizontal) {
+            HStack {
+                Text(station.stop.name)
+                Spacer(minLength: 8)
+                routeBadges(station)
+            }
+            VStack(alignment: .leading, spacing: 4) {
+                Text(station.stop.name)
+                ViewThatFits(in: .horizontal) {
+                    routeBadges(station)
+                    Text(station.routes.map(RouteBadge.displayID).joined(separator: " · "))
+                        .font(.subheadline).foregroundStyle(.secondary)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+        .contentShape(Rectangle())
     }
 
     private func routeBadges(_ station: Station) -> some View {

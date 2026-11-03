@@ -22,6 +22,7 @@ struct MapShell: View {
     @State private var selectedTrip: NativeTripPlan?
     @State private var tripFocusRevision = 0
     @State private var searchQuery = ""
+    @State private var recentStations = RecentStations()
     @FocusState private var stationSearchFocused: Bool
     @State private var arrivalStatusMessage = ""
     @State private var showingArrivalStatus = false
@@ -421,7 +422,7 @@ struct MapShell: View {
     }
 
     private func stationBrowser(search: Bool, expanded: Bool) -> some View {
-        StationBrowser(store: store, location: location, search: search, openWindowPreview: expanded ? { previewPlace = $0 } : nil, query: $searchQuery, searchFocus: $stationSearchFocused,
+        StationBrowser(store: store, location: location, search: search, recentStations: recentStations, openWindowPreview: expanded ? { previewPlace = $0 } : nil, query: $searchQuery, searchFocus: $stationSearchFocused,
                        directionsSelection: $directionsSelection, onDirectionsHere: beginDirections,
                        onSelectTrip: selectTrip, onShowTripMap: showTripOnMap)
         { station in

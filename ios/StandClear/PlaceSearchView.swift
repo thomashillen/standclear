@@ -1,13 +1,46 @@
 import SwiftUI
 
+/// Recent station identities are local to this installation. Resolve names and
+/// routes from the current dataset, including when it arrives after startup.
+@MainActor @Observable
+final class RecentStations {
+    static let storageKey = "recentStationIDs"
+    private let defaults: UserDefaults
+    private(set) var ids: [String]
+
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+        var seen = Set<String>()
+        ids = Array((defaults.stringArray(forKey: Self.storageKey) ?? []).filter {
+            !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && seen.insert($0).inserted
+        }.prefix(10))
+    }
+
+    func record(_ stationID: String) {
+        guard !stationID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, ids.first != stationID else { return }
+        ids = [stationID] + ids.filter { $0 != stationID }.prefix(9)
+        defaults.set(ids, forKey: Self.storageKey)
+    }
+
+    func resolved(in stations: [Station]) -> [Station] {
+        ids.compactMap { id in stations.first { $0.id == id } }
+    }
+
+    func clear() {
+        ids = []
+        defaults.removeObject(forKey: Self.storageKey)
+    }
+}
+
 /// A single results list. Station filtering is local and independent of MapKit.
 struct PlaceSearchView<StationRow: View>: View {
     let store: TransitStore
     let location: LocationStore
+    let recentStations: RecentStations
     let openWindowPreview: ((PlaceResult) -> Void)?
     @Binding var query: String
     let clearFocus: () -> Void
-    let stationRow: (Station) -> StationRow
+    let stationRow: (Station, Bool) -> StationRow
 
     @Environment(\.scenePhase) private var scenePhase
     private let service = PlaceService()
@@ -25,7 +58,23 @@ struct PlaceSearchView<StationRow: View>: View {
     var body: some View {
         let text = request.text
         let stations = text.isEmpty ? store.stations : store.stations.filter { $0.stop.name.localizedStandardContains(text) }
+        let recent = text.isEmpty ? recentStations.resolved(in: store.stations) : []
         List {
+            if !recent.isEmpty {
+                Section {
+                    ForEach(recent) { station in stationRow(station, true) }
+                } header: {
+                    HStack {
+                        Text("Recent stations")
+                        Spacer()
+                        Button("Clear", action: recentStations.clear)
+                            .accessibilityLabel("Clear recent stations")
+                            .accessibilityIdentifier("clearRecentStations")
+                    }
+                }
+                .listRowBackground(Color.clear)
+                .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
+            }
             if text.count >= 2 {
                 Section("Addresses and places") {
                     places(for: text)
@@ -43,7 +92,7 @@ struct PlaceSearchView<StationRow: View>: View {
                 } else if stations.isEmpty, !store.loading {
                     Text("No matching stations").foregroundStyle(.secondary)
                 }
-                ForEach(stations) { station in stationRow(station) }
+                ForEach(stations) { station in stationRow(station, false) }
             }
             .listRowBackground(Color.clear)
             .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
