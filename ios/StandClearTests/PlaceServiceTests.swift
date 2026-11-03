@@ -24,7 +24,7 @@ final class PlaceServiceTests: XCTestCase {
     func testShortQuerySkipsSearchAndNoMatchDiffersFromServiceFailure() async throws {
         let service = PlaceService(find: { query in
             switch query {
-            case "no match": throw NSError(domain: MKErrorDomain, code: MKError.Code.placemarkNotFound.rawValue)
+            case "no match": throw NSError(domain: MKErrorDomain, code: Int(MKError.Code.placemarkNotFound.rawValue))
             case "offline": throw URLError(.notConnectedToInternet)
             default: XCTFail("Short input should not start a search"); return []
             }
@@ -95,7 +95,7 @@ final class PlaceServiceTests: XCTestCase {
 
     func testNoWalkingDirectionsRemainsUnavailable() async throws {
         let service = PlaceService(find: { _ in [] }, route: { _, _ in
-            throw NSError(domain: MKErrorDomain, code: MKError.Code.directionsNotFound.rawValue)
+            throw NSError(domain: MKErrorDomain, code: Int(MKError.Code.directionsNotFound.rawValue))
         })
         do {
             _ = try await service.walk(from: start, to: end)
