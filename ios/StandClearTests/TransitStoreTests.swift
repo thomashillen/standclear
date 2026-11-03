@@ -4,6 +4,37 @@ import XCTest
 
 @MainActor
 final class TransitStoreTests: XCTestCase {
+    func testPlaceRenewalRequestsOncePerSourceTimestampAndDoesNotExtendExpiry() {
+        let start = Date(timeIntervalSince1970: 1_800_000_000)
+        var schedule = LocationFixSchedule()
+        schedule.accept(start)
+        XCTAssertFalse(schedule.claimRenewal(for: start, at: start.addingTimeInterval(24)))
+        XCTAssertTrue(schedule.claimRenewal(for: start, at: start.addingTimeInterval(25)))
+        // Core Location can deliver the same cached measurement in response.
+        schedule.accept(start)
+        XCTAssertFalse(schedule.claimRenewal(for: start, at: start.addingTimeInterval(26)))
+        XCTAssertFalse(schedule.usable(at: start.addingTimeInterval(30)))
+        XCTAssertTrue(schedule.expire(start))
+        XCTAssertNil(schedule.timestamp)
+        XCTAssertFalse(schedule.claimRenewal(for: start, at: start.addingTimeInterval(31)))
+    }
+
+    func testNewMeasurementSupersedesOldExpiryAndInactiveRequestCannotRenew() {
+        let start = Date(timeIntervalSince1970: 1_800_000_000)
+        let fresh = start.addingTimeInterval(26)
+        var schedule = LocationFixSchedule()
+        schedule.accept(start)
+        XCTAssertTrue(schedule.claimRenewal(for: start, at: start.addingTimeInterval(25)))
+        schedule.accept(fresh)
+        XCTAssertFalse(schedule.expire(start), "An obsolete deadline must not blank the refreshed position")
+        XCTAssertTrue(schedule.usable(at: start.addingTimeInterval(31)))
+        XCTAssertFalse(schedule.claimRenewal(for: start, at: fresh.addingTimeInterval(25)))
+        XCTAssertTrue(schedule.claimRenewal(for: fresh, at: fresh.addingTimeInterval(25)))
+        schedule.invalidate()
+        XCTAssertFalse(schedule.usable(at: fresh.addingTimeInterval(26)))
+        XCTAssertFalse(schedule.claimRenewal(for: fresh, at: fresh.addingTimeInterval(26)))
+    }
+
     func testStopCancelsInFlightRequestAndDoesNotPublishItsResult() async throws {
         let fixture = ResponseFixture()
         let (store, session) = makeStore(fixture)

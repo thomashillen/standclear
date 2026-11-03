@@ -382,36 +382,276 @@ final class StandClearUITests: XCTestCase {
         result.tap()
         let origin = app.buttons["placeOriginPicker"]
         XCTAssertTrue(origin.waitForExistence(timeout: 10))
-        XCTAssertTrue(origin.label.contains("Choose station"))
+        XCTAssertTrue(origin.label.contains("Current Location"))
         origin.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
-        let picker = app.searchFields["Search subway stations"]
+        let picker = app.searchFields[unifiedSearchPrompt]
         XCTAssertTrue(picker.waitForExistence(timeout: 10))
         picker.tap()
         picker.typeText("Wall\n")
-        selectStationResult("419", query: "Wall", in: app)
+        let chosen = app.buttons["stationChoice-419"]
+        revealPlaceElement(chosen, in: app.collectionViews.firstMatch)
+        chosen.tap()
         XCTAssertTrue(origin.waitForExistence(timeout: 10))
         XCTAssertTrue(origin.label.contains("Wall St"))
         let list = app.collectionViews["placePreviewList"]
-        let leg = list.descendants(matching: .any)["placeTripLeg-4:N:419>629"].firstMatch
-        XCTAssertTrue(leg.waitForExistence(timeout: 10))
-        let total = list.descendants(matching: .any)["placeWalkingTotal"].firstMatch
-        for _ in 0 ..< 3 where !total.exists {
-            list.swipeUp()
+        if !expanded, (app.buttons["Sheet Grabber"].value as? String) == "Half screen" {
+            app.buttons["Sheet Grabber"].doubleTap()
         }
+        let leg = list.descendants(matching: .any)["placeTripLeg-4:N:419>629"].firstMatch
+        revealPlaceElement(leg, in: list)
+        XCTAssertTrue(leg.exists)
+        let total = list.descendants(matching: .any)["placeWalkingTotal"].firstMatch
+        revealPlaceElement(total, in: list)
         XCTAssertTrue(total.waitForExistence(timeout: 5))
         XCTAssertTrue(list.descendants(matching: .any)["placeDestinationWalk"].firstMatch.label.contains("550 Madison"))
         let capture = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         capture.name = expanded ? "Expanded place preview" : "Compact place preview"
         capture.lifetime = .keepAlways
         add(capture)
-        if expanded {
-            app.buttons["Done"].tap()
-        } else {
-            app.navigationBars["Route preview"].buttons.element(boundBy: 0).tap()
-        }
+        app.buttons["placeBackToSearch"].tap()
         XCTAssertTrue(app.navigationBars["Search"].waitForExistence(timeout: 5))
         XCTAssertTrue(result.waitForExistence(timeout: 10))
         XCTAssertEqual(field.value as? String, "550 Madison")
+    }
+
+    @MainActor
+    func testMuseumTransferShowsBothServicesAndInterchangeOnMainMap() {
+        let app = XCUIApplication()
+        app.terminate()
+        XCUIDevice.shared.orientation = .portrait
+        app.resetAuthorizationStatus(for: .location)
+        app.launchArguments = ["--ui-test-fixture", "--ui-test-noguchi", "-mapProvider", "Apple Maps"]
+        addUIInterruptionMonitor(withDescription: "Location permission") { alert in
+            let deny = alert.buttons["Don’t Allow"]
+            guard deny.exists else { return false }
+            deny.tap()
+            return true
+        }
+        app.launch()
+        activatePermissionPrompt(in: app)
+        XCUIDevice.shared.orientation = .landscapeLeft
+        defer { XCUIDevice.shared.orientation = .portrait }
+        waitForLayout(in: app, expanded: true)
+        app.buttons["searchButton"].tap()
+        let field = app.searchFields[unifiedSearchPrompt]
+        XCTAssertTrue(field.waitForExistence(timeout: 5))
+        field.tap()
+        field.typeText("Noguchi\n")
+        let museum = app.buttons["placeResult-fixture-noguchi"]
+        XCTAssertTrue(museum.waitForExistence(timeout: 10))
+        museum.tap()
+        let origin = app.buttons["placeOriginPicker"]
+        XCTAssertTrue(origin.waitForExistence(timeout: 5))
+        origin.tap()
+        let picker = app.searchFields[unifiedSearchPrompt]
+        XCTAssertTrue(picker.waitForExistence(timeout: 5))
+        picker.tap()
+        picker.typeText("55 Wall Street\n")
+        let address = app.buttons["placeOriginResult-fixture-55-wall-street"]
+        XCTAssertTrue(address.waitForExistence(timeout: 10))
+        address.tap()
+        XCTAssertTrue(origin.waitForExistence(timeout: 5))
+        XCTAssertTrue(origin.label.contains("55 Wall Street"))
+        let list = app.collectionViews["placePreviewList"]
+        let inbound = "4:N:419>629"
+        let outbound = "N:N:R11>R05"
+        let choice = list.buttons["placeRouteOption-419>R05:\(inbound)|\(outbound)"]
+        revealPlaceElement(choice, in: list)
+        choice.tap()
+        let map = app.descendants(matching: .any)["appleTransitMap"].firstMatch
+        let interchange = "Change to N/W at Lexington Av/59 St"
+        expectation(for: NSPredicate(format: "value CONTAINS %@ AND value CONTAINS %@ AND value CONTAINS %@", interchange, "Wall St", "Broadway"), evaluatedWith: map)
+        waitForExpectations(timeout: 10)
+        let ride4 = list.descendants(matching: .any)["placeTripLeg-\(inbound)"].firstMatch
+        revealPlaceElement(ride4, in: list)
+        XCTAssertTrue(ride4.label.contains("Wall St") && ride4.label.contains("Lexington Av/59 St"))
+        let change = list.descendants(matching: .any)["placeTransferStep"].firstMatch
+        revealPlaceElement(change, in: list)
+        XCTAssertTrue(change.label.contains(interchange))
+        XCTAssertTrue(change.label.localizedCaseInsensitiveContains("in-station signs"))
+        XCTAssertFalse(list.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Walk to Lexington Av/59 St")).firstMatch.exists)
+        let capture = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        capture.name = "Wall St to Noguchi Museum with Lexington Av transfer on the main map"
+        capture.lifetime = .keepAlways
+        add(capture)
+        let rideNW = list.descendants(matching: .any)["placeTripLeg-\(outbound)"].firstMatch
+        revealPlaceElement(rideNW, in: list)
+        XCTAssertTrue(rideNW.label.contains("Lexington Av/59 St") && rideNW.label.contains("Broadway"))
+        app.buttons["placeBackToSearch"].tap()
+        XCTAssertTrue(museum.waitForExistence(timeout: 5))
+        XCTAssertEqual(field.value as? String, "Noguchi")
+    }
+
+    @MainActor
+    func testNoguchiMuseumOptionsOnCompactMap() {
+        checkMuseumRouteOptions(expanded: false)
+    }
+
+    @MainActor
+    func testNoguchiMuseumOptionsOnExpandedMap() {
+        checkMuseumRouteOptions(expanded: true)
+    }
+
+    @MainActor
+    private func checkMuseumRouteOptions(expanded: Bool) {
+        let app = XCUIApplication()
+        app.terminate()
+        XCUIDevice.shared.orientation = .portrait
+        app.resetAuthorizationStatus(for: .location)
+        func provideFix() {
+            XCUIDevice.shared.location = XCUILocation(location: CLLocation(latitude: 40.7553, longitude: -73.987))
+        }
+        provideFix()
+        defer {
+            XCUIDevice.shared.location = nil
+            XCUIDevice.shared.orientation = .portrait
+        }
+        app.launchArguments = ["--ui-test-fixture", "--ui-test-noguchi", "-mapProvider", "Apple Maps"]
+        addUIInterruptionMonitor(withDescription: "Location permission") { alert in
+            let allow = alert.buttons["Allow While Using App"]
+            guard allow.exists else { return false }
+            allow.tap()
+            return true
+        }
+        app.launch()
+        activatePermissionPrompt(in: app)
+        let dot = app.descendants(matching: .any)["userLocationDot"].firstMatch
+        XCTAssertTrue(dot.waitForExistence(timeout: 30))
+        if expanded {
+            XCUIDevice.shared.orientation = .landscapeLeft
+            waitForLayout(in: app, expanded: true)
+        }
+        app.buttons["searchButton"].tap()
+        let field = app.searchFields[unifiedSearchPrompt]
+        XCTAssertTrue(field.waitForExistence(timeout: 10))
+        field.tap()
+        field.typeText("Noguchi\n")
+        let museum = app.buttons["placeResult-fixture-noguchi"]
+        XCTAssertTrue(museum.waitForExistence(timeout: 10))
+        museum.tap()
+        let list = app.collectionViews["placePreviewList"]
+        let origin = app.buttons["placeOriginPicker"]
+        XCTAssertTrue(origin.waitForExistence(timeout: 10))
+        XCTAssertTrue(origin.label.contains("Current Location"))
+        let map = app.descendants(matching: .any)["appleTransitMap"].firstMatch
+        let mapped = NSPredicate(format: "value CONTAINS %@ AND value CONTAINS %@", "Noguchi", "N/W")
+        expectation(for: mapped, evaluatedWith: map)
+        waitForExpectations(timeout: 15)
+        let firstSummary = map.value as? String
+        let capture = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        capture.name = expanded ? "Expanded Noguchi Museum route on main map" : "Compact Noguchi Museum route on interactive main map"
+        capture.lifetime = .keepAlways
+        add(capture)
+        if expanded {
+            XCTAssertGreaterThan(list.frame.midX, app.windows.firstMatch.frame.midX)
+        } else {
+            let window = app.windows.firstMatch
+            XCTAssertGreaterThan(list.frame.minY, window.frame.height * 0.3, "The compact route card must expose the main map")
+            // Pan the exposed map, checking that its location annotation actually
+            // moved while the route card stayed on screen.
+            let priorX = dot.frame.midX
+            window.coordinate(withNormalizedOffset: CGVector(dx: 0.38, dy: 0.26))
+                .press(forDuration: 0.08, thenDragTo: window.coordinate(withNormalizedOffset: CGVector(dx: 0.50, dy: 0.26)))
+            let moved = NSPredicate { _, _ in MainActor.assumeIsolated { dot.exists && abs(dot.frame.midX - priorX) > 8 } }
+            expectation(for: moved, evaluatedWith: dot)
+            waitForExpectations(timeout: 8)
+            XCTAssertTrue(list.exists)
+        }
+        // Use an independently identified alighting platform. Other rows can
+        // be reordered as their walking durations finish loading.
+        provideFix()
+        let target = firstSummary?.hasSuffix(", 36 Av") == true ? "R05" : "R06"
+        let legID = "N:N:R16>\(target)"
+        let alternative = list.buttons["placeRouteOption-127>\(target):\(legID)"]
+        revealPlaceElement(alternative, in: list)
+        alternative.tap()
+        expectation(for: NSPredicate(format: "value == %@", "Selected"), evaluatedWith: alternative)
+        waitForExpectations(timeout: 8)
+        let changed = NSPredicate { _, _ in MainActor.assumeIsolated {
+            guard let summary = map.value as? String else { return false }
+            return summary.contains("Noguchi") && summary.contains("N/W") && summary != firstSummary
+        } }
+        expectation(for: changed, evaluatedWith: map)
+        waitForExpectations(timeout: 10)
+        let alighting = (map.value as? String)?.components(separatedBy: ", ").last ?? ""
+        XCTAssertTrue(["Broadway", "36 Av", "30 Av", "39 Av-Dutch Kills", "Queensboro Plaza"].contains(alighting))
+        if !expanded, (app.buttons["Sheet Grabber"].value as? String) == "Half screen" {
+            app.buttons["Sheet Grabber"].doubleTap()
+        }
+        let leg = list.descendants(matching: .any)["placeTripLeg-\(legID)"].firstMatch
+        revealPlaceElement(leg, in: list)
+        XCTAssertTrue(leg.label.contains(alighting), "The card and main map must identify the same alighting station")
+        let boarding = list.descendants(matching: .any)["placeDeparture-\(legID)"].firstMatch
+        revealPlaceElement(boarding, in: list)
+        XCTAssertTrue(boarding.label.contains("Next N boarding prediction"), "Use a matching northbound platform and route")
+        let walk = list.descendants(matching: .any)["placeDestinationWalk"].firstMatch
+        revealPlaceElement(walk, in: list)
+        XCTAssertTrue(walk.label.contains("Noguchi"))
+        let total = list.descendants(matching: .any)["placeTripTimeEstimate"].firstMatch
+        revealPlaceElement(total, in: list)
+        let selection = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        selection.name = expanded ? "Expanded museum alternate itinerary" : "Compact museum alternate itinerary"
+        selection.lifetime = .keepAlways
+        add(selection)
+        if !expanded {
+            provideFix()
+            revealPlaceElement(origin, in: list, downward: false)
+            origin.tap()
+            let picker = app.searchFields[unifiedSearchPrompt]
+            XCTAssertTrue(picker.waitForExistence(timeout: 5))
+            picker.tap()
+            picker.typeText("49 St\n")
+            let manual = app.buttons["stationChoice-R15"]
+            revealPlaceElement(manual, in: app.collectionViews.firstMatch)
+            manual.tap()
+            XCTAssertTrue(origin.waitForExistence(timeout: 5))
+            XCTAssertTrue(origin.label.contains("49 St"))
+            expectation(for: NSPredicate(format: "value CONTAINS %@", "49 St"), evaluatedWith: map)
+            waitForExpectations(timeout: 10)
+            origin.tap()
+            let useLocation = app.buttons["placeOriginCurrentLocation"]
+            XCTAssertTrue(useLocation.waitForExistence(timeout: 5))
+            provideFix()
+            useLocation.tap()
+            XCTAssertTrue(origin.waitForExistence(timeout: 5))
+            XCTAssertTrue(origin.label.contains("Current Location"))
+        }
+        app.buttons["placeBackToSearch"].tap()
+        XCTAssertTrue(museum.waitForExistence(timeout: 10))
+        XCTAssertEqual(field.value as? String, "Noguchi")
+    }
+
+    @MainActor
+    private func revealPlaceElement(_ element: XCUIElement, in list: XCUIElement, downward: Bool = true,
+                                    file: StaticString = #filePath, line: UInt = #line)
+    {
+        let app = XCUIApplication()
+        let nav = app.navigationBars["From"].exists ? app.navigationBars["From"] : app.navigationBars["Route preview"]
+        var towardBottom = downward
+        for _ in 0 ..< 18 {
+            let bounds = list.frame
+            let top = nav.exists ? max(bounds.minY, nav.frame.maxY) : bounds.minY
+            if element.exists {
+                let frame = element.frame
+                if !frame.isNull, !frame.isInfinite, frame.width > 0, frame.height > 0 {
+                    if frame.midY > top, frame.midY < bounds.maxY, bounds.contains(CGPoint(x: frame.midX, y: frame.midY)),
+                       // Read-only rows do not need activation points. XCTest
+                       // can expose their text even when there is no tap target.
+                       element.elementType != .button || element.isHittable
+                    {
+                        return
+                    }
+                    towardBottom = frame.midY >= top
+                }
+            }
+            // End the drag at rest. A default flick can leap over the entire
+            // route list in the short landscape control region.
+            let start = list.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: towardBottom ? 0.78 : 0.48))
+            let distance = min(bounds.height * 0.3, 150)
+            start.press(forDuration: 0.08, thenDragTo: start.withOffset(CGVector(dx: 0, dy: towardBottom ? -distance : distance)),
+                        withVelocity: .slow, thenHoldForDuration: 0.3)
+        }
+        XCTFail("Could not reveal \(element) in the current route panel", file: file, line: line)
     }
 
     @MainActor

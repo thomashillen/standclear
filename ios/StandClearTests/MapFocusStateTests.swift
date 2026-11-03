@@ -6,6 +6,17 @@ final class MapFocusStateTests: XCTestCase {
     private let nearby = CLLocationCoordinate2D(latitude: 40.707, longitude: -74.0118)
     private let station = CLLocationCoordinate2D(latitude: 40.7625, longitude: -73.9679)
 
+    func testPlaceMapFramesOriginAndDestinationWithoutInventingWalkingGeometry() throws {
+        let start = CLLocationCoordinate2D(latitude: 40.708, longitude: -74.013)
+        let place = PlaceResult(id: "museum", name: "Museum", subtitle: "", latitude: 40.767, longitude: -73.938)
+        let route = PlaceMapRoute(place: place, plan: nil, boarding: nil, alighting: nil, start: start,
+                                  access: nil, egress: nil, optionID: "candidate")
+        XCTAssertTrue(route.walkingOverlays.isEmpty)
+        let region = try XCTUnwrap(TripMapOverlay.region(for: [], including: route.endpoints))
+        XCTAssertEqual(region.center.latitude, (start.latitude + place.latitude) / 2, accuracy: 0.00001)
+        XCTAssertGreaterThan(region.span.longitudeDelta, abs(place.longitude - start.longitude))
+    }
+
     func testRepeatedNearMeAtSameCoordinateCreatesNewCameraIntent() {
         var state = MapFocusState()
         XCTAssertTrue(state.requestNearby(nearby))

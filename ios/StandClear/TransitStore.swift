@@ -147,6 +147,7 @@ final class TransitStore {
     private enum NativeUITestFixture {
         static func data(for path: String, now: Date) throws -> Data {
             let includeExpress = ProcessInfo.processInfo.arguments.contains("--ui-test-express-arrivals")
+            let includeMuseum = ProcessInfo.processInfo.arguments.contains("--ui-test-noguchi")
             let payload: [String: Any]
             switch path {
             case "gtfsData.json":
@@ -176,6 +177,12 @@ final class TransitStore {
                         ("613", "Hunts Point Av", 40.820948, -73.890549),
                     ])
                 }
+                if includeMuseum {
+                    lines["4"] = lexingtonFixtureLine()
+                    for route in ["N", "W"] {
+                        lines[route] = astoriaFixtureLine(route)
+                    }
+                }
                 payload = ["lines": lines]
             case "api/alerts":
                 payload = ["available": true, "generatedAt": now.timeIntervalSince1970 * 1000,
@@ -200,12 +207,78 @@ final class TransitStore {
                     ] + (includeExpress ? [
                         arrival(id: "ui-fixture-6x-n", route: "6X", stop: "608", direction: "N", destination: "601", eta: timestamp + 120),
                         arrival(id: "ui-fixture-6-s", route: "6", stop: "608", direction: "S", destination: "613", eta: timestamp + 240),
-                    ] : []) + groupedArrivals(at: timestamp),
+                    ] : []) + (includeMuseum ? museumArrivals(at: timestamp) : []) + groupedArrivals(at: timestamp),
                 ]
             default:
                 throw URLError(.unsupportedURL)
             }
             return try JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys])
+        }
+
+        /// Simulator-only extract of public/gtfsData.json. Station vertices are
+        /// retained while intermediate track points are simplified for the fixture.
+        private static func astoriaFixtureLine(_ route: String) -> [String: Any] {
+            let shape: [[Double]] = [
+                [-73.921479, 40.766779], [-73.925508, 40.76182], [-73.929575, 40.756804],
+                [-73.932755, 40.752882], [-73.9338, 40.751634], [-73.936856, 40.749205],
+                [-73.937515, 40.749245], [-73.940202, 40.750582], [-73.942083, 40.751651],
+                [-73.967258, 40.76266], [-73.972399, 40.764819], [-73.973347, 40.764811],
+                [-73.97417, 40.764808], [-73.978759, 40.766646], [-73.979375, 40.766396],
+                [-73.980658, 40.764664], [-73.984139, 40.759901], [-73.985775, 40.757477],
+                [-73.986754, 40.754672], [-73.98795, 40.749567],
+            ]
+            let stops: [(String, String, Int)] = [
+                ("R04", "30 Av", 0),
+                ("R05", "Broadway", 1),
+                ("R06", "36 Av", 2),
+                ("R08", "39 Av-Dutch Kills", 3),
+                ("R09", "Queensboro Plaza", 7),
+                ("R11", "Lexington Av/59 St", 9),
+                ("R13", "5 Av/59 St", 11),
+                ("R14", "57 St-7 Av", 15),
+                ("R15", "49 St", 16),
+                ("R16", "Times Sq-42 St", 18),
+                ("R17", "34 St-Herald Sq", 19),
+            ]
+            return fixtureTrack(route, color: "#F6BC26", shape: shape, stops: stops)
+        }
+
+        private static func lexingtonFixtureLine() -> [String: Any] {
+            let shape: [[Double]] = [
+                [-73.967967, 40.762526], [-73.975427, 40.7523], [-73.976848, 40.751776],
+                [-73.978287, 40.751266], [-73.989845, 40.735409], [-73.989951, 40.734673],
+                [-73.989863, 40.733476], [-73.990682, 40.730419], [-73.993622, 40.727308],
+                [-73.996631, 40.723488], [-73.99722, 40.722188], [-74.002905, 40.715772],
+                [-74.003263, 40.714102], [-74.004131, 40.713065], [-74.005023, 40.712297],
+                [-74.008536, 40.711379], [-74.009509, 40.710368], [-74.011862, 40.707557],
+            ]
+            let stops: [(String, String, Int)] = [
+                ("629", "59 St", 0),
+                ("631", "Grand Central-42 St", 2),
+                ("635", "14 St-Union Sq", 5),
+                ("640", "Brooklyn Bridge-City Hall", 13),
+                ("418", "Fulton St", 16),
+                ("419", "Wall St", 17),
+            ]
+            return fixtureTrack("4", color: "#009952", shape: shape, stops: stops)
+        }
+
+        private static func fixtureTrack(_ route: String, color: String, shape: [[Double]], stops: [(String, String, Int)]) -> [String: Any] {
+            ["id": route, "routeId": route, "color": color, "shape": shape,
+             "stops": stops.map { id, name, index in
+                 ["id": id, "name": name, "lat": shape[index][1], "lng": shape[index][0], "shapeIdx": index] as [String: Any]
+             }]
+        }
+
+        private static func museumArrivals(at timestamp: Double) -> [[String: Any]] {
+            // The two Broadway services use the same platforms. A sooner
+            // southbound prediction cannot board a Queens-bound itinerary.
+            ["R16", "R15", "R17", "R14", "R13", "R11"].enumerated().flatMap { index, platform in
+                let offset = Double(index * 90)
+                return [arrival(id: "museum-n-n", route: "N", stop: platform, direction: "N", destination: "R04", eta: timestamp + 540 + offset),
+                        arrival(id: "museum-w-n", route: "W", stop: platform, direction: "N", destination: "R04", eta: timestamp + 720 + offset),
+                        arrival(id: "museum-w-s", route: "W", stop: platform, direction: "S", destination: "R17", eta: timestamp + 60 + offset)]
+            }
         }
 
         private static func groupedArrivals(at timestamp: Double) -> [[String: Any]] {
@@ -242,6 +315,43 @@ final class TransitStore {
     }
 #endif
 
+/// Both deadlines belong to the source timestamp. Receiving the same cached
+/// fix again neither extends its lifetime nor permits another early request.
+struct LocationFixSchedule {
+    static let lifetime: TimeInterval = 30
+    private(set) var timestamp: Date?
+    private var lastRenewed: Date?
+
+    mutating func accept(_ date: Date) {
+        timestamp = date
+    }
+
+    mutating func invalidate() {
+        timestamp = nil
+    }
+
+    static func renewalDate(for date: Date) -> Date {
+        date.addingTimeInterval(lifetime - 5)
+    }
+
+    func usable(at now: Date) -> Bool {
+        guard let timestamp else { return false }
+        return abs(now.timeIntervalSince(timestamp)) < Self.lifetime
+    }
+
+    mutating func claimRenewal(for date: Date, at now: Date) -> Bool {
+        guard timestamp == date, lastRenewed != date, now >= Self.renewalDate(for: date), usable(at: now) else { return false }
+        lastRenewed = date
+        return true
+    }
+
+    mutating func expire(_ date: Date) -> Bool {
+        guard timestamp == date else { return false }
+        timestamp = nil
+        return true
+    }
+}
+
 @MainActor @Observable
 final class LocationStore: NSObject, @preconcurrency CLLocationManagerDelegate {
     private let manager = CLLocationManager()
@@ -250,6 +360,7 @@ final class LocationStore: NSObject, @preconcurrency CLLocationManagerDelegate {
     var message: String?
     private var active = false
     private var expiryTask: Task<Void, Never>?
+    private var schedule = LocationFixSchedule()
 
     /// Core Location invokes this manager’s delegate on its creating (main) thread.
     override init() {
@@ -276,11 +387,14 @@ final class LocationStore: NSObject, @preconcurrency CLLocationManagerDelegate {
         active = false
         manager.stopUpdatingLocation()
         expiryTask?.cancel()
+        schedule.invalidate()
         coordinate = nil
     }
 
     func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
         status = manager.authorizationStatus
+        expiryTask?.cancel()
+        schedule.invalidate()
         coordinate = nil
         if active {
             start()
@@ -290,20 +404,24 @@ final class LocationStore: NSObject, @preconcurrency CLLocationManagerDelegate {
     func locationManager(_: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
         guard active else { return }
         guard let location = locations.last, location.horizontalAccuracy >= 0,
-              abs(location.timestamp.timeIntervalSinceNow) < 30
+              abs(location.timestamp.timeIntervalSinceNow) < LocationFixSchedule.lifetime
         else {
             coordinate = nil
             message = "Your location is out of date. Try again or search for a station."
             return
         }
+        guard schedule.timestamp.map({ location.timestamp >= $0 }) ?? true else { return }
         coordinate = location.coordinate
         message = nil
+        let timestamp = location.timestamp
+        guard schedule.timestamp != timestamp else { return }
+        schedule.accept(timestamp)
         expiryTask?.cancel()
-        let remaining = max(0, 30 - Date().timeIntervalSince(location.timestamp))
+        let remaining = max(0, LocationFixSchedule.lifetime - Date().timeIntervalSince(timestamp))
         expiryTask = Task { [weak self] in
             do { try await Task.sleep(for: .seconds(remaining)) } catch { return }
-            self?.coordinate = nil
-            guard let self, active else { return }
+            guard let self, active, schedule.expire(timestamp) else { return }
+            coordinate = nil
             // Coarse one-shot fixes avoid a continuous high-accuracy watch while
             // still expiring stationary/cached coordinates before reusing them.
             manager.requestLocation()
@@ -315,8 +433,24 @@ final class LocationStore: NSObject, @preconcurrency CLLocationManagerDelegate {
         message = "Your location is unavailable. Try again or search for a station."
     }
 
+    var usableFixTimestamp: Date? {
+        availableCoordinate == nil ? nil : schedule.timestamp
+    }
+
+    /// The place card owns this cancellable wait. The ordinary expiry task
+    /// remains armed until a newer measurement actually arrives.
+    func renewForPlace(_ timestamp: Date, stillNeeded: () -> Bool) async {
+        let delay = LocationFixSchedule.renewalDate(for: timestamp).timeIntervalSinceNow
+        if delay > 0 {
+            do { try await Task.sleep(for: .seconds(delay)) } catch { return }
+        }
+        guard !Task.isCancelled, active, stillNeeded(), availableCoordinate != nil,
+              schedule.claimRenewal(for: timestamp, at: .now) else { return }
+        manager.requestLocation()
+    }
+
     var availableCoordinate: CLLocationCoordinate2D? {
-        guard status == .authorizedAlways || status == .authorizedWhenInUse else { return nil }
+        guard status == .authorizedAlways || status == .authorizedWhenInUse, schedule.usable(at: .now) else { return nil }
         return coordinate
     }
 }

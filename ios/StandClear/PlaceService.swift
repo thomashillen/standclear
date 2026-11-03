@@ -176,12 +176,39 @@ private final class MapRequest<Value: Sendable> {
                         latitude: 40.7061, longitude: -74.0095),
         ]
 
+        static let museum = PlaceResult(id: "fixture-noguchi", name: "The Noguchi Museum", subtitle: "9-01 33rd Road, Queens, New York",
+                                        latitude: 40.7667, longitude: -73.9381)
+
         static func find(_ query: String) -> [PlaceResult] {
-            addresses.filter { $0.name.localizedCaseInsensitiveContains(query) }
+            let candidates = ProcessInfo.processInfo.arguments.contains("--ui-test-noguchi") ? addresses + [museum] : addresses
+            return candidates.filter { $0.name.localizedCaseInsensitiveContains(query) }
+        }
+
+        /// Representative pedestrian paths for a reproducible test, independent
+        /// of production MKDirections. Include only explicit fixture endpoints.
+        private static var museumWalks: [WalkingConnection] {
+            let fix = CLLocationCoordinate2D(latitude: 40.7553, longitude: -73.987)
+            func walk(_ vertices: [(Double, Double)], from: CLLocationCoordinate2D? = nil, to: CLLocationCoordinate2D? = nil,
+                      meters: Double, seconds: Double) -> WalkingConnection
+            {
+                WalkingConnection(coordinates: [from].compactMap(\.self) + vertices.map { .init(latitude: $0.0, longitude: $0.1) } + [to].compactMap(\.self),
+                                  seconds: seconds, meters: meters)
+            }
+            return [
+                walk([(40.7061, -74.0095), (40.70684, -74.01074), (40.707557, -74.011862)], meters: 275, seconds: 210), // 55 Wall Street to Wall St 419
+                walk([(40.75512, -73.98712), (40.75468, -73.98742), (40.754672, -73.986754)], from: fix, meters: 115, seconds: 95), // Times Sq R16
+                walk([(40.75643, -73.98611), (40.75934, -73.98399), (40.759901, -73.984139)], from: fix, meters: 660, seconds: 510), // 49 St R15
+                walk([(40.75502, -73.9869), (40.75001, -73.98809), (40.749567, -73.98795)], from: fix, meters: 765, seconds: 600), // Herald Sq R17
+                walk([(40.76182, -73.925508), (40.76456, -73.93191), (40.76676, -73.93688), (40.76634, -73.93716)], to: museum.coordinate, meters: 1460, seconds: 1110), // Broadway
+                walk([(40.756804, -73.929575), (40.75869, -73.93398), (40.76021, -73.93291), (40.76286, -73.93903), (40.7659, -73.93692)], to: museum.coordinate, meters: 1770, seconds: 1380), // 36 Av
+                walk([(40.766779, -73.921479), (40.77031, -73.92976), (40.76763, -73.93164), (40.76941, -73.93568), (40.76697, -73.9374)], to: museum.coordinate, meters: 1925, seconds: 1490), // 30 Av
+                walk([(40.752882, -73.932755), (40.75462, -73.93673), (40.75808, -73.9343), (40.76035, -73.93948), (40.76598, -73.93724)], to: museum.coordinate, meters: 2010, seconds: 1560), // 39 Av
+                walk([(40.750582, -73.940202), (40.75287, -73.93919), (40.7592, -73.94032), (40.76598, -73.93724)], to: museum.coordinate, meters: 2270, seconds: 1770), // Queensboro Plaza
+            ]
         }
 
         static func route(_ from: CLLocationCoordinate2D, _ to: CLLocationCoordinate2D) throws -> WalkingConnection {
-            let routes = [
+            var routes = [
                 WalkingConnection(coordinates: [.init(latitude: 40.762526, longitude: -73.967967),
                                                 .init(latitude: 40.7638, longitude: -73.9712), addresses[0].coordinate],
                                   seconds: 435, meters: 555),
@@ -189,6 +216,9 @@ private final class MapRequest<Value: Sendable> {
                                                 .init(latitude: 40.7569, longitude: -73.9836), addresses[1].coordinate],
                                   seconds: 410, meters: 530),
             ]
+            if ProcessInfo.processInfo.arguments.contains("--ui-test-noguchi") {
+                routes += museumWalks
+            }
             func near(_ a: CLLocationCoordinate2D, _ b: CLLocationCoordinate2D) -> Bool {
                 abs(a.latitude - b.latitude) < 0.00001 && abs(a.longitude - b.longitude) < 0.00001
             }

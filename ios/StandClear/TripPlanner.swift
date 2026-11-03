@@ -21,12 +21,41 @@ struct NativeTripLeg: Identifiable {
     }
 }
 
+/// The alighting and boarding platforms used by adjacent rail legs.
+struct NativeTripTransfer {
+    let incoming: Stop
+    let outgoing: Stop
+    let routeIDs: [String]
+
+    var isLexington59: Bool {
+        Set([incoming.id, outgoing.id]) == Set(["629", "R11"])
+    }
+}
+
 struct NativeTripPlan: Identifiable {
     var legs: [NativeTripLeg]
     let totalStops: Int
     let transferComplexId: String?
     var id: String {
         legs.map(\.id).joined(separator: "|")
+    }
+
+    func transfer(in lines: [SubwayLine]) -> NativeTripTransfer? {
+        guard legs.count == 2, let transferComplexId else { return nil }
+        let arriving = legs[0], departing = legs[1]
+        guard arriving.routeId != departing.routeId, arriving.alightComplexId == transferComplexId,
+              departing.boardComplexId == transferComplexId else { return nil }
+
+        // Shared platforms can transfer directly. Distinct platforms must
+        // belong to the same curated station complex as the selected plan.
+        let members = Transit.complexes.first { $0.contains(transferComplexId) } ?? [transferComplexId]
+        guard members.contains(arriving.alightStopId), members.contains(departing.boardStopId),
+              let incoming = lines.first(where: { $0.routeId == arriving.routeId })?.stops.first(where: { $0.id == arriving.alightStopId }),
+              let outgoing = lines.first(where: { $0.routeId == departing.routeId })?.stops.first(where: { $0.id == departing.boardStopId }),
+              CLLocationCoordinate2DIsValid(incoming.coordinate), CLLocationCoordinate2DIsValid(outgoing.coordinate) else { return nil }
+        var seen = Set<String>()
+        let routes = (arriving.routeIDs + departing.routeIDs).filter { seen.insert($0).inserted }
+        return NativeTripTransfer(incoming: incoming, outgoing: outgoing, routeIDs: routes)
     }
 }
 
@@ -40,55 +69,73 @@ enum TripPlanner {
     }
 
     static func plans(lines: [SubwayLine], stations: [Station], from: Station, to: Station) -> [NativeTripPlan] {
-        var complexByStop: [String: String] = [:]
-        for station in stations {
-            for stopID in station.stopIDs {
-                complexByStop[stopID] = station.id
-            }
-        }
-        let origins = Set(from.stopIDs.compactMap { complexByStop[$0] })
-        let destinations = Set(to.stopIDs.compactMap { complexByStop[$0] })
-        guard !origins.isEmpty, !destinations.isEmpty, origins.isDisjoint(with: destinations) else { return [] }
-        let orderedLines = lines.sorted { $0.routeId == $1.routeId ? $0.id < $1.id : $0.routeId < $1.routeId }
-        var nodes: [String: [Node]] = [:]
-        for line in orderedLines where line.stops.count >= 2 {
-            nodes[line.routeId] = line.stops.enumerated().compactMap { index, stop in
-                complexByStop[stop.id].map { Node(complexID: $0, index: index, stopID: stop.id) }
-            }
-        }
-        var results: [NativeTripPlan] = []
-        for line in orderedLines {
-            guard let routeNodes = nodes[line.routeId],
-                  let board = routeNodes.first(where: { origins.contains($0.complexID) }),
-                  let alight = routeNodes.first(where: { destinations.contains($0.complexID) }),
-                  let direct = leg(line: line, board: board, alight: alight) else { continue }
-            results.append(NativeTripPlan(legs: [direct], totalStops: direct.stopCount, transferComplexId: nil))
-        }
-        for firstLine in orderedLines {
-            guard let firstNodes = nodes[firstLine.routeId],
-                  let board = firstNodes.first(where: { origins.contains($0.complexID) }) else { continue }
-            for transfer in firstNodes where !origins.contains(transfer.complexID) && !destinations.contains(transfer.complexID) {
-                guard let firstLeg = leg(line: firstLine, board: board, alight: transfer) else { continue }
-                for secondLine in orderedLines where secondLine.routeId != firstLine.routeId {
-                    guard let secondNodes = nodes[secondLine.routeId],
-                          let secondBoard = secondNodes.first(where: { $0.complexID == transfer.complexID }),
-                          let alight = secondNodes.first(where: { destinations.contains($0.complexID) }),
-                          let secondLeg = leg(line: secondLine, board: secondBoard, alight: alight) else { continue }
-                    results.append(NativeTripPlan(legs: [firstLeg, secondLeg], totalStops: firstLeg.stopCount + secondLeg.stopCount,
-                                                  transferComplexId: transfer.complexID))
+        Network(lines: lines, stations: stations).plans(from: from, to: to)
+    }
+
+    /// A place search evaluates several boarding/alighting pairs against one
+    /// immutable static graph. Index platforms and transfer complexes once.
+    struct Network {
+        private let orderedLines: [SubwayLine]
+        private var complexByStop: [String: String] = [:]
+        private var nodes: [String: [Node]] = [:]
+        private var firstNodesByComplex: [String: [String: Node]] = [:]
+
+        init(lines: [SubwayLine], stations: [Station]) {
+            orderedLines = lines.sorted { $0.routeId == $1.routeId ? $0.id < $1.id : $0.routeId < $1.routeId }
+            for station in stations {
+                for stopID in station.stopIDs {
+                    complexByStop[stopID] = station.id
                 }
             }
-        }
-        results.sort {
-            if $0.legs.count != $1.legs.count {
-                return $0.legs.count < $1.legs.count
+            for line in orderedLines where line.stops.count >= 2 {
+                let routeNodes = line.stops.enumerated().compactMap { index, stop in
+                    complexByStop[stop.id].map { Node(complexID: $0, index: index, stopID: stop.id) }
+                }
+                nodes[line.routeId] = routeNodes
+                firstNodesByComplex[line.routeId] = Dictionary(routeNodes.map { ($0.complexID, $0) }, uniquingKeysWith: { first, _ in first })
             }
-            if $0.totalStops != $1.totalStops {
-                return $0.totalStops < $1.totalStops
-            }
-            return $0.id < $1.id
         }
-        return deduplicate(results)
+
+        func plans(from: Station, to: Station) -> [NativeTripPlan] {
+            let origins = Set(from.stopIDs.compactMap { complexByStop[$0] })
+            let destinations = Set(to.stopIDs.compactMap { complexByStop[$0] })
+            guard !origins.isEmpty, !destinations.isEmpty, origins.isDisjoint(with: destinations) else { return [] }
+            let alightLines: [(SubwayLine, Node)] = orderedLines.compactMap { line in
+                guard let alight = nodes[line.routeId]?.first(where: { destinations.contains($0.complexID) }) else { return nil }
+                return (line, alight)
+            }
+            var results: [NativeTripPlan] = []
+            for line in orderedLines {
+                guard let routeNodes = nodes[line.routeId],
+                      let board = routeNodes.first(where: { origins.contains($0.complexID) }),
+                      let alight = routeNodes.first(where: { destinations.contains($0.complexID) }),
+                      let direct = TripPlanner.leg(line: line, board: board, alight: alight) else { continue }
+                results.append(NativeTripPlan(legs: [direct], totalStops: direct.stopCount, transferComplexId: nil))
+            }
+            for firstLine in orderedLines {
+                guard let firstNodes = nodes[firstLine.routeId],
+                      let board = firstNodes.first(where: { origins.contains($0.complexID) }) else { continue }
+                for transfer in firstNodes where !origins.contains(transfer.complexID) && !destinations.contains(transfer.complexID) {
+                    guard let firstLeg = TripPlanner.leg(line: firstLine, board: board, alight: transfer) else { continue }
+                    for (secondLine, alight) in alightLines where secondLine.routeId != firstLine.routeId {
+                        guard let secondBoard = firstNodesByComplex[secondLine.routeId]?[transfer.complexID],
+                              let secondLeg = TripPlanner.leg(line: secondLine, board: secondBoard, alight: alight) else { continue }
+                        results.append(NativeTripPlan(legs: [firstLeg, secondLeg], totalStops: firstLeg.stopCount + secondLeg.stopCount,
+                                                      transferComplexId: transfer.complexID))
+                    }
+                }
+            }
+            results.sort {
+                if $0.legs.count != $1.legs.count {
+                    return $0.legs.count < $1.legs.count
+                }
+                if $0.totalStops != $1.totalStops {
+                    return $0.totalStops < $1.totalStops
+                }
+                return $0.id < $1.id
+            }
+            return TripPlanner.deduplicate(results)
+        }
     }
 
     static func geometry(for leg: NativeTripLeg, lines: [SubwayLine]) -> [CLLocationCoordinate2D] {
