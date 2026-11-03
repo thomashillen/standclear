@@ -28,6 +28,12 @@ struct PlaceMapRoute {
         }
     }
 
+    func transferLabel(in lines: [SubwayLine]) -> (text: String, coordinate: CLLocationCoordinate2D)? {
+        guard let plan, let transfer = plan.transfer(in: lines), let departingLeg = plan.legs.last else { return nil }
+        let service = departingLeg.routeIDs.map { TransitRouteIdentity($0).bullet }.joined(separator: "/")
+        return ("Change to \(service) at \(transfer.outgoing.name)", transfer.outgoing.coordinate)
+    }
+
     var accessibilitySummary: String {
         let rides = plan?.legs.map { $0.routeIDs.joined(separator: "/") }.joined(separator: ", then ")
         return [place.name, rides, boarding?.name, alighting?.name].compactMap(\.self).joined(separator: ", ")

@@ -636,7 +636,9 @@ struct PlacePreview: View {
                             }
                         }
                         if let ride = option.route.ride {
-                            Text("\(ride.trip.legs.count == 1 ? "Direct" : "1 transfer") · \(ride.boarding.name) → \(ride.alighting.name)")
+                            let transfer = ride.trip.transfer(in: store.lines)
+                            let changes = transfer.map { "Change at \(transferName($0))" } ?? (ride.trip.legs.count == 1 ? "Direct" : "1 transfer")
+                            Text("\(changes) · \(ride.boarding.name) → \(ride.alighting.name)")
                                 .font(.subheadline).foregroundStyle(.secondary)
                         }
                     }
@@ -657,10 +659,16 @@ struct PlacePreview: View {
                 if current.request.start != nil {
                     walkingRow("Walk to \(ride.boarding.name)", walk: option.access)
                 }
-                ForEach(trip.legs) { leg in
+                let transfer = trip.transfer(in: store.lines)
+                ForEach(Array(trip.legs.enumerated()), id: \.element.id) { index, leg in
+                    if index == 1, let transfer {
+                        transferStep(transfer, arriving: trip.legs[0], departing: leg)
+                    }
                     let stops = store.lines.first { $0.routeId == leg.routeId }?.stops ?? []
-                    let boarding = stops.first { $0.id == leg.boardStopId }?.name ?? leg.boardStopId
-                    let alighting = stops.first { $0.id == leg.alightStopId }?.name ?? leg.alightStopId
+                    // These two platform IDs name the same verified interchange.
+                    // Show the same name at the end and beginning of its ride legs.
+                    let boarding = index == 1 && transfer?.isLexington59 == true ? "Lexington Av/59 St" : stops.first { $0.id == leg.boardStopId }?.name ?? leg.boardStopId
+                    let alighting = index == 0 && transfer?.isLexington59 == true ? "Lexington Av/59 St" : stops.first { $0.id == leg.alightStopId }?.name ?? leg.alightStopId
                     VStack(alignment: .leading, spacing: 4) {
                         Label("\(leg.routeIDs.map(RouteBadge.displayID).joined(separator: "/")) · \(leg.direction == "N" ? "Northbound" : "Southbound")", systemImage: "tram")
                             .font(.headline)
@@ -704,6 +712,32 @@ struct PlacePreview: View {
         } footer: {
             Text("Walking routes use station coordinates. Entrances and step-free access are unverified. Typical times allow 4 minutes per train wait, 90 seconds per stop and 3 minutes per transfer. Transfer predictions show departures at that platform now. A connection is not guaranteed.")
         }
+    }
+
+    private func transferName(_ transfer: NativeTripTransfer) -> String {
+        if transfer.isLexington59 {
+            return "Lexington Av/59 St"
+        }
+        if transfer.incoming.name == transfer.outgoing.name {
+            return transfer.incoming.name
+        }
+        return "\(transfer.incoming.name) / \(transfer.outgoing.name)"
+    }
+
+    private func transferStep(_ transfer: NativeTripTransfer, arriving: NativeTripLeg, departing: NativeTripLeg) -> some View {
+        let incoming = arriving.routeIDs.map(RouteBadge.displayID).joined(separator: "/")
+        let outgoing = departing.routeIDs.map(RouteBadge.displayID).joined(separator: "/")
+        let boarding = transfer.isLexington59 ? "Lexington Av/59 St" : transfer.outgoing.name
+        return VStack(alignment: .leading, spacing: 4) {
+            Label("Change to \(outgoing) at \(boarding)", systemImage: "arrow.left.arrow.right").font(.headline)
+            if transfer.isLexington59 {
+                Text("Follow the in-station signs from the \(incoming) platform to the \(outgoing) platform.")
+            } else {
+                Text("Leave the \(incoming) at \(transfer.incoming.name).")
+            }
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("placeTransferStep")
     }
 
     private func minutes(_ seconds: Double) -> String {

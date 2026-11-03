@@ -77,26 +77,7 @@ final class PlacePreviewTests: XCTestCase {
     }
 
     func testRectorAreaToNoguchiCanBoardAtWallStreetAndStillOffersDirectService() throws {
-        // Representative segments of public/gtfsData.json. The museum is over
-        // 1.2 km from Broadway; 59 St is a transfer between platform IDs.
-        let express = fixtureLine("4", [
-            ("629", 40.762526, -73.967967), ("631", 40.751776, -73.976848),
-            ("635", 40.734673, -73.989951), ("640", 40.713065, -74.004131),
-            ("418", 40.710368, -74.009509), ("419", 40.707557, -74.011862),
-        ])
-        let broadway = fixtureLine("W", [
-            ("R26", 40.70722, -74.013342), ("R25", 40.710668, -74.011029),
-            ("R24", 40.713282, -74.006978), ("R23", 40.719527, -74.001775),
-            ("R22", 40.724329, -73.997702), ("R21", 40.730328, -73.992629),
-            ("R20", 40.735736, -73.990568), ("R19", 40.741303, -73.989344),
-            ("R18", 40.745494, -73.988691), ("R17", 40.749567, -73.98795),
-            ("R16", 40.754672, -73.986754), ("R15", 40.759901, -73.984139),
-            ("R14", 40.764664, -73.980658), ("R13", 40.764811, -73.973347),
-            ("R11", 40.76266, -73.967258), ("R09", 40.750582, -73.940202),
-            ("R08", 40.752882, -73.932755), ("R06", 40.756804, -73.929575),
-            ("R05", 40.76182, -73.925508),
-        ])
-        let lines = [express, broadway]
+        let lines = lexingtonQueensLines()
         let stations = Transit.stations(lines)
         let place = CLLocationCoordinate2D(latitude: 40.76676, longitude: -73.9384)
         let fix = CLLocationCoordinate2D(latitude: 40.7071, longitude: -74.0135)
@@ -118,6 +99,59 @@ final class PlacePreviewTests: XCTestCase {
             return XCTFail("Manual station selection still has a direct ride")
         }
         XCTAssertTrue(manualRoutes.allSatisfy { $0.ride?.origin.id == manual.id })
+    }
+
+    func testLexington59TransferAndSelectedTrackInBothTravelDirections() throws {
+        let lines = lexingtonQueensLines()
+        let stations = Transit.stations(lines)
+        let wall = try XCTUnwrap(stations.first { $0.id == "419" })
+        let broadway = try XCTUnwrap(stations.first { $0.id == "R05" })
+        let yellow = try XCTUnwrap(lines.first { $0.routeId == "W" })
+        let timesSquare = try XCTUnwrap(yellow.stops.first { $0.id == "R16" })
+        for (origin, destination) in [(wall, broadway), (broadway, wall)] {
+            let outward = origin.id == wall.id
+            let plan = try XCTUnwrap(TripPlanner.plans(lines: lines, stations: stations, from: origin, to: destination).first)
+            let transfer = try XCTUnwrap(plan.transfer(in: lines))
+            XCTAssertTrue(transfer.isLexington59)
+            XCTAssertEqual(transfer.incoming.id, outward ? "629" : "R11")
+            XCTAssertEqual(transfer.outgoing.id, outward ? "R11" : "629")
+            XCTAssertEqual(transfer.routeIDs, outward ? ["4", "W"] : ["W", "4"])
+            let overlays = TripMapOverlay.make(plan: plan, lines: lines)
+            XCTAssertEqual(overlays.count, 2)
+            let segment = try XCTUnwrap(overlays.first { $0.color == yellow.color })
+            XCTAssertFalse(segment.walking)
+            let expectedIDs = outward ? ["R11", "R09", "R08", "R06", "R05"] : ["R05", "R06", "R08", "R09", "R11"]
+            let expected = try expectedIDs.map { id in try XCTUnwrap(yellow.stops.first { $0.id == id }) }
+            XCTAssertEqual(segment.coordinates.map(\.latitude), expected.map(\.lat))
+            XCTAssertEqual(segment.coordinates.map(\.longitude), expected.map(\.lng))
+            XCTAssertFalse(segment.coordinates.contains { $0.latitude == timesSquare.lat && $0.longitude == timesSquare.lng })
+            XCTAssertNil(plan.transfer(in: [yellow]), "Missing the incoming or outgoing line must suppress the transfer")
+            let mismatched = NativeTripPlan(legs: plan.legs, totalStops: plan.totalStops, transferComplexId: "127")
+            XCTAssertNil(mismatched.transfer(in: lines), "A different complex must not manufacture a transfer")
+        }
+    }
+
+    private func lexingtonQueensLines() -> [SubwayLine] {
+        // Representative segments of public/gtfsData.json. The museum is over
+        // 1.2 km from Broadway; 59 St is a transfer between platform IDs.
+        let express = fixtureLine("4", [
+            ("629", 40.762526, -73.967967), ("631", 40.751776, -73.976848),
+            ("635", 40.734673, -73.989951), ("640", 40.713065, -74.004131),
+            ("418", 40.710368, -74.009509), ("419", 40.707557, -74.011862),
+        ])
+        let broadway = fixtureLine("W", [
+            ("R26", 40.70722, -74.013342), ("R25", 40.710668, -74.011029),
+            ("R24", 40.713282, -74.006978), ("R23", 40.719527, -74.001775),
+            ("R22", 40.724329, -73.997702), ("R21", 40.730328, -73.992629),
+            ("R20", 40.735736, -73.990568), ("R19", 40.741303, -73.989344),
+            ("R18", 40.745494, -73.988691), ("R17", 40.749567, -73.98795),
+            ("R16", 40.754672, -73.986754), ("R15", 40.759901, -73.984139),
+            ("R14", 40.764664, -73.980658), ("R13", 40.764811, -73.973347),
+            ("R11", 40.76266, -73.967258), ("R09", 40.750582, -73.940202),
+            ("R08", 40.752882, -73.932755), ("R06", 40.756804, -73.929575),
+            ("R05", 40.76182, -73.925508),
+        ], color: "F6BC26")
+        return [express, broadway]
     }
 
     func testRejectedWalkingEndpointCanBeReplacedWithoutLosingOtherRoute() throws {
@@ -159,11 +193,11 @@ final class PlacePreviewTests: XCTestCase {
         XCTAssertNotNil(remaining.first?.trip)
     }
 
-    private func fixtureLine(_ route: String, _ points: [(String, Double, Double)]) -> SubwayLine {
+    private func fixtureLine(_ route: String, _ points: [(String, Double, Double)], color: String = "009952") -> SubwayLine {
         let stops = points.enumerated().map { index, point in
             Stop(id: point.0, name: point.0, lat: point.1, lng: point.2, shapeIdx: index)
         }
-        return SubwayLine(id: route, routeId: route, color: "009952", stops: stops, shape: stops.map { [$0.lng, $0.lat] })
+        return SubwayLine(id: route, routeId: route, color: color, stops: stops, shape: stops.map { [$0.lng, $0.lat] })
     }
 
     func testExactCoincidenceOverridesCachedWalkButNearbyStillRequiresRouting() {

@@ -21,12 +21,41 @@ struct NativeTripLeg: Identifiable {
     }
 }
 
+/// The alighting and boarding platforms used by adjacent rail legs.
+struct NativeTripTransfer {
+    let incoming: Stop
+    let outgoing: Stop
+    let routeIDs: [String]
+
+    var isLexington59: Bool {
+        Set([incoming.id, outgoing.id]) == Set(["629", "R11"])
+    }
+}
+
 struct NativeTripPlan: Identifiable {
     var legs: [NativeTripLeg]
     let totalStops: Int
     let transferComplexId: String?
     var id: String {
         legs.map(\.id).joined(separator: "|")
+    }
+
+    func transfer(in lines: [SubwayLine]) -> NativeTripTransfer? {
+        guard legs.count == 2, let transferComplexId else { return nil }
+        let arriving = legs[0], departing = legs[1]
+        guard arriving.routeId != departing.routeId, arriving.alightComplexId == transferComplexId,
+              departing.boardComplexId == transferComplexId else { return nil }
+
+        // Shared platforms can transfer directly. Distinct platforms must
+        // belong to the same curated station complex as the selected plan.
+        let members = Transit.complexes.first { $0.contains(transferComplexId) } ?? [transferComplexId]
+        guard members.contains(arriving.alightStopId), members.contains(departing.boardStopId),
+              let incoming = lines.first(where: { $0.routeId == arriving.routeId })?.stops.first(where: { $0.id == arriving.alightStopId }),
+              let outgoing = lines.first(where: { $0.routeId == departing.routeId })?.stops.first(where: { $0.id == departing.boardStopId }),
+              CLLocationCoordinate2DIsValid(incoming.coordinate), CLLocationCoordinate2DIsValid(outgoing.coordinate) else { return nil }
+        var seen = Set<String>()
+        let routes = (arriving.routeIDs + departing.routeIDs).filter { seen.insert($0).inserted }
+        return NativeTripTransfer(incoming: incoming, outgoing: outgoing, routeIDs: routes)
     }
 }
 

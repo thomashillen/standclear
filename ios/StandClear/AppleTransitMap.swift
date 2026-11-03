@@ -37,7 +37,7 @@ struct AppleTransitMap: View {
         let inputs = motionInputs
         GeometryReader { geometry in
             MapKit.Map(position: $position, interactionModes: [.pan, .zoom, .rotate]) {
-                ForEach(routeGeometry) { line in
+                ForEach(destination == nil ? routeGeometry : []) { line in
                     MapPolyline(line.polyline)
                         .stroke(line.color,
                                 style: StrokeStyle(lineWidth: 3, lineCap: .round, lineJoin: .round))
@@ -67,10 +67,9 @@ struct AppleTransitMap: View {
                     if let boarding = placeRoute?.boarding {
                         Marker(boarding.name, systemImage: "tram", coordinate: boarding.coordinate)
                     }
-                    if let id = placeRoute?.plan?.transferComplexId,
-                       let transfer = store.stations.first(where: { $0.id == id })
-                    {
-                        Marker("Transfer at \(transfer.stop.name)", systemImage: "arrow.left.arrow.right", coordinate: transfer.stop.coordinate)
+                    if let transfer = placeRoute?.transferLabel(in: store.lines) {
+                        Marker(transfer.text, systemImage: "arrow.left.arrow.right", coordinate: transfer.coordinate)
+                            .annotationTitles(.visible)
                     }
                     if let alighting = placeRoute?.alighting, alighting.id != placeRoute?.boarding?.id {
                         Marker(alighting.name, systemImage: "tram", coordinate: alighting.coordinate)
@@ -127,7 +126,7 @@ struct AppleTransitMap: View {
             .ignoresSafeArea(edges: .top)
             .accessibilityIdentifier("appleTransitMap")
             .accessibilityLabel("Subway map, Apple Maps")
-            .accessibilityValue(placeRoute?.accessibilitySummary ?? destination?.name ?? "")
+            .accessibilityValue([placeRoute?.transferLabel(in: store.lines)?.text, placeRoute?.accessibilitySummary ?? destination?.name].compactMap(\.self).joined(separator: ", "))
             .accessibilityHint("Use Search or Nearby for accessible station arrivals.")
         }
         .onChange(of: TripGeometryInput(linesRevision: inputs.linesRevision, focus: tripFocusRevision, placeRevision: placeGeometryRevision, ids: tripOverlays.map(\.id)), initial: true) { _, _ in
@@ -158,7 +157,7 @@ struct AppleTransitMap: View {
 
     private var motionInputs: MotionInputs {
         MotionInputs(linesRevision: store.linesRevision, feedRevision: store.feedError ? nil : store.motionSnapshotRevision,
-                     active: scenePhase == .active, reduceMotion: reduceMotion || !mapExposed)
+                     active: scenePhase == .active && destination == nil, reduceMotion: reduceMotion || !mapExposed)
     }
 
     private func stopMotion() {

@@ -237,7 +237,7 @@ struct MapShell: View {
                 } else {
                     TimelineView(.periodic(from: .now, by: 5)) { timeline in
                         Map(viewport: $viewport) {
-                            ForEvery(store.lines, id: \.routeId) { line in
+                            ForEvery(activeDestination == nil ? store.lines : [], id: \.routeId) { line in
                                 PolylineAnnotation(lineCoordinates: line.coordinates)
                                     .lineColor(StyleColor(transitColor(line.color)))
                                     .lineWidth(3)
@@ -256,8 +256,14 @@ struct MapShell: View {
                                     .textHaloColor(.white)
                                     .textHaloWidth(2)
                             }
-                            let projected = TrainMapProjection.markers(snapshot: store.snapshot, lines: store.lines,
-                                                                       now: timeline.date, feedUnavailable: store.feedError)
+                            if let transfer = visiblePlaceRoute?.transferLabel(in: store.lines) {
+                                PointAnnotation(coordinate: transfer.coordinate)
+                                    .textField(transfer.text)
+                                    .textHaloColor(.white)
+                                    .textHaloWidth(2)
+                            }
+                            let projected = activeDestination == nil ? TrainMapProjection.markers(snapshot: store.snapshot, lines: store.lines,
+                                                                                                  now: timeline.date, feedUnavailable: store.feedError) : []
                             CircleAnnotationGroup(projected.filter { $0.bearingDegrees == nil }) { marker in
                                 CircleAnnotation(centerCoordinate: marker.coordinate)
                                     .circleColor(StyleColor(transitColor(marker.color)))
