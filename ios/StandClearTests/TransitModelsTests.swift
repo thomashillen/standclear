@@ -269,3 +269,31 @@ final class TransitModelsTests: XCTestCase {
              shape: [[100, 10], [110, 20], [120, 30]])
     }
 }
+
+@MainActor
+final class RecentStationsTests: XCTestCase {
+    func testBoundedUniqueHistoryResolvesCurrentStationsAndClearsPersistence() throws {
+        let domain = "StandClear.RecentStationsTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: domain))
+        defer { defaults.removePersistentDomain(forName: domain) }
+        let history = RecentStations(defaults: defaults)
+        for index in 1 ... 12 {
+            history.record(String(index))
+        }
+        history.record("5")
+        history.record("5")
+        let expected = ["5", "12", "11", "10", "9", "8", "7", "6", "4", "3"]
+        XCTAssertEqual(history.ids, expected)
+        let restored = RecentStations(defaults: defaults)
+        XCTAssertEqual(restored.ids, expected)
+        XCTAssertTrue(restored.resolved(in: []).isEmpty)
+        let current: [Station] = ["12", "5", "other"].map { id in
+            let stop = Stop(id: id, name: "Updated \(id)", lat: 40.75, lng: -74, shapeIdx: 0)
+            return Station(id: id, stop: stop, stopIDs: [id], routes: ["4"])
+        }
+        XCTAssertEqual(restored.resolved(in: current).map(\.stop.name), ["Updated 5", "Updated 12"])
+        XCTAssertEqual(restored.ids, expected, "Delayed or unavailable stations must not erase stored selections")
+        restored.clear()
+        XCTAssertTrue(RecentStations(defaults: defaults).ids.isEmpty)
+    }
+}
