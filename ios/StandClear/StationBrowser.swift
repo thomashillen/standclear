@@ -44,7 +44,7 @@ struct StationBrowser: View {
     let search: Bool
     let recentStations: RecentStations
     let favoriteStations: FavoriteStations
-    let openWindowPreview: ((PlaceResult) -> Void)?
+    let openPlace: (PlaceResult) -> Void
     @Binding var query: String
     var searchFocus: FocusState<Bool>.Binding
     @Binding var directionsSelection: DirectionsSelection
@@ -57,7 +57,7 @@ struct StationBrowser: View {
     var body: some View {
         Group {
             if search {
-                PlaceSearchView(store: store, location: location, recentStations: recentStations, openWindowPreview: openWindowPreview,
+                PlaceSearchView(store: store, recentStations: recentStations, openPlace: openPlace,
                                 query: $query, clearFocus: { searchFocus.wrappedValue = false }, stationRow: searchStationRow)
                     .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Address, place or station")
                     .searchFocused(searchFocus)

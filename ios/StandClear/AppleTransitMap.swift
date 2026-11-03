@@ -13,6 +13,8 @@ struct AppleTransitMap: View {
     var currentLocation: CLLocationCoordinate2D?
     var tripOverlays: [TripMapOverlay] = []
     var tripFocusRevision: Int = 0
+    var destination: PlaceResult?
+    var placeRoute: PlaceMapRoute?
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
@@ -40,17 +42,30 @@ struct AppleTransitMap: View {
                                 style: StrokeStyle(lineWidth: 3, lineCap: .round, lineJoin: .round))
                 }
                 ForEach(tripGeometry) { overlay in
-                    MapPolyline(overlay.polyline)
-                        .stroke(.white, style: StrokeStyle(lineWidth: 10, lineCap: .round, lineJoin: .round))
-                    MapPolyline(overlay.polyline)
-                        .stroke(overlay.color,
-                                style: StrokeStyle(lineWidth: 6, lineCap: .round, lineJoin: .round))
+                    if overlay.walking {
+                        MapPolyline(overlay.polyline)
+                            .stroke(.blue, style: StrokeStyle(lineWidth: 4, lineCap: .round, dash: [6, 5]))
+                    } else {
+                        MapPolyline(overlay.polyline)
+                            .stroke(.white, style: StrokeStyle(lineWidth: 10, lineCap: .round, lineJoin: .round))
+                        MapPolyline(overlay.polyline)
+                            .stroke(overlay.color, style: StrokeStyle(lineWidth: 6, lineCap: .round, lineJoin: .round))
+                    }
                 }
                 ForEach(inputs.feedRevision == nil || !inputs.active ? [] : markers) { marker in
                     Annotation("Route \(marker.displayLetter) train", coordinate: marker.coordinate) {
                         AppleTrainAnnotation(marker: marker, cameraState: cameraState)
                     }
                     .annotationTitles(.hidden)
+                }
+                if let destination {
+                    Marker(destination.name, systemImage: "mappin", coordinate: destination.coordinate)
+                    if let boarding = placeRoute?.boarding {
+                        Marker(boarding.name, systemImage: "tram", coordinate: boarding.coordinate)
+                    }
+                    if let alighting = placeRoute?.alighting, alighting.id != placeRoute?.boarding?.id {
+                        Marker(alighting.name, systemImage: "tram", coordinate: alighting.coordinate)
+                    }
                 }
                 if let currentLocation {
                     // Use the same expiring foreground fix as nearby arrivals.
@@ -88,7 +103,7 @@ struct AppleTransitMap: View {
                 ))
             }
             .onChange(of: tripFocusRevision, initial: true) { _, _ in
-                if let region = TripMapOverlay.region(for: tripOverlays) {
+                if let region = TripMapOverlay.region(for: tripOverlays, including: placeRoute?.endpoints ?? [destination?.coordinate].compactMap(\.self)) {
                     position = .region(region)
                 }
             }
@@ -103,10 +118,11 @@ struct AppleTransitMap: View {
             .ignoresSafeArea(edges: .top)
             .accessibilityIdentifier("appleTransitMap")
             .accessibilityLabel("Subway map, Apple Maps")
+            .accessibilityValue(placeRoute?.accessibilitySummary ?? destination?.name ?? "")
             .accessibilityHint("Use Search or Nearby for accessible station arrivals.")
         }
         .onChange(of: TripGeometryInput(linesRevision: inputs.linesRevision, focus: tripFocusRevision, ids: tripOverlays.map(\.id)), initial: true) { _, _ in
-            tripGeometry = tripOverlays.compactMap { AppleRoutePolyline(id: $0.id, color: $0.color, coordinates: $0.coordinates) }
+            tripGeometry = tripOverlays.compactMap { AppleRoutePolyline(id: $0.id, color: $0.color, coordinates: $0.coordinates, walking: $0.walking) }
         }
         .task(id: inputs) { await render(inputs) }
         .onChange(of: scenePhase) { _, phase in
@@ -193,10 +209,12 @@ private struct AppleRoutePolyline: Identifiable {
     let id: String
     let color: Color
     let polyline: MKPolyline
+    let walking: Bool
 
-    init?(id: String, color: String, coordinates: [CLLocationCoordinate2D]) {
+    init?(id: String, color: String, coordinates: [CLLocationCoordinate2D], walking: Bool = false) {
         guard coordinates.count >= 2 else { return nil }
         self.id = id
+        self.walking = walking
         self.color = Color(uiColor: transitColor(color))
         polyline = MKPolyline(coordinates: coordinates, count: coordinates.count)
     }

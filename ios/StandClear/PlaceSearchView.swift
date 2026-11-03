@@ -35,9 +35,8 @@ final class RecentStations {
 /// A single results list. Station filtering is local and independent of MapKit.
 struct PlaceSearchView<StationRow: View>: View {
     let store: TransitStore
-    let location: LocationStore
     let recentStations: RecentStations
-    let openWindowPreview: ((PlaceResult) -> Void)?
+    let openPlace: (PlaceResult) -> Void
     @Binding var query: String
     let clearFocus: () -> Void
     let stationRow: (Station, Bool) -> StationRow
@@ -150,20 +149,11 @@ struct PlaceSearchView<StationRow: View>: View {
     }
 
     private func placeRow(_ item: PlaceResult) -> some View {
-        Group {
-            if let openWindowPreview {
-                Button {
-                    clearFocus()
-                    openWindowPreview(item)
-                } label: { resultLabel(item) }
-            } else {
-                NavigationLink {
-                    PlacePreview(place: item, store: store, location: location)
-                        .onAppear(perform: clearFocus)
-                } label: { resultLabel(item) }
-            }
-        }
-        .accessibilityIdentifier("placeResult-\(item.id)")
+        Button {
+            clearFocus()
+            openPlace(item)
+        } label: { resultLabel(item) }
+            .accessibilityIdentifier("placeResult-\(item.id)")
     }
 
     private func resultLabel(_ item: PlaceResult) -> some View {

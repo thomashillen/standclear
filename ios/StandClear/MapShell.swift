@@ -19,7 +19,8 @@ struct MapShell: View {
     @State private var expandedPanel: Panel = .nearby
     @State private var stationVisit = 0
     @State private var directionsSelection = DirectionsSelection()
-    @State private var previewPlace: PlaceResult?
+    @State private var placeSession = PlacePreviewSession()
+    @State private var placeRoute: PlaceMapRoute?
     @State private var selectedTrip: NativeTripPlan?
     @State private var tripFocusRevision = 0
     @State private var searchQuery = ""
@@ -44,6 +45,14 @@ struct MapShell: View {
     enum Panel: Hashable, Identifiable {
         case search, nearby, directions
         case station(String)
+        case place(PlaceResult)
+
+        var destination: PlaceResult? {
+            if case let .place(value) = self {
+                return value
+            }; return nil
+        }
+
         var id: Self {
             self
         }
@@ -70,7 +79,7 @@ struct MapShell: View {
                             }
                             .id(expandedPanel)
                             .id(stationVisit)
-                            if selectedTrip != nil {
+                            if selectedTrip != nil || expandedPanel.destination != nil {
                                 clearRouteButton
                                     .buttonStyle(.bordered)
                                     .padding(.horizontal)
@@ -128,6 +137,10 @@ struct MapShell: View {
                 if isExpanded, let activePanel = panel {
                     expandedPanel = activePanel
                     panel = nil
+                } else if !isExpanded, expandedPanel.destination != nil {
+                    sheetDetent = typeSize.isAccessibilitySize ? .large : .medium
+                    panel = expandedPanel
+                    expandedPanel = .nearby
                 } else if !isExpanded, case .station = expandedPanel {
                     sheetDetent = .large
                     panel = expandedPanel
@@ -155,14 +168,7 @@ struct MapShell: View {
                 // Search starts with room for its keyboard instead of promoting a medium sheet during focus.
                 .presentationDetents(panel == .search || typeSize.isAccessibilitySize ? [.large] : [.medium, .large], selection: $sheetDetent)
                 .presentationDragIndicator(.visible)
-            }
-        }
-        .fullScreenCover(item: $previewPlace) { place in
-            NavigationStack {
-                PlacePreview(place: place, store: store, location: location)
-                    .toolbar {
-                        ToolbarItem(placement: .confirmationAction) { Button("Done") { previewPlace = nil } }
-                    }
+                .presentationBackgroundInteraction(panel.destination != nil ? .enabled(upThrough: .medium) : .automatic)
             }
         }
         .alert("Arrival status", isPresented: $showingArrivalStatus) {
@@ -176,6 +182,11 @@ struct MapShell: View {
                 stationSearchFocused = false
             }
         }
+        .onChange(of: activeDestination?.id) { _, id in
+            if id == nil {
+                placeRoute = nil
+            }
+        }
         .onChange(of: sheetDetent) { _, _ in viewport = viewport.padding(focusPadding) }
         .onChange(of: windowSize) { _, _ in viewport = viewport.padding(focusPadding) }
         .onChange(of: typeSize, initial: true) { _, _ in
@@ -186,6 +197,7 @@ struct MapShell: View {
         }
         .onChange(of: scenePhase) { _, phase in
             if phase != .active {
+                placeRoute = nil
                 location.stop(); store.stop()
             }
             if phase == .background {
@@ -210,7 +222,8 @@ struct MapShell: View {
                 if mapProvider == .apple {
                     AppleTransitMap(store: store, mapExposed: panel == nil || sheetDetent != .large, focusedCoordinate: focus.coordinate, focusRevision: focus.revision,
                                     coveredWidth: coveredWidth, coveredBottom: coveredBottom, currentLocation: location.availableCoordinate,
-                                    tripOverlays: tripOverlays, tripFocusRevision: tripFocusRevision)
+                                    tripOverlays: tripOverlays, tripFocusRevision: tripFocusRevision,
+                                    destination: activeDestination, placeRoute: visiblePlaceRoute)
                 } else {
                     TimelineView(.periodic(from: .now, by: 5)) { timeline in
                         Map(viewport: $viewport) {
@@ -225,7 +238,13 @@ struct MapShell: View {
                                     .lineWidth(10)
                                 PolylineAnnotation(lineCoordinates: overlay.coordinates)
                                     .lineColor(StyleColor(transitColor(overlay.color)))
-                                    .lineWidth(6)
+                                    .lineWidth(overlay.walking ? 4 : 6)
+                            }
+                            if let place = activeDestination {
+                                PointAnnotation(coordinate: place.coordinate)
+                                    .textField(place.name)
+                                    .textHaloColor(.white)
+                                    .textHaloWidth(2)
                             }
                             let projected = TrainMapProjection.markers(snapshot: store.snapshot, lines: store.lines,
                                                                        now: timeline.date, feedUnavailable: store.feedError)
@@ -281,7 +300,7 @@ struct MapShell: View {
                         .id(mapID)
                     }
                 }
-                if panel == nil || coveredWidth > 0 {
+                if activeDestination == nil, panel == nil || coveredWidth > 0 {
                     TimelineView(.periodic(from: .now, by: 5)) { timeline in
                         NearbyGlancePanel(store: store, location: location, now: timeline.date,
                                           maximumHeight: maximumGlanceHeight,
@@ -411,12 +430,69 @@ struct MapShell: View {
         viewport = .camera(center: coordinate, zoom: 14).padding(focusPadding)
     }
 
+    private var isWide: Bool {
+        windowSize.width >= 640 && !typeSize.isAccessibilitySize
+    }
+
+    private var activeDestination: PlaceResult? {
+        (isWide ? expandedPanel : panel)?.destination
+    }
+
+    private var visiblePlaceRoute: PlaceMapRoute? {
+        guard scenePhase == .active, let placeRoute, placeRoute.place.id == activeDestination?.id,
+              !placeSession.usesCurrentLocation || location.availableCoordinate != nil else { return nil }
+        return placeRoute
+    }
+
     private var tripOverlays: [TripMapOverlay] {
-        TripMapOverlay.make(plan: selectedTrip, lines: store.lines)
+        let route = visiblePlaceRoute
+        return TripMapOverlay.make(plan: route?.plan ?? selectedTrip, lines: store.lines) + (route?.walkingOverlays ?? [])
+    }
+
+    private func openPlace(_ place: PlaceResult, expanded: Bool) {
+        focus.cancelPending()
+        stationSearchFocused = false
+        selectedTrip = nil
+        placeRoute = nil
+        placeSession = PlacePreviewSession()
+        if expanded {
+            expandedPanel = .place(place)
+        } else {
+            panel = .place(place)
+            sheetDetent = typeSize.isAccessibilitySize ? .large : .medium
+        }
+        tripFocusRevision += 1
+        viewport = .camera(center: place.coordinate, zoom: 13).padding(focusPadding)
+    }
+
+    private func updatePlaceMap(_ route: PlaceMapRoute?, destination: PlaceResult) {
+        guard activeDestination?.id == destination.id else { return }
+        placeRoute = route
+        tripFocusRevision += 1
+        let points = tripOverlays.flatMap(\.coordinates) + (route?.endpoints ?? [destination.coordinate])
+        if points.count > 1 {
+            viewport = .overview(geometry: LineString(points), geometryPadding: .init(top: 24, leading: 24, bottom: 24, trailing: 24), maxZoom: 14)
+                .padding(focusPadding)
+        }
     }
 
     @ViewBuilder private func panelContent(_ mode: Panel, expanded: Bool = false) -> some View {
         switch mode {
+        case let .place(place):
+            PlacePreview(place: place, store: store, location: location, session: placeSession,
+                         onMapChange: { updatePlaceMap($0, destination: place) })
+                .toolbar {
+                    ToolbarItem(placement: .navigation) {
+                        Button("Back to Search", systemImage: "chevron.backward") {
+                            if expanded {
+                                expandedPanel = .search
+                            } else {
+                                panel = .search
+                            }
+                        }
+                        .accessibilityIdentifier("placeBackToSearch")
+                    }
+                }
         case let .station(id):
             if let station = store.stations.first(where: { $0.id == id }) {
                 StationArrivals(station: station, store: store, favoriteStations: favoriteStations, directionsSelection: $directionsSelection,
@@ -433,9 +509,20 @@ struct MapShell: View {
     }
 
     private var clearRouteButton: some View {
-        Button("Clear route", systemImage: "xmark") { selectTrip(nil) }
-            .accessibilityIdentifier("clearMapRoute")
-            .accessibilityHint("Remove the highlighted route. Your From and To stations are kept.")
+        Button("Clear route", systemImage: "xmark") {
+            if activeDestination != nil {
+                placeRoute = nil
+                if isWide {
+                    expandedPanel = .nearby
+                } else {
+                    panel = nil
+                }
+            } else {
+                selectTrip(nil)
+            }
+        }
+        .accessibilityIdentifier("clearMapRoute")
+        .accessibilityHint(activeDestination == nil ? "Remove the highlighted route. Your From and To stations are kept." : "Close directions to this place and clear its route.")
     }
 
     private func showTripOnMap(_ plan: NativeTripPlan) {
@@ -464,7 +551,7 @@ struct MapShell: View {
     }
 
     private func stationBrowser(search: Bool, expanded: Bool) -> some View {
-        StationBrowser(store: store, location: location, search: search, recentStations: recentStations, favoriteStations: favoriteStations, openWindowPreview: expanded ? { previewPlace = $0 } : nil, query: $searchQuery, searchFocus: $stationSearchFocused,
+        StationBrowser(store: store, location: location, search: search, recentStations: recentStations, favoriteStations: favoriteStations, openPlace: { openPlace($0, expanded: expanded) }, query: $searchQuery, searchFocus: $stationSearchFocused,
                        directionsSelection: $directionsSelection, onDirectionsHere: beginDirections,
                        onSelectTrip: selectTrip, onShowTripMap: showTripOnMap, select: focusStation)
     }
