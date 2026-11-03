@@ -21,6 +21,7 @@ struct MapShell: View {
     @State private var directionsSelection = DirectionsSelection()
     @State private var placeSession = PlacePreviewSession()
     @State private var placeRoute: PlaceMapRoute?
+    @State private var publishedOrigin: PlacePreviewSession.Origin?
     @State private var placeGeometryRevision = 0
     @State private var detentBeforeOriginPicker: PresentationDetent?
     @State private var selectedTrip: NativeTripPlan?
@@ -442,7 +443,11 @@ struct MapShell: View {
 
     private var visiblePlaceRoute: PlaceMapRoute? {
         guard scenePhase == .active, let placeRoute, placeRoute.place.id == activeDestination?.id,
-              !placeSession.usesCurrentLocation || location.availableCoordinate != nil else { return nil }
+              publishedOrigin == placeSession.origin else { return nil }
+        if placeSession.usesCurrentLocation {
+            guard let fix = location.availableCoordinate, let start = placeRoute.start,
+                  fix.latitude == start.latitude, fix.longitude == start.longitude else { return nil }
+        }
         return placeRoute
     }
 
@@ -472,6 +477,7 @@ struct MapShell: View {
         guard activeDestination?.id == destination.id else { return }
         let selectionChanged = placeRoute?.optionID != route?.optionID
         placeRoute = route
+        publishedOrigin = route == nil ? nil : placeSession.origin
         placeGeometryRevision += 1
         // Walking responses for other choices must not pull a rider back after a pan.
         guard selectionChanged else { return }
