@@ -263,7 +263,7 @@ final class StandClearUITests: XCTestCase {
         } else {
             XCTAssertTrue(app.buttons["originPicker"].label.contains("Choose station"))
         }
-        app.buttons["originPicker"].tap()
+        app.buttons["originPicker"].coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
         let origins = app.searchFields.firstMatch
         XCTAssertTrue(origins.waitForExistence(timeout: 5))
         origins.tap()
@@ -363,13 +363,13 @@ final class StandClearUITests: XCTestCase {
         let origin = app.buttons["originPicker"]
         expectation(for: NSPredicate(format: "enabled == true"), evaluatedWith: origin)
         waitForExpectations(timeout: 30)
-        origin.tap()
+        origin.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
         let originSearch = app.searchFields.firstMatch
         XCTAssertTrue(originSearch.waitForExistence(timeout: 5))
         originSearch.tap()
         originSearch.typeText("Wall")
         selectStationResult("419", query: "Wall", in: app)
-        app.buttons["destinationPicker"].tap()
+        app.buttons["destinationPicker"].coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
         let destinationSearch = app.searchFields.firstMatch
         XCTAssertTrue(destinationSearch.waitForExistence(timeout: 5))
         destinationSearch.tap()

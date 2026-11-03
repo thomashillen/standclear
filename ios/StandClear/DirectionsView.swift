@@ -23,6 +23,8 @@ struct DirectionsView: View {
             Section {
                 Button { editing = .origin } label: {
                     LabeledContent("From", value: selection.origin(in: store.stations)?.stop.name ?? "Choose station")
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentShape(Rectangle())
                 }
                 .accessibilityIdentifier("originPicker")
                 .disabled(store.stations.isEmpty)
@@ -34,6 +36,8 @@ struct DirectionsView: View {
                 }
                 Button { editing = .destination } label: {
                     LabeledContent("To", value: selection.destination(in: store.stations)?.stop.name ?? "Choose station")
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentShape(Rectangle())
                 }
                 .accessibilityIdentifier("destinationPicker")
                 .disabled(store.stations.isEmpty)
