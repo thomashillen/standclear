@@ -364,7 +364,10 @@ final class StandClearUITests: XCTestCase {
         app.terminate()
         XCUIDevice.shared.orientation = .portrait
         app.resetAuthorizationStatus(for: .location)
-        XCUIDevice.shared.location = XCUILocation(location: CLLocation(latitude: 40.7553, longitude: -73.987))
+        func provideFix() {
+            XCUIDevice.shared.location = XCUILocation(location: CLLocation(latitude: 40.7553, longitude: -73.987))
+        }
+        provideFix()
         defer {
             XCUIDevice.shared.location = nil
             XCUIDevice.shared.orientation = .portrait
@@ -401,6 +404,10 @@ final class StandClearUITests: XCTestCase {
         expectation(for: mapped, evaluatedWith: map)
         waitForExpectations(timeout: 15)
         let firstSummary = map.value as? String
+        let capture = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        capture.name = expanded ? "Expanded Noguchi Museum route on main map" : "Compact Noguchi Museum route on interactive main map"
+        capture.lifetime = .keepAlways
+        add(capture)
         if expanded {
             XCTAssertGreaterThan(list.frame.midX, app.windows.firstMatch.frame.midX)
         } else {
@@ -416,17 +423,13 @@ final class StandClearUITests: XCTestCase {
             waitForExpectations(timeout: 8)
             XCTAssertTrue(list.exists)
         }
-        let capture = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
-        capture.name = expanded ? "Expanded Noguchi Museum route on main map" : "Compact Noguchi Museum route on interactive main map"
-        capture.lifetime = .keepAlways
-        add(capture)
-        let other = list.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND value != %@", "placeRouteOption-", "Selected")).firstMatch
-        revealPlaceElement(other, in: list)
-        let buttonID = other.identifier
-        let alternative = list.buttons[buttonID]
-        let optionID = buttonID.dropFirst("placeRouteOption-".count)
-        guard let separator = optionID.firstIndex(of: ":") else { return XCTFail("Expected a subway option with a trip identity") }
-        let legID = String(optionID[optionID.index(after: separator)...])
+        // Use an independently identified alighting platform. Other rows can
+        // be reordered as their walking durations finish loading.
+        provideFix()
+        let target = firstSummary?.hasSuffix(", 36 Av") == true ? "R05" : "R06"
+        let legID = "N:N:R16>\(target)"
+        let alternative = list.buttons["placeRouteOption-127>\(target):\(legID)"]
+        revealPlaceElement(alternative, in: list)
         alternative.tap()
         expectation(for: NSPredicate(format: "value == %@", "Selected"), evaluatedWith: alternative)
         waitForExpectations(timeout: 8)
@@ -454,6 +457,7 @@ final class StandClearUITests: XCTestCase {
         selection.lifetime = .keepAlways
         add(selection)
         if !expanded {
+            provideFix()
             revealPlaceElement(origin, in: list, downward: false)
             origin.tap()
             let picker = app.searchFields[unifiedSearchPrompt]
@@ -470,6 +474,7 @@ final class StandClearUITests: XCTestCase {
             origin.tap()
             let useLocation = app.buttons["placeOriginCurrentLocation"]
             XCTAssertTrue(useLocation.waitForExistence(timeout: 5))
+            provideFix()
             useLocation.tap()
             XCTAssertTrue(origin.waitForExistence(timeout: 5))
             XCTAssertTrue(origin.label.contains("Current Location"))
@@ -483,13 +488,31 @@ final class StandClearUITests: XCTestCase {
     private func revealPlaceElement(_ element: XCUIElement, in list: XCUIElement, downward: Bool = true,
                                     file: StaticString = #filePath, line: UInt = #line)
     {
-        for _ in 0 ..< 10 {
-            if element.exists, element.frame.height > 0, list.frame.intersects(element.frame), element.isHittable {
-                return
+        let app = XCUIApplication()
+        let nav = app.navigationBars["From"].exists ? app.navigationBars["From"] : app.navigationBars["Route preview"]
+        var towardBottom = downward
+        for _ in 0 ..< 18 {
+            let bounds = list.frame
+            let top = nav.exists ? max(bounds.minY, nav.frame.maxY) : bounds.minY
+            if element.exists {
+                let frame = element.frame
+                if !frame.isNull, !frame.isInfinite, frame.width > 0, frame.height > 0 {
+                    if frame.midY > top, frame.midY < bounds.maxY, bounds.contains(CGPoint(x: frame.midX, y: frame.midY)),
+                       // Read-only rows do not need activation points. XCTest
+                       // can expose their text even when there is no tap target.
+                       element.elementType != .button || element.isHittable
+                    {
+                        return
+                    }
+                    towardBottom = frame.midY >= top
+                }
             }
-            let start = list.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: downward ? 0.78 : 0.44))
-            let end = list.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: downward ? 0.44 : 0.78))
-            start.press(forDuration: 0.1, thenDragTo: end)
+            // End the drag at rest. A default flick can leap over the entire
+            // route list in the short landscape control region.
+            let start = list.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: towardBottom ? 0.78 : 0.48))
+            let distance = min(bounds.height * 0.3, 150)
+            start.press(forDuration: 0.08, thenDragTo: start.withOffset(CGVector(dx: 0, dy: towardBottom ? -distance : distance)),
+                        withVelocity: .slow, thenHoldForDuration: 0.3)
         }
         XCTFail("Could not reveal \(element) in the current route panel", file: file, line: line)
     }
