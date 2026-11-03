@@ -172,6 +172,8 @@ private final class MapRequest<Value: Sendable> {
                         latitude: 40.7616, longitude: -73.9733),
             PlaceResult(id: "fixture-bryant-park", name: "Bryant Park", subtitle: "Manhattan, New York",
                         latitude: 40.7536, longitude: -73.9832),
+            PlaceResult(id: "fixture-55-wall-street", name: "55 Wall Street", subtitle: "Manhattan, New York",
+                        latitude: 40.7061, longitude: -74.0095),
         ]
 
         static func find(_ query: String) -> [PlaceResult] {

@@ -14,42 +14,26 @@ struct StationBrowser: View {
     let onShowTripMap: (NativeTripPlan) -> Void
     let select: (Station) -> Void
 
-    private var results: [Station] {
-        if search {
-            return store.stations.filter { query.isEmpty || $0.stop.name.localizedStandardContains(query) }
-        }
-        guard let coordinate = location.availableCoordinate else { return [] }
-        return Transit.nearby(store.stations, coordinate: coordinate)
-    }
-
     var body: some View {
         Group {
             if search {
-                content.searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search subway stations")
+                PlaceSearchView(store: store, location: location, openWindowPreview: openWindowPreview,
+                                query: $query, clearFocus: { searchFocus.wrappedValue = false }, stationRow: stationLink)
+                    .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Address, place or station")
                     .searchFocused(searchFocus)
             } else {
-                content
+                nearby
             }
         }
-        .navigationTitle(search ? "Search stations" : "Nearby arrivals")
+        .navigationTitle(search ? "Search" : "Nearby arrivals")
         .navigationBarTitleDisplayMode(.inline)
     }
 
-    private var content: some View {
+    private var nearby: some View {
         TimelineView(.periodic(from: .now, by: 5)) { context in
+            let results = location.availableCoordinate.map { Transit.nearby(store.stations, coordinate: $0) } ?? []
             List {
                 Group {
-                    if search {
-                        NavigationLink {
-                            PlaceSearchView(initialQuery: query, store: store, location: location, openWindowPreview: openWindowPreview)
-                                .onAppear { searchFocus.wrappedValue = false }
-                        } label: {
-                            Label(query.isEmpty ? "Addresses and places" : "Search places for “\(query)”", systemImage: "mappin.and.ellipse")
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .contentShape(Rectangle())
-                        }
-                        .accessibilityIdentifier("placeSearchEntry")
-                    }
                     if store.loading {
                         ProgressView("Loading stations…")
                     }
@@ -60,24 +44,16 @@ struct StationBrowser: View {
                             Button("Retry stations") { Task { await store.loadLines() } }
                         }
                     }
-                    if !search, location.availableCoordinate == nil {
+                    if location.availableCoordinate == nil {
                         locationState
                     } else if results.isEmpty, !store.loading, store.error == nil {
-                        if search {
-                            ContentUnavailableView.search(text: query)
-                        } else {
-                            Section {
-                                Label("You’re outside NYC", systemImage: "location.slash")
-                                Text("No NYC subway stations are within 80 km. Use Search to explore stations.")
-                                    .foregroundStyle(.secondary)
-                            }
+                        Section {
+                            Label("You’re outside NYC", systemImage: "location.slash")
+                            Text("No NYC subway stations are within 80 km. Use Search to explore stations.")
+                                .foregroundStyle(.secondary)
                         }
                     }
-                    if search {
-                        ForEach(results) { station in
-                            stationLink(station)
-                        }
-                    } else if !results.isEmpty {
+                    if !results.isEmpty {
                         if store.feedError || store.snapshot?.isFresh(at: context.date) != true {
                             Section {
                                 ArrivalFeedState(store: store, now: context.date)
