@@ -180,44 +180,53 @@ struct PlaceTimeEstimate {
     }
 }
 
-/// Holds at most one successful result for each walking leg in the open preview.
+/// Keep recent walking paths for the alternatives in this card. Leaving the
+/// current-location context discards every path that began at the rider’s fix.
 struct PlaceWalkMemory {
     enum Leg { case toStation, toPlace }
 
     private struct Entry {
+        let leg: Leg
         let start, end: CLLocationCoordinate2D
         let fromLocation: Bool
         let connection: WalkingConnection
         let date: Date
     }
 
-    private var entries: [Leg: Entry] = [:]
+    private var entries: [Entry] = []
 
     mutating func remember(_ connection: WalkingConnection, leg: Leg, start: CLLocationCoordinate2D,
                            end: CLLocationCoordinate2D, fromLocation: Bool, at date: Date = .now)
     {
-        entries[leg] = Entry(start: start, end: end, fromLocation: fromLocation, connection: connection, date: date)
+        entries.removeAll {
+            $0.leg == leg && $0.fromLocation == fromLocation &&
+                $0.start.latitude == start.latitude && $0.start.longitude == start.longitude &&
+                $0.end.latitude == end.latitude && $0.end.longitude == end.longitude
+        }
+        entries.append(Entry(leg: leg, start: start, end: end, fromLocation: fromLocation, connection: connection, date: date))
+        if entries.count > 12 {
+            entries.removeFirst()
+        }
     }
 
     func connection(for leg: Leg, start: CLLocationCoordinate2D, end: CLLocationCoordinate2D,
                     fromLocation: Bool, at date: Date = .now) -> WalkingConnection?
     {
-        guard let entry = entries[leg], entry.fromLocation == fromLocation,
-              (0 ..< 300).contains(date.timeIntervalSince(entry.date)),
-              entry.end.latitude == end.latitude, entry.end.longitude == end.longitude else { return nil }
-        if entry.start.latitude == start.latitude, entry.start.longitude == start.longitude {
-            return entry.connection
-        }
-        // Station endpoints are exact. Only the explicitly approximate rider
-        // position can reuse a recent street path after a small GPS fluctuation.
-        guard fromLocation else { return nil }
-        let previous = CLLocation(latitude: entry.start.latitude, longitude: entry.start.longitude)
-        let current = CLLocation(latitude: start.latitude, longitude: start.longitude)
-        return previous.distance(from: current) < 25 ? entry.connection : nil
+        entries.last { entry in
+            guard entry.leg == leg, entry.fromLocation == fromLocation,
+                  (0 ..< 300).contains(date.timeIntervalSince(entry.date)),
+                  entry.end.latitude == end.latitude, entry.end.longitude == end.longitude else { return false }
+            if entry.start.latitude == start.latitude, entry.start.longitude == start.longitude {
+                return true
+            }
+            guard fromLocation else { return false }
+            let previous = CLLocation(latitude: entry.start.latitude, longitude: entry.start.longitude)
+            return previous.distance(from: CLLocation(latitude: start.latitude, longitude: start.longitude)) < 25
+        }?.connection
     }
 
     mutating func discardLocationWalks() {
-        entries = entries.filter { !$0.value.fromLocation }
+        entries.removeAll { $0.fromLocation }
     }
 }
 
