@@ -50,6 +50,10 @@ final class TransitStore {
         return try JSONDecoder().decode(T.self, from: data)
     }
 
+    func stationAlerts() async throws -> StationAlertSnapshot {
+        try await fetch("api/alerts")
+    }
+
     func loadLines() async {
         guard active else { return }
         let current = generation
@@ -162,6 +166,13 @@ final class TransitStore {
                         ("419", "Wall St", 40.707557, -74.011862),
                     ]),
                 ]]
+            case "api/alerts":
+                payload = ["available": true, "generatedAt": now.timeIntervalSince1970 * 1000,
+                           "feedTimestamp": now.timeIntervalSince1970, "alerts": [
+                               ["id": "fixture-wall", "header": "Downtown 4 trains are delayed at Wall St",
+                                "description": "Allow extra travel time at Wall St.", "effect": "SIGNIFICANT_DELAYS", "severity": "severe",
+                                "routeIds": ["4"], "stopIds": ["419"], "selectors": [["routeId": "4", "stopId": "419"]]],
+                           ]]
             case "api/trains":
                 let timestamp = now.timeIntervalSince1970
                 payload = [

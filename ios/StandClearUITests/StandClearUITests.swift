@@ -353,6 +353,20 @@ final class StandClearUITests: XCTestCase {
         }
         selectSearchResult("419", query: "Wall", in: app)
         XCTAssertTrue(app.navigationBars["Wall St"].waitForExistence(timeout: 5))
+        if !expanded, !locationGranted {
+            let summary = app.buttons["stationAlertsSummary"]
+            XCTAssertTrue(summary.waitForExistence(timeout: 10))
+            XCTAssertTrue(summary.label.contains("1 severe"))
+            let alert = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "Allow extra travel time at Wall St.")).firstMatch
+            XCTAssertFalse(alert.exists, "Severe advisories should identify urgency without displacing arrivals")
+            summary.tap()
+            XCTAssertTrue(alert.waitForExistence(timeout: 5))
+            let capture = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            capture.name = "Station-scoped service advisory"
+            capture.lifetime = .keepAlways
+            add(capture)
+            summary.tap()
+        }
         XCTAssertTrue(app.buttons["directionsHere"].waitForExistence(timeout: 5))
         app.buttons["directionsHere"].tap()
         XCTAssertTrue(app.buttons["destinationPicker"].waitForExistence(timeout: 5))

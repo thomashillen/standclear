@@ -158,6 +158,20 @@ struct StationArrivals: View {
     let onSelectTrip: (NativeTripPlan?) -> Void
     let onShowTripMap: (NativeTripPlan) -> Void
     @State private var showingDirections = false
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var visible = false
+    @State private var alerts: StationAlertsLoad = .loading
+    @State private var alertsRetry = 0
+
+    private struct AlertsRequest: Equatable {
+        let stationID: String
+        let active: Bool
+        let revision: Int
+    }
+
+    private var alertsRequest: AlertsRequest {
+        AlertsRequest(stationID: station.id, active: visible && scenePhase == .active && !showingDirections, revision: alertsRetry)
+    }
 
     var body: some View {
         TimelineView(.periodic(from: .now, by: 5)) { context in
@@ -176,6 +190,7 @@ struct StationArrivals: View {
                 .accessibilityHint("Plan a subway trip to this station. Choose or edit your starting station.")
                 .accessibilityIdentifier("directionsHere")
                 .listRowBackground(Color.clear)
+                StationAlertSection(station: station, load: alerts, now: context.date) { alertsRetry += 1 }
                 Section {
                     ArrivalFeedState(store: store, now: context.date)
                     if !store.feedError, store.snapshot?.isFresh(at: context.date) == true {
@@ -198,6 +213,23 @@ struct StationArrivals: View {
             .listStyle(.plain)
             .scrollContentBackground(.hidden)
             .listSectionSpacing(.compact)
+        }
+        .onAppear { visible = true }
+        .onDisappear { visible = false }
+        .task(id: alertsRequest) { [alertsRequest] in
+            guard alertsRequest.active else { return }
+            alerts = .loading
+            while !Task.isCancelled {
+                do {
+                    let snapshot = try await store.stationAlerts()
+                    guard !Task.isCancelled, self.alertsRequest == alertsRequest else { return }
+                    alerts = .received(snapshot)
+                } catch {
+                    guard !Task.isCancelled, self.alertsRequest == alertsRequest else { return }
+                    alerts = .failed
+                }
+                do { try await Task.sleep(for: .seconds(60)) } catch { return }
+            }
         }
         .navigationTitle(station.stop.name)
         .navigationBarTitleDisplayMode(.inline)
