@@ -17,6 +17,7 @@ struct MapShell: View {
     @State private var sheetDetent: PresentationDetent = .medium
     @State private var windowSize: CGSize = .zero
     @State private var expandedPanel: Panel = .nearby
+    @State private var stationVisit = 0
     @State private var directionsSelection = DirectionsSelection()
     @State private var previewPlace: PlaceResult?
     @State private var selectedTrip: NativeTripPlan?
@@ -39,10 +40,11 @@ struct MapShell: View {
         }
     }
 
-    enum Panel: String, Identifiable {
+    enum Panel: Hashable, Identifiable {
         case search, nearby, directions
-        var id: String {
-            rawValue
+        case station(String)
+        var id: Self {
+            self
         }
     }
 
@@ -66,6 +68,7 @@ struct MapShell: View {
                                     .containerBackground(.clear, for: .navigation)
                             }
                             .id(expandedPanel)
+                            .id(stationVisit)
                             if selectedTrip != nil {
                                 clearRouteButton
                                     .buttonStyle(.bordered)
@@ -95,7 +98,7 @@ struct MapShell: View {
                     }
                 } else {
                     NavigationStack {
-                        map(statusWidth: statusWidth, coveredWidth: 0, coveredBottom: (panel == .nearby || panel == .directions) && sheetDetent == .medium ? geometry.size.height / 2 : 0, maximumGlanceHeight: geometry.size.height * 0.55)
+                        map(statusWidth: statusWidth, coveredWidth: 0, coveredBottom: mediumSheetCoversMap ? geometry.size.height / 2 : 0, maximumGlanceHeight: geometry.size.height * 0.55)
                             .navigationTitle("StandClear")
                             .navigationBarTitleDisplayMode(.inline)
                             .toolbar {
@@ -121,9 +124,14 @@ struct MapShell: View {
                 // The old searchable navigation region is about to disappear.
                 // Release its focus so its keyboard cannot cover the new layout.
                 stationSearchFocused = false
-                guard isExpanded, let activePanel = panel else { return }
-                expandedPanel = activePanel
-                panel = nil
+                if isExpanded, let activePanel = panel {
+                    expandedPanel = activePanel
+                    panel = nil
+                } else if !isExpanded, case .station = expandedPanel {
+                    sheetDetent = .large
+                    panel = expandedPanel
+                    expandedPanel = .nearby
+                }
             }
             .onChange(of: panel) { _, selection in
                 if selection != .search {
@@ -278,6 +286,7 @@ struct MapShell: View {
                                           maximumHeight: maximumGlanceHeight,
                                           mapUnavailable: mapError && mapProvider == .mapbox,
                                           retryMap: { mapError = false; mapLoaded = false; mapID = UUID() },
+                                          openStation: { showGlanceStation($0, expanded: coveredWidth > 0) },
                                           openNearby: {
                                               showNearby(expanded: coveredWidth > 0)
                                           })
@@ -366,10 +375,33 @@ struct MapShell: View {
         location.start()
     }
 
+    private func showGlanceStation(_ id: String, expanded: Bool) {
+        let destination = Panel.station(id)
+        if expanded {
+            // A repeated tap can also return from this station’s pushed Directions view.
+            if expandedPanel == destination {
+                stationVisit += 1
+            }
+            expandedPanel = destination
+        } else {
+            sheetDetent = .large
+            panel = destination
+        }
+        focus.cancelPending()
+        selectedTrip = nil
+        if let station = store.stations.first(where: { $0.id == id }) {
+            focusStation(station)
+        }
+    }
+
+    private var mediumSheetCoversMap: Bool {
+        panel != nil && panel != .search && sheetDetent == .medium
+    }
+
     private var focusPadding: SwiftUI.EdgeInsets {
         let expanded = windowSize.width >= 640 && !typeSize.isAccessibilitySize
         let right = expanded ? min(windowSize.width * 0.4, 380) : 0
-        let bottom = !expanded && (panel == .nearby || panel == .directions) && sheetDetent == .medium ? windowSize.height / 2 : 0
+        let bottom = !expanded && mediumSheetCoversMap ? windowSize.height / 2 : 0
         return SwiftUI.EdgeInsets(top: 0, leading: 0, bottom: bottom, trailing: right)
     }
 
@@ -383,9 +415,18 @@ struct MapShell: View {
     }
 
     @ViewBuilder private func panelContent(_ mode: Panel, expanded: Bool = false) -> some View {
-        if mode == .directions {
+        switch mode {
+        case let .station(id):
+            if let station = store.stations.first(where: { $0.id == id }) {
+                StationArrivals(station: station, store: store, directionsSelection: $directionsSelection,
+                                onDirectionsHere: beginDirections, onSelectTrip: selectTrip, onShowTripMap: showTripOnMap)
+            } else {
+                ContentUnavailableView("Station unavailable", systemImage: "tram",
+                                       description: Text("This station is no longer in the subway data."))
+            }
+        case .directions:
             DirectionsView(store: store, selection: $directionsSelection, onSelect: selectTrip, onShowMap: showTripOnMap)
-        } else {
+        case .nearby, .search:
             stationBrowser(search: mode == .search, expanded: expanded)
         }
     }
@@ -424,13 +465,14 @@ struct MapShell: View {
     private func stationBrowser(search: Bool, expanded: Bool) -> some View {
         StationBrowser(store: store, location: location, search: search, recentStations: recentStations, openWindowPreview: expanded ? { previewPlace = $0 } : nil, query: $searchQuery, searchFocus: $stationSearchFocused,
                        directionsSelection: $directionsSelection, onDirectionsHere: beginDirections,
-                       onSelectTrip: selectTrip, onShowTripMap: showTripOnMap)
-        { station in
-            stationSearchFocused = false
-            selectedTrip = nil
-            if focus.focus(on: station.stop.coordinate) {
-                applyFocus()
-            }
+                       onSelectTrip: selectTrip, onShowTripMap: showTripOnMap, select: focusStation)
+    }
+
+    private func focusStation(_ station: Station) {
+        stationSearchFocused = false
+        selectedTrip = nil
+        if focus.focus(on: station.stop.coordinate) {
+            applyFocus()
         }
     }
 }
