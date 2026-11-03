@@ -180,7 +180,8 @@ struct MapShell: View {
                 // Search starts with room for its keyboard instead of promoting a medium sheet during focus.
                 .presentationDetents(panel == .search || typeSize.isAccessibilitySize ? [.large] : [.medium, .large], selection: $sheetDetent)
                 .presentationDragIndicator(.visible)
-                .presentationBackgroundInteraction(panel.destination != nil ? .enabled(upThrough: .medium) : .automatic)
+                // A place card and the exposed map form one interactive view, including between detents.
+                .presentationBackgroundInteraction(panel.destination != nil ? .enabled : .automatic)
             }
         }
         .alert("Arrival status", isPresented: $showingArrivalStatus) {
