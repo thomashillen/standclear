@@ -72,6 +72,49 @@ final class StandClearUITests: XCTestCase {
     }
 
     @MainActor
+    func testExpressArrivalIdentifiesServiceAtParkchester() {
+        let app = XCUIApplication()
+        app.terminate()
+        XCUIDevice.shared.orientation = .portrait
+        app.resetAuthorizationStatus(for: .location)
+        XCUIDevice.shared.location = XCUILocation(location: CLLocation(latitude: 40.833226, longitude: -73.860816))
+        defer { XCUIDevice.shared.location = nil }
+        app.launchArguments = ["--ui-test-fixture", "--ui-test-express-arrivals", "-mapProvider", "Apple Maps"]
+        addUIInterruptionMonitor(withDescription: "Location permission") { alert in
+            let allow = alert.buttons["Allow While Using App"]
+            guard allow.exists else { return false }
+            allow.tap()
+            return true
+        }
+        app.launch()
+        activatePermissionPrompt(in: app)
+        let glance = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label CONTAINS[c] %@ AND label CONTAINS %@", "glance-608:", "express", "6")).firstMatch
+        XCTAssertTrue(glance.waitForExistence(timeout: 15), "The Parkchester glance should identify the explicit 6X service")
+        let map = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        map.name = "Parkchester glance with express and regular 6 predictions"
+        map.lifetime = .keepAlways
+        add(map)
+        glance.tap()
+        XCTAssertTrue(app.navigationBars["Nearby arrivals"].waitForExistence(timeout: 5))
+        app.buttons["Sheet Grabber"].doubleTap()
+        let station = app.buttons["station-608"]
+        XCTAssertTrue(station.waitForExistence(timeout: 5))
+        station.tap()
+        XCTAssertTrue(app.navigationBars["Parkchester"].waitForExistence(timeout: 5))
+        let express = app.buttons["arrivalRow-ui-fixture-6x-n:608:N"]
+        let regular = app.buttons["arrivalRow-ui-fixture-6-s:608:S"]
+        XCTAssertTrue(express.waitForExistence(timeout: 10))
+        XCTAssertTrue(express.label.contains("6"))
+        XCTAssertTrue(express.label.localizedCaseInsensitiveContains("Express"))
+        XCTAssertTrue(regular.waitForExistence(timeout: 5))
+        XCTAssertFalse(regular.label.localizedCaseInsensitiveContains("Express"))
+        let detail = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        detail.name = "Parkchester station details distinguish express and regular 6 arrivals"
+        detail.lifetime = .keepAlways
+        add(detail)
+    }
+
+    @MainActor
     func testRecentStationPersistsAcrossRelaunchAndCanBeCleared() {
         let app = XCUIApplication()
         app.terminate()

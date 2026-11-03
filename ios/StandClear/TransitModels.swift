@@ -35,6 +35,25 @@ struct Train: Decodable, Identifiable {
     let lastReportedAt: Double?
 }
 
+/// Route suffixes describe the reported service, not its track or stopping pattern.
+struct TransitRouteIdentity {
+    let baseID: String
+    let isExpress: Bool
+
+    init(_ id: String) {
+        isExpress = id.count > 1 && id.hasSuffix("X")
+        baseID = isExpress ? String(id.dropLast()) : id
+    }
+
+    var bullet: String {
+        ["GS", "FS", "H"].contains(baseID) ? "S" : baseID
+    }
+
+    var spokenName: String {
+        isExpress ? "\(bullet) Express" : bullet
+    }
+}
+
 struct Arrival: Decodable, Identifiable {
     let routeId: String
     let stopId: String

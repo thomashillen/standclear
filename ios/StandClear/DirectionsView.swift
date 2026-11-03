@@ -203,7 +203,7 @@ private struct DeparturePredictionView: View {
                                                            snapshot: store.snapshot, now: context.date,
                                                            feedUnavailable: store.feedError)
                 {
-                    Text("\(RouteBadge.displayID(arrival.routeId)) · \(arrival.countdown(at: context.date) ?? "Prediction elapsed")")
+                    Text("\(TransitRouteIdentity(arrival.routeId).spokenName) · \(arrival.countdown(at: context.date) ?? "Prediction elapsed")")
                         .font(.headline).monospacedDigit()
                     if let destination = arrival.destinationName(in: store.lines) {
                         Text("Train destination: \(destination)")

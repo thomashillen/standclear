@@ -295,10 +295,6 @@ private struct ArrivalRow: View {
     let store: TransitStore
     let now: Date
 
-    private var direction: String {
-        arrival.directionLabel
-    }
-
     var body: some View {
         DisclosureGroup {
             Text("Predicted arrival: \(Date(timeIntervalSince1970: arrival.eta).formatted(date: .omitted, time: .shortened))")
@@ -333,10 +329,12 @@ private struct ArrivalRow: View {
     }
 
     private var routeAndDirection: some View {
-        HStack(spacing: 8) {
+        let service = TransitRouteIdentity(arrival.routeId)
+        return HStack(spacing: 8) {
             RouteBadge(routeID: arrival.routeId,
-                       color: store.lines.first { $0.routeId == arrival.routeId }?.color ?? "808080")
-            Text(direction)
+                       color: store.lines.first { $0.routeId == service.baseID }?.color ?? "808080")
+            Text(service.isExpress ? "\(arrival.directionLabel) · Express" : arrival.directionLabel)
+                .accessibilityLabel(arrival.directionLabel)
         }
     }
 
