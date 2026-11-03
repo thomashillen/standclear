@@ -72,6 +72,68 @@ final class StandClearUITests: XCTestCase {
     }
 
     @MainActor
+    func testRecentStationPersistsAcrossRelaunchAndCanBeCleared() {
+        let app = XCUIApplication()
+        app.terminate()
+        XCUIDevice.shared.orientation = .portrait
+        app.resetAuthorizationStatus(for: .location)
+        app.launchArguments = ["--ui-test-fixture", "-mapProvider", "Apple Maps"]
+        addUIInterruptionMonitor(withDescription: "Location permission") { alert in
+            let deny = alert.buttons["Don’t Allow"]
+            guard deny.exists else { return false }
+            deny.tap()
+            return true
+        }
+        app.launch()
+        activatePermissionPrompt(in: app)
+        let searchButton = app.buttons["searchButton"]
+        searchButton.tap()
+        let field = app.searchFields[unifiedSearchPrompt]
+        let recent = app.buttons["recentStation-419"]
+        let clearHistory = app.buttons["clearRecentStations"]
+        let stations = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "station-")).firstMatch
+        XCTAssertTrue(stations.waitForExistence(timeout: 10))
+        if clearHistory.exists {
+            clearHistory.tap()
+        }
+        XCTAssertFalse(recent.exists)
+        XCTAssertTrue(field.waitForExistence(timeout: 5))
+        field.tap()
+        field.typeText("Wall\n")
+        selectSearchResult("419", query: "Wall", in: app)
+        let detail = app.navigationBars["Wall St"]
+        XCTAssertTrue(detail.waitForExistence(timeout: 5))
+        detail.buttons.element(boundBy: 0).tap()
+        XCTAssertTrue(field.waitForExistence(timeout: 5))
+        XCTAssertEqual(field.value as? String, "Wall")
+        XCTAssertFalse(recent.exists, "Recent stations appear only for an empty query")
+        field.tap()
+        let clearQuery = field.buttons["Clear text"]
+        XCTAssertTrue(clearQuery.waitForExistence(timeout: 5))
+        clearQuery.tap()
+        XCTAssertTrue(recent.waitForExistence(timeout: 10))
+
+        app.terminate()
+        app.launch()
+        XCTAssertTrue(searchButton.waitForExistence(timeout: 15))
+        searchButton.tap()
+        XCTAssertTrue(recent.waitForExistence(timeout: 10))
+        XCTAssertTrue(recent.label.contains("Wall St"))
+        let capture = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        capture.name = "Recent station in empty Search after relaunch"
+        capture.lifetime = .keepAlways
+        add(capture)
+        recent.tap()
+        XCTAssertTrue(detail.waitForExistence(timeout: 5))
+        detail.buttons.element(boundBy: 0).tap()
+        XCTAssertTrue(clearHistory.waitForExistence(timeout: 5))
+        clearHistory.tap()
+        XCTAssertTrue(recent.waitForNonExistence(timeout: 5))
+        XCTAssertFalse(clearHistory.exists)
+        XCTAssertTrue(stations.exists, "Clearing recent stations must preserve station browsing")
+    }
+
+    @MainActor
     func testPlaceSearchPreviewsSubwayAndWalkingFromManualStation() {
         checkPlaceSearchPreview(expanded: false)
     }
