@@ -269,7 +269,7 @@ final class StandClearUITests: XCTestCase {
         XCTAssertTrue(origins.waitForExistence(timeout: 5))
         origins.tap()
         origins.typeText("59\n")
-        app.buttons["stationChoice-629"].tap()
+        selectStationResult("629", query: "59", in: app)
         XCTAssertTrue(app.buttons["originPicker"].waitForExistence(timeout: 5))
         XCTAssertFalse(app.staticTexts["originSuggestion"].exists, "A manual origin replaces the location suggestion")
         app.navigationBars["Directions"].buttons.element(boundBy: 0).tap()
@@ -369,13 +369,13 @@ final class StandClearUITests: XCTestCase {
         XCTAssertTrue(originSearch.waitForExistence(timeout: 5))
         originSearch.tap()
         originSearch.typeText("Wall")
-        app.buttons["stationChoice-419"].tap()
+        selectStationResult("419", query: "Wall", in: app)
         app.buttons["destinationPicker"].tap()
         let destinationSearch = app.searchFields.firstMatch
         XCTAssertTrue(destinationSearch.waitForExistence(timeout: 5))
         destinationSearch.tap()
         destinationSearch.typeText("59")
-        app.buttons["stationChoice-629"].tap()
+        selectStationResult("629", query: "59", in: app)
         let northbound = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "tripPlan-4:N:419>629")).firstMatch
         XCTAssertTrue(northbound.waitForExistence(timeout: 10))
         northbound.tap()
@@ -401,6 +401,22 @@ final class StandClearUITests: XCTestCase {
         XCTAssertTrue(southbound.waitForExistence(timeout: 5))
         XCTAssertTrue(app.buttons["originPicker"].label.contains("59 St"))
         XCTAssertTrue(app.buttons["destinationPicker"].label.contains("Wall St"))
+    }
+
+    @MainActor
+    private func selectStationResult(_ stationID: String, query: String, in app: XCUIApplication) {
+        // Text injection can return before SwiftUI exposes the filtered list.
+        // Wait for the exact result; do not retry input or substitute a station.
+        let result = app.buttons["stationChoice-\(stationID)"]
+        let ready = NSPredicate { _, _ in
+            MainActor.assumeIsolated {
+                let search = app.searchFields.firstMatch
+                return search.exists && (search.value as? String) == query && result.exists
+            }
+        }
+        expectation(for: ready, evaluatedWith: result)
+        waitForExpectations(timeout: 10)
+        result.tap()
     }
 
     @MainActor
