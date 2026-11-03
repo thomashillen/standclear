@@ -5,8 +5,6 @@ struct DirectionsView: View {
     @Binding var selection: DirectionsSelection
     let onSelect: (NativeTripPlan?) -> Void
     let onShowMap: (NativeTripPlan) -> Void
-    @State private var editing: Endpoint?
-
     private enum Endpoint: String, Identifiable, Hashable {
         case origin, destination
         var id: String {
@@ -21,7 +19,7 @@ struct DirectionsView: View {
     var body: some View {
         List {
             Section {
-                Button { editing = .origin } label: {
+                NavigationLink(value: Endpoint.origin) {
                     LabeledContent("From", value: selection.origin(in: store.stations)?.stop.name ?? "Choose station")
                 }
                 .accessibilityIdentifier("originPicker")
@@ -32,7 +30,7 @@ struct DirectionsView: View {
                         .foregroundStyle(.secondary)
                         .accessibilityIdentifier("originSuggestion")
                 }
-                Button { editing = .destination } label: {
+                NavigationLink(value: Endpoint.destination) {
                     LabeledContent("To", value: selection.destination(in: store.stations)?.stop.name ?? "Choose station")
                 }
                 .accessibilityIdentifier("destinationPicker")
@@ -104,14 +102,13 @@ struct DirectionsView: View {
                     .accessibilityIdentifier("clearDirections")
             }
         }
-        .navigationDestination(item: $editing) { endpoint in
+        .navigationDestination(for: Endpoint.self) { endpoint in
             DirectionStationPicker(stations: store.stations, title: endpoint.title) { station in
                 if endpoint == .origin {
                     selection.originID = station.id
                 } else {
                     selection.destinationID = station.id
                 }
-                editing = nil
             }
         }
         .onChange(of: selection) { _, _ in onSelect(nil) }
@@ -122,6 +119,7 @@ private struct DirectionStationPicker: View {
     let stations: [Station]
     let title: String
     let choose: (Station) -> Void
+    @Environment(\.dismiss) private var dismiss
     @State private var query = ""
 
     private var matches: [Station] {
@@ -134,7 +132,10 @@ private struct DirectionStationPicker: View {
                 ContentUnavailableView.search(text: query)
             }
             ForEach(matches) { station in
-                Button { choose(station) } label: {
+                Button {
+                    choose(station)
+                    dismiss()
+                } label: {
                     VStack(alignment: .leading) {
                         Text(station.stop.name)
                         Text(station.routes.map(RouteBadge.displayID).joined(separator: " · "))
