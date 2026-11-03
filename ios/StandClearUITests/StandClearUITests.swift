@@ -70,6 +70,71 @@ final class StandClearUITests: XCTestCase {
     }
 
     @MainActor
+    func testPlaceSearchPreviewsSubwayAndWalkingFromManualStation() {
+        checkPlaceSearchPreview(expanded: false)
+    }
+
+    @MainActor
+    func testExpandedPlaceSearchPreview() {
+        checkPlaceSearchPreview(expanded: true)
+    }
+
+    @MainActor
+    private func checkPlaceSearchPreview(expanded: Bool) {
+        let app = XCUIApplication()
+        app.terminate()
+        XCUIDevice.shared.orientation = expanded ? .landscapeLeft : .portrait
+        defer { XCUIDevice.shared.orientation = .portrait }
+        app.resetAuthorizationStatus(for: .location)
+        app.launchArguments = ["--ui-test-fixture", "-mapProvider", "Apple Maps"]
+        app.launch()
+        let deny = XCUIApplication(bundleIdentifier: "com.apple.springboard").alerts.buttons["Don’t Allow"]
+        XCTAssertTrue(deny.waitForExistence(timeout: 20))
+        deny.tap()
+        waitForLayout(in: app, expanded: expanded)
+        app.buttons["searchButton"].tap()
+        let entry = app.buttons["placeSearchEntry"]
+        XCTAssertTrue(entry.waitForExistence(timeout: 10))
+        entry.tap()
+        let field = app.searchFields["Address or place in NYC"]
+        XCTAssertTrue(field.waitForExistence(timeout: 10))
+        field.tap()
+        field.typeText("550 Madison\n")
+        let result = app.buttons["placeResult-fixture-550-madison"]
+        XCTAssertTrue(result.waitForExistence(timeout: 10))
+        result.tap()
+        let origin = app.buttons["placeOriginPicker"]
+        XCTAssertTrue(origin.waitForExistence(timeout: 10))
+        XCTAssertTrue(origin.label.contains("Choose station"))
+        origin.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+        let picker = app.searchFields["Search subway stations"]
+        XCTAssertTrue(picker.waitForExistence(timeout: 10))
+        picker.tap()
+        picker.typeText("Wall\n")
+        selectStationResult("419", query: "Wall", in: app)
+        XCTAssertTrue(origin.waitForExistence(timeout: 10))
+        XCTAssertTrue(origin.label.contains("Wall St"))
+        let list = app.collectionViews["placePreviewList"]
+        let leg = list.descendants(matching: .any)["placeTripLeg-4:N:419>629"].firstMatch
+        XCTAssertTrue(leg.waitForExistence(timeout: 10))
+        let total = list.descendants(matching: .any)["placeWalkingTotal"].firstMatch
+        for _ in 0 ..< 3 where !total.exists {
+            list.swipeUp()
+        }
+        XCTAssertTrue(total.waitForExistence(timeout: 5))
+        XCTAssertTrue(list.descendants(matching: .any)["placeDestinationWalk"].firstMatch.label.contains("550 Madison"))
+        let capture = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        capture.name = expanded ? "Expanded place preview" : "Compact place preview"
+        capture.lifetime = .keepAlways
+        add(capture)
+        if expanded {
+            app.buttons["Done"].tap()
+            XCTAssertTrue(result.waitForExistence(timeout: 5))
+            XCTAssertEqual(field.value as? String, "550 Madison")
+        }
+    }
+
+    @MainActor
     func testMapProviderComparisonKeepsNativeControls() {
         let app = XCUIApplication()
         app.launchArguments = ["--ui-test-fixture"]

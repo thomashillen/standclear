@@ -85,7 +85,7 @@ public/
 
 ## Native iOS proof of concept
 
-A separate SwiftUI Xcode project lives in [`ios/`](ios/README.md), alongside the web application. It uses the native Mapbox SDK and the existing static-data and realtime endpoints. Open `ios/StandClear.xcodeproj`; see the native guide for local configuration, simulator validation, architecture, and migration limits. This is an incremental development client, not an App Store release or web feature parity.
+A separate SwiftUI Xcode project lives in [`ios/`](ios/README.md), alongside the web application. It uses Apple MapKit for its primary map, NYC place search and walking directions, and the existing StandClear endpoints for subway data. Mapbox remains available as a fallback renderer. Open `ios/StandClear.xcodeproj`; see the native guide for local configuration, simulator validation, architecture, and migration limits. This is an incremental development client, not an App Store release or web feature parity.
 
 ## Rebuilding static GTFS data
 
