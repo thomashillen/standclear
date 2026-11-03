@@ -49,7 +49,7 @@ Ordinary Xcode builds do not require XcodeGen. Commit the generated project and 
 - `TransitStore` loads the existing static dataset and polls the existing train endpoint. Active-scene polling uses an eight-second interval after successful requests and a longer delay on failure. Requests have a timeout; realtime work is stopped when the scene becomes inactive.
 - `LocationStore` uses Core Location with when-in-use permission, hundred-meter accuracy, foreground one-shot fixes, 30-second fix expiration, and inactive-scene cleanup.
 - `TransitModels` decodes the shared contracts and implements the small native station/arrival projection. Station complexes use the web client’s explicit allowlist rather than merging unrelated stations by name or proximity. Train deduplication is trip-only, preserving legitimate trains queued at a terminus.
-- `StationBrowser` provides station search and a nearby station list, with route-color badges and navigation to native arrival rows.
+- `StationBrowser` provides combined place and station search and a nearby station list, with route-color badges and navigation to native arrival rows.
 - The application icon reuses the existing `public` 512-pixel StandClear artwork, upscaled to the 1024-pixel asset required by the native app icon catalog. This preserves the existing identity; it does not add new illustration detail.
 
 Navigation stacks, toolbars, buttons, menus, searchable lists, navigation links, sheets, presentation detents, progress views, unavailable states, typography, and semantic materials come from SwiftUI. The operating system supplies their appearance, including supported Liquid Glass behavior. Custom visuals are limited to transit geometry, route colors, and train markers. There are no custom glass gradients, blur recipes, shadows, or animation replicas.
@@ -121,7 +121,7 @@ The [original proof-of-concept validation record](docs/validation.md) describes 
 
 ## Limits and next increments
 
-In **Search → Addresses and places**, search for an NYC address or point of interest and open the result to preview a trip. MapKit looks up the place and supplies walking paths and estimated walking times. StandClear uses its subway graph to find direct and one-transfer trips. A recent location near a station supplies the starting point. Tap **From** to choose another station, including when location access is unavailable.
+Open **Search** and type an NYC address, place or subway station. Address and place matches appear first, followed by matching subway stations. Choose a place to preview a trip or a station to see arrivals and **Directions here**. MapKit looks up the place and supplies walking paths and estimated walking times. StandClear uses its subway graph to find direct and one-transfer trips. A recent location near a station supplies the starting point. Tap **From** to choose another station, including when location access is unavailable.
 
 The planner considers up to three destination station complexes within 900 metres. Once each required walking path is available, the preview shows both walking time and a typical trip duration. The latter uses regular-service assumptions of four minutes per train wait, 90 seconds per stop and three minutes per transfer. Station coordinates approximate entrances. The nearby-arrivals list continues to rank stations by straight-line distance. Service alerts, saved places, and alternative trip comparisons are future increments.
 

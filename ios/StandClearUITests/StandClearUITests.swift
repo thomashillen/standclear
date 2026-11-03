@@ -2,6 +2,8 @@ import CoreLocation
 import XCTest
 
 final class StandClearUITests: XCTestCase {
+    private let unifiedSearchPrompt = "Address, place or station"
+
     @MainActor
     func testNearbyGlanceKeepsMapVisibleForGrantedLocation() {
         let app = XCUIApplication()
@@ -65,7 +67,7 @@ final class StandClearUITests: XCTestCase {
         neighborhood.lifetime = .keepAlways
         add(neighborhood)
         app.buttons["searchButton"].tap()
-        XCTAssertTrue(app.navigationBars["Search stations"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.navigationBars["Search"].waitForExistence(timeout: 5))
         XCTAssertFalse(app.navigationBars["Nearby arrivals"].exists, "Nearby must not interrupt manual search")
     }
 
@@ -108,11 +110,10 @@ final class StandClearUITests: XCTestCase {
         }
         waitForLayout(in: app, expanded: expanded)
         app.buttons["searchButton"].tap()
-        let entry = app.buttons["placeSearchEntry"]
-        XCTAssertTrue(entry.waitForExistence(timeout: 10))
-        entry.tap()
-        let field = app.searchFields["Address or place in NYC"]
+        XCTAssertTrue(app.navigationBars["Search"].waitForExistence(timeout: 10))
+        let field = app.searchFields[unifiedSearchPrompt]
         XCTAssertTrue(field.waitForExistence(timeout: 10))
+        XCTAssertEqual(app.searchFields.count, 1)
         field.tap()
         field.typeText("550 Madison\n")
         let result = app.buttons["placeResult-fixture-550-madison"]
@@ -144,9 +145,12 @@ final class StandClearUITests: XCTestCase {
         add(capture)
         if expanded {
             app.buttons["Done"].tap()
-            XCTAssertTrue(result.waitForExistence(timeout: 5))
-            XCTAssertEqual(field.value as? String, "550 Madison")
+        } else {
+            app.navigationBars["Route preview"].buttons.element(boundBy: 0).tap()
         }
+        XCTAssertTrue(app.navigationBars["Search"].waitForExistence(timeout: 5))
+        XCTAssertTrue(result.waitForExistence(timeout: 10))
+        XCTAssertEqual(field.value as? String, "550 Madison")
     }
 
     @MainActor
@@ -215,7 +219,7 @@ final class StandClearUITests: XCTestCase {
         XCTAssertTrue(search.waitForExistence(timeout: 15))
         activatePermissionPrompt(in: app)
         search.tap()
-        XCTAssertTrue(app.navigationBars["Search stations"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.navigationBars["Search"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.searchFields.firstMatch.exists)
         let searchScreenshot = XCTAttachment(screenshot: app.screenshot())
         searchScreenshot.name = "Native search presentation"
@@ -224,7 +228,7 @@ final class StandClearUITests: XCTestCase {
         app.buttons["Done"].tap()
         app.buttons["nearbyButton"].tap()
         XCTAssertTrue(app.navigationBars["Nearby arrivals"].waitForExistence(timeout: 5))
-        XCTAssertFalse(app.navigationBars["Search stations"].exists)
+        XCTAssertFalse(app.navigationBars["Search"].exists)
         XCTAssertTrue(app.staticTexts["Location access is off"].waitForExistence(timeout: 5))
         let nearby = XCTAttachment(screenshot: app.screenshot())
         nearby.name = "Native nearby denied-permission state"
@@ -240,7 +244,7 @@ final class StandClearUITests: XCTestCase {
         waitForLayout(in: app, expanded: true)
         XCTAssertTrue(app.navigationBars["Nearby arrivals"].exists)
         app.buttons["searchButton"].tap()
-        XCTAssertTrue(app.navigationBars["Search stations"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.navigationBars["Search"].waitForExistence(timeout: 5))
         XCTAssertFalse(app.buttons["Done"].exists, "Wide controls should occupy the right region, not a sheet")
         XCTAssertGreaterThan(app.buttons["searchButton"].frame.midX, app.frame.midX)
         XCTAssertGreaterThan(app.buttons["nearbyButton"].frame.midX, app.frame.midX)
@@ -258,7 +262,7 @@ final class StandClearUITests: XCTestCase {
         field.typeText("Times")
         XCUIDevice.shared.orientation = .landscapeLeft
         waitForLayout(in: app, expanded: true)
-        XCTAssertTrue(app.navigationBars["Search stations"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.navigationBars["Search"].waitForExistence(timeout: 5))
         let sheetDismissed = NSPredicate(format: "exists == false")
         expectation(for: sheetDismissed, evaluatedWith: app.buttons["Done"])
         waitForExpectations(timeout: 5)
@@ -279,7 +283,7 @@ final class StandClearUITests: XCTestCase {
         expectation(for: sheetDismissed, evaluatedWith: app.buttons["Done"])
         waitForExpectations(timeout: 5)
         XCTAssertTrue(app.navigationBars["Nearby arrivals"].exists)
-        XCTAssertFalse(app.navigationBars["Search stations"].exists)
+        XCTAssertFalse(app.navigationBars["Search"].exists)
     }
 
     @MainActor
@@ -330,12 +334,23 @@ final class StandClearUITests: XCTestCase {
         }
         defer { XCUIDevice.shared.orientation = .portrait }
         app.buttons["searchButton"].tap()
-        let search = app.searchFields.firstMatch
+        let search = app.searchFields[unifiedSearchPrompt]
         XCTAssertTrue(search.waitForExistence(timeout: 5))
         search.tap()
         XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 10),
                       "Tapping Search must present a usable keyboard before entering a station")
         search.typeText("Wall\n")
+        if !expanded, !locationGranted {
+            // The same submitted query offers both a place and a station.
+            let list = app.collectionViews["stationList"]
+            XCTAssertTrue(list.buttons["placeResult-fixture-55-wall-street"].waitForExistence(timeout: 10))
+            XCTAssertTrue(list.buttons["station-419"].exists)
+            XCTAssertEqual(search.value as? String, "Wall")
+            let capture = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            capture.name = "Unified search for Wall"
+            capture.lifetime = .keepAlways
+            add(capture)
+        }
         selectSearchResult("419", query: "Wall", in: app)
         XCTAssertTrue(app.navigationBars["Wall St"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.buttons["directionsHere"].waitForExistence(timeout: 5))
@@ -504,6 +519,10 @@ final class StandClearUITests: XCTestCase {
         }
         expectation(for: ready, evaluatedWith: result)
         waitForExpectations(timeout: 10)
+        if query == "Wall" {
+            XCTAssertFalse(app.buttons["placeResult-fixture-55-wall-street"].exists,
+                           "The transit endpoint picker should offer stations only")
+        }
         result.tap()
     }
 
