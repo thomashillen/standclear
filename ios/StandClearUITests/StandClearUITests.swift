@@ -955,6 +955,67 @@ final class StandClearUITests: XCTestCase {
     }
 
     @MainActor
+    func testStationTripShowsTransferPredictionAndClearsMap() {
+        let app = XCUIApplication()
+        app.terminate()
+        XCUIDevice.shared.orientation = .portrait
+        app.resetAuthorizationStatus(for: .location)
+        app.launchArguments = ["--ui-test-fixture", "--ui-test-noguchi", "-mapProvider", "Apple Maps"]
+        addUIInterruptionMonitor(withDescription: "Location permission") { alert in
+            let deny = alert.buttons["Don’t Allow"]
+            guard deny.exists else { return false }
+            deny.tap()
+            return true
+        }
+        app.launch()
+        activatePermissionPrompt(in: app)
+        app.buttons["moreButton"].tap()
+        app.buttons["directionsButton"].tap()
+        for (picker, query, stationID) in [("originPicker", "Wall", "419"), ("destinationPicker", "Broadway", "R05")] {
+            let button = app.buttons[picker]
+            expectation(for: NSPredicate(format: "enabled == true"), evaluatedWith: button)
+            waitForExpectations(timeout: 10)
+            button.tap()
+            let field = app.searchFields["Search subway stations"]
+            XCTAssertTrue(field.waitForExistence(timeout: 5))
+            field.tap()
+            field.typeText(query)
+            selectStationResult(stationID, query: query, in: app)
+        }
+
+        let plan = app.buttons["tripPlan-4:N:419>629|N:N:R11>R05"]
+        XCTAssertTrue(plan.waitForExistence(timeout: 10))
+        plan.tap()
+        let grabber = app.buttons["Sheet Grabber"]
+        if grabber.exists, grabber.value as? String == "Half screen" {
+            grabber.doubleTap()
+        }
+        let transfer = app.descendants(matching: .any)["stationTripTransfer"].firstMatch
+        let list = app.collectionViews.firstMatch
+        let interchange = "Change to N/W at Lexington Av/59 St"
+        revealPlaceElement(transfer, in: list)
+        XCTAssertTrue(transfer.label.contains(interchange))
+        let prediction = app.descendants(matching: .any)["legPrediction-N:N:R11>R05"].firstMatch
+        let nextN = prediction.staticTexts["N · 17 min"]
+        revealPlaceElement(nextN, in: list)
+        XCTAssertTrue(prediction.staticTexts["Train destination: 30 Av"].exists)
+        let showMap = app.buttons["Show route on map"]
+        revealPlaceElement(showMap, in: list, downward: false)
+        showMap.tap()
+        let map = app.descendants(matching: .any)["appleTransitMap"].firstMatch
+        expectation(for: NSPredicate(format: "value CONTAINS %@", interchange), evaluatedWith: map)
+        waitForExpectations(timeout: 10)
+        let capture = XCTAttachment(screenshot: app.screenshot())
+        capture.name = "Station trip from Wall St to Broadway with Lexington Av transfer"
+        capture.lifetime = .keepAlways
+        add(capture)
+        app.buttons["clearMapRoute"].tap()
+        expectation(for: NSPredicate(format: "exists == true AND NOT (value CONTAINS %@)", interchange), evaluatedWith: map)
+        waitForExpectations(timeout: 5)
+        XCTAssertFalse(app.buttons["clearMapRoute"].exists)
+    }
+
+    @MainActor
     func testStationDirectionsAndSwap() throws {
         try checkStationDirectionsAndSwap(provider: "Apple Maps")
     }
