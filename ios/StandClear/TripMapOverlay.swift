@@ -14,6 +14,13 @@ struct PlaceMapRoute {
         [start, boarding?.coordinate, alighting?.coordinate, place.coordinate].compactMap(\.self)
     }
 
+    func startMarker(currentLocation: CLLocationCoordinate2D?) -> CLLocationCoordinate2D? {
+        guard let start else { return nil }
+        let alreadyMarked = [currentLocation, boarding?.coordinate, place.coordinate].compactMap(\.self)
+            .contains { $0.latitude == start.latitude && $0.longitude == start.longitude }
+        return alreadyMarked ? nil : start
+    }
+
     var walkingOverlays: [TripMapOverlay] {
         [("access", access), ("egress", egress)].compactMap { key, connection in
             guard let connection, connection.coordinates.count >= 2 else { return nil }

@@ -61,6 +61,9 @@ struct AppleTransitMap: View {
                 }
                 if let destination {
                     Marker(destination.name, systemImage: "mappin", coordinate: destination.coordinate)
+                    if let start = placeRoute?.startMarker(currentLocation: currentLocation) {
+                        Marker("Start", systemImage: "figure.walk", coordinate: start)
+                    }
                     if let boarding = placeRoute?.boarding {
                         Marker(boarding.name, systemImage: "tram", coordinate: boarding.coordinate)
                     }
