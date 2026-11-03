@@ -35,6 +35,7 @@ struct MapShell: View {
     @State private var tripFocusRevision = 0
     @State private var searchQuery = ""
     @State private var recentStations = RecentStations()
+    @State private var placeSearchMemory = PlaceSearchMemory()
     @State private var favoriteStations = FavoriteStations()
     @FocusState private var stationSearchFocused: Bool
     @State private var arrivalStatusMessage = ""
@@ -594,7 +595,7 @@ struct MapShell: View {
     }
 
     private func stationBrowser(search: Bool, expanded: Bool) -> some View {
-        StationBrowser(store: store, location: location, search: search, recentStations: recentStations, favoriteStations: favoriteStations, openPlace: { openPlace($0, expanded: expanded) }, query: $searchQuery, searchFocus: $stationSearchFocused,
+        StationBrowser(store: store, location: location, search: search, placeSearchMemory: placeSearchMemory, recentStations: recentStations, favoriteStations: favoriteStations, openPlace: { openPlace($0, expanded: expanded) }, query: $searchQuery, searchFocus: $stationSearchFocused,
                        directionsSelection: $directionsSelection, onDirectionsHere: beginDirections,
                        onSelectTrip: selectTrip, onShowTripMap: showTripOnMap, select: focusStation)
     }
