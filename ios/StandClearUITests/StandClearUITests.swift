@@ -394,6 +394,9 @@ final class StandClearUITests: XCTestCase {
         XCTAssertTrue(origin.waitForExistence(timeout: 10))
         XCTAssertTrue(origin.label.contains("Wall St"))
         let list = app.collectionViews["placePreviewList"]
+        if !expanded, (app.buttons["Sheet Grabber"].value as? String) == "Half screen" {
+            app.buttons["Sheet Grabber"].doubleTap()
+        }
         let leg = list.descendants(matching: .any)["placeTripLeg-4:N:419>629"].firstMatch
         revealPlaceElement(leg, in: list)
         XCTAssertTrue(leg.exists)
@@ -409,6 +412,69 @@ final class StandClearUITests: XCTestCase {
         XCTAssertTrue(app.navigationBars["Search"].waitForExistence(timeout: 5))
         XCTAssertTrue(result.waitForExistence(timeout: 10))
         XCTAssertEqual(field.value as? String, "550 Madison")
+    }
+
+    @MainActor
+    func testMuseumTransferShowsBothServicesAndInterchangeOnMainMap() {
+        let app = XCUIApplication()
+        app.terminate()
+        XCUIDevice.shared.orientation = .portrait
+        app.resetAuthorizationStatus(for: .location)
+        app.launchArguments = ["--ui-test-fixture", "--ui-test-noguchi", "-mapProvider", "Apple Maps"]
+        addUIInterruptionMonitor(withDescription: "Location permission") { alert in
+            let deny = alert.buttons["Don’t Allow"]
+            guard deny.exists else { return false }
+            deny.tap()
+            return true
+        }
+        app.launch()
+        activatePermissionPrompt(in: app)
+        XCUIDevice.shared.orientation = .landscapeLeft
+        defer { XCUIDevice.shared.orientation = .portrait }
+        waitForLayout(in: app, expanded: true)
+        app.buttons["searchButton"].tap()
+        let field = app.searchFields[unifiedSearchPrompt]
+        XCTAssertTrue(field.waitForExistence(timeout: 5))
+        field.tap()
+        field.typeText("Noguchi\n")
+        let museum = app.buttons["placeResult-fixture-noguchi"]
+        XCTAssertTrue(museum.waitForExistence(timeout: 10))
+        museum.tap()
+        let origin = app.buttons["placeOriginPicker"]
+        XCTAssertTrue(origin.waitForExistence(timeout: 5))
+        origin.tap()
+        let picker = app.searchFields[unifiedSearchPrompt]
+        XCTAssertTrue(picker.waitForExistence(timeout: 5))
+        picker.tap()
+        picker.typeText("Wall\n")
+        let wall = app.buttons["stationChoice-419"]
+        revealPlaceElement(wall, in: app.collectionViews.firstMatch)
+        wall.tap()
+        let list = app.collectionViews["placePreviewList"]
+        let inbound = "4:N:419>629"
+        let outbound = "N:N:R11>R05"
+        let choice = list.buttons["placeRouteOption-419>R05:\(inbound)|\(outbound)"]
+        revealPlaceElement(choice, in: list)
+        choice.tap()
+        let map = app.descendants(matching: .any)["appleTransitMap"].firstMatch
+        let interchange = "Change to N/W at Lexington Av/59 St"
+        expectation(for: NSPredicate(format: "value CONTAINS %@ AND value CONTAINS %@ AND value CONTAINS %@", interchange, "Wall St", "Broadway"), evaluatedWith: map)
+        waitForExpectations(timeout: 10)
+        let ride4 = list.descendants(matching: .any)["placeTripLeg-\(inbound)"].firstMatch
+        revealPlaceElement(ride4, in: list)
+        XCTAssertTrue(ride4.label.contains("Wall St") && ride4.label.contains("Lexington Av/59 St"))
+        let change = list.descendants(matching: .any)["placeTransferStep"].firstMatch
+        revealPlaceElement(change, in: list)
+        XCTAssertTrue(change.label.contains(interchange))
+        XCTAssertTrue(change.label.localizedCaseInsensitiveContains("in-station signs"))
+        XCTAssertFalse(list.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Walk to Lexington Av/59 St")).firstMatch.exists)
+        let capture = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        capture.name = "Wall St to Noguchi Museum with Lexington Av transfer on the main map"
+        capture.lifetime = .keepAlways
+        add(capture)
+        let rideNW = list.descendants(matching: .any)["placeTripLeg-\(outbound)"].firstMatch
+        revealPlaceElement(rideNW, in: list)
+        XCTAssertTrue(rideNW.label.contains("Lexington Av/59 St") && rideNW.label.contains("Broadway"))
     }
 
     @MainActor
@@ -504,6 +570,9 @@ final class StandClearUITests: XCTestCase {
         waitForExpectations(timeout: 10)
         let alighting = (map.value as? String)?.components(separatedBy: ", ").last ?? ""
         XCTAssertTrue(["Broadway", "36 Av", "30 Av", "39 Av-Dutch Kills", "Queensboro Plaza"].contains(alighting))
+        if !expanded, (app.buttons["Sheet Grabber"].value as? String) == "Half screen" {
+            app.buttons["Sheet Grabber"].doubleTap()
+        }
         let leg = list.descendants(matching: .any)["placeTripLeg-\(legID)"].firstMatch
         revealPlaceElement(leg, in: list)
         XCTAssertTrue(leg.label.contains(alighting), "The card and main map must identify the same alighting station")

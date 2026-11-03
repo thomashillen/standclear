@@ -178,6 +178,7 @@ final class TransitStore {
                     ])
                 }
                 if includeMuseum {
+                    lines["4"] = lexingtonFixtureLine()
                     for route in ["N", "W"] {
                         lines[route] = astoriaFixtureLine(route)
                     }
@@ -239,17 +240,41 @@ final class TransitStore {
                 ("R16", "Times Sq-42 St", 18),
                 ("R17", "34 St-Herald Sq", 19),
             ]
-            return ["id": route, "routeId": route, "color": "#F6BC26", "shape": shape,
-                    "stops": stops.map { id, name, index in
-                        ["id": id, "name": name, "lat": shape[index][1], "lng": shape[index][0], "shapeIdx": index] as [String: Any]
-                    }]
+            return fixtureTrack(route, color: "#F6BC26", shape: shape, stops: stops)
+        }
+
+        private static func lexingtonFixtureLine() -> [String: Any] {
+            let shape: [[Double]] = [
+                [-73.967967, 40.762526], [-73.975427, 40.7523], [-73.976848, 40.751776],
+                [-73.978287, 40.751266], [-73.989845, 40.735409], [-73.989951, 40.734673],
+                [-73.989863, 40.733476], [-73.990682, 40.730419], [-73.993622, 40.727308],
+                [-73.996631, 40.723488], [-73.99722, 40.722188], [-74.002905, 40.715772],
+                [-74.003263, 40.714102], [-74.004131, 40.713065], [-74.005023, 40.712297],
+                [-74.008536, 40.711379], [-74.009509, 40.710368], [-74.011862, 40.707557],
+            ]
+            let stops: [(String, String, Int)] = [
+                ("629", "59 St", 0),
+                ("631", "Grand Central-42 St", 2),
+                ("635", "14 St-Union Sq", 5),
+                ("640", "Brooklyn Bridge-City Hall", 13),
+                ("418", "Fulton St", 16),
+                ("419", "Wall St", 17),
+            ]
+            return fixtureTrack("4", color: "#009952", shape: shape, stops: stops)
+        }
+
+        private static func fixtureTrack(_ route: String, color: String, shape: [[Double]], stops: [(String, String, Int)]) -> [String: Any] {
+            ["id": route, "routeId": route, "color": color, "shape": shape,
+             "stops": stops.map { id, name, index in
+                 ["id": id, "name": name, "lat": shape[index][1], "lng": shape[index][0], "shapeIdx": index] as [String: Any]
+             }]
         }
 
         private static func museumArrivals(at timestamp: Double) -> [[String: Any]] {
             // The two Broadway services use the same platforms. A sooner
             // southbound prediction cannot board a Queens-bound itinerary.
             ["R16", "R15", "R17", "R14", "R13", "R11"].enumerated().flatMap { index, platform in
-                let offset = Double(index * 45)
+                let offset = Double(index * 90)
                 return [arrival(id: "museum-n-n", route: "N", stop: platform, direction: "N", destination: "R04", eta: timestamp + 540 + offset),
                         arrival(id: "museum-w-n", route: "W", stop: platform, direction: "N", destination: "R04", eta: timestamp + 720 + offset),
                         arrival(id: "museum-w-s", route: "W", stop: platform, direction: "S", destination: "R17", eta: timestamp + 60 + offset)]
