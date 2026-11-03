@@ -18,6 +18,7 @@ struct MapShell: View {
     @State private var windowSize: CGSize = .zero
     @State private var expandedPanel: Panel = .nearby
     @State private var directionsSelection = DirectionsSelection()
+    @State private var previewPlace: PlaceResult?
     @State private var selectedTrip: NativeTripPlan?
     @State private var tripFocusRevision = 0
     @State private var searchQuery = ""
@@ -60,7 +61,7 @@ struct MapShell: View {
                         map(statusWidth: statusWidth, coveredWidth: geometry.size.width - statusWidth, coveredBottom: 0, maximumGlanceHeight: geometry.size.height * 0.55)
                         VStack(spacing: 0) {
                             NavigationStack {
-                                panelContent(expandedPanel)
+                                panelContent(expandedPanel, expanded: true)
                                     .containerBackground(.clear, for: .navigation)
                             }
                             .id(expandedPanel)
@@ -144,6 +145,14 @@ struct MapShell: View {
                 // Search starts with room for its keyboard instead of promoting a medium sheet during focus.
                 .presentationDetents(panel == .search || typeSize.isAccessibilitySize ? [.large] : [.medium, .large], selection: $sheetDetent)
                 .presentationDragIndicator(.visible)
+            }
+        }
+        .fullScreenCover(item: $previewPlace) { place in
+            NavigationStack {
+                PlacePreview(place: place, store: store, location: location)
+                    .toolbar {
+                        ToolbarItem(placement: .confirmationAction) { Button("Done") { previewPlace = nil } }
+                    }
             }
         }
         .alert("Arrival status", isPresented: $showingArrivalStatus) {
@@ -365,11 +374,11 @@ struct MapShell: View {
         TripMapOverlay.make(plan: selectedTrip, lines: store.lines)
     }
 
-    @ViewBuilder private func panelContent(_ mode: Panel) -> some View {
+    @ViewBuilder private func panelContent(_ mode: Panel, expanded: Bool = false) -> some View {
         if mode == .directions {
             DirectionsView(store: store, selection: $directionsSelection, onSelect: selectTrip, onShowMap: showTripOnMap)
         } else {
-            stationBrowser(search: mode == .search)
+            stationBrowser(search: mode == .search, expanded: expanded)
         }
     }
 
@@ -406,8 +415,8 @@ struct MapShell: View {
         }
     }
 
-    private func stationBrowser(search: Bool) -> some View {
-        StationBrowser(store: store, location: location, search: search, query: $searchQuery, searchFocus: $stationSearchFocused,
+    private func stationBrowser(search: Bool, expanded: Bool) -> some View {
+        StationBrowser(store: store, location: location, search: search, openWindowPreview: expanded ? { previewPlace = $0 } : nil, query: $searchQuery, searchFocus: $stationSearchFocused,
                        directionsSelection: $directionsSelection, onDirectionsHere: beginDirections,
                        onSelectTrip: selectTrip, onShowTripMap: showTripOnMap)
         { station in

@@ -5,6 +5,7 @@ struct StationBrowser: View {
     let store: TransitStore
     let location: LocationStore
     let search: Bool
+    let openWindowPreview: ((PlaceResult) -> Void)?
     @Binding var query: String
     var searchFocus: FocusState<Bool>.Binding
     @Binding var directionsSelection: DirectionsSelection
@@ -40,7 +41,7 @@ struct StationBrowser: View {
                 Group {
                     if search {
                         NavigationLink {
-                            PlaceSearchView(initialQuery: query, store: store, location: location)
+                            PlaceSearchView(initialQuery: query, store: store, location: location, openWindowPreview: openWindowPreview)
                                 .onAppear { searchFocus.wrappedValue = false }
                         } label: {
                             Label(query.isEmpty ? "Addresses and places" : "Search places for “\(query)”", systemImage: "mappin.and.ellipse")

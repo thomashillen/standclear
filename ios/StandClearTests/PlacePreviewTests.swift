@@ -43,6 +43,20 @@ final class PlacePreviewTests: XCTestCase {
         XCTAssertEqual(route.alighting.id, origin.stop.id)
     }
 
+    func testExactCoincidenceOverridesCachedWalkButNearbyStillRequiresRouting() {
+        let point = CLLocationCoordinate2D(latitude: 40.75, longitude: -74)
+        let other = CLLocationCoordinate2D(latitude: 40.75001, longitude: -74)
+        let prior = WalkingConnection(coordinates: [other, point], seconds: 10, meters: 5)
+        let zero = PlacePreview.Walk(from: point, to: point, cached: prior)
+        guard case .notRequired = zero else { return XCTFail("Coincident endpoints need no walking request") }
+        XCTAssertNil(zero.connection)
+        let estimate = PlaceTimeEstimate(stopsPerLeg: [2], accessSeconds: 0, egressSeconds: zero.secondsForEstimate)
+        XCTAssertEqual(estimate?.totalSeconds, 420)
+        let nearby = PlacePreview.Walk(from: other, to: point, cached: nil)
+        guard case .loading = nearby else { return XCTFail("Even a short, nonzero walk needs a routed duration") }
+        XCTAssertNil(nearby.secondsForEstimate)
+    }
+
     func testWalkMemorySeparatesLocationFromStationAndExpiresEntries() {
         let date = Date(timeIntervalSince1970: 1_800_000_000)
         let start = CLLocationCoordinate2D(latitude: 40.75, longitude: -74)

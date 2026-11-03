@@ -133,6 +133,11 @@ final class StandClearUITests: XCTestCase {
         capture.name = expanded ? "Expanded place preview" : "Compact place preview"
         capture.lifetime = .keepAlways
         add(capture)
+        if expanded {
+            app.buttons["Done"].tap()
+            XCTAssertTrue(result.waitForExistence(timeout: 5))
+            XCTAssertEqual(field.value as? String, "550 Madison")
+        }
     }
 
     @MainActor

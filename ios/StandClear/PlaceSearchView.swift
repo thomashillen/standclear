@@ -3,6 +3,7 @@ import SwiftUI
 struct PlaceSearchView: View {
     let store: TransitStore
     let location: LocationStore
+    let openWindowPreview: ((PlaceResult) -> Void)?
     @Environment(\.scenePhase) private var scenePhase
     private let service = PlaceService()
     @State private var query: String
@@ -11,10 +12,11 @@ struct PlaceSearchView: View {
     @State private var state: SearchState = .loading
     @State private var completedQuery: String?
 
-    init(initialQuery: String, store: TransitStore, location: LocationStore) {
+    init(initialQuery: String, store: TransitStore, location: LocationStore, openWindowPreview: ((PlaceResult) -> Void)?) {
         _query = State(initialValue: initialQuery)
         self.store = store
         self.location = location
+        self.openWindowPreview = openWindowPreview
     }
 
     private enum SearchState { case loading, failed, results([PlaceResult]) }
@@ -41,17 +43,14 @@ struct PlaceSearchView: View {
                         ContentUnavailableView.search(text: request.text)
                     }
                     ForEach(items) { item in
-                        NavigationLink {
-                            PlacePreview(place: item, store: store, location: location)
-                        } label: {
-                            VStack(alignment: .leading) {
-                                Text(item.name)
-                                if !item.subtitle.isEmpty {
-                                    Text(item.subtitle).font(.subheadline).foregroundStyle(.secondary)
-                                }
+                        Group {
+                            if let openWindowPreview {
+                                Button { openWindowPreview(item) } label: { resultLabel(item) }
+                            } else {
+                                NavigationLink {
+                                    PlacePreview(place: item, store: store, location: location)
+                                } label: { resultLabel(item) }
                             }
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .contentShape(Rectangle())
                         }
                         .accessibilityIdentifier("placeResult-\(item.id)")
                     }
@@ -83,5 +82,16 @@ struct PlaceSearchView: View {
             }
             completedQuery = request.text
         }
+    }
+
+    private func resultLabel(_ item: PlaceResult) -> some View {
+        VStack(alignment: .leading) {
+            Text(item.name)
+            if !item.subtitle.isEmpty {
+                Text(item.subtitle).font(.subheadline).foregroundStyle(.secondary)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .contentShape(Rectangle())
     }
 }

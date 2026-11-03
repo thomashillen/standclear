@@ -144,13 +144,23 @@ struct PlacePreview: View {
                 stationCount: store.stations.count, active: scenePhase == .active, revision: revision)
     }
 
-    private enum Walk {
-        case omitted, loading, unavailable, ready(WalkingConnection)
-        var secondsForEstimate: Double? {
-            if case .omitted = self {
-                return 0
+    enum Walk {
+        case omitted, notRequired, loading, unavailable, ready(WalkingConnection)
+
+        init(from start: CLLocationCoordinate2D, to end: CLLocationCoordinate2D, cached: WalkingConnection?) {
+            if start.latitude == end.latitude, start.longitude == end.longitude {
+                self = .notRequired
+            } else {
+                self = cached.map(Self.ready) ?? .loading
             }
-            return connection?.seconds
+        }
+
+        var secondsForEstimate: Double? {
+            switch self {
+            case .omitted, .notRequired: 0
+            case let .ready(walk): walk.seconds
+            case .loading, .unavailable: nil
+            }
         }
 
         var connection: WalkingConnection? {
@@ -217,20 +227,26 @@ struct PlacePreview: View {
         }
         let outcome = origin.map { PlaceRouting.route(to: key.place.coordinate, from: $0, stations: store.stations, lines: store.lines) }
         var result = Preview(request: key, origin: origin, outcome: outcome)
+        let shouldFrame = !camera.positionedByUser || preview?.request.place != key.place || preview?.request.manualID != key.manualID
         guard case let .route(route)? = outcome else {
             preview = result
-            frameMap(result)
+            if shouldFrame {
+                frameMap(result)
+            }
             return
         }
         let accessStart = route.trip == nil ? nil : key.fix?.coordinate
         if let accessStart {
-            result.access = walks.connection(for: .toStation, start: accessStart, end: route.boarding.coordinate, fromLocation: true).map(Walk.ready) ?? .loading
+            let end = route.boarding.coordinate
+            result.access = Walk(from: accessStart, to: end, cached: walks.connection(for: .toStation, start: accessStart, end: end, fromLocation: true))
         }
         let directFromLocation = route.trip == nil && key.fix != nil
         let egressStart = route.trip == nil ? (key.fix?.coordinate ?? route.alighting.coordinate) : route.alighting.coordinate
-        result.egress = walks.connection(for: .toPlace, start: egressStart, end: key.place.coordinate, fromLocation: directFromLocation).map(Walk.ready) ?? .loading
+        result.egress = Walk(from: egressStart, to: key.place.coordinate, cached: walks.connection(for: .toPlace, start: egressStart, end: key.place.coordinate, fromLocation: directFromLocation))
         preview = result
-        frameMap(result)
+        if shouldFrame {
+            frameMap(result)
+        }
         let service = PlaceService()
         if let accessStart, case .loading = result.access {
             result.access = await walking(service, leg: .toStation, from: accessStart, to: route.boarding.coordinate, fromLocation: true, key: key)
@@ -333,16 +349,18 @@ struct PlacePreview: View {
                     .accessibilityElement(children: .combine)
                     .accessibilityIdentifier("placeTripLeg-\(leg.id)")
                 }
-            } else {
+            } else if current.egress.secondsForEstimate != 0 {
                 Text(current.request.fix == nil ? "Walk from the selected station to your destination." : "Walk directly from your approximate location to your destination.")
             }
             walkingRow("Walk to \(place.name)", walk: current.egress)
                 .accessibilityIdentifier("placeDestinationWalk")
             if let estimate = PlaceTimeEstimate(stopsPerLeg: route.trip?.legs.map(\.stopCount) ?? [],
                                                 accessSeconds: current.access.secondsForEstimate,
-                                                egressSeconds: current.egress.connection?.seconds)
+                                                egressSeconds: current.egress.secondsForEstimate)
             {
-                walkingTotal(seconds: estimate.walkingSeconds)
+                if estimate.walkingSeconds > 0 {
+                    walkingTotal(seconds: estimate.walkingSeconds)
+                }
                 if route.trip != nil {
                     LabeledContent("Typical total trip time", value: "About \(minutes(estimate.totalSeconds))")
                         .accessibilityIdentifier("placeTripTimeEstimate")
@@ -381,6 +399,7 @@ struct PlacePreview: View {
             case let .ready(connection):
                 let distance = Measurement(value: connection.meters, unit: UnitLength.meters)
                 Text("\(minutes(connection.seconds)) · \(distance.formatted(.measurement(width: .abbreviated, usage: .road)))")
+            case .notRequired: Text("No walk required")
             case .loading: ProgressView("Finding walking route…")
             case .unavailable: Text("Walking route unavailable").foregroundStyle(.secondary)
             case .omitted: EmptyView()
