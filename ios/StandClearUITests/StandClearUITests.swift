@@ -45,19 +45,12 @@ final class StandClearUITests: XCTestCase {
         let arrivalsList = app.collectionViews["stationList"]
         XCTAssertTrue(arrivalsList.waitForExistence(timeout: 5))
         let candidate = arrivalsList.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND NOT label CONTAINS %@", "arrivalRow-", "<1 min")).firstMatch
-        if candidate.exists {
+        if candidate.waitForExistence(timeout: 2) {
+            let hittable = NSPredicate(format: "exists == true AND hittable == true")
+            expectation(for: hittable, evaluatedWith: candidate)
+            waitForExpectations(timeout: 10)
             let arrivalID = candidate.identifier
-            let arrival = arrivalsList.buttons[arrivalID]
-            let usable = NSPredicate { _, _ in
-                MainActor.assumeIsolated {
-                    guard arrival.exists else { return false }
-                    let frame = arrival.frame
-                    return frame.width > 0 && frame.height > 0 && app.frame.contains(frame)
-                }
-            }
-            expectation(for: usable, evaluatedWith: arrival)
-            waitForExpectations(timeout: 20)
-            arrival.tap()
+            candidate.tap()
             XCTAssertTrue(arrivalsList.staticTexts.matching(NSPredicate(format: "identifier == %@ AND label BEGINSWITH %@", arrivalID, "Predicted arrival:")).firstMatch.waitForExistence(timeout: 5))
         }
         app.buttons["Done"].tap()
@@ -251,9 +244,8 @@ final class StandClearUITests: XCTestCase {
         XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 10),
                       "Tapping Search must present a usable keyboard before entering a station")
         search.typeText("Wall\n")
-        let station = app.buttons["station-419"]
-        XCTAssertTrue(station.waitForExistence(timeout: 30))
-        station.tap()
+        selectSearchResult("419", query: "Wall", in: app)
+        XCTAssertTrue(app.navigationBars["Wall St"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.buttons["directionsHere"].waitForExistence(timeout: 5))
         app.buttons["directionsHere"].tap()
         XCTAssertTrue(app.buttons["destinationPicker"].waitForExistence(timeout: 5))
@@ -277,7 +269,7 @@ final class StandClearUITests: XCTestCase {
         app.navigationBars["Wall St"].buttons.element(boundBy: 0).tap()
         XCTAssertTrue(app.searchFields.firstMatch.waitForExistence(timeout: 5))
         XCTAssertTrue((app.searchFields.firstMatch.value as? String)?.contains("Wall") == true)
-        station.tap()
+        selectSearchResult("419", query: "Wall", in: app)
         app.buttons["directionsHere"].tap()
         XCTAssertTrue(app.buttons["originPicker"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.buttons["originPicker"].label.contains("59 St"))
@@ -412,6 +404,20 @@ final class StandClearUITests: XCTestCase {
             MainActor.assumeIsolated {
                 let search = app.searchFields.firstMatch
                 return search.exists && (search.value as? String) == query && result.exists
+            }
+        }
+        expectation(for: ready, evaluatedWith: result)
+        waitForExpectations(timeout: 10)
+        result.tap()
+    }
+
+    @MainActor
+    private func selectSearchResult(_ stationID: String, query: String, in app: XCUIApplication) {
+        let result = app.buttons["station-\(stationID)"]
+        let ready = NSPredicate { _, _ in
+            MainActor.assumeIsolated {
+                let search = app.searchFields.firstMatch
+                return search.exists && (search.value as? String) == query && result.exists && result.isHittable
             }
         }
         expectation(for: ready, evaluatedWith: result)
