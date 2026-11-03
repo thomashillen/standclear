@@ -528,6 +528,7 @@ final class StandClearUITests: XCTestCase {
         field.typeText("Noguchi\n")
         let museum = app.buttons["placeResult-fixture-noguchi"]
         XCTAssertTrue(museum.waitForExistence(timeout: 10))
+        provideFix()
         museum.tap()
         let list = app.collectionViews["placePreviewList"]
         let origin = app.buttons["placeOriginPicker"]
@@ -547,15 +548,20 @@ final class StandClearUITests: XCTestCase {
         } else {
             let window = app.windows.firstMatch
             XCTAssertGreaterThan(list.frame.minY, window.frame.height * 0.3, "The compact route card must expose the main map")
-            // Pan the exposed map, checking that its location annotation actually
-            // moved while the route card stayed on screen.
-            let priorX = dot.frame.midX
-            window.coordinate(withNormalizedOffset: CGVector(dx: 0.38, dy: 0.26))
-                .press(forDuration: 0.08, thenDragTo: window.coordinate(withNormalizedOffset: CGVector(dx: 0.50, dy: 0.26)))
-            let moved = NSPredicate { _, _ in MainActor.assumeIsolated { dot.exists && abs(dot.frame.midX - priorX) > 8 } }
-            expectation(for: moved, evaluatedWith: dot)
+            // The destination pin belongs to the selected itinerary and stays
+            // present independently of Core Location updates.
+            let pin = map.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "The Noguchi Museum")).firstMatch
+            XCTAssertTrue(pin.waitForExistence(timeout: 5))
+            let priorX = pin.frame.midX
+            let start = window.coordinate(withNormalizedOffset: CGVector(dx: 0.30, dy: 0.34))
+            start.press(forDuration: 0.1, thenDragTo: start.withOffset(CGVector(dx: window.frame.width * 0.23, dy: 0)),
+                        withVelocity: .slow, thenHoldForDuration: 0.3)
+            let moved = NSPredicate { _, _ in MainActor.assumeIsolated { pin.exists && pin.frame.midX - priorX > 8 } }
+            expectation(for: moved, evaluatedWith: pin)
             waitForExpectations(timeout: 8)
             XCTAssertTrue(list.exists)
+            XCTAssertEqual(map.value as? String, firstSummary)
+            XCTAssertTrue(list.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND value == %@", "placeRouteOption-", "Selected")).firstMatch.exists)
         }
         // Use an independently identified alighting platform. Other rows can
         // be reordered as their walking durations finish loading.
