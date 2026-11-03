@@ -31,6 +31,7 @@ struct MapShell: View {
 
     @State private var placeGeometryRevision = 0
     @State private var detentBeforeOriginPicker: PresentationDetent?
+    @State private var editingPlaceID: String?
     @State private var selectedTrip: NativeTripPlan?
     @State private var tripFocusRevision = 0
     @State private var searchQuery = ""
@@ -194,6 +195,7 @@ struct MapShell: View {
             }
         }
         .onChange(of: activeDestination?.id) { _, id in
+            editingPlaceID = nil
             if id == nil {
                 placeRoute = nil
             }
@@ -219,6 +221,10 @@ struct MapShell: View {
             if available, focus.receiveLocation(location.availableCoordinate) {
                 applyFocus()
             }
+        }
+        .task(id: placeRenewalFix) { [timestamp = placeRenewalFix] in
+            guard let timestamp else { return }
+            await location.renewForPlace(timestamp) { placeRenewalFix == timestamp }
         }
         .task(id: scenePhase) {
             guard scenePhase == .active else { location.stop(); store.stop(); return }
@@ -455,6 +461,11 @@ struct MapShell: View {
         (isWide ? expandedPanel : panel)?.destination
     }
 
+    private var placeRenewalFix: Date? {
+        guard scenePhase == .active, activeDestination != nil, placeSession.usesCurrentLocation, editingPlaceID != activeDestination?.id else { return nil }
+        return location.usableFixTimestamp
+    }
+
     private var visiblePlaceRoute: PlaceMapRoute? {
         guard scenePhase == .active, let placeRoute, placeRoute.place.id == activeDestination?.id,
               publishedOrigin == placeSession.origin else { return nil }
@@ -513,7 +524,9 @@ struct MapShell: View {
             PlacePreview(place: place, store: store, location: location, session: placeSession,
                          onMapChange: { updatePlaceMap($0, destination: place) },
                          onEditingOriginChanged: { editing in
-                             guard !expanded, panel?.destination?.id == place.id else { return }
+                             guard activeDestination?.id == place.id else { return }
+                             editingPlaceID = editing ? place.id : nil
+                             guard !expanded else { return }
                              if editing {
                                  detentBeforeOriginPicker = sheetDetent
                                  sheetDetent = .large

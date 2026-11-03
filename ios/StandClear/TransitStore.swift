@@ -315,6 +315,43 @@ final class TransitStore {
     }
 #endif
 
+/// Both deadlines belong to the source timestamp. Receiving the same cached
+/// fix again neither extends its lifetime nor permits another early request.
+struct LocationFixSchedule {
+    static let lifetime: TimeInterval = 30
+    private(set) var timestamp: Date?
+    private var lastRenewed: Date?
+
+    mutating func accept(_ date: Date) {
+        timestamp = date
+    }
+
+    mutating func invalidate() {
+        timestamp = nil
+    }
+
+    static func renewalDate(for date: Date) -> Date {
+        date.addingTimeInterval(lifetime - 5)
+    }
+
+    func usable(at now: Date) -> Bool {
+        guard let timestamp else { return false }
+        return abs(now.timeIntervalSince(timestamp)) < Self.lifetime
+    }
+
+    mutating func claimRenewal(for date: Date, at now: Date) -> Bool {
+        guard timestamp == date, lastRenewed != date, now >= Self.renewalDate(for: date), usable(at: now) else { return false }
+        lastRenewed = date
+        return true
+    }
+
+    mutating func expire(_ date: Date) -> Bool {
+        guard timestamp == date else { return false }
+        timestamp = nil
+        return true
+    }
+}
+
 @MainActor @Observable
 final class LocationStore: NSObject, @preconcurrency CLLocationManagerDelegate {
     private let manager = CLLocationManager()
@@ -323,6 +360,7 @@ final class LocationStore: NSObject, @preconcurrency CLLocationManagerDelegate {
     var message: String?
     private var active = false
     private var expiryTask: Task<Void, Never>?
+    private var schedule = LocationFixSchedule()
 
     /// Core Location invokes this manager’s delegate on its creating (main) thread.
     override init() {
@@ -349,11 +387,14 @@ final class LocationStore: NSObject, @preconcurrency CLLocationManagerDelegate {
         active = false
         manager.stopUpdatingLocation()
         expiryTask?.cancel()
+        schedule.invalidate()
         coordinate = nil
     }
 
     func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
         status = manager.authorizationStatus
+        expiryTask?.cancel()
+        schedule.invalidate()
         coordinate = nil
         if active {
             start()
@@ -363,20 +404,24 @@ final class LocationStore: NSObject, @preconcurrency CLLocationManagerDelegate {
     func locationManager(_: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
         guard active else { return }
         guard let location = locations.last, location.horizontalAccuracy >= 0,
-              abs(location.timestamp.timeIntervalSinceNow) < 30
+              abs(location.timestamp.timeIntervalSinceNow) < LocationFixSchedule.lifetime
         else {
             coordinate = nil
             message = "Your location is out of date. Try again or search for a station."
             return
         }
+        guard schedule.timestamp.map({ location.timestamp >= $0 }) ?? true else { return }
         coordinate = location.coordinate
         message = nil
+        let timestamp = location.timestamp
+        guard schedule.timestamp != timestamp else { return }
+        schedule.accept(timestamp)
         expiryTask?.cancel()
-        let remaining = max(0, 30 - Date().timeIntervalSince(location.timestamp))
+        let remaining = max(0, LocationFixSchedule.lifetime - Date().timeIntervalSince(timestamp))
         expiryTask = Task { [weak self] in
             do { try await Task.sleep(for: .seconds(remaining)) } catch { return }
-            self?.coordinate = nil
-            guard let self, active else { return }
+            guard let self, active, schedule.expire(timestamp) else { return }
+            coordinate = nil
             // Coarse one-shot fixes avoid a continuous high-accuracy watch while
             // still expiring stationary/cached coordinates before reusing them.
             manager.requestLocation()
@@ -388,8 +433,24 @@ final class LocationStore: NSObject, @preconcurrency CLLocationManagerDelegate {
         message = "Your location is unavailable. Try again or search for a station."
     }
 
+    var usableFixTimestamp: Date? {
+        availableCoordinate == nil ? nil : schedule.timestamp
+    }
+
+    /// The place card owns this cancellable wait. The ordinary expiry task
+    /// remains armed until a newer measurement actually arrives.
+    func renewForPlace(_ timestamp: Date, stillNeeded: () -> Bool) async {
+        let delay = LocationFixSchedule.renewalDate(for: timestamp).timeIntervalSinceNow
+        if delay > 0 {
+            do { try await Task.sleep(for: .seconds(delay)) } catch { return }
+        }
+        guard !Task.isCancelled, active, stillNeeded(), availableCoordinate != nil,
+              schedule.claimRenewal(for: timestamp, at: .now) else { return }
+        manager.requestLocation()
+    }
+
     var availableCoordinate: CLLocationCoordinate2D? {
-        guard status == .authorizedAlways || status == .authorizedWhenInUse else { return nil }
+        guard status == .authorizedAlways || status == .authorizedWhenInUse, schedule.usable(at: .now) else { return nil }
         return coordinate
     }
 }
