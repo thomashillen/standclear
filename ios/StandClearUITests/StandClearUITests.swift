@@ -137,6 +137,70 @@ final class StandClearUITests: XCTestCase {
     }
 
     @MainActor
+    func testFavoriteStationPersistsAndOpensFromNearbyWithoutLocation() {
+        let app = XCUIApplication()
+        app.terminate()
+        XCUIDevice.shared.orientation = .portrait
+        app.resetAuthorizationStatus(for: .location)
+        app.launchArguments = ["--ui-test-fixture", "-mapProvider", "Apple Maps"]
+        addUIInterruptionMonitor(withDescription: "Location permission") { alert in
+            let deny = alert.buttons["Don’t Allow"]
+            guard deny.exists else { return false }
+            deny.tap()
+            return true
+        }
+        app.launch()
+        activatePermissionPrompt(in: app)
+        app.buttons["searchButton"].tap()
+        let field = app.searchFields[unifiedSearchPrompt]
+        XCTAssertTrue(field.waitForExistence(timeout: 5))
+        field.tap()
+        field.typeText("Wall\n")
+        selectSearchResult("419", query: "Wall", in: app)
+        let detail = app.navigationBars["Wall St"]
+        XCTAssertTrue(detail.waitForExistence(timeout: 5))
+        let toggle = app.buttons["favoriteStationToggle"]
+        XCTAssertTrue(toggle.waitForExistence(timeout: 5))
+        // Restore a known starting state if a previous simulator run stopped
+        // before cleanup. Preserve any other station the rider saved.
+        if toggle.label == "Remove from favorites" {
+            toggle.tap()
+        }
+        XCTAssertEqual(toggle.label, "Add to favorites")
+        toggle.tap()
+        XCTAssertEqual(toggle.label, "Remove from favorites")
+
+        app.terminate()
+        app.launch()
+        let nearby = app.buttons["nearbyButton"]
+        XCTAssertTrue(nearby.waitForExistence(timeout: 15))
+        nearby.tap()
+        XCTAssertTrue(app.navigationBars["Nearby arrivals"].waitForExistence(timeout: 5))
+        app.buttons["Sheet Grabber"].doubleTap()
+        let list = app.collectionViews["stationList"]
+        let favorite = list.buttons["favoriteStation-419"]
+        XCTAssertTrue(favorite.waitForExistence(timeout: 10))
+        XCTAssertTrue(favorite.label.contains("Wall St"))
+        let missingFix = list.descendants(matching: .any).matching(NSPredicate(format: "label IN %@", [
+            "Location access is off", "Location unavailable", "Waiting for your location…",
+        ])).firstMatch
+        XCTAssertTrue(missingFix.waitForExistence(timeout: 5), "A saved station must open even without a usable location fix")
+        let capture = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        capture.name = "Saved Wall St in Nearby after relaunch without location"
+        capture.lifetime = .keepAlways
+        add(capture)
+        favorite.tap()
+        XCTAssertTrue(detail.waitForExistence(timeout: 5))
+        XCTAssertEqual(toggle.label, "Remove from favorites")
+        toggle.tap()
+        XCTAssertEqual(toggle.label, "Add to favorites")
+        detail.buttons.element(boundBy: 0).tap()
+        XCTAssertTrue(app.navigationBars["Nearby arrivals"].waitForExistence(timeout: 5))
+        XCTAssertTrue(favorite.waitForNonExistence(timeout: 5))
+        XCTAssertTrue(missingFix.exists)
+    }
+
+    @MainActor
     func testRecentStationPersistsAcrossRelaunchAndCanBeCleared() {
         let app = XCUIApplication()
         app.terminate()
