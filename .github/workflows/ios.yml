@@ -36,6 +36,8 @@ jobs:
           with open(os.environ['GITHUB_ENV'], 'a') as env:
               env.write('IOS_SIMULATOR_ID=' + phones[0]['udid'] + '\n')
           PY
+      - name: Boot the selected simulator and wait for system startup
+        run: xcrun simctl bootstatus "$IOS_SIMULATOR_ID" -b
       - name: Build, analyze, and test without signing or credentials
         run: |
           xcodebuild -project ios/StandClear.xcodeproj -scheme StandClear \

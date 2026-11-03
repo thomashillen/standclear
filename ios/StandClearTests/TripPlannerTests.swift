@@ -97,6 +97,26 @@ final class TripPlannerTests: XCTestCase {
         XCTAssertEqual(TripPlanner.nextDeparture(for: leg, stations: stations, snapshot: snapshot, now: now, feedUnavailable: false)?.tripId, "valid")
     }
 
+    func testFirstBoardingUsesWalkAndEntryButKeepsPlatformPrediction() throws {
+        let stations = Transit.stations(sampleLines())
+        let leg = try XCTUnwrap(try TripPlanner.plans(lines: sampleLines(), stations: stations,
+                                                      from: station("631", in: stations), to: station("419", in: stations)).first?.legs.first)
+        let arrivals = [arrival("early", route: "4", stop: "631", direction: "S", seconds: 180),
+                        arrival("wrong-direction", route: "4", stop: "631", direction: "N", seconds: 231),
+                        arrival("boundary", route: "4", stop: "631", direction: "S", seconds: 230)]
+        let snapshot = Snapshot(generatedAt: now.timeIntervalSince1970 * 1000, trains: [], arrivals: arrivals)
+        let eligible = TripPlanner.departures(for: leg, stations: stations, snapshot: snapshot, now: now, feedUnavailable: false)
+        XCTAssertEqual(eligible.map(\.tripId), ["early", "boundary"])
+        let comparison = TripPlanner.EarlyDeparture(departures: eligible, walkSeconds: 210, now: now)
+        XCTAssertEqual(comparison?.nextAfterWalk?.tripId, "boundary")
+        XCTAssertNotNil(TripPlanner.EarlyDeparture(departures: eligible, walkSeconds: 300, now: now))
+        XCTAssertNil(TripPlanner.EarlyDeparture(departures: eligible, walkSeconds: 300, now: now)?.nextAfterWalk)
+        for duration: Double? in [nil, 0, -1, .nan, .infinity, 160] {
+            XCTAssertNil(TripPlanner.EarlyDeparture(departures: eligible, walkSeconds: duration, now: now))
+        }
+        XCTAssertNil(TripPlanner.EarlyDeparture(departures: [], walkSeconds: 210, now: now))
+    }
+
     func testDepartureRejectsStaleFailedAndOldVehicleData() throws {
         let lines = sampleLines(), stations = Transit.stations(lines)
         let leg = try XCTUnwrap(try TripPlanner.plans(lines: lines, stations: stations,
