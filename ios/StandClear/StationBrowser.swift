@@ -268,7 +268,9 @@ struct StationArrivals: View {
 
     var body: some View {
         TimelineView(.periodic(from: .now, by: 5)) { context in
-            let arrivals = Transit.arrivals(for: station, snapshot: store.snapshot, now: context.date)
+            let fresh = !store.feedError && store.snapshot?.isFresh(at: context.date) == true
+            let groups = fresh ? StationArrivalGroup.groups(Transit.arrivals(for: station, snapshot: store.snapshot, now: context.date)) : []
+            let caveat = "MTA predictions may change. Missing predictions do not mean no service. Partial upstream outages may omit routes."
             List {
                 Button {
                     // Prefill only on this explicit action, never when navigation
@@ -286,23 +288,25 @@ struct StationArrivals: View {
                 StationAlertSection(station: station, load: alerts, now: context.date) { alertsRetry += 1 }
                 Section {
                     ArrivalFeedState(store: store, now: context.date)
-                    if !store.feedError, store.snapshot?.isFresh(at: context.date) == true {
-                        if arrivals.isEmpty {
-                            Label("No upcoming predictions", systemImage: "tram")
-                            Text("The feed currently has no upcoming arrivals for this station.")
-                                .foregroundStyle(.secondary)
-                        } else {
-                            ForEach(Array(arrivals.prefix(20))) { arrival in
-                                ArrivalRow(arrival: arrival, store: store, now: context.date)
-                            }
-                        }
+                    if fresh, groups.isEmpty {
+                        Label("No upcoming predictions", systemImage: "tram")
+                        Text("The feed currently has no upcoming arrivals for this station.")
+                            .foregroundStyle(.secondary)
                     }
                 } footer: {
-                    Text("MTA predictions may change. Missing predictions do not mean no service. Partial upstream outages may omit routes.")
+                    if groups.isEmpty {
+                        Text(caveat)
+                    }
                 }
                 .listRowBackground(Color.clear)
                 .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
+                ForEach(groups) { group in
+                    StationDirectionSection(group: group, store: store, now: context.date,
+                                            footer: group.id == groups.last?.id ? caveat : nil)
+                }
+                .id(station.id)
             }
+            .accessibilityIdentifier("stationArrivalsList")
             .listStyle(.plain)
             .scrollContentBackground(.hidden)
             .listSectionSpacing(.compact)
@@ -341,6 +345,42 @@ struct StationArrivals: View {
             DirectionsView(store: store, selection: $directionsSelection,
                            onSelect: onSelectTrip, onShowMap: onShowTripMap)
         }
+    }
+}
+
+private struct StationDirectionSection: View {
+    let group: StationArrivalGroup
+    let store: TransitStore
+    let now: Date
+    let footer: String?
+    @State private var expanded = false
+
+    var body: some View {
+        Section {
+            if group.arrivals.isEmpty {
+                Text("No upcoming predictions reported.")
+                    .foregroundStyle(.secondary)
+            } else {
+                ForEach(group.visible(expanded: expanded)) { arrival in
+                    ArrivalRow(arrival: arrival, store: store, now: now)
+                }
+                if group.overflowCount > 0 {
+                    let title = expanded ? "Show less" : "Show all (\(group.overflowCount) more)"
+                    Button(title) { expanded.toggle() }
+                        .accessibilityLabel("\(title), \(group.direction.title)")
+                        .accessibilityIdentifier("stationArrivalToggle-\(group.direction.rawValue)")
+                }
+            }
+        } header: {
+            Text(group.direction.title)
+                .accessibilityIdentifier("stationArrivalHeader-\(group.direction.rawValue)")
+        } footer: {
+            if let footer {
+                Text(footer)
+            }
+        }
+        .listRowBackground(Color.clear)
+        .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
     }
 }
 
