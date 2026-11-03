@@ -22,6 +22,13 @@ struct MapShell: View {
     @State private var placeSession = PlacePreviewSession()
     @State private var placeRoute: PlaceMapRoute?
     @State private var publishedOrigin: PlacePreviewSession.Origin?
+    @State private var framedPlaceChoice: PlaceChoice?
+
+    private struct PlaceChoice: Equatable {
+        let optionID: String
+        let origin: PlacePreviewSession.Origin
+    }
+
     @State private var placeGeometryRevision = 0
     @State private var detentBeforeOriginPicker: PresentationDetent?
     @State private var selectedTrip: NativeTripPlan?
@@ -462,6 +469,7 @@ struct MapShell: View {
         selectedTrip = nil
         placeRoute = nil
         detentBeforeOriginPicker = nil
+        framedPlaceChoice = nil
         placeSession = PlacePreviewSession()
         if expanded {
             expandedPanel = .place(place)
@@ -475,14 +483,17 @@ struct MapShell: View {
 
     private func updatePlaceMap(_ route: PlaceMapRoute?, destination: PlaceResult) {
         guard activeDestination?.id == destination.id else { return }
-        let selectionChanged = placeRoute?.optionID != route?.optionID
         placeRoute = route
         publishedOrigin = route == nil ? nil : placeSession.origin
         placeGeometryRevision += 1
-        // Walking responses for other choices must not pull a rider back after a pan.
-        guard selectionChanged else { return }
+        // A renewed location or walking reply invalidates geometry, but is not
+        // a request to undo a pan when the same itinerary remains selected.
+        guard let route else { return }
+        let choice = PlaceChoice(optionID: route.optionID, origin: placeSession.origin)
+        guard choice != framedPlaceChoice else { return }
+        framedPlaceChoice = choice
         tripFocusRevision += 1
-        let points = tripOverlays.flatMap(\.coordinates) + (route?.endpoints ?? [destination.coordinate])
+        let points = tripOverlays.flatMap(\.coordinates) + route.endpoints
         if points.count > 1 {
             viewport = .overview(geometry: LineString(points), geometryPadding: .init(top: 24, leading: 24, bottom: 24, trailing: 24), maxZoom: 14)
                 .padding(focusPadding)
