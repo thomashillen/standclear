@@ -87,10 +87,25 @@ final class StandClearUITests: XCTestCase {
         defer { XCUIDevice.shared.orientation = .portrait }
         app.resetAuthorizationStatus(for: .location)
         app.launchArguments = ["--ui-test-fixture", "-mapProvider", "Apple Maps"]
+        addUIInterruptionMonitor(withDescription: "Location permission") { alert in
+            let deny = alert.buttons["Don’t Allow"]
+            guard deny.exists else { return false }
+            deny.tap()
+            return true
+        }
         app.launch()
-        let deny = XCUIApplication(bundleIdentifier: "com.apple.springboard").alerts.buttons["Don’t Allow"]
-        XCTAssertTrue(deny.waitForExistence(timeout: 20))
-        deny.tap()
+        // Nearby can request permission on demand. Compact exercises an actual
+        // denial. Expanded also supports the system waiting for its first fix.
+        let nearby = app.buttons["nearbyButton"]
+        XCTAssertTrue(nearby.waitForExistence(timeout: 20))
+        nearby.tap()
+        if expanded {
+            XCTAssertTrue(app.navigationBars["Nearby arrivals"].waitForExistence(timeout: 10))
+            XCTAssertFalse(app.descendants(matching: .any)["userLocationDot"].exists)
+        } else {
+            XCTAssertTrue(app.staticTexts["Location access is off"].firstMatch.waitForExistence(timeout: 10))
+            app.buttons["Done"].tap()
+        }
         waitForLayout(in: app, expanded: expanded)
         app.buttons["searchButton"].tap()
         let entry = app.buttons["placeSearchEntry"]
