@@ -128,7 +128,9 @@ final class TransitModelsTests: XCTestCase {
                     stop: stop("station-\(offset)", latitude: 40.75 + Double(offset) * 0.001, longitude: -73.99),
                     stopIDs: ["station-\(offset)"], routes: ["1"])
         }
-        XCTAssertEqual(Transit.nearby(stations, coordinate: origin).map(\.id),
+        let nearby = Transit.nearby(stations, coordinate: origin)
+        XCTAssertEqual(nearby.first?.meters ?? 0, 111, accuracy: 1)
+        XCTAssertEqual(nearby.map(\.id),
                        ["station-1", "station-2", "station-3", "station-4", "station-5"])
     }
 

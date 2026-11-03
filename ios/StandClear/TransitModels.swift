@@ -216,14 +216,23 @@ enum Transit {
         return matches.sorted { $0.score < $1.score }.map(\.station)
     }
 
-    static func nearby(_ stations: [Station], coordinate: CLLocationCoordinate2D) -> [Station] {
-        let origin = CLLocation(latitude: coordinate.latitude, longitude: coordinate.longitude)
-        let ranked = stations.sorted {
-            origin.distance(from: CLLocation(latitude: $0.stop.lat, longitude: $0.stop.lng)) <
-                origin.distance(from: CLLocation(latitude: $1.stop.lat, longitude: $1.stop.lng))
+    struct NearbyStation: Identifiable {
+        let station: Station
+        let meters: Double
+        var id: String {
+            station.id
         }
-        guard let first = ranked.first,
-              origin.distance(from: CLLocation(latitude: first.stop.lat, longitude: first.stop.lng)) <= 80000 else { return [] }
+    }
+
+    static func nearby(_ stations: [Station], coordinate: CLLocationCoordinate2D) -> [NearbyStation] {
+        guard CLLocationCoordinate2DIsValid(coordinate) else { return [] }
+        let origin = CLLocation(latitude: coordinate.latitude, longitude: coordinate.longitude)
+        let ranked = stations.compactMap { station -> NearbyStation? in
+            guard CLLocationCoordinate2DIsValid(station.stop.coordinate) else { return nil }
+            let meters = origin.distance(from: CLLocation(latitude: station.stop.lat, longitude: station.stop.lng))
+            return NearbyStation(station: station, meters: meters)
+        }.sorted { $0.meters == $1.meters ? $0.id < $1.id : $0.meters < $1.meters }
+        guard let first = ranked.first, first.meters <= 80000 else { return [] }
         return Array(ranked.prefix(5))
     }
 
