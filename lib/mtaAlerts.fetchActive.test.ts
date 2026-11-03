@@ -61,9 +61,9 @@ type FeedEntity = NonNullable<
   ? E
   : never;
 
-function feed(entities: FeedEntity[]): Buffer {
+function feed(entities: FeedEntity[], timestamp = NOW_SEC - 90): Buffer {
   const message = FeedMessage.create({
-    header: { gtfsRealtimeVersion: "2.0", incrementality: 0, timestamp: 0 },
+    header: { gtfsRealtimeVersion: "2.0", incrementality: 0, timestamp },
     entity: entities,
   });
   return Buffer.from(FeedMessage.encode(message).finish());
@@ -575,7 +575,7 @@ describe("fetchActiveAlerts — error paths", () => {
     const { fetchActiveAlerts } = await freshImport();
 
     const r = await fetchActiveAlerts();
-    expect(r.alerts).toEqual([]);
+    expect(r).toMatchObject({ alerts: [], available: false, feedTimestamp: null });
     expect(r.generatedAt).toBeGreaterThan(0);
     expect(captureException).toHaveBeenCalledTimes(1);
     const [err, fields] = captureException.mock.calls[0];
@@ -594,7 +594,7 @@ describe("fetchActiveAlerts — error paths", () => {
     const { fetchActiveAlerts } = await freshImport();
 
     const r = await fetchActiveAlerts();
-    expect(r.alerts).toEqual([]);
+    expect(r).toMatchObject({ alerts: [], available: false, feedTimestamp: null });
     expect(captureException).toHaveBeenCalledTimes(1);
     expect(captureException.mock.calls[0][0]).toBe(networkErr);
   });
@@ -614,12 +614,21 @@ describe("fetchActiveAlerts — error paths", () => {
     const { fetchActiveAlerts } = await freshImport();
 
     const r = await fetchActiveAlerts();
-    expect(r.alerts).toEqual([]);
+    expect(r).toMatchObject({ alerts: [], available: false, feedTimestamp: null });
     expect(captureException).toHaveBeenCalledTimes(1);
   });
 });
 
 describe("fetchActiveAlerts — happy path shape", () => {
+  it("keeps an empty successful feed distinct from failure without fabricating its source time", async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue(feedResponse(feed([], 0)));
+    const { fetchActiveAlerts } = await freshImport();
+
+    expect(await fetchActiveAlerts()).toMatchObject({
+      alerts: [], available: true, feedTimestamp: null,
+    });
+  });
+
   it("emits a generatedAt millisecond timestamp + alert list, severity classified via severityOf", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       feedResponse(
@@ -648,6 +657,8 @@ describe("fetchActiveAlerts — happy path shape", () => {
     // generatedAt is wall-clock milliseconds — the test's fake clock
     // pins Date.now() to NOW_SEC * 1000.
     expect(r.generatedAt).toBe(NOW_SEC * 1000);
+    expect(r.available).toBe(true);
+    expect(r.feedTimestamp).toBe(NOW_SEC - 90);
     expect(r.alerts).toHaveLength(1);
     expect(r.alerts[0]).toMatchObject({
       id: "happy",
