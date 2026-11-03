@@ -52,7 +52,7 @@ final class StandClearUITests: XCTestCase {
             MainActor.assumeIsolated {
                 guard arrival.exists else { return false }
                 let frame = arrival.frame
-                return frame.width > 0 && frame.height > 0 && app.frame.contains(frame)
+                return frame.width > 0 && frame.height > 0 && app.frame.contains(frame) && arrival.isHittable
             }
         }
         expectation(for: usable, evaluatedWith: arrival)
@@ -251,10 +251,8 @@ final class StandClearUITests: XCTestCase {
         XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 10),
                       "Tapping Search must present a usable keyboard before entering a station")
         search.typeText("Wall\n")
-        let station = app.buttons["station-419"]
-        XCTAssertTrue(station.waitForExistence(timeout: 30))
-        // Exercise the row's empty center as well as its text and route badges.
-        station.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+        selectSearchResult("419", query: "Wall", in: app)
+        XCTAssertTrue(app.navigationBars["Wall St"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.buttons["directionsHere"].waitForExistence(timeout: 5))
         app.buttons["directionsHere"].tap()
         XCTAssertTrue(app.buttons["destinationPicker"].waitForExistence(timeout: 5))
@@ -278,7 +276,7 @@ final class StandClearUITests: XCTestCase {
         app.navigationBars["Wall St"].buttons.element(boundBy: 0).tap()
         XCTAssertTrue(app.searchFields.firstMatch.waitForExistence(timeout: 5))
         XCTAssertTrue((app.searchFields.firstMatch.value as? String)?.contains("Wall") == true)
-        station.tap()
+        selectSearchResult("419", query: "Wall", in: app)
         app.buttons["directionsHere"].tap()
         XCTAssertTrue(app.buttons["originPicker"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.buttons["originPicker"].label.contains("59 St"))
@@ -418,6 +416,22 @@ final class StandClearUITests: XCTestCase {
         expectation(for: ready, evaluatedWith: result)
         waitForExpectations(timeout: 10)
         result.tap()
+    }
+
+    @MainActor
+    private func selectSearchResult(_ stationID: String, query: String, in app: XCUIApplication) {
+        let result = app.buttons["station-\(stationID)"]
+        let ready = NSPredicate { _, _ in
+            MainActor.assumeIsolated {
+                let search = app.searchFields.firstMatch
+                return search.exists && (search.value as? String) == query && result.exists && result.isHittable
+            }
+        }
+        expectation(for: ready, evaluatedWith: result)
+        waitForExpectations(timeout: 10)
+        // Regression: the blank center between station text and route badges
+        // must navigate just like either visible part of the native row label.
+        result.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
     }
 
     @MainActor
