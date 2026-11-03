@@ -16,6 +16,7 @@ struct AppleTransitMap: View {
     var destination: PlaceResult?
     var placeRoute: PlaceMapRoute?
     var placeGeometryRevision = 0
+    var transferMarker: (text: String, coordinate: CLLocationCoordinate2D)?
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
@@ -33,11 +34,15 @@ struct AppleTransitMap: View {
     ))
     @State private var cameraState = AppleTransitCameraState()
 
+    private var showsJourney: Bool {
+        destination != nil || !tripOverlays.isEmpty
+    }
+
     var body: some View {
         let inputs = motionInputs
         GeometryReader { geometry in
             MapKit.Map(position: $position, interactionModes: [.pan, .zoom, .rotate]) {
-                ForEach(destination == nil ? routeGeometry : []) { line in
+                ForEach(showsJourney ? [] : routeGeometry) { line in
                     MapPolyline(line.polyline)
                         .stroke(line.color,
                                 style: StrokeStyle(lineWidth: 3, lineCap: .round, lineJoin: .round))
@@ -67,13 +72,13 @@ struct AppleTransitMap: View {
                     if let boarding = placeRoute?.boarding {
                         Marker(boarding.name, systemImage: "tram", coordinate: boarding.coordinate)
                     }
-                    if let transfer = placeRoute?.transferLabel(in: store.lines) {
-                        Marker(transfer.text, systemImage: "arrow.left.arrow.right", coordinate: transfer.coordinate)
-                            .annotationTitles(.visible)
-                    }
                     if let alighting = placeRoute?.alighting, alighting.id != placeRoute?.boarding?.id {
                         Marker(alighting.name, systemImage: "tram", coordinate: alighting.coordinate)
                     }
+                }
+                if let transfer = transferMarker {
+                    Marker(transfer.text, systemImage: "arrow.left.arrow.right", coordinate: transfer.coordinate)
+                        .annotationTitles(.visible)
                 }
                 if let currentLocation {
                     // Use the same expiring foreground fix as nearby arrivals.
@@ -126,7 +131,7 @@ struct AppleTransitMap: View {
             .ignoresSafeArea(edges: .top)
             .accessibilityIdentifier("appleTransitMap")
             .accessibilityLabel("Subway map, Apple Maps")
-            .accessibilityValue([placeRoute?.transferLabel(in: store.lines)?.text, placeRoute?.accessibilitySummary ?? destination?.name].compactMap(\.self).joined(separator: ", "))
+            .accessibilityValue([transferMarker?.text, placeRoute?.accessibilitySummary ?? destination?.name].compactMap(\.self).joined(separator: ", "))
             .accessibilityHint("Use Search or Nearby for accessible station arrivals.")
         }
         .onChange(of: TripGeometryInput(linesRevision: inputs.linesRevision, focus: tripFocusRevision, placeRevision: placeGeometryRevision, ids: tripOverlays.map(\.id)), initial: true) { _, _ in
@@ -157,7 +162,7 @@ struct AppleTransitMap: View {
 
     private var motionInputs: MotionInputs {
         MotionInputs(linesRevision: store.linesRevision, feedRevision: store.feedError ? nil : store.motionSnapshotRevision,
-                     active: scenePhase == .active && destination == nil, reduceMotion: reduceMotion || !mapExposed)
+                     active: scenePhase == .active && !showsJourney, reduceMotion: reduceMotion || !mapExposed)
     }
 
     private func stopMotion() {

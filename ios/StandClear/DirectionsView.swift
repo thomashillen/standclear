@@ -165,13 +165,17 @@ private struct TripItineraryView: View {
             }
             ForEach(Array(plan.legs.enumerated()), id: \.element.id) { index, leg in
                 Section(index == 0 ? "Board" : "Transfer") {
-                    Text(stopName(leg.boardStopId)).font(.headline)
+                    if index == 1, let transfer = plan.transfer(in: store.lines) {
+                        TripTransferStep(transfer: transfer, arriving: plan.legs[0], departing: leg)
+                            .accessibilityIdentifier("stationTripTransfer")
+                    } else {
+                        Text(stopName(leg.boardStopId)).font(.headline)
+                    }
                     TripRouteLabels(routes: leg.routeIDs, store: store)
                     Label(leg.direction == "N" ? "Northbound" : "Southbound", systemImage: leg.direction == "N" ? "arrow.up" : "arrow.down")
                     Text("Ride \(leg.stopCount) stops to \(stopName(leg.alightStopId)).")
-                    if index == 0 {
-                        DeparturePredictionView(leg: leg, store: store)
-                    }
+                    DeparturePredictionView(leg: leg, store: store, isTransfer: index > 0)
+                        .accessibilityIdentifier("legPrediction-\(leg.id)")
                 }
             }
             if let last = plan.legs.last {
@@ -191,14 +195,35 @@ private struct TripItineraryView: View {
     }
 }
 
+struct TripTransferStep: View {
+    let transfer: NativeTripTransfer
+    let arriving: NativeTripLeg
+    let departing: NativeTripLeg
+
+    var body: some View {
+        let incoming = arriving.routeIDs.map(RouteBadge.displayID).joined(separator: "/")
+        let outgoing = departing.routeIDs.map(RouteBadge.displayID).joined(separator: "/")
+        VStack(alignment: .leading, spacing: 4) {
+            Label(transfer.instruction(to: departing), systemImage: "arrow.left.arrow.right").font(.headline)
+            if transfer.isLexington59 {
+                Text("Follow the in-station signs from the \(incoming) platform to the \(outgoing) platform.")
+            } else {
+                Text("Leave the \(incoming) at \(transfer.incoming.name).")
+            }
+        }
+        .accessibilityElement(children: .combine)
+    }
+}
+
 private struct DeparturePredictionView: View {
     let leg: NativeTripLeg
     let store: TransitStore
+    let isTransfer: Bool
 
     var body: some View {
         TimelineView(.periodic(from: .now, by: 5)) { context in
             VStack(alignment: .leading) {
-                Text("Next boarding prediction").font(.subheadline)
+                Text(isTransfer ? "Next departure at the transfer platform" : "Next boarding prediction").font(.subheadline)
                 if let arrival = TripPlanner.nextDeparture(for: leg, stations: store.stations,
                                                            snapshot: store.snapshot, now: context.date,
                                                            feedUnavailable: store.feedError)
@@ -209,7 +234,7 @@ private struct DeparturePredictionView: View {
                         Text("Train destination: \(destination)")
                             .font(.subheadline)
                     }
-                    Text("This does not guarantee you can catch the train or make a connection.")
+                    Text(isTransfer ? "This is the prediction at the platform now. You may arrive after this train departs." : "This does not guarantee you can catch the train or make a connection.")
                         .font(.footnote).foregroundStyle(.secondary)
                 } else if store.snapshot == nil, !store.feedError {
                     ProgressView("Connecting to arrivals…")

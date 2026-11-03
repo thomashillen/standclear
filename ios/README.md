@@ -151,7 +151,7 @@ Choose **More → Directions**, then select From and To stations. Native lists, 
 
 `TripPlanner` ports the existing `lib/commuteRouting.ts` direct/one-transfer graph and curated complex membership. Platform IDs remain distinct from complex IDs. Equivalent routes share an option; express/local options with different stop counts remain separate. Plans are ranked by transfers and stops, not total journey time. Geometry uses existing static shapes and rejects malformed data.
 
-The first boarding prediction uses the existing strict freshness filters, matching each route's actual boarding platform and direction. It is separate from the static itinerary and is not a promise that the rider can catch that train or make a connection. Missing predictions do not establish no service. This increment does not include service-alert routing, total-duration estimates, walking/accessibility routing, address search, live location endpoints, or Live Activities. It adds no endpoint, account, or paid service.
+Each leg shows the next reported departure at its boarding platform, using the existing strict freshness, route and direction checks. For a transfer, the map marks the outgoing platform and trip details name the connecting service. A transfer-platform prediction describes trains there now, even if they will depart before the rider arrives. It is separate from the static itinerary and is not a promise that the rider can catch that train or make a connection. Missing predictions do not establish no service. This increment does not include service-alert routing, total-duration estimates, walking/accessibility routing, address search, live location endpoints, or Live Activities. It adds no endpoint, account, or paid service.
 
 ## Compact native arrivals
 
