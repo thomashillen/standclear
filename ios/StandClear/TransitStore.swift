@@ -4,7 +4,15 @@ import Observation
 
 @MainActor @Observable
 final class TransitStore {
-    var lines: [SubwayLine] = []
+    var lines: [SubwayLine] = [] {
+        didSet { linesRevision &+= 1 }
+    }
+
+    private(set) var linesRevision: UInt64 = 0
+    /// Identifies an accepted response in the active session, including a
+    /// corrected payload with an unchanged feed timestamp. Shared refreshes
+    /// have the same ID. Inactive and failed feeds cannot drive map motion.
+    private(set) var motionSnapshotRevision: UUID?
     var stations: [Station] = []
     var snapshot: Snapshot?
     var loading = true
@@ -71,6 +79,7 @@ final class TransitStore {
 
     func stop() {
         active = false
+        motionSnapshotRevision = nil
         generation += 1
         refreshTask?.cancel()
         refreshTask = nil
@@ -93,11 +102,13 @@ final class TransitStore {
             guard active, current == generation else { return }
             if data.generatedAt >= (snapshot?.generatedAt ?? 0) {
                 snapshot = data
+                motionSnapshotRevision = requestID
             }
             feedError = false
         } catch {
             if active, current == generation, !Task.isCancelled {
                 feedError = true
+                motionSnapshotRevision = nil
             }
         }
         if current == generation, requestID == refreshID {

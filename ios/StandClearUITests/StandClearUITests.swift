@@ -359,7 +359,11 @@ final class StandClearUITests: XCTestCase {
         add(capture)
         app.buttons["Show route on map"].tap()
         XCTAssertTrue(app.buttons["searchButton"].waitForExistence(timeout: 5))
-        XCTAssertEqual(app.navigationBars["Trip details"].exists, expanded)
+        if expanded {
+            XCTAssertTrue(app.navigationBars["Trip details"].exists)
+        } else {
+            XCTAssertTrue(app.navigationBars["Trip details"].waitForNonExistence(timeout: 5))
+        }
         let mapCapture = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         mapCapture.name = expanded ? "Station-entry route in expanded region" : "Station-entry route after sheet dismissal"
         mapCapture.lifetime = .keepAlways

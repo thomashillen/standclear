@@ -196,15 +196,13 @@ struct MapShell: View {
 
     @ViewBuilder private func map(statusWidth: CGFloat, coveredWidth: CGFloat, coveredBottom: CGFloat, maximumGlanceHeight: CGFloat) -> some View {
         if hasToken || mapProvider == .apple {
-            TimelineView(.periodic(from: .now, by: 5)) { timeline in
-                ZStack(alignment: .topLeading) {
-                    if mapProvider == .apple {
-                        AppleTransitMap(lines: store.lines,
-                                        markers: TrainMapProjection.markers(snapshot: store.snapshot, lines: store.lines,
-                                                                            now: timeline.date, feedUnavailable: store.feedError),
-                                        focusedCoordinate: focus.coordinate, focusRevision: focus.revision, coveredWidth: coveredWidth, coveredBottom: coveredBottom,
-                                        currentLocation: location.availableCoordinate, tripOverlays: tripOverlays, tripFocusRevision: tripFocusRevision)
-                    } else {
+            ZStack(alignment: .topLeading) {
+                if mapProvider == .apple {
+                    AppleTransitMap(store: store, mapExposed: panel == nil || sheetDetent != .large, focusedCoordinate: focus.coordinate, focusRevision: focus.revision,
+                                    coveredWidth: coveredWidth, coveredBottom: coveredBottom, currentLocation: location.availableCoordinate,
+                                    tripOverlays: tripOverlays, tripFocusRevision: tripFocusRevision)
+                } else {
+                    TimelineView(.periodic(from: .now, by: 5)) { timeline in
                         Map(viewport: $viewport) {
                             ForEvery(store.lines, id: \.routeId) { line in
                                 PolylineAnnotation(lineCoordinates: line.coordinates)
@@ -272,7 +270,9 @@ struct MapShell: View {
                         .ignoresSafeArea(edges: .top)
                         .id(mapID)
                     }
-                    if panel == nil || coveredWidth > 0 {
+                }
+                if panel == nil || coveredWidth > 0 {
+                    TimelineView(.periodic(from: .now, by: 5)) { timeline in
                         NearbyGlancePanel(store: store, location: location, now: timeline.date,
                                           maximumHeight: maximumGlanceHeight,
                                           mapUnavailable: mapError && mapProvider == .mapbox,
@@ -389,9 +389,7 @@ struct MapShell: View {
     }
 
     private func showTripOnMap(_ plan: NativeTripPlan) {
-        if windowSize.width < 640 || typeSize.isAccessibilitySize {
-            panel = nil
-        }
+        panel = nil
         selectTrip(plan)
     }
 

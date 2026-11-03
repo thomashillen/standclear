@@ -154,7 +154,11 @@ private struct TripItineraryView: View {
     var body: some View {
         List {
             Section {
-                Button("Show route on map", systemImage: "map") { onShowMap(plan) }
+                Button { onShowMap(plan) } label: {
+                    Label("Show route on map", systemImage: "map")
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentShape(Rectangle())
+                }
                 Text("\(plan.totalStops) stops · \(plan.legs.count == 1 ? "Direct" : "1 transfer")")
             } footer: {
                 Text("Regular route network only. Check service changes before travel; walking and station access are not included.")

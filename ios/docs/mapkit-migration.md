@@ -14,8 +14,6 @@ Use Apple Maps as the primary native renderer and keep Mapbox selectable while r
 
 ## Train motion
 
-`TrainMapProjection` currently maps each reported segment and progress value to one coordinate and heading. MapKit’s `Annotation` displays that estimate. Polls advance the position in steps. The web’s `trainTrajectory.ts` and `useTrainMarkers.ts` provide a reference for travel along cumulative track distance, orientation around corners, and smoothing corrections when a new report arrives.
-
-A native motion increment can cache cumulative distances per line and calculate a short trajectory per trip on each fresh snapshot. Advance toward a matching next-stop ETA, stop at the predicted platform, and keep reported stopped trains parked. Hold the estimate when the trip or shape cannot support a direction. Reset on trip changes, large discontinuities and foreground reentry. Keep vehicle-age fading and expiration, suppress failed or stale snapshots, pause work outside the active scene, and present discrete updates under Reduce Motion.
+MapKit advances an eligible train along its representative track toward a matching next-stop ETA. Reduce Motion uses discrete estimates. A stopped train stays at its platform, and missing evidence, stale reports and failed feeds use the existing visibility rules. See [train motion](train-motion.md) for sampling and lifecycle behavior.
 
 Before retiring the fallback, exercise a dense corridor during pan and zoom, inspect reverse travel and turnouts, and measure update cost with the artwork and itinerary overlays visible. Verify map accessibility and camera behavior when folding on the physical Duo. Record simulator observations separately from device results. The [comparison record](map-comparison.md) contains the earlier renderer checks.

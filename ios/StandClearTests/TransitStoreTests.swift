@@ -15,6 +15,7 @@ final class TransitStoreTests: XCTestCase {
         store.stop()
         try await waitUntil { fixture.cancellationCount == 1 }
         XCTAssertNil(store.snapshot)
+        XCTAssertNil(store.motionSnapshotRevision)
         XCTAssertFalse(store.feedError, "Cancellation must not appear as an outage")
         await store.refresh()
         XCTAssertEqual(fixture.requestCount, 1, "A stopped store must not start network work")
@@ -29,13 +30,21 @@ final class TransitStoreTests: XCTestCase {
         try await waitUntil { fixture.requestCount == 1 }
 
         var entered = 0
-        let secondRefresh = Task { entered += 1; await store.refresh() }
-        let thirdRefresh = Task { entered += 1; await store.refresh() }
+        @MainActor func sharedRefresh() async -> UUID? {
+            entered += 1
+            await store.refresh()
+            return store.motionSnapshotRevision
+        }
+        let secondRefresh = Task { await sharedRefresh() }
+        let thirdRefresh = Task { await sharedRefresh() }
         try await waitUntil { entered == 2 }
         XCTAssertEqual(fixture.requestCount, 1)
         fixture.respond(generatedAt: 1_800_000_000_000)
-        await secondRefresh.value
-        await thirdRefresh.value
+        let secondRevision = await secondRefresh.value
+        let thirdRevision = await thirdRefresh.value
+        let accepted = try XCTUnwrap(store.motionSnapshotRevision)
+        XCTAssertEqual(secondRevision, accepted)
+        XCTAssertEqual(thirdRevision, accepted)
         XCTAssertEqual(store.snapshot?.generatedAt, 1_800_000_000_000)
         XCTAssertEqual(fixture.requestCount, 1)
     }
@@ -49,12 +58,82 @@ final class TransitStoreTests: XCTestCase {
         try await waitUntil { fixture.requestCount == 1 }
         fixture.respond(generatedAt: 1_800_000_000_000)
         try await waitUntil { store.snapshot != nil }
+        let accepted = try XCTUnwrap(store.motionSnapshotRevision)
 
         let refresh = Task { await store.refresh() }
         try await waitUntil { fixture.requestCount == 2 }
         fixture.respond(generatedAt: 1_799_999_990_000)
         await refresh.value
         XCTAssertEqual(store.snapshot?.generatedAt, 1_800_000_000_000)
+        XCTAssertEqual(store.motionSnapshotRevision, accepted, "Rejected older responses must not advance the motion input")
+    }
+
+    func testSameTimestampCorrectionPublishesNewRevisionAndRemovesTrain() async throws {
+        let fixture = ResponseFixture()
+        let (store, session) = makeStore(fixture)
+        defer { session.invalidateAndCancel() }
+        let run = Task { await store.run() }
+        defer { run.cancel(); store.stop() }
+        let timestamp = 1_800_000_000_000.0
+        try await waitUntil { fixture.requestCount == 1 }
+        fixture.respond(generatedAt: timestamp, includesTrain: true)
+        try await waitUntil { store.snapshot?.trains.first?.id == "fixture-train" }
+        let originalRevision = try XCTUnwrap(store.motionSnapshotRevision)
+
+        let correction = Task { await store.refresh() }
+        try await waitUntil { fixture.requestCount == 2 }
+        fixture.respond(generatedAt: timestamp)
+        await correction.value
+        XCTAssertEqual(store.snapshot?.generatedAt, timestamp)
+        XCTAssertEqual(store.snapshot?.trains.count, 0)
+        XCTAssertNotEqual(try XCTUnwrap(store.motionSnapshotRevision), originalRevision)
+    }
+
+    func testMotionNeedsAnAcceptedResponseAfterFailureAndForegroundResume() async throws {
+        let fixture = ResponseFixture()
+        let (store, session) = makeStore(fixture)
+        defer { session.invalidateAndCancel() }
+        let firstRun = Task { await store.run() }
+        defer { firstRun.cancel(); store.stop() }
+        let timestamp = 1_800_000_000_000.0
+        try await waitUntil { fixture.requestCount == 1 }
+        fixture.respond(generatedAt: timestamp)
+        try await waitUntil { store.motionSnapshotRevision != nil }
+        let originalRevision = try XCTUnwrap(store.motionSnapshotRevision)
+
+        let failure = Task { await store.refresh() }
+        try await waitUntil { fixture.requestCount == 2 }
+        fixture.respond(generatedAt: timestamp, statusCode: 503)
+        await failure.value
+        XCTAssertTrue(store.feedError)
+        XCTAssertNil(store.motionSnapshotRevision)
+
+        let older = Task { await store.refresh() }
+        try await waitUntil { fixture.requestCount == 3 }
+        fixture.respond(generatedAt: timestamp - 1000)
+        await older.value
+        XCTAssertNil(store.motionSnapshotRevision, "An older response cannot make the cached feed eligible again")
+
+        let recovery = Task { await store.refresh() }
+        try await waitUntil { fixture.requestCount == 4 }
+        fixture.respond(generatedAt: timestamp)
+        await recovery.value
+        let recoveredRevision = try XCTUnwrap(store.motionSnapshotRevision)
+        XCTAssertNotEqual(originalRevision, recoveredRevision)
+        XCTAssertFalse(store.feedError)
+
+        firstRun.cancel()
+        store.stop()
+        await firstRun.value
+        XCTAssertNil(store.motionSnapshotRevision)
+        let resumedRun = Task { await store.run() }
+        defer { resumedRun.cancel(); store.stop() }
+        try await waitUntil { fixture.requestCount == 5 }
+        XCTAssertEqual(store.snapshot?.generatedAt, timestamp)
+        XCTAssertNil(store.motionSnapshotRevision, "Previously cached data must not drive motion during the foreground fetch")
+        fixture.respond(generatedAt: timestamp)
+        try await waitUntil { store.motionSnapshotRevision != nil }
+        XCTAssertNotEqual(try XCTUnwrap(store.motionSnapshotRevision), recoveredRevision)
     }
 
     func testCompletedResponseCannotPublishAfterStoreStops() async throws {
@@ -72,6 +151,7 @@ final class TransitStoreTests: XCTestCase {
             await Task.yield()
         }
         XCTAssertNil(store.snapshot)
+        XCTAssertNil(store.motionSnapshotRevision, "A late response cannot reactivate motion after backgrounding")
         XCTAssertFalse(store.feedError)
     }
 
@@ -141,14 +221,15 @@ private final class ResponseFixture: @unchecked Sendable {
         cancellations += 1
     }
 
-    func respond(generatedAt: Double) {
+    func respond(generatedAt: Double, includesTrain: Bool = false, statusCode: Int = 200) {
         lock.lock()
         let request = pending
         pending = nil
         lock.unlock()
         guard let request, let url = request.request.url else { return }
-        let data = Data("{\"generatedAt\":\(generatedAt),\"trains\":[],\"arrivals\":[]}".utf8)
-        request.client?.urlProtocol(request, didReceive: HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil)!, cacheStoragePolicy: .notAllowed)
+        let trains = includesTrain ? #"[{"id":"fixture-train","routeId":"1","direction":"S","progress":0.5,"prevStopId":"126","nextStopId":"127","status":"IN_TRANSIT_TO"}]"# : "[]"
+        let data = Data("{\"generatedAt\":\(generatedAt),\"trains\":\(trains),\"arrivals\":[]}".utf8)
+        request.client?.urlProtocol(request, didReceive: HTTPURLResponse(url: url, statusCode: statusCode, httpVersion: nil, headerFields: nil)!, cacheStoragePolicy: .notAllowed)
         request.client?.urlProtocol(request, didLoad: data)
         request.client?.urlProtocolDidFinishLoading(request)
     }
