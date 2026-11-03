@@ -27,6 +27,12 @@ struct NativeTripTransfer {
     let outgoing: Stop
     let routeIDs: [String]
 
+    func instruction(to departing: NativeTripLeg) -> String {
+        let services = departing.routeIDs.map { TransitRouteIdentity($0).bullet }.joined(separator: "/")
+        let station = isLexington59 ? "Lexington Av/59 St" : outgoing.name
+        return "Change to \(services) at \(station)"
+    }
+
     var isLexington59: Bool {
         Set([incoming.id, outgoing.id]) == Set(["629", "R11"])
     }

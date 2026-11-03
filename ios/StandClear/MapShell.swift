@@ -240,11 +240,11 @@ struct MapShell: View {
                     AppleTransitMap(store: store, mapExposed: panel == nil || sheetDetent != .large, focusedCoordinate: focus.coordinate, focusRevision: focus.revision,
                                     coveredWidth: coveredWidth, coveredBottom: coveredBottom, currentLocation: location.availableCoordinate,
                                     tripOverlays: tripOverlays, tripFocusRevision: tripFocusRevision,
-                                    destination: activeDestination, placeRoute: visiblePlaceRoute, placeGeometryRevision: placeGeometryRevision)
+                                    destination: activeDestination, placeRoute: visiblePlaceRoute, placeGeometryRevision: placeGeometryRevision, transferMarker: transferMarker)
                 } else {
                     TimelineView(.periodic(from: .now, by: 5)) { timeline in
                         Map(viewport: $viewport) {
-                            ForEvery(activeDestination == nil ? store.lines : [], id: \.routeId) { line in
+                            ForEvery(showsJourney ? [] : store.lines, id: \.routeId) { line in
                                 PolylineAnnotation(lineCoordinates: line.coordinates)
                                     .lineColor(StyleColor(transitColor(line.color)))
                                     .lineWidth(3)
@@ -263,14 +263,14 @@ struct MapShell: View {
                                     .textHaloColor(.white)
                                     .textHaloWidth(2)
                             }
-                            if let transfer = visiblePlaceRoute?.transferLabel(in: store.lines) {
+                            if let transfer = transferMarker {
                                 PointAnnotation(coordinate: transfer.coordinate)
                                     .textField(transfer.text)
                                     .textHaloColor(.white)
                                     .textHaloWidth(2)
                             }
-                            let projected = activeDestination == nil ? TrainMapProjection.markers(snapshot: store.snapshot, lines: store.lines,
-                                                                                                  now: timeline.date, feedUnavailable: store.feedError) : []
+                            let projected = !showsJourney ? TrainMapProjection.markers(snapshot: store.snapshot, lines: store.lines,
+                                                                                       now: timeline.date, feedUnavailable: store.feedError) : []
                             CircleAnnotationGroup(projected.filter { $0.bearingDegrees == nil }) { marker in
                                 CircleAnnotation(centerCoordinate: marker.coordinate)
                                     .circleColor(StyleColor(transitColor(marker.color)))
@@ -318,12 +318,12 @@ struct MapShell: View {
                         .onMapLoadingError { _ in mapError = true }
                         .accessibilityLabel("Subway map. Use Search or Nearby for accessible station arrivals.")
                         .accessibilityIdentifier("mapboxTransitMap")
-                        .accessibilityValue(location.availableCoordinate == nil ? "Location unavailable" : "Your approximate location is shown")
+                        .accessibilityValue([transferMarker?.text, location.availableCoordinate == nil ? "Location unavailable" : "Your approximate location is shown"].compactMap(\.self).joined(separator: ", "))
                         .ignoresSafeArea(edges: .top)
                         .id(mapID)
                     }
                 }
-                if activeDestination == nil, panel == nil || coveredWidth > 0 {
+                if !showsJourney, panel == nil || coveredWidth > 0 {
                     TimelineView(.periodic(from: .now, by: 5)) { timeline in
                         NearbyGlancePanel(store: store, location: location, now: timeline.date,
                                           maximumHeight: maximumGlanceHeight,
@@ -474,6 +474,16 @@ struct MapShell: View {
                   fix.latitude == start.latitude, fix.longitude == start.longitude else { return nil }
         }
         return placeRoute
+    }
+
+    private var showsJourney: Bool {
+        activeDestination != nil || selectedTrip != nil
+    }
+
+    private var transferMarker: (text: String, coordinate: CLLocationCoordinate2D)? {
+        guard let plan = visiblePlaceRoute?.plan ?? selectedTrip, let transfer = plan.transfer(in: store.lines),
+              let departing = plan.legs.last else { return nil }
+        return (transfer.instruction(to: departing), transfer.outgoing.coordinate)
     }
 
     private var tripOverlays: [TripMapOverlay] {

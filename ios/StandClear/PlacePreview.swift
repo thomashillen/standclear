@@ -665,7 +665,8 @@ struct PlacePreview: View {
                 let transfer = trip.transfer(in: store.lines)
                 ForEach(Array(trip.legs.enumerated()), id: \.element.id) { index, leg in
                     if index == 1, let transfer {
-                        transferStep(transfer, arriving: trip.legs[0], departing: leg)
+                        TripTransferStep(transfer: transfer, arriving: trip.legs[0], departing: leg)
+                            .accessibilityIdentifier("placeTransferStep")
                     }
                     let stops = store.lines.first { $0.routeId == leg.routeId }?.stops ?? []
                     // These two platform IDs name the same verified interchange.
@@ -725,22 +726,6 @@ struct PlacePreview: View {
             return transfer.incoming.name
         }
         return "\(transfer.incoming.name) / \(transfer.outgoing.name)"
-    }
-
-    private func transferStep(_ transfer: NativeTripTransfer, arriving: NativeTripLeg, departing: NativeTripLeg) -> some View {
-        let incoming = arriving.routeIDs.map(RouteBadge.displayID).joined(separator: "/")
-        let outgoing = departing.routeIDs.map(RouteBadge.displayID).joined(separator: "/")
-        let boarding = transfer.isLexington59 ? "Lexington Av/59 St" : transfer.outgoing.name
-        return VStack(alignment: .leading, spacing: 4) {
-            Label("Change to \(outgoing) at \(boarding)", systemImage: "arrow.left.arrow.right").font(.headline)
-            if transfer.isLexington59 {
-                Text("Follow the in-station signs from the \(incoming) platform to the \(outgoing) platform.")
-            } else {
-                Text("Leave the \(incoming) at \(transfer.incoming.name).")
-            }
-        }
-        .accessibilityElement(children: .combine)
-        .accessibilityIdentifier("placeTransferStep")
     }
 
     private func minutes(_ seconds: Double) -> String {
