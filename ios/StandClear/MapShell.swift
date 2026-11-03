@@ -21,6 +21,7 @@ struct MapShell: View {
     @State private var directionsSelection = DirectionsSelection()
     @State private var placeSession = PlacePreviewSession()
     @State private var placeRoute: PlaceMapRoute?
+    @State private var placeGeometryRevision = 0
     @State private var selectedTrip: NativeTripPlan?
     @State private var tripFocusRevision = 0
     @State private var searchQuery = ""
@@ -223,7 +224,7 @@ struct MapShell: View {
                     AppleTransitMap(store: store, mapExposed: panel == nil || sheetDetent != .large, focusedCoordinate: focus.coordinate, focusRevision: focus.revision,
                                     coveredWidth: coveredWidth, coveredBottom: coveredBottom, currentLocation: location.availableCoordinate,
                                     tripOverlays: tripOverlays, tripFocusRevision: tripFocusRevision,
-                                    destination: activeDestination, placeRoute: visiblePlaceRoute)
+                                    destination: activeDestination, placeRoute: visiblePlaceRoute, placeGeometryRevision: placeGeometryRevision)
                 } else {
                     TimelineView(.periodic(from: .now, by: 5)) { timeline in
                         Map(viewport: $viewport) {
@@ -467,7 +468,11 @@ struct MapShell: View {
 
     private func updatePlaceMap(_ route: PlaceMapRoute?, destination: PlaceResult) {
         guard activeDestination?.id == destination.id else { return }
+        let selectionChanged = placeRoute?.optionID != route?.optionID
         placeRoute = route
+        placeGeometryRevision += 1
+        // Walking responses for other choices must not pull a rider back after a pan.
+        guard selectionChanged else { return }
         tripFocusRevision += 1
         let points = tripOverlays.flatMap(\.coordinates) + (route?.endpoints ?? [destination.coordinate])
         if points.count > 1 {

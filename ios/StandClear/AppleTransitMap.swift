@@ -15,6 +15,7 @@ struct AppleTransitMap: View {
     var tripFocusRevision: Int = 0
     var destination: PlaceResult?
     var placeRoute: PlaceMapRoute?
+    var placeGeometryRevision = 0
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
@@ -62,6 +63,11 @@ struct AppleTransitMap: View {
                     Marker(destination.name, systemImage: "mappin", coordinate: destination.coordinate)
                     if let boarding = placeRoute?.boarding {
                         Marker(boarding.name, systemImage: "tram", coordinate: boarding.coordinate)
+                    }
+                    if let id = placeRoute?.plan?.transferComplexId,
+                       let transfer = store.stations.first(where: { $0.id == id })
+                    {
+                        Marker("Transfer at \(transfer.stop.name)", systemImage: "arrow.left.arrow.right", coordinate: transfer.stop.coordinate)
                     }
                     if let alighting = placeRoute?.alighting, alighting.id != placeRoute?.boarding?.id {
                         Marker(alighting.name, systemImage: "tram", coordinate: alighting.coordinate)
@@ -121,7 +127,7 @@ struct AppleTransitMap: View {
             .accessibilityValue(placeRoute?.accessibilitySummary ?? destination?.name ?? "")
             .accessibilityHint("Use Search or Nearby for accessible station arrivals.")
         }
-        .onChange(of: TripGeometryInput(linesRevision: inputs.linesRevision, focus: tripFocusRevision, ids: tripOverlays.map(\.id)), initial: true) { _, _ in
+        .onChange(of: TripGeometryInput(linesRevision: inputs.linesRevision, focus: tripFocusRevision, placeRevision: placeGeometryRevision, ids: tripOverlays.map(\.id)), initial: true) { _, _ in
             tripGeometry = tripOverlays.compactMap { AppleRoutePolyline(id: $0.id, color: $0.color, coordinates: $0.coordinates, walking: $0.walking) }
         }
         .task(id: inputs) { await render(inputs) }
@@ -136,6 +142,7 @@ struct AppleTransitMap: View {
     private struct TripGeometryInput: Equatable {
         let linesRevision: UInt64
         let focus: Int
+        let placeRevision: Int
         let ids: [String]
     }
 
