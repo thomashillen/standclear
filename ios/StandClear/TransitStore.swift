@@ -147,6 +147,7 @@ final class TransitStore {
     private enum NativeUITestFixture {
         static func data(for path: String, now: Date) throws -> Data {
             let includeExpress = ProcessInfo.processInfo.arguments.contains("--ui-test-express-arrivals")
+            let includeMuseum = ProcessInfo.processInfo.arguments.contains("--ui-test-noguchi")
             let payload: [String: Any]
             switch path {
             case "gtfsData.json":
@@ -176,6 +177,11 @@ final class TransitStore {
                         ("613", "Hunts Point Av", 40.820948, -73.890549),
                     ])
                 }
+                if includeMuseum {
+                    for route in ["N", "W"] {
+                        lines[route] = astoriaFixtureLine(route)
+                    }
+                }
                 payload = ["lines": lines]
             case "api/alerts":
                 payload = ["available": true, "generatedAt": now.timeIntervalSince1970 * 1000,
@@ -200,12 +206,54 @@ final class TransitStore {
                     ] + (includeExpress ? [
                         arrival(id: "ui-fixture-6x-n", route: "6X", stop: "608", direction: "N", destination: "601", eta: timestamp + 120),
                         arrival(id: "ui-fixture-6-s", route: "6", stop: "608", direction: "S", destination: "613", eta: timestamp + 240),
-                    ] : []),
+                    ] : []) + (includeMuseum ? museumArrivals(at: timestamp) : []),
                 ]
             default:
                 throw URLError(.unsupportedURL)
             }
             return try JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys])
+        }
+
+        /// Simulator-only extract of public/gtfsData.json. Station vertices are
+        /// retained while intermediate track points are simplified for the fixture.
+        private static func astoriaFixtureLine(_ route: String) -> [String: Any] {
+            let shape: [[Double]] = [
+                [-73.921479, 40.766779], [-73.925508, 40.76182], [-73.929575, 40.756804],
+                [-73.932755, 40.752882], [-73.9338, 40.751634], [-73.936856, 40.749205],
+                [-73.937515, 40.749245], [-73.940202, 40.750582], [-73.942083, 40.751651],
+                [-73.967258, 40.76266], [-73.972399, 40.764819], [-73.973347, 40.764811],
+                [-73.97417, 40.764808], [-73.978759, 40.766646], [-73.979375, 40.766396],
+                [-73.980658, 40.764664], [-73.984139, 40.759901], [-73.985775, 40.757477],
+                [-73.986754, 40.754672], [-73.98795, 40.749567],
+            ]
+            let stops: [(String, String, Int)] = [
+                ("R04", "30 Av", 0),
+                ("R05", "Broadway", 1),
+                ("R06", "36 Av", 2),
+                ("R08", "39 Av-Dutch Kills", 3),
+                ("R09", "Queensboro Plaza", 7),
+                ("R11", "Lexington Av/59 St", 9),
+                ("R13", "5 Av/59 St", 11),
+                ("R14", "57 St-7 Av", 15),
+                ("R15", "49 St", 16),
+                ("R16", "Times Sq-42 St", 18),
+                ("R17", "34 St-Herald Sq", 19),
+            ]
+            return ["id": route, "routeId": route, "color": "#F6BC26", "shape": shape,
+                    "stops": stops.map { id, name, index in
+                        ["id": id, "name": name, "lat": shape[index][1], "lng": shape[index][0], "shapeIdx": index] as [String: Any]
+                    }]
+        }
+
+        private static func museumArrivals(at timestamp: Double) -> [[String: Any]] {
+            // The two Broadway services use the same platforms. A sooner
+            // southbound prediction cannot board a Queens-bound itinerary.
+            ["R16", "R15", "R17", "R14", "R13", "R11"].enumerated().flatMap { index, platform in
+                let offset = Double(index * 45)
+                return [arrival(id: "museum-n-n", route: "N", stop: platform, direction: "N", destination: "R04", eta: timestamp + 540 + offset),
+                        arrival(id: "museum-w-n", route: "W", stop: platform, direction: "N", destination: "R04", eta: timestamp + 720 + offset),
+                        arrival(id: "museum-w-s", route: "W", stop: platform, direction: "S", destination: "R17", eta: timestamp + 60 + offset)]
+            }
         }
 
         private static func line(id: String, color: String, stops: [(String, String, Double, Double)]) -> [String: Any] {
