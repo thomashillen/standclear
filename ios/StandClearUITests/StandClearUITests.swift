@@ -30,7 +30,20 @@ final class StandClearUITests: XCTestCase {
         mapCapture.name = "Location dot and compact nearby glance"
         mapCapture.lifetime = .keepAlways
         add(mapCapture)
-        app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "glance-")).firstMatch.tap()
+        // Select a different station from the closest (Times Square) to prove
+        // the compact sheet is driven by the specific glance row tapped.
+        let penn = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "glance-128:")).firstMatch
+        XCTAssertTrue(penn.waitForExistence(timeout: 10))
+        penn.tap()
+        XCTAssertTrue(app.navigationBars["34 St-Penn Station"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["directionsHere"].exists)
+        XCTAssertFalse(app.navigationBars["Nearby arrivals"].exists)
+        let direct = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        direct.name = "Compact glance opens the selected Penn Station directly"
+        direct.lifetime = .keepAlways
+        add(direct)
+        app.buttons["Done"].tap()
+        app.buttons["nearbyButton"].tap()
         XCTAssertTrue(app.navigationBars["Nearby arrivals"].waitForExistence(timeout: 5))
         let station = app.buttons["station-127"]
         XCTAssertTrue(station.waitForExistence(timeout: 10), "Times Square should be nearby the simulated location")
@@ -88,6 +101,9 @@ final class StandClearUITests: XCTestCase {
         }
         app.launch()
         activatePermissionPrompt(in: app)
+        XCUIDevice.shared.orientation = .landscapeLeft
+        defer { XCUIDevice.shared.orientation = .portrait }
+        waitForLayout(in: app, expanded: true)
         let glance = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label CONTAINS[c] %@ AND label CONTAINS %@", "glance-608:", "express", "6")).firstMatch
         XCTAssertTrue(glance.waitForExistence(timeout: 15), "The Parkchester glance should identify the explicit 6X service")
         let map = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
@@ -95,21 +111,27 @@ final class StandClearUITests: XCTestCase {
         map.lifetime = .keepAlways
         add(map)
         glance.tap()
-        XCTAssertTrue(app.navigationBars["Nearby arrivals"].waitForExistence(timeout: 5))
-        app.buttons["Sheet Grabber"].doubleTap()
-        let station = app.buttons["station-608"]
-        XCTAssertTrue(station.waitForExistence(timeout: 5))
-        station.tap()
-        XCTAssertTrue(app.navigationBars["Parkchester"].waitForExistence(timeout: 5))
+        let title = app.navigationBars["Parkchester"]
+        XCTAssertTrue(title.waitForExistence(timeout: 5))
+        XCTAssertGreaterThan(title.frame.midX, app.windows.firstMatch.frame.midX)
+        XCTAssertFalse(app.navigationBars["Nearby arrivals"].exists)
+        XCTAssertFalse(app.buttons["Done"].exists, "The expanded map uses its trailing control region")
+        XCTAssertTrue(app.buttons["directionsHere"].exists)
         let express = app.buttons["arrivalRow-ui-fixture-6x-n:608:N"]
         let regular = app.buttons["arrivalRow-ui-fixture-6-s:608:S"]
+        // The short landscape control region scrolls independently of the map.
+        let list = app.collectionViews.firstMatch
+        for _ in 0 ..< 3 where !regular.exists || regular.frame.maxY > list.frame.maxY {
+            list.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.8))
+                .press(forDuration: 0.1, thenDragTo: list.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)))
+        }
         XCTAssertTrue(express.waitForExistence(timeout: 10))
         XCTAssertTrue(express.label.contains("6"))
         XCTAssertTrue(express.label.localizedCaseInsensitiveContains("Express"))
         XCTAssertTrue(regular.waitForExistence(timeout: 5))
         XCTAssertFalse(regular.label.localizedCaseInsensitiveContains("Express"))
         let detail = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
-        detail.name = "Parkchester station details distinguish express and regular 6 arrivals"
+        detail.name = "Expanded glance opens Parkchester station details with express and regular 6 arrivals"
         detail.lifetime = .keepAlways
         add(detail)
     }
