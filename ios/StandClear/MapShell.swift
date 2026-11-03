@@ -89,7 +89,7 @@ struct MapShell: View {
                             }
                             .id(expandedPanel)
                             .id(stationVisit)
-                            if selectedTrip != nil || expandedPanel.destination != nil {
+                            if selectedTrip != nil {
                                 clearRouteButton
                                     .buttonStyle(.bordered)
                                     .padding(.horizontal)
@@ -516,6 +516,9 @@ struct MapShell: View {
                              }
                          })
                          .toolbar {
+                             if expanded {
+                                 ToolbarItem(placement: .confirmationAction) { clearRouteButton }
+                             }
                              ToolbarItem(placement: .navigation) {
                                  Button("Back to Search", systemImage: "chevron.backward") {
                                      if expanded {

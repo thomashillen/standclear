@@ -732,6 +732,7 @@ private struct PlaceOriginPicker: View {
     let choose: (PlacePreviewSession.Origin) -> Void
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
+    @FocusState private var searchFocused: Bool
     @State private var query = ""
     @State private var places: [PlaceResult] = []
     @State private var resolved = ""
@@ -750,7 +751,9 @@ private struct PlaceOriginPicker: View {
     }
 
     private func pick(_ origin: PlacePreviewSession.Origin) {
-        choose(origin); dismiss()
+        searchFocused = false
+        choose(origin)
+        dismiss()
     }
 
     var body: some View {
@@ -792,6 +795,7 @@ private struct PlaceOriginPicker: View {
             }
         }
         .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Address, place or station")
+        .searchFocused($searchFocused)
         .navigationTitle("From").navigationBarTitleDisplayMode(.inline)
         .task(id: key) { [key] in
             guard key.active, key.query.count >= 2 else { return }
