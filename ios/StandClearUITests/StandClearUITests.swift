@@ -488,7 +488,7 @@ final class StandClearUITests: XCTestCase {
         XCTAssertTrue(rideNW.label.contains("Lexington Av/59 St") && rideNW.label.contains("Broadway"))
         let transferPrediction = list.descendants(matching: .any)["placeDeparture-\(outbound)"].firstMatch
         revealPlaceElement(transferPrediction, in: list)
-        XCTAssertEqual(transferPrediction.label, "Next N boarding prediction: 17 min.")
+        XCTAssertEqual(transferPrediction.label, "Next N departure at the transfer platform: 17 min from now.")
         app.buttons["placeBackToSearch"].tap()
         XCTAssertTrue(museum.waitForExistence(timeout: 5))
         XCTAssertEqual(field.value as? String, "Noguchi")
