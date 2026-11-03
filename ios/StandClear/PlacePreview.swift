@@ -8,15 +8,43 @@ enum PlaceRouting {
     static let originSearchMeters = 1100.0
     static let destinationSearchMeters = 1800.0
 
-    struct Route: Identifiable {
-        let origin: Station
-        let destination: Station
-        let trip: NativeTripPlan?
-        let boarding: Stop
-        let alighting: Stop
+    enum Route: Identifiable {
+        struct Ride {
+            let origin: Station
+            let destination: Station
+            let trip: NativeTripPlan
+            let boarding: Stop
+            let alighting: Stop
+        }
+
+        case subway(Ride)
+        case walk(from: CLLocationCoordinate2D)
+
+        var ride: Ride? {
+            if case let .subway(ride) = self {
+                return ride
+            }
+            return nil
+        }
+
+        var trip: NativeTripPlan? {
+            ride?.trip
+        }
+
+        var start: CLLocationCoordinate2D {
+            switch self {
+            case let .walk(start): start
+            case let .subway(ride): ride.origin.stop.coordinate
+            }
+        }
+
+        var egressStart: CLLocationCoordinate2D {
+            ride?.alighting.coordinate ?? start
+        }
 
         var id: String {
-            "\(origin.id)>\(destination.id):\(trip?.id ?? "walk")"
+            guard let ride else { return "walk" }
+            return "\(ride.origin.id)>\(ride.destination.id):\(ride.trip.id)"
         }
 
         fileprivate var servicePattern: String {
@@ -66,19 +94,15 @@ enum PlaceRouting {
         let graph = TripPlanner.Network(lines: lines, stations: stations)
         let routeByID = Dictionary(lines.map { ($0.routeId, $0) }, uniquingKeysWith: { first, _ in first })
         var candidates: [(route: Route, score: Double)] = []
-        var hasDirectWalk = false
+        // Coverage is checked above, but walking uses the actual chosen start
+        // regardless of which subway stations are closest to either endpoint.
+        if let start = manual?.stop.coordinate ?? location,
+           let meters = distance(from: start, to: place), meters <= maximumWalkingMeters
+        {
+            candidates.append((.walk(from: start), meters * 1.3 / 1.4))
+        }
         for origin in origins {
-            for destination in destinations {
-                if origin.id == destination.id {
-                    if !hasDirectWalk, let start = manual?.stop.coordinate ?? location,
-                       let meters = distance(from: start, to: place), meters <= maximumWalkingMeters
-                    {
-                        let walk = Route(origin: origin, destination: destination, trip: nil, boarding: origin.stop, alighting: origin.stop)
-                        candidates.append((walk, meters * 1.3 / 1.4))
-                        hasDirectWalk = true
-                    }
-                    continue
-                }
+            for destination in destinations where origin.id != destination.id {
                 for trip in graph.plans(from: origin, to: destination) {
                     guard let first = trip.legs.first, let last = trip.legs.last,
                           let boarding = routeByID[first.routeId]?.stops.first(where: { $0.id == first.boardStopId }),
@@ -98,7 +122,7 @@ enum PlaceRouting {
                     let walkSeconds = (accessMeters + exitMeters) * 1.3 / 1.4
                     guard let estimate = PlaceTimeEstimate(stopsPerLeg: trip.legs.map(\.stopCount),
                                                            accessSeconds: 0, egressSeconds: walkSeconds) else { continue }
-                    let route = Route(origin: origin, destination: destination, trip: trip, boarding: boarding, alighting: alighting)
+                    let route = Route.subway(.init(origin: origin, destination: destination, trip: trip, boarding: boarding, alighting: alighting))
                     candidates.append((route, estimate.totalSeconds))
                 }
             }
@@ -110,8 +134,10 @@ enum PlaceRouting {
         // First show distinct service choices. Neighboring exits on the same
         // train can fill open slots but must not hide a viable direct ride.
         let plausible = candidates.prefix { $0.score <= best.score + max(900, best.score * 0.25) }
-        var seenPatterns = Set<String>()
-        var options: [Route] = []
+        // Give the eligible direct walk one slot even when several faster
+        // subway patterns exist. The routed street walk must pass the same cap.
+        var options = candidates.first { $0.route.ride == nil }.map { [$0.route] } ?? []
+        var seenPatterns = Set(options.map(\.servicePattern))
         for candidate in plausible where seenPatterns.insert(candidate.route.servicePattern).inserted {
             options.append(candidate.route)
             if options.count == 3 {
@@ -128,7 +154,7 @@ enum PlaceRouting {
         }
         let chosen = Set(options.map(\.id))
         var emitted = Set<String>()
-        return .routes(plausible.compactMap { chosen.contains($0.route.id) && emitted.insert($0.route.id).inserted ? $0.route : nil })
+        return .routes(candidates.compactMap { chosen.contains($0.route.id) && emitted.insert($0.route.id).inserted ? $0.route : nil })
     }
 }
 
@@ -412,8 +438,8 @@ struct PlacePreview: View {
         guard request == result.request, result.request.active else { return }
         guard let option = selected(in: result) else { onMapChange(nil); return }
         let r = option.route
-        onMapChange(PlaceMapRoute(place: place, plan: r.trip, boarding: r.trip == nil ? nil : r.boarding,
-                                  alighting: r.trip == nil ? nil : r.alighting, start: result.request.start ?? r.origin.stop.coordinate,
+        onMapChange(PlaceMapRoute(place: place, plan: r.trip, boarding: r.ride?.boarding,
+                                  alighting: r.ride?.alighting, start: result.request.start ?? r.start,
                                   access: option.access.connection, egress: option.egress.connection, optionID: option.id))
     }
 
@@ -469,20 +495,20 @@ struct PlacePreview: View {
             for var option in order where checked[option.id] == nil {
                 guard !Task.isCancelled, request == key else { return }
                 let route = option.route
-                if let start = key.start, route.trip != nil {
-                    option.access = await checkedWalk(service, leg: .toStation, from: start, to: route.boarding.coordinate,
+                if let start = key.start, let ride = route.ride {
+                    option.access = await checkedWalk(service, leg: .toStation, from: start, to: ride.boarding.coordinate,
                                                       fromLocation: key.origin == .currentLocation, key: key, memo: &memo)
                 }
                 guard !Task.isCancelled, request == key else { return }
-                if option.access.rulesOutOption {
-                    excludedBoarding.insert(route.boarding.id)
+                if option.access.rulesOutOption, let ride = route.ride {
+                    excludedBoarding.insert(ride.boarding.id)
                 } else {
-                    let start = route.trip == nil ? (key.start ?? route.alighting.coordinate) : route.alighting.coordinate
+                    let start = route.egressStart
                     option.egress = await checkedWalk(service, leg: .toPlace, from: start, to: key.place.coordinate,
                                                       fromLocation: route.trip == nil && key.origin == .currentLocation, key: key, memo: &memo)
                     guard !Task.isCancelled, request == key else { return }
-                    if option.egress.rulesOutOption, route.trip != nil {
-                        excludedAlighting.insert(route.alighting.id)
+                    if option.egress.rulesOutOption, let ride = route.ride {
+                        excludedAlighting.insert(ride.alighting.id)
                     }
                 }
                 if option.access.rulesOutOption || option.egress.rulesOutOption {
@@ -600,8 +626,8 @@ struct PlacePreview: View {
                                 Image(systemName: "checkmark").accessibilityHidden(true)
                             }
                         }
-                        if let trip = option.route.trip {
-                            Text("\(trip.legs.count == 1 ? "Direct" : "1 transfer") · \(option.route.boarding.name) → \(option.route.alighting.name)")
+                        if let ride = option.route.ride {
+                            Text("\(ride.trip.legs.count == 1 ? "Direct" : "1 transfer") · \(ride.boarding.name) → \(ride.alighting.name)")
                                 .font(.subheadline).foregroundStyle(.secondary)
                         }
                     }
@@ -617,9 +643,10 @@ struct PlacePreview: View {
     private func itinerary(_ option: Option, current: Preview) -> some View {
         let route = option.route
         return Section {
-            if let trip = route.trip {
+            if let ride = route.ride {
+                let trip = ride.trip
                 if current.request.start != nil {
-                    walkingRow("Walk to \(route.boarding.name)", walk: option.access)
+                    walkingRow("Walk to \(ride.boarding.name)", walk: option.access)
                 }
                 ForEach(trip.legs) { leg in
                     let stops = store.lines.first { $0.routeId == leg.routeId }?.stops ?? []
