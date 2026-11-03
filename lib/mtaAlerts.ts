@@ -45,6 +45,9 @@ export interface ServiceAlert {
 
 export interface AlertsResponse {
   generatedAt: number;
+  // Optional on older cached responses. The upstream timestamp is epoch seconds.
+  available?: boolean;
+  feedTimestamp?: number | null;
   alerts: ServiceAlert[];
 }
 
@@ -194,9 +197,15 @@ export async function fetchActiveAlerts(): Promise<AlertsResponse> {
       });
     }
 
-    return { generatedAt: Date.now(), alerts };
+    const timestamp = toSec(feed.header.timestamp);
+    return {
+      generatedAt: Date.now(),
+      available: true,
+      feedTimestamp: timestamp !== null && timestamp > 0 ? timestamp : null,
+      alerts,
+    };
   } catch (err) {
     captureException(err, { what: "alerts feed failed", url: ALERTS_URL });
-    return { generatedAt: Date.now(), alerts: [] };
+    return { generatedAt: Date.now(), available: false, feedTimestamp: null, alerts: [] };
   }
 }
