@@ -5,21 +5,14 @@ struct DirectionsView: View {
     @Binding var selection: DirectionsSelection
     let onSelect: (NativeTripPlan?) -> Void
     let onShowMap: (NativeTripPlan) -> Void
-    private enum Endpoint: String, Identifiable, Hashable {
-        case origin, destination
-        var id: String {
-            rawValue
-        }
-
-        var title: String {
-            self == .origin ? "From station" : "To station"
-        }
-    }
-
     var body: some View {
         List {
             Section {
-                NavigationLink(value: Endpoint.origin) {
+                NavigationLink {
+                    DirectionStationPicker(stations: store.stations, title: "From station") { station in
+                        selection.originID = station.id
+                    }
+                } label: {
                     LabeledContent("From", value: selection.origin(in: store.stations)?.stop.name ?? "Choose station")
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .contentShape(Rectangle())
@@ -32,7 +25,11 @@ struct DirectionsView: View {
                         .foregroundStyle(.secondary)
                         .accessibilityIdentifier("originSuggestion")
                 }
-                NavigationLink(value: Endpoint.destination) {
+                NavigationLink {
+                    DirectionStationPicker(stations: store.stations, title: "To station") { station in
+                        selection.destinationID = station.id
+                    }
+                } label: {
                     LabeledContent("To", value: selection.destination(in: store.stations)?.stop.name ?? "Choose station")
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .contentShape(Rectangle())
@@ -104,15 +101,6 @@ struct DirectionsView: View {
                 Button("Clear directions", systemImage: "xmark.circle") { selection.clear() }
                     .disabled(selection.originID == nil && selection.destinationID == nil)
                     .accessibilityIdentifier("clearDirections")
-            }
-        }
-        .navigationDestination(for: Endpoint.self) { endpoint in
-            DirectionStationPicker(stations: store.stations, title: endpoint.title) { station in
-                if endpoint == .origin {
-                    selection.originID = station.id
-                } else {
-                    selection.destinationID = station.id
-                }
             }
         }
         .onChange(of: selection) { _, _ in onSelect(nil) }
