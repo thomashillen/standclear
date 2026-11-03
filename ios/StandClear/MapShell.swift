@@ -22,6 +22,7 @@ struct MapShell: View {
     @State private var placeSession = PlacePreviewSession()
     @State private var placeRoute: PlaceMapRoute?
     @State private var placeGeometryRevision = 0
+    @State private var detentBeforeOriginPicker: PresentationDetent?
     @State private var selectedTrip: NativeTripPlan?
     @State private var tripFocusRevision = 0
     @State private var searchQuery = ""
@@ -455,6 +456,7 @@ struct MapShell: View {
         stationSearchFocused = false
         selectedTrip = nil
         placeRoute = nil
+        detentBeforeOriginPicker = nil
         placeSession = PlacePreviewSession()
         if expanded {
             expandedPanel = .place(place)
@@ -485,19 +487,29 @@ struct MapShell: View {
         switch mode {
         case let .place(place):
             PlacePreview(place: place, store: store, location: location, session: placeSession,
-                         onMapChange: { updatePlaceMap($0, destination: place) })
-                .toolbar {
-                    ToolbarItem(placement: .navigation) {
-                        Button("Back to Search", systemImage: "chevron.backward") {
-                            if expanded {
-                                expandedPanel = .search
-                            } else {
-                                panel = .search
-                            }
-                        }
-                        .accessibilityIdentifier("placeBackToSearch")
-                    }
-                }
+                         onMapChange: { updatePlaceMap($0, destination: place) },
+                         onEditingOriginChanged: { editing in
+                             guard !expanded, panel?.destination?.id == place.id else { return }
+                             if editing {
+                                 detentBeforeOriginPicker = sheetDetent
+                                 sheetDetent = .large
+                             } else if let previous = detentBeforeOriginPicker {
+                                 sheetDetent = typeSize.isAccessibilitySize ? .large : previous
+                                 detentBeforeOriginPicker = nil
+                             }
+                         })
+                         .toolbar {
+                             ToolbarItem(placement: .navigation) {
+                                 Button("Back to Search", systemImage: "chevron.backward") {
+                                     if expanded {
+                                         expandedPanel = .search
+                                     } else {
+                                         panel = .search
+                                     }
+                                 }
+                                 .accessibilityIdentifier("placeBackToSearch")
+                             }
+                         }
         case let .station(id):
             if let station = store.stations.first(where: { $0.id == id }) {
                 StationArrivals(station: station, store: store, favoriteStations: favoriteStations, directionsSelection: $directionsSelection,

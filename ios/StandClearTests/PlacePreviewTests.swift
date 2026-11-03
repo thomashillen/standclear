@@ -10,37 +10,127 @@ final class PlacePreviewTests: XCTestCase {
         let near = station(stop("unconnected", latitude: 40.749))
         let served = station(stop("connected", latitude: 40.7502), also: exit.id)
         let line = SubwayLine(id: "4", routeId: "4", color: "009952", stops: [board, exit], shape: [[-74, 40.77], [-74, 40.75]])
-        let result = PlaceRouting.route(to: near.stop.coordinate, from: origin, stations: [origin, near, served], lines: [line])
-        guard case let .route(route) = result else { return XCTFail("Expected the reachable station near the place") }
+        let result = PlaceRouting.options(to: near.stop.coordinate, from: origin, location: nil, stations: [origin, near, served], lines: [line])
+        guard case let .routes(routes) = result, let route = routes.first else { return XCTFail("Expected the reachable station near the place") }
         XCTAssertEqual(route.destination.id, served.id)
         XCTAssertEqual(route.trip?.totalStops, 1)
         XCTAssertEqual(route.boarding.id, board.id)
         XCTAssertEqual(route.alighting.id, exit.id)
     }
 
-    func testStationSearchBoundsAndInvalidCoordinates() {
+    func testMissingOriginAndBoundedDestinationRecoveryStates() {
         let origin = station(stop("origin", latitude: 40.78))
-        let distant = station(stop("distant", latitude: 40.76))
+        let distant = station(stop("distant", latitude: 40.77))
         let place = CLLocationCoordinate2D(latitude: 40.75, longitude: -74)
-        guard case .noNearbyStation = PlaceRouting.route(to: place, from: origin, stations: [origin, distant], lines: []) else {
-            return XCTFail("A station more than 900 metres away must not be suggested")
+        guard case .noOrigin = PlaceRouting.options(to: place, from: nil, location: nil, stations: [origin], lines: []) else {
+            return XCTFail("Missing permission or fix needs an origin selection")
+        }
+        guard case .noNearbyStation = PlaceRouting.options(to: place, from: origin, location: nil, stations: [origin, distant], lines: []) else {
+            return XCTFail("Do not propose unbounded destination walks")
         }
         XCTAssertNil(PlaceRouting.distance(from: .init(latitude: .nan, longitude: -74), to: origin.stop))
-        let nearby = (0 ..< 4).map { station(stop("s\($0)", latitude: 40.75 + Double($0) / 10000)) }
-        let board = origin.stop
-        let exit = nearby[3].stop
-        let line = SubwayLine(id: "4", routeId: "4", color: "009952", stops: [board, exit], shape: [])
-        guard case .noConnection = PlaceRouting.route(to: place, from: origin, stations: [origin] + nearby, lines: [line]) else {
-            return XCTFail("Only the three closest destination candidates are considered")
+        let nearPlace = station(stop("target", latitude: 40.7501))
+        guard case .noConnection = PlaceRouting.options(to: place, from: origin, location: nil, stations: [origin, nearPlace], lines: []) else {
+            return XCTFail("Stations in range without a rail connection have a distinct recovery state")
         }
     }
 
     func testPlaceAtStartingStationUsesWalkingOnly() {
         let origin = station(stop("nearby", latitude: 40.75))
-        let result = PlaceRouting.route(to: origin.stop.coordinate, from: origin, stations: [origin], lines: [])
-        guard case let .route(route) = result else { return XCTFail("Expected a walk from the station") }
+        let result = PlaceRouting.options(to: origin.stop.coordinate, from: origin, location: nil, stations: [origin], lines: [])
+        guard case let .routes(routes) = result, let route = routes.first else { return XCTFail("Expected a walk from the station") }
         XCTAssertNil(route.trip)
         XCTAssertEqual(route.alighting.id, origin.stop.id)
+    }
+
+    func testRectorAreaToNoguchiCanBoardAtWallStreetAndStillOffersDirectService() throws {
+        // Representative segments of public/gtfsData.json. The museum is over
+        // 1.2 km from Broadway; 59 St is a transfer between platform IDs.
+        let express = fixtureLine("4", [
+            ("629", 40.762526, -73.967967), ("631", 40.751776, -73.976848),
+            ("635", 40.734673, -73.989951), ("640", 40.713065, -74.004131),
+            ("418", 40.710368, -74.009509), ("419", 40.707557, -74.011862),
+        ])
+        let broadway = fixtureLine("W", [
+            ("R26", 40.70722, -74.013342), ("R25", 40.710668, -74.011029),
+            ("R24", 40.713282, -74.006978), ("R23", 40.719527, -74.001775),
+            ("R22", 40.724329, -73.997702), ("R21", 40.730328, -73.992629),
+            ("R20", 40.735736, -73.990568), ("R19", 40.741303, -73.989344),
+            ("R18", 40.745494, -73.988691), ("R17", 40.749567, -73.98795),
+            ("R16", 40.754672, -73.986754), ("R15", 40.759901, -73.984139),
+            ("R14", 40.764664, -73.980658), ("R13", 40.764811, -73.973347),
+            ("R11", 40.76266, -73.967258), ("R09", 40.750582, -73.940202),
+            ("R08", 40.752882, -73.932755), ("R06", 40.756804, -73.929575),
+            ("R05", 40.76182, -73.925508),
+        ])
+        let lines = [express, broadway]
+        let stations = Transit.stations(lines)
+        let place = CLLocationCoordinate2D(latitude: 40.76676, longitude: -73.9384)
+        let fix = CLLocationCoordinate2D(latitude: 40.7071, longitude: -74.0135)
+        guard case let .routes(routes) = PlaceRouting.options(to: place, from: nil, location: fix, stations: stations, lines: lines) else {
+            return XCTFail("A longer destination walk must allow the real museum trip")
+        }
+        XCTAssertLessThanOrEqual(routes.count, 3)
+        XCTAssertEqual(Set(routes.map(\.id)).count, routes.count)
+        let first = try XCTUnwrap(routes.first)
+        XCTAssertEqual(first.origin.id, "419")
+        XCTAssertEqual(first.trip?.transferComplexId, "629")
+        XCTAssertEqual(first.trip?.legs.first?.alightStopId, "629")
+        XCTAssertEqual(first.trip?.legs.last?.boardStopId, "R11")
+        XCTAssertEqual(first.destination.id, "R05")
+        XCTAssertTrue(routes.contains { $0.origin.id == "R26" && $0.trip?.legs.count == 1 })
+
+        let manual = try XCTUnwrap(stations.first { $0.id == "R26" })
+        guard case let .routes(manualRoutes) = PlaceRouting.options(to: place, from: manual, location: fix, stations: stations, lines: lines) else {
+            return XCTFail("Manual station selection still has a direct ride")
+        }
+        XCTAssertTrue(manualRoutes.allSatisfy { $0.origin.id == manual.id })
+    }
+
+    func testRejectedWalkingEndpointCanBeReplacedWithoutLosingOtherRoute() throws {
+        let line = fixtureLine("F", [
+            ("D16", 40.754222, -73.984569), ("B06", 40.759145, -73.953260),
+            ("B04", 40.754203, -73.942836),
+        ])
+        let stations = Transit.stations([line])
+        let manual = try XCTUnwrap(stations.first { $0.id == "D16" })
+        let place = CLLocationCoordinate2D(latitude: 40.76676, longitude: -73.9384)
+        guard case let .routes(routes) = PlaceRouting.options(to: place, from: manual, location: nil, stations: stations,
+                                                              lines: [line], excludingAlightingStops: ["B06"])
+        else {
+            return XCTFail("Rejecting an impractical Roosevelt Island exit should retain a Queens exit")
+        }
+        XCTAssertEqual(routes.map(\.alighting.id), ["B04"])
+        guard case .noConnection = PlaceRouting.options(to: place, from: manual, location: nil, stations: stations, lines: [line],
+                                                        excludingBoardingStops: ["D16"], excludingAlightingStops: ["B06"])
+        else {
+            return XCTFail("A rejected access walk must not reappear on a replacement itinerary")
+        }
+    }
+
+    func testExcludingDirectWalkKeepsRailOptionsFromSameStation() throws {
+        let line = fixtureLine("Q", [("source", 40.751, -74), ("exit", 40.75, -74)])
+        let stations = Transit.stations([line])
+        let manual = try XCTUnwrap(stations.first { $0.id == "source" })
+        let place = CLLocationCoordinate2D(latitude: 40.75, longitude: -74)
+        guard case let .routes(initial) = PlaceRouting.options(to: place, from: manual, location: nil, stations: stations, lines: [line]) else {
+            return XCTFail("Expected direct walking and subway choices")
+        }
+        let walk = try XCTUnwrap(initial.first { $0.trip == nil })
+        guard case let .routes(remaining) = PlaceRouting.options(to: place, from: manual, location: nil, stations: stations,
+                                                                 lines: [line], excludingOptionIDs: [walk.id])
+        else {
+            return XCTFail("A rejected direct walk must not invalidate a different walking endpoint")
+        }
+        XCTAssertEqual(remaining.map(\.alighting.id), ["exit"])
+        XCTAssertNotNil(remaining.first?.trip)
+    }
+
+    private func fixtureLine(_ route: String, _ points: [(String, Double, Double)]) -> SubwayLine {
+        let stops = points.enumerated().map { index, point in
+            Stop(id: point.0, name: point.0, lat: point.1, lng: point.2, shapeIdx: index)
+        }
+        return SubwayLine(id: route, routeId: route, color: "009952", stops: stops, shape: stops.map { [$0.lng, $0.lat] })
     }
 
     func testExactCoincidenceOverridesCachedWalkButNearbyStillRequiresRouting() {
