@@ -431,3 +431,46 @@ final class SavedPlacesTests: XCTestCase {
         XCTAssertTrue(saved.places.isEmpty)
     }
 }
+
+@MainActor
+final class RecentPlacesTests: XCTestCase {
+    func testBoundsReordersRestoresAndRemovesHistory() throws {
+        let domain = "StandClear.RecentPlacesTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: domain))
+        defer { defaults.removePersistentDomain(forName: domain) }
+        let history = RecentPlaces(defaults: defaults)
+        let places = (0 ..< 12).map {
+            PlaceResult(id: String($0), name: "Place \($0)", subtitle: "", latitude: 40.75, longitude: -74)
+        }
+        for place in places {
+            history.record(place)
+        }
+        XCTAssertEqual(history.places.map(\.id), (2 ..< 12).reversed().map(String.init))
+        let refreshed = PlaceResult(id: "new-id", name: places[5].name, subtitle: "Updated address", latitude: 40.750001, longitude: -74)
+        history.record(refreshed)
+        XCTAssertEqual(history.places.first, refreshed)
+        XCTAssertEqual(history.places.count, 10)
+        XCTAssertFalse(history.places.contains { $0.id == "5" })
+        let restored = RecentPlaces(defaults: defaults)
+        XCTAssertEqual(restored.places, history.places)
+        restored.remove(refreshed)
+        XCTAssertEqual(RecentPlaces(defaults: defaults).places.count, 9)
+        restored.clear()
+        XCTAssertTrue(RecentPlaces(defaults: defaults).places.isEmpty)
+    }
+
+    func testIgnoresInvalidRecordsAndCorruptStorage() throws {
+        let domain = "StandClear.RecentPlacesTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: domain))
+        defer { defaults.removePersistentDomain(forName: domain) }
+        let valid = PlaceResult(id: "one", name: "Place", subtitle: "", latitude: 40.75, longitude: -74)
+        let invalid = PlaceResult(id: "bad", name: "Bad", subtitle: "", latitude: 999, longitude: 0)
+        try defaults.set(JSONEncoder().encode([invalid, valid, valid]), forKey: RecentPlaces.storageKey)
+        let history = RecentPlaces(defaults: defaults)
+        XCTAssertEqual(history.places, [valid])
+        history.record(invalid)
+        XCTAssertEqual(history.places, [valid])
+        defaults.set(Data("invalid json".utf8), forKey: RecentPlaces.storageKey)
+        XCTAssertTrue(RecentPlaces(defaults: defaults).places.isEmpty)
+    }
+}

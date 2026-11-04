@@ -448,6 +448,19 @@ final class StandClearUITests: XCTestCase {
         app.buttons["Manage Home"].tap()
         app.buttons["Remove Home"].tap()
         XCTAssertTrue(saved.waitForNonExistence(timeout: 5))
+        let recent = app.buttons["recentPlace-fixture-550-madison"]
+        XCTAssertTrue(recent.waitForExistence(timeout: 5))
+        let recentCapture = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        recentCapture.name = expanded ? "Expanded recent destination" : "Compact recent destination"
+        recentCapture.lifetime = .keepAlways
+        add(recentCapture)
+        recent.tap()
+        XCTAssertTrue(origin.waitForExistence(timeout: 10))
+        XCTAssertTrue(origin.label.contains("Current Location"), "Reopening a recent destination starts a new editable trip")
+        app.buttons["placeBackToSearch"].tap()
+        XCTAssertTrue(recent.waitForExistence(timeout: 5))
+        app.buttons["clearRecentPlaces"].tap()
+        XCTAssertTrue(recent.waitForNonExistence(timeout: 5))
         XCTAssertTrue(field.exists)
     }
 
