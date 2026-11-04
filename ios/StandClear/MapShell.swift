@@ -13,6 +13,7 @@ struct MapShell: View {
     @State private var viewport = Viewport.camera(
         center: CLLocationCoordinate2D(latitude: 40.754, longitude: -73.984), zoom: 11
     )
+    @State private var linePath: [LineDestination] = []
     @State private var panel: Panel?
     @State private var sheetDetent: PresentationDetent = .medium
     @State private var windowSize: CGSize = .zero
@@ -57,7 +58,7 @@ struct MapShell: View {
     }
 
     enum Panel: Hashable, Identifiable {
-        case search, nearby, directions
+        case search, nearby, directions, lines
         case station(String)
         case place(PlaceResult)
 
@@ -87,12 +88,9 @@ struct MapShell: View {
                     ZStack(alignment: .trailing) {
                         map(statusWidth: statusWidth, coveredWidth: geometry.size.width - statusWidth, coveredBottom: 0, maximumGlanceHeight: geometry.size.height * 0.55)
                         VStack(spacing: 0) {
-                            NavigationStack {
-                                panelContent(expandedPanel, expanded: true)
-                                    .containerBackground(.clear, for: .navigation)
-                            }
-                            .id(expandedPanel)
-                            .id(stationVisit)
+                            panelNavigation(expandedPanel, expanded: true)
+                                .id(expandedPanel)
+                                .id(stationVisit)
                             if selectedTrip != nil {
                                 clearRouteButton
                                     .buttonStyle(.bordered)
@@ -155,6 +153,10 @@ struct MapShell: View {
                     sheetDetent = typeSize.isAccessibilitySize ? .large : .medium
                     panel = expandedPanel
                     expandedPanel = .nearby
+                } else if !isExpanded, expandedPanel == .lines {
+                    sheetDetent = .large
+                    panel = .lines
+                    expandedPanel = .nearby
                 } else if !isExpanded, case .station = expandedPanel {
                     sheetDetent = .large
                     panel = expandedPanel
@@ -173,17 +175,12 @@ struct MapShell: View {
                 }
             }
             .sheet(item: $panel) { panel in
-                NavigationStack {
-                    panelContent(panel)
-                        .toolbar {
-                            ToolbarItem(placement: .confirmationAction) { Button("Done") { self.panel = nil } }
-                        }
-                }
-                // Search starts with room for its keyboard instead of promoting a medium sheet during focus.
-                .presentationDetents(panel == .search || typeSize.isAccessibilitySize ? [.large] : [.medium, .large], selection: $sheetDetent)
-                .presentationDragIndicator(.visible)
-                // A place card and the exposed map form one interactive view, including between detents.
-                .presentationBackgroundInteraction(panel.destination != nil ? .enabled : .automatic)
+                panelNavigation(panel, expanded: false)
+                    // Search starts with room for its keyboard instead of promoting a medium sheet during focus.
+                    .presentationDetents(panel == .search || typeSize.isAccessibilitySize ? [.large] : [.medium, .large], selection: $sheetDetent)
+                    .presentationDragIndicator(.visible)
+                    // A place card and the exposed map form one interactive view, including between detents.
+                    .presentationBackgroundInteraction(panel.destination != nil ? .enabled : .automatic)
             }
         }
         .alert("Arrival status", isPresented: $showingArrivalStatus) {
@@ -358,6 +355,16 @@ struct MapShell: View {
 
     private var moreMenu: some View {
         Menu("More", systemImage: "ellipsis") {
+            Button("Lines", systemImage: "tram") {
+                focus.cancelPending()
+                if windowSize.width >= 640, !typeSize.isAccessibilitySize {
+                    expandedPanel = .lines
+                } else {
+                    sheetDetent = .large
+                    panel = .lines
+                }
+            }
+            .accessibilityIdentifier("linesButton")
             Button("Directions", systemImage: "arrow.triangle.turn.up.right.diamond") {
                 focus.cancelPending()
                 if windowSize.width >= 640, !typeSize.isAccessibilitySize {
@@ -532,6 +539,24 @@ struct MapShell: View {
         }
     }
 
+    @ViewBuilder private func panelNavigation(_ mode: Panel, expanded: Bool) -> some View {
+        if mode == .lines {
+            NavigationStack(path: $linePath) { panelRoot(mode, expanded: expanded) }
+        } else {
+            NavigationStack { panelRoot(mode, expanded: expanded) }
+        }
+    }
+
+    @ViewBuilder private func panelRoot(_ mode: Panel, expanded: Bool) -> some View {
+        if expanded {
+            panelContent(mode, expanded: true).containerBackground(.clear, for: .navigation)
+        } else {
+            panelContent(mode).toolbar {
+                ToolbarItem(placement: .confirmationAction) { Button("Done") { panel = nil } }
+            }
+        }
+    }
+
     @ViewBuilder private func panelContent(_ mode: Panel, expanded: Bool = false) -> some View {
         switch mode {
         case let .place(place):
@@ -572,6 +597,12 @@ struct MapShell: View {
                 ContentUnavailableView("Station unavailable", systemImage: "tram",
                                        description: Text("This station is no longer in the subway data."))
             }
+        case .lines:
+            LineBrowser(store: store, stationDetail: { station in
+                StationArrivals(station: station, store: store, favoriteStations: favoriteStations, savedPlaces: savedPlaces,
+                                directionsSelection: $directionsSelection, onDirectionsHere: beginDirections,
+                                onSelectTrip: selectTrip, onShowTripMap: showTripOnMap)
+            }, select: focusStation)
         case .directions:
             DirectionsView(store: store, selection: $directionsSelection, onSelect: selectTrip, onShowMap: showTripOnMap)
         case .nearby, .search:
