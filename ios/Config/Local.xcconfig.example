@@ -1,4 +1,4 @@
-// Copy to Local.xcconfig (ignored). Supply a public native Mapbox token locally.
-MAPBOX_PUBLIC_TOKEN =
+// Copy to Local.xcconfig (ignored) for machine-specific signing configuration.
+// MapKit does not require a rendering token.
 // Optional for physical devices only:
 // DEVELOPMENT_TEAM = your-personal-team-id

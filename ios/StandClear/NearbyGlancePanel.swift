@@ -6,8 +6,6 @@ struct NearbyGlancePanel: View {
     let location: LocationStore
     let now: Date
     let maximumHeight: CGFloat
-    let mapUnavailable: Bool
-    let retryMap: () -> Void
     let openStation: (String) -> Void
     let openNearby: () -> Void
     @Environment(\.dynamicTypeSize) private var typeSize
@@ -31,11 +29,6 @@ struct NearbyGlancePanel: View {
 
     private var content: some View {
         VStack(alignment: .leading, spacing: 0) {
-            if mapUnavailable {
-                Label("Map unavailable", systemImage: "map")
-                    .font(.caption)
-                Button("Retry map", action: retryMap)
-            }
             if location.availableCoordinate == nil {
                 locationState
             } else if store.loading {

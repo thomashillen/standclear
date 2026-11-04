@@ -1,8 +1,8 @@
-# StandClear for iOS — native transit map comparison
+# StandClear for iOS — native MapKit client
 
-This Xcode project is an incremental native client alongside the existing Next.js web application. The web app and backend remain the production application. The SwiftUI client now offers a bounded comparison between the native Mapbox Maps SDK, pinned to **11.26.0** through Swift Package Manager, and Apple MapKit. Both engines run natively; neither uses a WebView. MapKit is the default for new installations. Choose a map provider in **More** to switch engines; the choice persists between launches. This comparison does not establish complete feature or performance parity.
+This Xcode project is an incremental native client alongside the existing Next.js web application. The native app uses SwiftUI MapKit exclusively, with no map-provider setting, rendering token or third-party map SDK. Existing installations ignore the former provider preference. The web app and its Mapbox integration remain unchanged.
 
-The project targets iOS 26 or later and is developed with Xcode 27.2 / the iOS 27.2 SDK. See [the map comparison record](docs/map-comparison.md) for the comparison’s scope, observations, and validation results.
+The project targets iOS 26 or later and is developed with Xcode 27.2 / the iOS 27.2 SDK. See [the native MapKit migration record](docs/mapkit-migration.md) for scope and remaining device checks; the [earlier comparison record](docs/map-comparison.md) is historical.
 
 ## Open and configure
 
@@ -16,13 +16,7 @@ Select the shared **StandClear** scheme and an installed iPhone simulator, then 
 
 Xcode reads the same local source files being edited in this checkout. Press **⌘R** after code changes to rebuild and relaunch. Realtime data refreshes independently while the application is running.
 
-To enable the optional Mapbox renderer, create `ios/Config/Local.xcconfig`, which is ignored by Git:
-
-```xcconfig
-MAPBOX_PUBLIC_TOKEN = <your public Mapbox rendering token>
-```
-
-Use an appropriate public rendering token for a native application; a token restricted to web URLs may not work. Do not use a secret Mapbox token here. `App.xcconfig` optionally includes this file, and the public token is supplied to Mapbox through the application’s processed Info.plist. A public rendering token is necessarily present in a built client application: keeping it out of Git does not make the installed application a secret store.
+MapKit does not require a rendering token. `ios/Config/App.xcconfig` optionally includes the ignored `Local.xcconfig` for machine-specific signing configuration. An existing unused Mapbox token in that local file can remain private; it is no longer read or included in the app’s Info.plist.
 
 Do not commit tokens, signing files, credentials, or machine-specific configuration. Keep build products and DerivedData outside the repository, or in the ignored `ios/build/` or `ios/DerivedData/` directories. Never commit an application archive containing local configuration.
 
@@ -40,12 +34,12 @@ Ordinary Xcode builds do not require XcodeGen. Commit the generated project and 
 
 ## Architecture and native presentation
 
-- `StandClearApp` configures Mapbox and opens `MapShell`.
-- `MapShell` owns the observable stores, the native provider menu, and adaptive controls. Mapbox uses its supported SwiftUI `Map` and annotation APIs; its UIKit map view is not wrapped in a custom representable.
-- `AppleTransitMap` uses SwiftUI MapKit polylines and custom annotations on a flat Apple basemap. Pitch is deliberately disabled for this comparison; rotated train bodies and upright route text are evaluated in the flat-map presentation.
-- `TrainMapProjection` supplies both engines with the same estimated positions, route identity, and freshness. Travel heading follows the shape segment. A parked train uses its next known trip arrival as direction evidence; when the feed cannot establish a direction, the map uses a neutral round marker rather than a directed car. Reports fade after 90 seconds and markers are hidden after 360 seconds; stale or failed snapshots do not provide current markers.
-- `TransitArtwork` draws the shared subway-car silhouette and route badges with SwiftUI. The car body rotates while its route label stays upright. Mapbox’s image annotation API requires a `UIImage`, so `TrainSpriteCache` uses SwiftUI `ImageRenderer` once per route/color and caches the result; no custom UIKit map bridge or UIKit drawing implementation is introduced.
-- `TrainMarkerSizing` carries the native car-size curve shared with the web’s transit artwork. MapKit estimates a comparable zoom from the visible longitude span and available width; this remains approximate, especially during rotation. Route text fades at wider map views to avoid labels overflowing tiny cars.
+- `StandClearApp` opens `MapShell`.
+- `MapShell` owns the observable stores, map focus and itinerary intent, native menus, and adaptive controls. `AppleTransitMap` is the only map renderer.
+- `AppleTransitMap` uses SwiftUI MapKit polylines and custom annotations on a flat Apple basemap. Pitch is deliberately disabled; train bodies rotate along the track while route text stays upright.
+- `TrainMapProjection` supplies estimated positions, route identity, and freshness. Travel heading follows the shape segment. A parked train uses its next known trip arrival as direction evidence; when the feed cannot establish a direction, the map uses a neutral round marker rather than a directed car. Reports fade after 90 seconds and markers are hidden after 360 seconds; stale or failed snapshots do not provide current markers.
+- `TransitArtwork` draws the shared subway-car silhouette and route badges with SwiftUI. The car body rotates while its route label stays upright. Map annotations render the artwork directly in SwiftUI; no image cache or UIKit map bridge is needed.
+- `TrainMarkerSizing` carries the native car-size curve shared with the web’s transit artwork. MapKit estimates the artwork zoom from the visible longitude span and available width; this remains approximate, especially during rotation. Route text fades at wider map views to avoid labels overflowing tiny cars.
 - `TransitStore` loads the existing static dataset and polls the existing train endpoint. Active-scene polling uses an eight-second interval after successful requests and a longer delay on failure. If the initial static station load fails, the active polling loop retries it up to three times at that same cadence while retaining a visible retry state. Empty station data is treated as a failure. Manual Retry remains available after the automatic attempts are exhausted; backgrounding ends the run and its retry budget. Requests have a timeout; realtime work is stopped when the scene becomes inactive.
 - `LocationStore` uses Core Location with when-in-use permission, hundred-meter accuracy, foreground one-shot fixes, 30-second fix expiration, and inactive-scene cleanup.
 - `TransitModels` decodes the shared contracts and implements the small native station/arrival projection. Station complexes use the web client’s explicit allowlist rather than merging unrelated stations by name or proximity. Train deduplication is trip-only, preserving legitimate trains queued at a terminus.
@@ -117,7 +111,7 @@ npm test
 npm run build
 ```
 
-The [original proof-of-concept validation record](docs/validation.md) describes the first milestone’s checks and screenshots. See [the map comparison record](docs/map-comparison.md) for results specific to the current artwork/provider comparison; earlier results alone do not validate these changes. The Native iOS workflow builds, analyzes, and runs simulator tests without credentials alongside the existing web CI.
+The [original proof-of-concept validation record](docs/validation.md) describes the first milestone’s checks and screenshots. The [earlier map comparison record](docs/map-comparison.md) is historical; neither record validates subsequent changes. The Native iOS workflow builds, analyzes, and runs simulator tests without credentials alongside the existing web CI.
 
 ## Limits and next increments
 
@@ -127,11 +121,11 @@ For place directions, select an option in the route card to highlight its subway
 
 Open a station from Search or Nearby to see service advisories alongside arrivals. StandClear checks the existing `/api/alerts` endpoint while the station is open and the app is active. An advisory can apply to a whole route, a stop, or a route at a particular stop. Station alerts include reported express variants of their base routes, while retaining explicit stop scope and keeping separate shuttle services distinct. The section distinguishes current reports, older reports with a timestamp, and unavailable or unconfirmed status. A fresh request alone cannot confirm that the MTA source is current. Advisories provide context for riders and are not used to recalculate itineraries.
 
-MapKit is the primary native development path. Riders can still select the Mapbox renderer under **More**. See [the migration audit](docs/mapkit-migration.md) for the remaining dependencies and checks before retirement.
+MapKit is the only native renderer. See [the migration record](docs/mapkit-migration.md) for the retired dependencies and remaining device checks.
 
 ## Location and compact map glance
 
-Both renderers show a blue approximate-location dot from the existing expiring coarse fix. No independent map location manager or continuous high-accuracy tracking is added. Permission revocation, fix expiration, and background cleanup remove the dot and location-dependent predictions.
+The map shows a blue approximate-location dot from the existing expiring coarse fix. No independent map location manager or continuous high-accuracy tracking is added. Permission revocation, fix expiration, and background cleanup remove the dot and location-dependent predictions.
 
 The glance mirrors the web grouping: station complexes remain distinct, services sharing a route color are grouped at that station, and only stations within 900 metres are considered. Up to three groups use stable distance/identity ordering. Both directions show the next valid prediction within 45 minutes; dashes do not imply no service. Native freshness and failed-request gates remain in force, with no synthesized “Now” rows. More opens a point-in-time arrival-status alert and provides recovery actions.
 
@@ -149,7 +143,7 @@ Queued basics: station-to-station directions should reuse the web's direct/one-t
 
 ## Basic station directions
 
-Choose **More → Directions**, then select From and To stations. Native lists, search fields, navigation links, and buttons provide station selection, swap/clear, up to four route alternatives, and boarding/transfer/alighting instructions. Selecting an itinerary highlights its route geometry and frames it in either map engine. Selections are stored by station identity and survive adaptive presentation changes; delayed data never chooses a different station for the rider.
+Choose **More → Directions**, then select From and To stations. Native lists, search fields, navigation links, and buttons provide station selection, swap/clear, up to four route alternatives, and boarding/transfer/alighting instructions. Selecting an itinerary highlights its route geometry and frames it in the native map. Selections are stored by station identity and survive adaptive presentation changes; delayed data never chooses a different station for the rider.
 
 `TripPlanner` ports the existing `lib/commuteRouting.ts` direct/one-transfer graph and curated complex membership. Platform IDs remain distinct from complex IDs. Equivalent routes share an option; express/local options with different stop counts remain separate. Plans are ranked by transfers and stops, not total journey time. Geometry uses existing static shapes and rejects malformed data.
 
