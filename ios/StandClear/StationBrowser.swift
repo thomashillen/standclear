@@ -38,6 +38,10 @@ final class FavoriteStations {
     }
 }
 
+enum StationBrowserDestination: Hashable {
+    case station(String)
+}
+
 struct StationBrowser: View {
     let store: TransitStore
     let location: LocationStore
@@ -55,7 +59,8 @@ struct StationBrowser: View {
     let onSelectTrip: (NativeTripPlan?) -> Void
     let onShowTripMap: (NativeTripPlan) -> Void
     let select: (Station) -> Void
-    @State private var selectedStationID: String?
+    @Binding var path: [StationBrowserDestination]
+    let dismissPanel: (() -> Void)?
 
     var body: some View {
         Group {
@@ -69,12 +74,24 @@ struct StationBrowser: View {
                 nearby
             }
         }
-        .navigationDestination(item: $selectedStationID) { id in
-            if let station = store.stations.first(where: { $0.id == id }) {
-                stationDetails(station)
-            } else {
-                ContentUnavailableView("Station unavailable", systemImage: "tram",
-                                       description: Text("This station is no longer in the subway data."))
+        .navigationDestination(for: StationBrowserDestination.self) { destination in
+            Group {
+                switch destination {
+                case let .station(id):
+                    if let station = store.stations.first(where: { $0.id == id }) {
+                        stationDetails(station)
+                    } else {
+                        ContentUnavailableView("Station unavailable", systemImage: "tram",
+                                               description: Text("This station is no longer in the subway data."))
+                    }
+                }
+            }
+            .toolbar {
+                if let dismissPanel {
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Done", action: dismissPanel)
+                    }
+                }
             }
         }
         .navigationTitle(search ? "Search" : "Nearby arrivals")
@@ -190,7 +207,7 @@ struct StationBrowser: View {
     private func openSearchStation(_ station: Station) {
         recentStations.record(station.id)
         searchFocus.wrappedValue = false
-        selectedStationID = station.id
+        path.append(.station(station.id))
     }
 
     private func searchStationRow(_ station: Station, recent: Bool) -> some View {
@@ -205,7 +222,7 @@ struct StationBrowser: View {
     }
 
     private func nearbyStationRow(_ station: Station, savedOnly: Bool, meters: Double? = nil) -> some View {
-        Button { selectedStationID = station.id } label: {
+        Button { path.append(.station(station.id)) } label: {
             stationLabel(station, starred: favoriteStations.contains(station.id), meters: meters)
                 .accessibilityElement(children: .combine)
         }
