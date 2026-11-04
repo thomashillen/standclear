@@ -21,6 +21,41 @@ final class PlaceServiceTests: XCTestCase {
         XCTAssertEqual(results[1].coordinate.latitude, 40.76)
     }
 
+    func testServiceAreaAndSearchRegionCoverPreviouslyExcludedStatenIslandStations() {
+        // Extracted from public/gtfsData.json: each failed the old south/west bounds.
+        let stops: [(String, Double, Double)] = [
+            ("Eltingville", 40.544601, -74.16457), ("Annadale", 40.54046, -74.178217),
+            ("Huguenot", 40.533674, -74.191794), ("Prince's Bay", 40.525507, -74.200064),
+            ("Pleasant Plains", 40.52241, -74.217847), ("Richmond Valley", 40.519631, -74.229141),
+            ("Arthur Kill", 40.516578, -74.242096), ("Tottenville", 40.512764, -74.251961),
+        ]
+        let region = PlaceServiceArea.searchRegion
+        for (name, latitude, longitude) in stops {
+            XCTAssertTrue(PlaceServiceArea.contains(.init(latitude: latitude, longitude: longitude)), name)
+            XCTAssertLessThan(abs(latitude - region.center.latitude), region.span.latitudeDelta / 2, name)
+            XCTAssertLessThan(abs(longitude - region.center.longitude), region.span.longitudeDelta / 2, name)
+        }
+    }
+
+    func testTottenvilleSearchResultAndShortWalkArePreserved() async throws {
+        let station = CLLocationCoordinate2D(latitude: 40.512764, longitude: -74.251961)
+        let destination = PlaceResult(id: "tottenville", name: "Tottenville destination", subtitle: "Staten Island",
+                                      latitude: 40.514, longitude: -74.251)
+        let middle = CLLocationCoordinate2D(latitude: 40.5134, longitude: -74.2516)
+        let service = PlaceService(find: { _ in [destination, self.place("outside", latitude: 40.46)] }, route: { from, to in
+            XCTAssertEqual(from.latitude, station.latitude)
+            XCTAssertEqual(to.longitude, destination.longitude)
+            return WalkingConnection(coordinates: [from, middle, to], seconds: 180, meters: 240)
+        })
+        let matches = try await service.search("Tottenville")
+        XCTAssertEqual(matches, [destination])
+        let walk = try await service.walk(from: station, to: destination.coordinate)
+        XCTAssertEqual(walk.seconds, 180)
+        XCTAssertEqual(walk.meters, 240)
+        XCTAssertEqual(walk.coordinates.map(\.latitude), [station.latitude, middle.latitude, destination.latitude])
+        XCTAssertEqual(walk.coordinates.map(\.longitude), [station.longitude, middle.longitude, destination.longitude])
+    }
+
     func testShortQuerySkipsSearchAndNoMatchDiffersFromServiceFailure() async throws {
         let service = PlaceService(find: { query in
             switch query {
@@ -74,14 +109,24 @@ final class PlaceServiceTests: XCTestCase {
 
     func testWalkRejectsOutOfAreaInputAndInvalidGeometryOrMetrics() async throws {
         let service = PlaceService(find: { _ in [] }, route: unexpectedWalk)
-        do {
-            _ = try await service.walk(from: start, to: .init(latitude: 41, longitude: -74))
-            XCTFail("Outside-area endpoints must not start a walking request")
-        } catch PlaceServiceError.noWalkingRoute {}
+        for invalid in [CLLocationCoordinate2D(latitude: 41, longitude: -74),
+                        .init(latitude: 40.46, longitude: -74.25), .init(latitude: 40.51, longitude: -74.28),
+                        .init(latitude: .nan, longitude: -74), .init(latitude: 40.51, longitude: .infinity)]
+        {
+            do {
+                _ = try await service.walk(from: start, to: invalid)
+                XCTFail("Outside-area or invalid endpoints must not start a walking request")
+            } catch PlaceServiceError.noWalkingRoute {}
+            do {
+                _ = try await service.walk(from: invalid, to: end)
+                XCTFail("The starting endpoint must pass the same boundary checks")
+            } catch PlaceServiceError.noWalkingRoute {}
+        }
 
         for invalid in [
             WalkingConnection(coordinates: [start, start], seconds: 1, meters: 2),
             WalkingConnection(coordinates: [start, .init(latitude: .nan, longitude: -74), end], seconds: 1, meters: 2),
+            WalkingConnection(coordinates: [start, .init(latitude: 40.46, longitude: -74.25), end], seconds: 1, meters: 2),
             WalkingConnection(coordinates: [start, end], seconds: .infinity, meters: 2),
             WalkingConnection(coordinates: [start, end], seconds: 1, meters: -4),
         ] {

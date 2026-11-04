@@ -512,6 +512,9 @@ final class LiveBackendContractTests: XCTestCase {
         let staticData = try await JSONDecoder().decode(StaticData.self, from: payload("gtfsData.json"))
         let stations = Transit.stations(Array(staticData.lines.values))
         XCTAssertFalse(stations.isEmpty)
+        for stop in staticData.lines.values.flatMap(\.stops) {
+            XCTAssertTrue(PlaceServiceArea.contains(stop.coordinate), "Existing station \(stop.id) must fit native place coverage")
+        }
         for id in ["127", "419", "629"] {
             XCTAssertTrue(stations.contains { $0.id == id }, "Expected NYC station \(id) in the live static contract")
         }

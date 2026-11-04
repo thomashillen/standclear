@@ -1056,6 +1056,68 @@ final class StandClearUITests: XCTestCase {
     }
 
     @MainActor
+    func testTottenvillePlaceSearchAndWalkingPreview() {
+        let app = XCUIApplication()
+        app.terminate()
+        XCUIDevice.shared.orientation = .portrait
+        defer { XCUIDevice.shared.orientation = .portrait }
+        app.resetAuthorizationStatus(for: .location)
+        app.launchArguments = ["--ui-test-fixture", "--ui-test-staten-island"]
+        addUIInterruptionMonitor(withDescription: "Location permission") { alert in
+            let deny = alert.buttons["Don’t Allow"]
+            guard deny.exists else { return false }
+            deny.tap()
+            return true
+        }
+        app.launch()
+        activatePermissionPrompt(in: app)
+        app.buttons["searchButton"].tap()
+        let search = app.searchFields[unifiedSearchPrompt]
+        XCTAssertTrue(search.waitForExistence(timeout: 5))
+        guard focusSearchField(search, in: app) else { return }
+        search.typeText("Tottenville destination\n")
+        let place = app.buttons["placeResult-fixture-tottenville"]
+        XCTAssertTrue(place.waitForExistence(timeout: 10), "A destination near the existing SI terminus must not be filtered out")
+        place.tap()
+        let origin = app.buttons["placeOriginPicker"]
+        XCTAssertTrue(origin.waitForExistence(timeout: 10))
+        origin.tap()
+        let picker = app.searchFields[unifiedSearchPrompt]
+        XCTAssertTrue(picker.waitForExistence(timeout: 5))
+        guard focusSearchField(picker, in: app) else { return }
+        picker.typeText("Tottenville\n")
+        let station = app.buttons["stationChoice-S09"]
+        revealPlaceElement(station, in: app.collectionViews.firstMatch)
+        station.tap()
+        XCTAssertTrue(origin.waitForExistence(timeout: 10))
+        XCTAssertTrue(origin.label.contains("Tottenville"))
+        let list = app.collectionViews["placePreviewList"]
+        if app.buttons["Sheet Grabber"].value as? String == "Half screen" {
+            app.buttons["Sheet Grabber"].doubleTap()
+        }
+        let walk = list.descendants(matching: .any)["placeDestinationWalk"].firstMatch
+        revealPlaceElement(walk, in: list)
+        XCTAssertTrue(walk.label.contains("Tottenville destination"))
+        let total = list.descendants(matching: .any)["placeWalkingTotal"].firstMatch
+        revealPlaceElement(total, in: list)
+        XCTAssertTrue(total.label.contains("3 min"), "The confirmed fixture walk should supply its duration")
+        XCTAssertFalse(app.staticTexts["No usable walking connection"].exists)
+        let compact = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        compact.name = "Tottenville walking preview in compact presentation"
+        compact.lifetime = .keepAlways
+        add(compact)
+        revealPlaceElement(origin, in: list, downward: false)
+        XCUIDevice.shared.orientation = .landscapeLeft
+        waitForLayout(in: app, expanded: true, readyControl: "placeOriginPicker")
+        revealPlaceElement(total, in: list)
+        XCTAssertTrue(total.label.contains("3 min"))
+        let expanded = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        expanded.name = "Tottenville walking preview in expanded presentation"
+        expanded.lifetime = .keepAlways
+        add(expanded)
+    }
+
+    @MainActor
     private func revealPlaceElement(_ element: XCUIElement, in list: XCUIElement, downward: Bool = true,
                                     file: StaticString = #filePath, line: UInt = #line)
     {
