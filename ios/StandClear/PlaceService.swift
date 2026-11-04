@@ -2,7 +2,7 @@ import CoreLocation
 import Foundation
 import MapKit
 
-struct PlaceResult: Identifiable, Hashable, Sendable {
+struct PlaceResult: Identifiable, Hashable, Codable, Sendable {
     let id: String
     let name: String
     let subtitle: String

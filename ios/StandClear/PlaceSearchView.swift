@@ -1,3 +1,4 @@
+import CoreLocation
 import SwiftUI
 
 /// Recent station identities are local to this installation. Resolve names and
@@ -32,6 +33,48 @@ final class RecentStations {
     }
 }
 
+/// Home and Work stay on this device and reuse the existing place route flow.
+@MainActor @Observable
+final class SavedPlaces {
+    enum Anchor: String, CaseIterable {
+        case home = "Home"
+        case work = "Work"
+        var symbol: String {
+            self == .home ? "house" : "briefcase"
+        }
+    }
+
+    static let storageKey = "savedPlaces"
+    private let defaults: UserDefaults
+    private(set) var places: [String: PlaceResult]
+
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+        let stored = defaults.data(forKey: Self.storageKey)
+            .flatMap { try? JSONDecoder().decode([String: PlaceResult].self, from: $0) } ?? [:]
+        places = stored.filter { Anchor(rawValue: $0.key) != nil && Self.isValid($0.value) }
+    }
+
+    func set(_ place: PlaceResult?, for anchor: Anchor) {
+        if let place {
+            guard Self.isValid(place) else { return }
+            // Match the web's address identity even when a new search assigns a new ID.
+            places = places.filter {
+                $0.value.name != place.name || $0.value.latitude != place.latitude || $0.value.longitude != place.longitude
+            }
+        }
+        places[anchor.rawValue] = place
+        if let data = try? JSONEncoder().encode(places) {
+            defaults.set(data, forKey: Self.storageKey)
+        }
+    }
+
+    private static func isValid(_ place: PlaceResult) -> Bool {
+        !place.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+            CLLocationCoordinate2DIsValid(place.coordinate)
+    }
+}
+
 /// Retain the last completed place lookup in this map window so returning
 /// from directions can restore the same list without another MapKit request.
 @MainActor @Observable
@@ -53,6 +96,7 @@ final class PlaceSearchMemory {
 struct PlaceSearchView<StationRow: View>: View {
     let store: TransitStore
     let recentStations: RecentStations
+    let savedPlaces: SavedPlaces
     let placeSearchMemory: PlaceSearchMemory
     let openPlace: (PlaceResult) -> Void
     @Binding var query: String
@@ -76,6 +120,38 @@ struct PlaceSearchView<StationRow: View>: View {
         let stations = Transit.searchStations(store.stations, query: text)
         let recent = text.isEmpty ? recentStations.resolved(in: store.stations) : []
         List {
+            if text.isEmpty, !savedPlaces.places.isEmpty {
+                Section("Saved places") {
+                    ForEach(SavedPlaces.Anchor.allCases, id: \.self) { anchor in
+                        if let place = savedPlaces.places[anchor.rawValue] {
+                            HStack {
+                                Button {
+                                    clearFocus()
+                                    openPlace(place)
+                                } label: {
+                                    Label {
+                                        VStack(alignment: .leading) {
+                                            Text(anchor.rawValue)
+                                            Text(place.name).font(.subheadline).foregroundStyle(.secondary)
+                                        }
+                                    } icon: { Image(systemName: anchor.symbol) }
+                                        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                                        .contentShape(Rectangle())
+                                }
+                                .buttonStyle(.plain)
+                                .accessibilityIdentifier("savedPlace-\(anchor.rawValue)")
+                                Menu {
+                                    Button("Remove \(anchor.rawValue)", role: .destructive) {
+                                        savedPlaces.set(nil, for: anchor)
+                                    }
+                                } label: { Image(systemName: "ellipsis").frame(minWidth: 44, minHeight: 44) }
+                                    .accessibilityLabel("Manage \(anchor.rawValue)")
+                            }
+                        }
+                    }
+                }
+                .listRowBackground(Color.clear)
+            }
             if !recent.isEmpty {
                 Section {
                     ForEach(recent) { station in stationRow(station, true) }
@@ -156,11 +232,24 @@ struct PlaceSearchView<StationRow: View>: View {
     }
 
     private func placeRow(_ item: PlaceResult) -> some View {
-        Button {
-            clearFocus()
-            openPlace(item)
-        } label: { resultLabel(item) }
-            .accessibilityIdentifier("placeResult-\(item.id)")
+        HStack {
+            Button {
+                clearFocus()
+                openPlace(item)
+            } label: { resultLabel(item) }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("placeResult-\(item.id)")
+            Menu {
+                ForEach(SavedPlaces.Anchor.allCases, id: \.self) { anchor in
+                    Button("Set as \(anchor.rawValue)", systemImage: anchor.symbol) {
+                        savedPlaces.set(item, for: anchor)
+                        clearFocus()
+                        query = ""
+                    }
+                }
+            } label: { Image(systemName: "ellipsis").frame(minWidth: 44, minHeight: 44) }
+                .accessibilityLabel("Save \(item.name)")
+        }
     }
 
     private func resultLabel(_ item: PlaceResult) -> some View {

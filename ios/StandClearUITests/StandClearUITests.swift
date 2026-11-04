@@ -380,7 +380,16 @@ final class StandClearUITests: XCTestCase {
         field.typeText("550 Madison\n")
         let result = app.buttons["placeResult-fixture-550-madison"]
         XCTAssertTrue(result.waitForExistence(timeout: 10))
-        result.tap()
+        app.buttons["Save 550 Madison Avenue"].tap()
+        app.buttons["Set as Home"].tap()
+        let saved = app.buttons["savedPlace-Home"]
+        XCTAssertTrue(saved.waitForExistence(timeout: 5))
+        XCTAssertTrue(saved.label.contains("550 Madison"))
+        let shortcutCapture = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        shortcutCapture.name = expanded ? "Expanded saved Home shortcut" : "Compact saved Home shortcut"
+        shortcutCapture.lifetime = .keepAlways
+        add(shortcutCapture)
+        saved.tap()
         let origin = app.buttons["placeOriginPicker"]
         XCTAssertTrue(origin.waitForExistence(timeout: 10))
         XCTAssertTrue(origin.label.contains("Current Location"))
@@ -411,8 +420,11 @@ final class StandClearUITests: XCTestCase {
         add(capture)
         app.buttons["placeBackToSearch"].tap()
         XCTAssertTrue(app.navigationBars["Search"].waitForExistence(timeout: 5))
-        XCTAssertTrue(result.waitForExistence(timeout: 10))
-        XCTAssertEqual(field.value as? String, "550 Madison")
+        XCTAssertTrue(saved.waitForExistence(timeout: 10))
+        app.buttons["Manage Home"].tap()
+        app.buttons["Remove Home"].tap()
+        XCTAssertTrue(saved.waitForNonExistence(timeout: 5))
+        XCTAssertTrue(field.exists)
     }
 
     @MainActor

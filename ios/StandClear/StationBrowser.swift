@@ -43,6 +43,7 @@ struct StationBrowser: View {
     let location: LocationStore
     let search: Bool
     let placeSearchMemory: PlaceSearchMemory
+    let savedPlaces: SavedPlaces
     let recentStations: RecentStations
     let favoriteStations: FavoriteStations
     let openPlace: (PlaceResult) -> Void
@@ -58,7 +59,7 @@ struct StationBrowser: View {
     var body: some View {
         Group {
             if search {
-                PlaceSearchView(store: store, recentStations: recentStations, placeSearchMemory: placeSearchMemory, openPlace: openPlace,
+                PlaceSearchView(store: store, recentStations: recentStations, savedPlaces: savedPlaces, placeSearchMemory: placeSearchMemory, openPlace: openPlace,
                                 query: $query, clearFocus: { searchFocus.wrappedValue = false }, stationRow: searchStationRow)
                     .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Address, place or station")
                     .searchFocused(searchFocus)
