@@ -72,6 +72,50 @@ final class StationAlertsTests: XCTestCase {
         XCTAssertFalse(matches(lineID: "6", alertRoute: "7X"))
         XCTAssertFalse(matches(lineID: "GS", alertRoute: "FS"))
         XCTAssertFalse(matches(lineID: "FS", alertRoute: "H"))
+        XCTAssertFalse(matches(lineID: "4", alertRoute: "4X"))
+        XCTAssertFalse(matches(lineID: "GS", alertRoute: "GSX"))
+        XCTAssertTrue(matches(lineID: "unknownX", alertRoute: "unknownX"))
+    }
+
+    func testStationExpressAdvisoriesPreserveStopScopeAndSelectorPrecedence() {
+        for (base, express) in [("6", "6X"), ("7", "7X"), ("F", "FX")] {
+            let station = Station(id: "platform", stop: Stop(id: "platform", name: "Station", lat: 40.7, lng: -74, shapeIdx: 0),
+                                  stopIDs: ["platform", "connected"], routes: [base])
+            func matches(_ selectors: [StationAlert.Selector]?, routes: [String] = [], stops: [String] = []) -> Bool {
+                StationAlert(id: "alert", header: "", description: "", effect: "", severity: "warning",
+                             routeIds: routes, stopIds: stops, selectors: selectors).applies(to: station)
+            }
+            XCTAssertTrue(matches([.init(routeId: express, stopId: nil)]), express)
+            XCTAssertTrue(matches([.init(routeId: express, stopId: "connected")]), express)
+            XCTAssertFalse(matches([.init(routeId: express, stopId: "elsewhere")]), express)
+            XCTAssertFalse(matches([.init(routeId: "4", stopId: "platform")]), express)
+            XCTAssertFalse(matches([.init(routeId: express, stopId: "elsewhere"), .init(routeId: "4", stopId: "platform")]), express)
+            XCTAssertTrue(matches([.init(routeId: "4", stopId: "platform"), .init(routeId: express, stopId: nil)]), express)
+            XCTAssertFalse(matches([.init(routeId: express, stopId: "elsewhere")], routes: [base], stops: ["platform"]), "Structured scope takes precedence over flattened arrays")
+            XCTAssertTrue(matches(nil, routes: [express]), express)
+            XCTAssertTrue(matches([], routes: [express]), express)
+            XCTAssertTrue(matches(nil, stops: ["platform"]), "Legacy stop-only scope remains supported")
+            XCTAssertFalse(matches(nil, routes: ["4"], stops: ["elsewhere"]), express)
+        }
+    }
+
+    func testStationRouteFamiliesDoNotCombineDistinctShuttles() {
+        func matches(stationRoute: String, alertRoute: String) -> Bool {
+            let station = Station(id: "platform", stop: Stop(id: "platform", name: "Station", lat: 40.7, lng: -74, shapeIdx: 0),
+                                  stopIDs: ["platform"], routes: [stationRoute])
+            return StationAlert(id: "alert", header: "", description: "", effect: "", severity: "warning",
+                                routeIds: [], stopIds: [], selectors: [.init(routeId: alertRoute, stopId: "platform")]).applies(to: station)
+        }
+        XCTAssertTrue(matches(stationRoute: "7X", alertRoute: "7"), "Normalize both station and advisory routes")
+        XCTAssertFalse(matches(stationRoute: "4", alertRoute: "4X"))
+        XCTAssertFalse(matches(stationRoute: "GS", alertRoute: "GSX"))
+        XCTAssertTrue(matches(stationRoute: "unknownX", alertRoute: "unknownX"))
+        for shuttle in ["GS", "FS", "H"] {
+            XCTAssertTrue(matches(stationRoute: shuttle, alertRoute: shuttle))
+            for other in ["GS", "FS", "H"] where other != shuttle {
+                XCTAssertFalse(matches(stationRoute: shuttle, alertRoute: other))
+            }
+        }
     }
 
     private func evidence(available: Bool? = true, generatedAge: Double = 0, sourceAge: Double? = 0) -> StationAlertSnapshot.Evidence {

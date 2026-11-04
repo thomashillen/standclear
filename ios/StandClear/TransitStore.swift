@@ -193,6 +193,9 @@ final class TransitStore {
                                ["id": "fixture-wall", "header": "Downtown 4 trains are delayed at Wall St",
                                 "description": "Allow extra travel time at Wall St.", "effect": "SIGNIFICANT_DELAYS", "severity": "severe",
                                 "routeIds": ["4"], "stopIds": ["419"], "selectors": [["routeId": "4", "stopId": "419"]]],
+                               ["id": "fixture-express", "header": "6 express trains are delayed at Pelham Bay Park",
+                                "description": "Allow extra travel time for express service.", "effect": "SIGNIFICANT_DELAYS", "severity": "warning",
+                                "routeIds": ["6X"], "stopIds": ["601"], "selectors": [["routeId": "6X", "stopId": "601"]]],
                            ]]
             case "api/trains":
                 let timestamp = now.timeIntervalSince1970

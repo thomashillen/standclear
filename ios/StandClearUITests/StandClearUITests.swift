@@ -417,6 +417,39 @@ final class StandClearUITests: XCTestCase {
     }
 
     @MainActor
+    func testStationShowsExpressOnlyServiceAdvisory() {
+        let app = XCUIApplication()
+        defer { XCUIDevice.shared.orientation = .portrait }
+        for expanded in [false, true] {
+            app.terminate()
+            XCUIDevice.shared.orientation = expanded ? .landscapeLeft : .portrait
+            app.launchArguments = ["--ui-test-fixture", "--ui-test-express-arrivals", "-mapProvider", "Apple Maps"]
+            app.launch()
+            if !expanded {
+                activatePermissionPrompt(in: app)
+            }
+            waitForLayout(in: app, expanded: expanded)
+            app.buttons["searchButton"].tap()
+            let search = app.searchFields[unifiedSearchPrompt]
+            XCTAssertTrue(search.waitForExistence(timeout: 5))
+            search.tap()
+            search.typeText("Pelham Bay Park\n")
+            selectSearchResult("601", query: "Pelham Bay Park", in: app)
+            let alerts = app.buttons["stationAlertsSummary"]
+            XCTAssertTrue(alerts.waitForExistence(timeout: 10), "A 6X-only advisory must appear at a station indexed under the base 6 route")
+            XCTAssertTrue(alerts.label.contains("1 advisory"))
+            XCTAssertGreaterThanOrEqual(alerts.frame.height, 44)
+            alerts.tap()
+            let warning = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "6 express trains are delayed at Pelham Bay Park")).firstMatch
+            XCTAssertTrue(warning.waitForExistence(timeout: 5))
+            let capture = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            capture.name = expanded ? "Expanded station express advisory" : "Compact station express advisory"
+            capture.lifetime = .keepAlways
+            add(capture)
+        }
+    }
+
+    @MainActor
     func testRecentStationPersistsAcrossRelaunchAndCanBeCleared() {
         let app = XCUIApplication()
         app.terminate()

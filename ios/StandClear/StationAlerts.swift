@@ -35,14 +35,25 @@ struct StationAlert: Decodable, Identifiable {
         let routeId, stopId: String?
     }
 
+    /// Only known feed aliases share advisory scope. Unknown route IDs retain
+    /// their identity rather than inheriting a route from their spelling.
+    private static func routeFamily(_ id: String) -> String {
+        switch id {
+        case "6X": "6"
+        case "7X": "7"
+        case "FX": "F"
+        default: id
+        }
+    }
+
     /// A line includes its reported express service and variants beyond the
     /// representative static stopping pattern. An explicit different route
     /// never matches merely because it shares a station with this line.
     func applies(to line: SubwayLine) -> Bool {
-        let routeID = TransitRouteIdentity(line.routeId).baseID
+        let routeID = Self.routeFamily(line.routeId)
         let stopIDs = Set(line.stops.map(\.id))
         func matchesRoute(_ id: String) -> Bool {
-            TransitRouteIdentity(id).baseID == routeID
+            Self.routeFamily(id) == routeID
         }
         guard let selectors, !selectors.isEmpty else {
             return routeIds.contains(where: matchesRoute) || stopIds.contains(where: stopIDs.contains)
@@ -56,14 +67,20 @@ struct StationAlert: Decodable, Identifiable {
     }
 
     func applies(to station: Station) -> Bool {
+        // Static stations list base routes; an express advisory belongs to the
+        // same service family, while any explicit stop scope still must match.
+        let routes = Set(station.routes.map(Self.routeFamily))
+        func matchesRoute(_ id: String) -> Bool {
+            routes.contains(Self.routeFamily(id))
+        }
         guard let selectors, !selectors.isEmpty else {
-            return stopIds.contains(where: station.stopIDs.contains) || routeIds.contains(where: station.routes.contains)
+            return stopIds.contains(where: station.stopIDs.contains) || routeIds.contains(where: matchesRoute)
         }
         // A GTFS selector's fields must match together. Any selector may qualify.
         return selectors.contains { selector in
             switch (selector.routeId, selector.stopId) {
-            case let (route?, stop?): station.routes.contains(route) && station.stopIDs.contains(stop)
-            case let (route?, nil): station.routes.contains(route)
+            case let (route?, stop?): matchesRoute(route) && station.stopIDs.contains(stop)
+            case let (route?, nil): matchesRoute(route)
             case let (nil, stop?): station.stopIDs.contains(stop)
             case (nil, nil): false
             }
