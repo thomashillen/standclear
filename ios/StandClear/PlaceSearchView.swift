@@ -113,6 +113,57 @@ final class SavedPlaces {
     }
 }
 
+/// Destination history is bounded and local. Repeat picks move to the front.
+@MainActor @Observable
+final class RecentPlaces {
+    static let storageKey = "recentPlaces"
+    private let defaults: UserDefaults
+    private(set) var places: [PlaceResult]
+
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+        let stored = defaults.data(forKey: Self.storageKey)
+            .flatMap { try? JSONDecoder().decode([PlaceResult].self, from: $0) } ?? []
+        var accepted: [PlaceResult] = []
+        for place in stored where SavedPlaces.Destination.place(place).isValid {
+            if !accepted.contains(where: { Self.matches($0, place) }) {
+                accepted.append(place)
+            }
+            if accepted.count == 10 {
+                break
+            }
+        }
+        places = accepted
+    }
+
+    func record(_ place: PlaceResult) {
+        guard SavedPlaces.Destination.place(place).isValid else { return }
+        places = [place] + places.filter { !Self.matches($0, place) }.prefix(9)
+        persist()
+    }
+
+    func remove(_ place: PlaceResult) {
+        places.removeAll { Self.matches($0, place) }
+        persist()
+    }
+
+    func clear() {
+        places = []
+        defaults.removeObject(forKey: Self.storageKey)
+    }
+
+    private func persist() {
+        if let data = try? JSONEncoder().encode(places) {
+            defaults.set(data, forKey: Self.storageKey)
+        }
+    }
+
+    private static func matches(_ a: PlaceResult, _ b: PlaceResult) -> Bool {
+        (!a.id.isEmpty && a.id == b.id) ||
+            (a.name == b.name && abs(a.latitude - b.latitude) < 0.00001 && abs(a.longitude - b.longitude) < 0.00001)
+    }
+}
+
 /// Retain the last completed place lookup in this map window so returning
 /// from directions can restore the same list without another MapKit request.
 @MainActor @Observable
@@ -134,6 +185,7 @@ final class PlaceSearchMemory {
 struct PlaceSearchView<StationRow: View>: View {
     let store: TransitStore
     let recentStations: RecentStations
+    let recentPlaces: RecentPlaces
     let savedPlaces: SavedPlaces
     let placeSearchMemory: PlaceSearchMemory
     let openPlace: (PlaceResult) -> Void
@@ -197,6 +249,26 @@ struct PlaceSearchView<StationRow: View>: View {
                     }
                 }
                 .listRowBackground(Color.clear)
+            }
+            if text.isEmpty, !recentPlaces.places.isEmpty {
+                Section {
+                    ForEach(recentPlaces.places.prefix(3)) { recentPlaceRow($0) }
+                    if recentPlaces.places.count > 3 {
+                        DisclosureGroup("More recent places") {
+                            ForEach(recentPlaces.places.dropFirst(3)) { recentPlaceRow($0) }
+                        }
+                    }
+                } header: {
+                    HStack {
+                        Text("Recent places")
+                        Spacer()
+                        Button("Clear", action: recentPlaces.clear)
+                            .accessibilityLabel("Clear recent places")
+                            .accessibilityIdentifier("clearRecentPlaces")
+                    }
+                }
+                .listRowBackground(Color.clear)
+                .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
             }
             if !recent.isEmpty {
                 Section {
@@ -310,6 +382,21 @@ struct PlaceSearchView<StationRow: View>: View {
                 }
             } label: { Image(systemName: "ellipsis").frame(minWidth: 44, minHeight: 44) }
                 .accessibilityLabel("Save \(item.name)")
+        }
+    }
+
+    private func recentPlaceRow(_ place: PlaceResult) -> some View {
+        HStack {
+            Button {
+                clearFocus()
+                openPlace(place)
+            } label: { resultLabel(place) }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("recentPlace-\(place.id)")
+            Menu {
+                Button("Remove from recent places", role: .destructive) { recentPlaces.remove(place) }
+            } label: { Image(systemName: "ellipsis").frame(minWidth: 44, minHeight: 44) }
+                .accessibilityLabel("Manage recent \(place.name)")
         }
     }
 
