@@ -8,6 +8,9 @@ struct MapShell: View {
     @State private var store = TransitStore()
     @State private var location = LocationStore()
     @State private var linePath: [LineDestination] = []
+    @State private var searchPath: [StationBrowserDestination] = []
+    @State private var nearbyPath: [StationBrowserDestination] = []
+    @State private var expandedNearbyRequested = false
     @State private var panel: Panel?
     @State private var sheetDetent: PresentationDetent = .medium
     @State private var windowSize: CGSize = .zero
@@ -75,7 +78,7 @@ struct MapShell: View {
                                     .padding(.horizontal)
                             }
                             ControlGroup {
-                                Button("Search", systemImage: "magnifyingglass") { focus.cancelPending(); expandedPanel = .search }
+                                Button("Search", systemImage: "magnifyingglass") { showSearch(expanded: true) }
                                     .accessibilityIdentifier("searchButton")
                                 Button("Nearby", systemImage: "location") {
                                     showNearby(expanded: true)
@@ -108,7 +111,7 @@ struct MapShell: View {
                                     }
                                 }
                                 ToolbarItemGroup(placement: .bottomBar) {
-                                    Button("Search", systemImage: "magnifyingglass") { focus.cancelPending(); panel = .search }
+                                    Button("Search", systemImage: "magnifyingglass") { showSearch(expanded: false) }
                                         .accessibilityIdentifier("searchButton")
                                     Spacer()
                                     Button("Nearby", systemImage: "location") { showNearby(expanded: false) }
@@ -125,8 +128,19 @@ struct MapShell: View {
                 // Release its focus so its keyboard cannot cover the new layout.
                 stationSearchFocused = false
                 if isExpanded, let activePanel = panel {
+                    expandedNearbyRequested = activePanel == .nearby
                     expandedPanel = activePanel
                     panel = nil
+                } else if !isExpanded, expandedPanel == .search {
+                    sheetDetent = .large
+                    panel = .search
+                    expandedPanel = .nearby
+                } else if !isExpanded, expandedPanel == .nearby,
+                          expandedNearbyRequested || !nearbyPath.isEmpty
+                {
+                    sheetDetent = typeSize.isAccessibilitySize || !nearbyPath.isEmpty ? .large : .medium
+                    panel = .nearby
+                    expandedNearbyRequested = false
                 } else if !isExpanded, expandedPanel.destination != nil {
                     sheetDetent = typeSize.isAccessibilitySize ? .large : .medium
                     panel = expandedPanel
@@ -141,7 +155,17 @@ struct MapShell: View {
                     expandedPanel = .nearby
                 }
             }
-            .onChange(of: panel) { _, selection in
+            .onChange(of: panel) { previous, selection in
+                // Done and interactive dismissal end a browser visit. Moving
+                // its sheet into the expanded pane preserves the same path.
+                if selection == nil, !expanded {
+                    if previous == .search {
+                        searchPath = []
+                    }
+                    if previous == .nearby {
+                        nearbyPath = []
+                    }
+                }
                 if selection != .search {
                     stationSearchFocused = false
                 }
@@ -167,6 +191,9 @@ struct MapShell: View {
             Text(arrivalStatusMessage)
         }
         .onChange(of: expandedPanel) { _, selection in
+            if selection != .nearby {
+                expandedNearbyRequested = false
+            }
             if selection != .search {
                 stationSearchFocused = false
             }
@@ -270,12 +297,25 @@ struct MapShell: View {
         showingArrivalStatus = true
     }
 
+    private func showSearch(expanded: Bool) {
+        focus.cancelPending()
+        if expanded {
+            expandedPanel = .search
+        } else {
+            searchPath = []
+            panel = .search
+        }
+    }
+
+
     private func showNearby(expanded: Bool) {
         selectedTrip = nil
         sheetDetent = typeSize.isAccessibilitySize ? .large : .medium
         if expanded {
+            expandedNearbyRequested = true
             expandedPanel = .nearby
         } else {
+            nearbyPath = []
             panel = .nearby
         }
         focus.requestNearby(location.availableCoordinate)
@@ -378,6 +418,10 @@ struct MapShell: View {
     @ViewBuilder private func panelNavigation(_ mode: Panel, expanded: Bool) -> some View {
         if mode == .lines {
             NavigationStack(path: $linePath) { panelRoot(mode, expanded: expanded) }
+        } else if mode == .search {
+            NavigationStack(path: $searchPath) { panelRoot(mode, expanded: expanded) }
+        } else if mode == .nearby {
+            NavigationStack(path: $nearbyPath) { panelRoot(mode, expanded: expanded) }
         } else {
             NavigationStack { panelRoot(mode, expanded: expanded) }
         }
@@ -416,11 +460,7 @@ struct MapShell: View {
                              }
                              ToolbarItem(placement: .navigation) {
                                  Button("Back to Search", systemImage: "chevron.backward") {
-                                     if expanded {
-                                         expandedPanel = .search
-                                     } else {
-                                         panel = .search
-                                     }
+                                     showSearch(expanded: expanded)
                                  }
                                  .accessibilityIdentifier("placeBackToSearch")
                              }
@@ -485,7 +525,9 @@ struct MapShell: View {
     private func stationBrowser(search: Bool, expanded: Bool) -> some View {
         StationBrowser(store: store, location: location, search: search, placeSearchMemory: placeSearchMemory, savedPlaces: savedPlaces, recentStations: recentStations, recentPlaces: recentPlaces, favoriteStations: favoriteStations, openPlace: { openPlace($0, expanded: expanded) }, query: $searchQuery, searchFocus: $stationSearchFocused,
                        directionsSelection: $directionsSelection, onDirectionsHere: beginDirections,
-                       onSelectTrip: selectTrip, onShowTripMap: showTripOnMap, select: focusStation)
+                       onSelectTrip: selectTrip, onShowTripMap: showTripOnMap, select: focusStation,
+                       path: search ? $searchPath : $nearbyPath,
+                       dismissPanel: expanded ? nil : { panel = nil })
     }
 
     private func focusStation(_ station: Station) {

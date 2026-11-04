@@ -8,15 +8,15 @@ final class TrainMotionTests: XCTestCase {
         Date(timeIntervalSince1970: epoch + offset)
     }
 
-    private func line() -> SubwayLine {
-        let start = Stop(id: "a", name: "A", lat: 40.75, lng: -74, shapeIdx: 0)
-        let end = Stop(id: "b", name: "B", lat: 40.751, lng: -73.999, shapeIdx: 3)
-        return SubwayLine(id: "R", routeId: "R", color: "FCCC0A", stops: [start, end],
-                          shape: [[-74, 40.75], [-73.999, 40.75], [-73.999, 40.75], [-73.999, 40.751]])
+    private func line(route: String = "R", longitudeOffset: Double = 0) -> SubwayLine {
+        let start = Stop(id: "a", name: "A", lat: 40.75, lng: -74 + longitudeOffset, shapeIdx: 0)
+        let end = Stop(id: "b", name: "B", lat: 40.751, lng: -73.999 + longitudeOffset, shapeIdx: 3)
+        return SubwayLine(id: route, routeId: route, color: "FCCC0A", stops: [start, end],
+                          shape: [[-74, 40.75], [-73.999, 40.75], [-73.999, 40.75], [-73.999, 40.751]].map { [$0[0] + longitudeOffset, $0[1]] })
     }
 
-    private func train(_ progress: Double = 0, reverse: Bool = false, status: String = "IN_TRANSIT_TO", reported: Double? = 0) -> Train {
-        Train(id: "t", routeId: "R", direction: reverse ? "S" : "N", progress: progress,
+    private func train(_ progress: Double = 0, route: String = "R", reverse: Bool = false, status: String = "IN_TRANSIT_TO", reported: Double? = 0) -> Train {
+        Train(id: "t", routeId: route, direction: reverse ? "S" : "N", progress: progress,
               prevStopId: reverse ? "b" : "a", nextStopId: reverse ? "a" : "b", status: status,
               lastReportedAt: reported.map { epoch + $0 })
     }
@@ -134,5 +134,45 @@ final class TrainMotionTests: XCTestCase {
         engine.reset()
         engine.update(snapshot: feed(train(reported: -355), [arrival(40)]), now: date(0))
         XCTAssertTrue(engine.markers(at: date(6)).isEmpty)
+    }
+
+    func testExpressMotionUsesBaseTrackButRequiresExactReportedArrivalEvidence() throws {
+        for (express, base) in [("6X", "6"), ("7X", "7"), ("FX", "F")] {
+            var engine = TrainMotion(lines: [line(route: base)])
+            let vehicle = train(route: express)
+            let mismatched = [arrival(40, route: base), arrival(40, route: express, direction: "S"),
+                              arrival(40, route: express, stop: "a"), arrival(40, route: express, trip: "other")]
+            engine.update(snapshot: feed(vehicle, mismatched), now: date(0))
+            XCTAssertFalse(engine.hasActiveMotion(at: date(10)))
+            XCTAssertEqual(try XCTUnwrap(engine.markers(at: date(30)).first).coordinate.longitude, -74, accuracy: 0.000001)
+            engine.update(snapshot: feed(vehicle, [arrival(40, route: express)]), now: date(0))
+            XCTAssertTrue(engine.hasActiveMotion(at: date(10)))
+            let moving = try XCTUnwrap(engine.markers(at: date(30)).first)
+            XCTAssertGreaterThan(moving.coordinate.latitude, 40.75)
+            XCTAssertEqual(moving.routeID, express)
+            XCTAssertEqual(moving.displayLetter, express)
+            XCTAssertEqual(try XCTUnwrap(engine.markers(at: date(30), reduceMotion: true).first).coordinate.longitude, -74, accuracy: 0.000001)
+            XCTAssertTrue(engine.markers(at: date(60)).isEmpty)
+            engine.update(snapshot: feed(vehicle, [arrival(40, route: express)]), now: date(0), feedUnavailable: true)
+            XCTAssertTrue(engine.markers(at: date(0)).isEmpty)
+        }
+    }
+
+    func testExpressMotionSamplesItsExactTrackWhenPresentAndNeverFallsBackFromInvalidExactTrack() throws {
+        let base = line(route: "6")
+        let exact = line(route: "6X", longitudeOffset: 0.01)
+        let snapshot = feed(train(route: "6X"), [arrival(40, route: "6X")])
+        var engine = TrainMotion(lines: [base, exact])
+        engine.update(snapshot: snapshot, now: date(0))
+        XCTAssertTrue(engine.hasActiveMotion(at: date(10)))
+        let marker = try XCTUnwrap(engine.markers(at: date(30)).first)
+        XCTAssertGreaterThan(marker.coordinate.latitude, 40.75)
+        XCTAssertEqual(marker.coordinate.longitude, -73.989, accuracy: 0.000001)
+        let invalid = SubwayLine(id: exact.id, routeId: exact.routeId, color: exact.color, stops: exact.stops,
+                                 shape: [[-74, .nan], [-73, 40]])
+        engine = TrainMotion(lines: [base, invalid])
+        engine.update(snapshot: snapshot, now: date(0))
+        XCTAssertFalse(engine.hasActiveMotion(at: date(10)))
+        XCTAssertTrue(engine.markers(at: date(10)).isEmpty)
     }
 }

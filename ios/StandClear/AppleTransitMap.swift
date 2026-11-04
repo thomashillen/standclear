@@ -59,7 +59,7 @@ struct AppleTransitMap: View {
                     }
                 }
                 ForEach(inputs.feedRevision == nil || !inputs.active ? [] : markers) { marker in
-                    Annotation("Route \(marker.displayLetter) train", coordinate: marker.coordinate) {
+                    Annotation("Route \(marker.spokenRouteName) train", coordinate: marker.coordinate) {
                         AppleTrainAnnotation(marker: marker, cameraState: cameraState)
                     }
                     .annotationTitles(.hidden)
@@ -283,7 +283,7 @@ private struct AppleTrainAnnotation: View {
         .frame(width: 46 * scale, height: 24 * scale)
         .opacity(marker.opacity)
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Route \(marker.displayLetter) train. Estimated position.")
+        .accessibilityLabel("Route \(marker.spokenRouteName) train. Estimated position.")
         .accessibilityValue(accessibilityValue(marker))
     }
 
