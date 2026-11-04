@@ -534,7 +534,7 @@ enum LineDestination: Hashable {
     case station(String)
 }
 
-/// Browse the static route pattern; current arrivals and alerts remain in station details.
+/// Browse the static route pattern and reported line advisories; arrivals remain in station details.
 struct LineBrowser<StationDetail: View>: View {
     let store: TransitStore
     let stationDetail: (Station) -> StationDetail
@@ -594,10 +594,36 @@ struct LineBrowser<StationDetail: View>: View {
 
     @ViewBuilder private func stops(for routeID: String) -> some View {
         if let line = store.lines.first(where: { $0.routeId == routeID }) {
+            LineStations(line: line, store: store)
+        } else {
+            ContentUnavailableView("Line unavailable", systemImage: "tram",
+                                   description: Text("This line is no longer in the subway data."))
+        }
+    }
+}
+
+private struct LineStations: View {
+    let line: SubwayLine
+    let store: TransitStore
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var visible = false
+    @State private var alerts: StationAlertsLoad = .loading
+    @State private var alertsRetry = 0
+
+    private struct Request: Equatable {
+        let routeID: String
+        let active: Bool
+        let revision: Int
+    }
+
+    private var request: Request {
+        Request(routeID: line.routeId, active: visible && scenePhase == .active, revision: alertsRetry)
+    }
+
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 5)) { context in
             List {
-                Text("Static route pattern. Service may change. Open a station for reported arrivals and advisories.")
-                    .font(.footnote).foregroundStyle(.secondary)
-                    .listRowBackground(Color.clear)
+                LineAlertSection(line: line, load: alerts, now: context.date) { alertsRetry += 1 }
                 Section {
                     ForEach(line.stops) { stop in
                         if let station = store.stations.first(where: { $0.stopIDs.contains(stop.id) }) {
@@ -611,18 +637,35 @@ struct LineBrowser<StationDetail: View>: View {
                         }
                     }
                 } header: {
-                    Text("Stations")
+                    Text("Regular station pattern")
+                } footer: {
+                    Text("Service may change. Open a station for reported arrivals.")
                 }
                 .listRowBackground(Color.clear)
             }
             .listStyle(.plain)
+            .listSectionSpacing(.compact)
             .scrollContentBackground(.hidden)
-            .navigationTitle("\(RouteBadge.displayID(routeID)) line")
+            .navigationTitle("\(RouteBadge.displayID(line.routeId)) line")
             .navigationBarTitleDisplayMode(.inline)
             .accessibilityIdentifier("lineStationList")
-        } else {
-            ContentUnavailableView("Line unavailable", systemImage: "tram",
-                                   description: Text("This line is no longer in the subway data."))
+        }
+        .onAppear { visible = true }
+        .onDisappear { visible = false }
+        .task(id: request) { [request] in
+            guard request.active else { return }
+            alerts = .loading
+            while !Task.isCancelled {
+                do {
+                    let snapshot = try await store.stationAlerts()
+                    guard !Task.isCancelled, self.request == request else { return }
+                    alerts = .received(snapshot)
+                } catch {
+                    guard !Task.isCancelled, self.request == request else { return }
+                    alerts = .failed
+                }
+                do { try await Task.sleep(for: .seconds(60)) } catch { return }
+            }
         }
     }
 }
