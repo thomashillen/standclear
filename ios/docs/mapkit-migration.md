@@ -1,19 +1,17 @@
 # Native MapKit migration
 
-Use Apple Maps as the primary native renderer and keep Mapbox selectable while riders compare the two. On the physical Duo, Thomas reported that Apple Maps filled the expanded window and that trains appeared and updated. Smooth motion, dense-map performance, and the latest layouts still need separate verification.
+Thomas selected MapKit as the only native iOS map renderer after comparing it with Mapbox on the Duo. The app now always opens SwiftUI MapKit, including installations whose former `mapProvider` preference is `Mapbox`. There is no provider toggle or token gate. The existing web app continues using Mapbox.
 
-## Coverage and remaining dependencies
+## Scope
 
-| Area | Current dependency and removal work |
-| --- | --- |
-| Map and overlays | `AppleTransitMap` draws route polylines, train artwork, the approximate location dot, and itinerary highlights with SwiftUI MapKit. Verify camera framing, compass and attribution clearance, and selected routes under the cover sheet and expanded pane before removing the second renderer. |
-| Native fallback | `MapShell` owns the provider preference, Mapbox viewport, ornaments, annotations, loading recovery, and missing-token state. `StandClearApp` configures the SDK. `TrainSpriteCache` renders images for Mapbox. Keep the route colors, car artwork, marker sizing and transit projections that MapKit also uses. |
-| Build and configuration | `project.yml` pins Mapbox Maps 11.26.0 and defines `MBXAccessToken`. Retiring the fallback entails regenerating the Xcode project, updating package resolution, removing the app token declaration and revising provider-switching and missing-token tests. Preserve ignored signing configuration. |
-| Search and walking | The existing `/api/geocode` and `/api/walk` web contracts use Mapbox upstream. Native place previews use MKLocalSearch for destinations and MKDirections for walking. The web app still needs its own provider credentials even after the native fallback is retired. |
-| Transit data | Both renderers use StandClear’s `/gtfsData.json` and `/api/trains`. The native `TripPlanner` supplies subway legs and boarding predictions. Keep these shared contracts when changing the map or place-search provider. |
+- `AppleTransitMap` supplies subway polylines, estimated train markers, approximate location, station/place/transfer markers, and itinerary overlays. Its focus and trip revisions and safe-area insets continue to control camera framing around compact sheets and the expanded control region.
+- Native Mapbox SDK imports, renderer code, image cache, package dependencies and lockfile are removed. The shared transit artwork, route identity, marker sizing and freshness/motion rules remain.
+- The app no longer reads or embeds `MBXAccessToken`. Ignored local configuration remains available for Personal Team signing and is not deleted. MapKit requires no rendering token.
+- Native place previews continue using MKLocalSearch and MKDirections. The web `/api/geocode` and `/api/walk` contracts retain their existing upstream Mapbox integration and configuration.
+- Shared `/gtfsData.json`, `/api/trains` and `/api/alerts` contracts are unchanged. Removing the native renderer does not change subway routing or boarding predictions.
 
-## Train motion
+## Validation and remaining checks
 
-MapKit advances an eligible train along its representative track toward a matching next-stop ETA. Reduce Motion uses discrete estimates. A stopped train stays at its platform, and missing evidence, stale reports and failed feeds use the existing visibility rules. See [train motion](train-motion.md) for sampling and lifecycle behavior.
+The native UI suite covers a fresh MapKit launch and a legacy Mapbox preference, native controls, Nearby/Search, station and place directions, route clearing, and compact/expanded presentations. Build, analysis, unit/UI results and rendered evidence for each change belong in its pull request; this document does not establish that pending checks have passed.
 
-Before retiring the fallback, exercise a dense corridor during pan and zoom, inspect reverse travel and turnouts, and measure update cost with the artwork and itinerary overlays visible. Verify map accessibility and camera behavior when folding on the physical Duo. Record simulator observations separately from device results. The [comparison record](map-comparison.md) contains the earlier renderer checks.
+On the physical Duo, Thomas previously reported that Apple Maps filled the expanded window and that trains appeared and updated. Dense-map pan/zoom performance, update cost, latest fold transitions, safe-area clearance and spoken VoiceOver output still require device acceptance. Simulator checks are recorded separately from physical results. See [train motion](train-motion.md) for estimated movement and lifecycle rules, and the [historical comparison](map-comparison.md) for the earlier two-renderer experiment.

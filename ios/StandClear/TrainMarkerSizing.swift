@@ -29,7 +29,7 @@ enum TrainMarkerSizing {
         return min(1, max(0, (zoom - 12) / 0.5))
     }
 
-    /// Approximate a Mapbox-compatible zoom using a 512-point Mercator world.
+    /// Approximate the shared web artwork zoom scale using a 512-point Mercator world.
     /// MapKit's coordinate region is a bounding box, so this is a comparison
     /// sizing estimate, especially while rotating, not an exact engine zoom.
     static func zoom(longitudeSpan: Double, viewportWidth: Double) -> Double {

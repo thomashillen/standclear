@@ -20,8 +20,6 @@
 	<string>1.0</string>
 	<key>CFBundleVersion</key>
 	<string>1</string>
-	<key>MBXAccessToken</key>
-	<string>$(MAPBOX_PUBLIC_TOKEN)</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>StandClear uses your location to find nearby subway stations and arrivals.</string>
 	<key>UILaunchScreen</key>

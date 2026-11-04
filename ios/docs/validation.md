@@ -1,5 +1,7 @@
 # Native proof-of-concept validation — November 2, 2026
 
+> Historical record: these observations describe the earlier proof of concept. The native app now uses MapKit exclusively; see [the migration record](mapkit-migration.md) for current scope.
+
 ## Executed locally
 
 - Synchronized the existing checkout with `origin/main` (`245e2db`) before implementation; tracked tree clean and exact HEAD match. GitHub authentication, repository push permission, fetch, and a push dry run succeeded. Ignored local configuration was preserved; no `git clean -fdx` used.
