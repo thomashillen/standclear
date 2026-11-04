@@ -203,8 +203,9 @@ final class TransitStore {
                         train(id: "ui-fixture-4-map", route: "4", direction: "N", previous: "631", next: "629", timestamp: timestamp),
                     ],
                     "arrivals": [
-                        arrival(id: "ui-fixture-1-n", route: "1", stop: "127", direction: "N", destination: "126", eta: timestamp + 180),
+                        arrival(id: "ui-fixture-1-n", route: "1", stop: "127", direction: "N", destination: "126", eta: timestamp + 150),
                         arrival(id: "ui-fixture-1-s", route: "1", stop: "127", direction: "S", destination: "128", eta: timestamp + 300),
+                        arrival(id: "ui-fixture-1-n-later", route: "1", stop: "127", direction: "N", destination: "126", eta: timestamp + 630),
                         arrival(id: "ui-fixture-4-n", route: "4", stop: "419", direction: "N", destination: "629", eta: timestamp + 180),
                         arrival(id: "ui-fixture-4-s", route: "4", stop: "629", direction: "S", destination: "419", eta: timestamp + 240),
                     ] + (includeExpress ? [

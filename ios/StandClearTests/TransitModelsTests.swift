@@ -20,6 +20,26 @@ final class TransitModelsTests: XCTestCase {
         XCTAssertEqual(results("  "), names)
     }
 
+    func testNearbyPreviewCombinesOnlyMatchingServicesWithinFirstThreePredictions() {
+        func prediction(_ id: String, route: String = "1", direction: String = "N", destination: String? = "101") -> Arrival {
+            Arrival(routeId: route, stopId: "127", direction: direction, eta: now.timeIntervalSince1970 + 120, tripId: id, destStopId: destination)
+        }
+        let first = prediction("first"), south = prediction("south", direction: "S"), later = prediction("later")
+        let groups = NearbyArrivalGroup.groups([first, south, later, prediction("beyond-preview")])
+        XCTAssertEqual(groups.map(\.id), [first.id, south.id])
+        XCTAssertEqual(groups[0].arrivals.map(\.tripId), ["first", "later"])
+        XCTAssertEqual(groups[1].arrivals.map(\.tripId), ["south"])
+        XCTAssertTrue(NearbyArrivalGroup.groups([]).isEmpty)
+        for distinct in [prediction("express", route: "1X"), prediction("short-turn", destination: "126"),
+                         prediction("missing", destination: nil), prediction("empty", destination: ""),
+                         prediction("unknown-direction", direction: "?")]
+        {
+            XCTAssertEqual(NearbyArrivalGroup.groups([first, distinct]).count, 2)
+        }
+        XCTAssertEqual(NearbyArrivalGroup.groups([prediction("a", destination: nil), prediction("b", destination: nil)]).count, 2)
+        XCTAssertEqual(NearbyArrivalGroup.groups([prediction("a", direction: "?"), prediction("b", direction: "?")]).count, 2)
+    }
+
     func testStationArrivalGroupsPreserveLaterDirectionsAndIndependentPreviews() throws {
         let station = Station(id: "631", stop: stop("631"), stopIDs: ["631"], routes: ["4"])
         func prediction(_ trip: String, _ direction: String, _ seconds: Int) -> Arrival {
