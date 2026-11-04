@@ -475,10 +475,10 @@ final class StandClearUITests: XCTestCase {
         XCTAssertTrue(stations.waitForExistence(timeout: 10))
         if clearHistory.exists {
             clearHistory.tap()
+            XCTAssertTrue(clearHistory.waitForNonExistence(timeout: 5))
         }
         XCTAssertFalse(recent.exists)
-        XCTAssertTrue(field.waitForExistence(timeout: 5))
-        field.tap()
+        guard focusRecentStationSearch(field, in: app) else { return }
         field.typeText("Times Square\n")
         let match = app.buttons["station-127"]
         XCTAssertTrue(match.waitForExistence(timeout: 10))
@@ -518,6 +518,25 @@ final class StandClearUITests: XCTestCase {
         XCTAssertTrue(recent.waitForNonExistence(timeout: 5))
         XCTAssertFalse(clearHistory.exists)
         XCTAssertTrue(stations.exists, "Clearing recent stations must preserve station browsing")
+    }
+
+    @MainActor
+    private func focusRecentStationSearch(_ field: XCUIElement, in app: XCUIApplication,
+                                          file: StaticString = #filePath, line: UInt = #line) -> Bool
+    {
+        let ready = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == true AND hittable == true"), object: field)
+        guard XCTWaiter.wait(for: [ready], timeout: 5) == .completed else {
+            XCTFail("Recent-station search field did not become interactive", file: file, line: line)
+            return false
+        }
+        // Clearing history removes a section from the native list. Activate
+        // the visible text area after that update, then require the keyboard.
+        field.coordinate(withNormalizedOffset: CGVector(dx: 0.3, dy: 0.5)).tap()
+        guard app.keyboards.firstMatch.waitForExistence(timeout: 10) else {
+            XCTFail("Recent-station search did not present its keyboard: \(field.debugDescription)", file: file, line: line)
+            return false
+        }
+        return true
     }
 
     @MainActor
