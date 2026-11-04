@@ -18,8 +18,8 @@ jobs:
   simulator:
     name: Build, analyze, and test iOS
     runs-on: macos-26
-    # Build, full serial tests, result upload and runner cleanup can exceed 35 minutes.
-    timeout-minutes: 40
+    # Build, full serial UI coverage and result cleanup exceeded 40 minutes in run 41846703241.
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v7
       - name: Select an installed iPhone simulator

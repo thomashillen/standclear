@@ -97,7 +97,9 @@ final class StandClearUITests: XCTestCase {
         expanded.lifetime = .keepAlways
         add(expanded)
         XCUIDevice.shared.orientation = .portrait
-        waitForLayout(in: app, expanded: false, readyControl: "nearbyButton")
+        waitForLayout(in: app, expanded: false, readyControl: "Done")
+        XCTAssertTrue(app.navigationBars["Nearby arrivals"].exists, "Explicit Nearby browsing survives narrowing")
+        app.buttons["Done"].tap()
         let neighborhood = XCTAttachment(screenshot: app.screenshot())
         neighborhood.name = "Near Me recentered neighborhood"
         neighborhood.lifetime = .keepAlways
@@ -1177,6 +1179,16 @@ final class StandClearUITests: XCTestCase {
             capture.lifetime = .keepAlways
             add(capture)
             summary.tap()
+        }
+        if locationGranted {
+            // Search may outlast the real 30-second fix lifetime on a hosted
+            // simulator. Deliver a fresh measurement on foreground entry.
+            XCUIDevice.shared.press(.home)
+            XCTAssertTrue(app.wait(for: .runningBackground, timeout: 5))
+            XCUIDevice.shared.location = XCUILocation(location: CLLocation(latitude: 40.7553, longitude: -73.987))
+            app.activate()
+            XCTAssertTrue(app.wait(for: .runningForeground, timeout: 5))
+            XCTAssertTrue(app.navigationBars["Wall St"].waitForExistence(timeout: 5))
         }
         XCTAssertTrue(app.buttons["directionsHere"].waitForExistence(timeout: 5))
         app.buttons["directionsHere"].tap()
