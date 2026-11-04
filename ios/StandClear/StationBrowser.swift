@@ -314,34 +314,22 @@ struct StationArrivals: View {
             let groups = fresh ? StationArrivalGroup.groups(Transit.arrivals(for: station, snapshot: store.snapshot, now: context.date)) : []
             let caveat = "MTA predictions may change. Missing predictions do not mean no service. Partial upstream outages may omit routes."
             List {
-                Button {
-                    // Prefill only on this explicit action, never when navigation
-                    // reappears after a rider edits an endpoint or goes back.
-                    onDirectionsHere(station)
-                    showingDirections = true
-                } label: {
-                    Label("Directions here", systemImage: "arrow.triangle.turn.up.right.diamond")
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .contentShape(Rectangle())
-                }
-                .accessibilityHint("Plan a subway trip to this station. Choose or edit your starting station.")
-                .accessibilityIdentifier("directionsHere")
-                .listRowBackground(Color.clear)
                 StationAlertSection(station: station, load: alerts, now: context.date) { alertsRetry += 1 }
-                Section {
-                    ArrivalFeedState(store: store, now: context.date)
-                    if fresh, groups.isEmpty {
-                        Label("No upcoming predictions", systemImage: "tram")
-                        Text("The feed currently has no upcoming arrivals for this station.")
-                            .foregroundStyle(.secondary)
-                    }
-                } footer: {
-                    if groups.isEmpty {
+                if !fresh || groups.isEmpty {
+                    Section {
+                        if !fresh {
+                            ArrivalFeedState(store: store, now: context.date)
+                        } else {
+                            Label("No upcoming predictions", systemImage: "tram")
+                            Text("The feed currently has no upcoming arrivals for this station.")
+                                .foregroundStyle(.secondary)
+                        }
+                    } footer: {
                         Text(caveat)
                     }
+                    .listRowBackground(Color.clear)
+                    .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
                 }
-                .listRowBackground(Color.clear)
-                .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
                 ForEach(groups) { group in
                     StationDirectionSection(group: group, store: store, now: context.date,
                                             footer: group.id == groups.last?.id ? caveat : nil)
@@ -371,6 +359,19 @@ struct StationArrivals: View {
             }
         }
         .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    // Prefill only on this explicit action, never when navigation
+                    // reappears after a rider edits an endpoint or goes back.
+                    onDirectionsHere(station)
+                    showingDirections = true
+                } label: {
+                    Label("Directions here", systemImage: "arrow.triangle.turn.up.right.diamond")
+                }
+                .labelStyle(.iconOnly)
+                .accessibilityHint("Plan a subway trip to this station. Choose or edit your starting station.")
+                .accessibilityIdentifier("directionsHere")
+            }
             ToolbarItem(placement: .topBarTrailing) {
                 Menu("Save station", systemImage: "ellipsis") {
                     ForEach(SavedPlaces.Anchor.allCases, id: \.self) { anchor in
@@ -421,7 +422,7 @@ private struct StationDirectionSection: View {
                     .foregroundStyle(.secondary)
             } else {
                 ForEach(group.visible(expanded: expanded)) { arrival in
-                    ArrivalRow(arrival: arrival, store: store, now: now)
+                    ArrivalRow(arrival: arrival, store: store, now: now, showsDirection: false)
                 }
                 if group.overflowCount > 0 {
                     let title = expanded ? "Show less" : "Show all (\(group.overflowCount) more)"
@@ -466,6 +467,7 @@ private struct ArrivalRow: View {
     let store: TransitStore
     let now: Date
     var additionalArrivals: [Arrival] = []
+    var showsDirection = true
 
     private var arrivals: [Arrival] {
         [arrival] + additionalArrivals
@@ -492,7 +494,7 @@ private struct ArrivalRow: View {
                         countdown
                     }
                 }
-                if let destination = arrival.destinationName(in: store.lines) {
+                if showsDirection, let destination = arrival.destinationName(in: store.lines) {
                     Text("To \(destination)")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
@@ -511,8 +513,15 @@ private struct ArrivalRow: View {
         return HStack(spacing: 8) {
             RouteBadge(routeID: arrival.routeId,
                        color: store.lines.first { $0.routeId == service.baseID }?.color ?? "808080")
-            Text(service.isExpress ? "\(arrival.directionLabel) · Express" : arrival.directionLabel)
-                .accessibilityLabel(arrival.directionLabel)
+            if showsDirection {
+                Text(service.isExpress ? "\(arrival.directionLabel) · Express" : arrival.directionLabel)
+                    .accessibilityLabel(arrival.directionLabel)
+            } else {
+                let destination = arrival.destinationName(in: store.lines).map { "To \($0)" } ?? "Destination unavailable"
+                Text(service.isExpress ? "\(destination) · Express" : destination)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityLabel("\(arrival.directionLabel), \(destination)")
+            }
         }
     }
 

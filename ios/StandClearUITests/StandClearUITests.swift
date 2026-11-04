@@ -151,6 +151,149 @@ final class StandClearUITests: XCTestCase {
     }
 
     @MainActor
+    func testStationDensityPreservesStaleAlertsAndArrivalDetails() {
+        checkCompactStationDetails(accessibilityText: false)
+    }
+
+    @MainActor
+    func testStationWithoutAdvisoriesStaysQuietOnlyWhenCurrent() {
+        let app = XCUIApplication()
+        XCUIDevice.shared.orientation = .portrait
+        app.resetAuthorizationStatus(for: .location)
+        addUIInterruptionMonitor(withDescription: "Location permission") { alert in
+            let deny = alert.buttons["Don’t Allow"]
+            guard deny.exists else { return false }
+            deny.tap()
+            return true
+        }
+        for stale in [false, true] {
+            app.terminate()
+            app.launchArguments = ["--ui-test-fixture", "-mapProvider", "Apple Maps"]
+            if stale {
+                app.launchArguments.append("--ui-test-stale-alerts")
+            }
+            app.launch()
+            activatePermissionPrompt(in: app)
+            app.buttons["searchButton"].tap()
+            let search = app.searchFields[unifiedSearchPrompt]
+            XCTAssertTrue(search.waitForExistence(timeout: 5))
+            search.tap()
+            search.typeText("Times Sq\n")
+            selectSearchResult("127", query: "Times Sq", in: app)
+            let list = app.collectionViews["stationArrivalsList"]
+            XCTAssertTrue(list.buttons["arrivalRow-ui-fixture-1-n:127:N"].waitForExistence(timeout: 10))
+            XCTAssertFalse(list.staticTexts["Arrival feed connected"].exists)
+            XCTAssertFalse(list.staticTexts["No service alerts reported for this station."].exists)
+            if stale {
+                XCTAssertTrue(list.buttons["stationAlertsRetry"].waitForExistence(timeout: 10))
+                XCTAssertTrue(list.staticTexts["Alert status unconfirmed"].exists, "Empty stale evidence must remain visibly unconfirmed")
+                XCTAssertTrue(list.staticTexts["stationAlertLastReport"].exists)
+            } else {
+                XCTAssertFalse(list.buttons["stationAlertsRetry"].exists)
+            }
+        }
+    }
+
+    @MainActor
+    func testStationDensityAtLargestAccessibilityText() {
+        checkCompactStationDetails(accessibilityText: true)
+    }
+
+    @MainActor
+    func testStationDensityInExpandedControlRegion() {
+        checkCompactStationDetails(accessibilityText: false, expanded: true)
+    }
+
+    @MainActor
+    private func checkCompactStationDetails(accessibilityText: Bool, expanded: Bool = false) {
+        let app = XCUIApplication()
+        app.terminate()
+        XCUIDevice.shared.orientation = .portrait
+        app.resetAuthorizationStatus(for: .location)
+        app.launchArguments = ["--ui-test-fixture", "--ui-test-stale-alerts", "-mapProvider", "Apple Maps"]
+        if accessibilityText {
+            app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
+        }
+        addUIInterruptionMonitor(withDescription: "Location permission") { alert in
+            let deny = alert.buttons["Don’t Allow"]
+            guard deny.exists else { return false }
+            deny.tap()
+            return true
+        }
+        app.launch()
+        activatePermissionPrompt(in: app)
+        if expanded {
+            XCUIDevice.shared.orientation = .landscapeLeft
+            waitForLayout(in: app, expanded: true)
+        }
+        defer {
+            if expanded {
+                XCUIDevice.shared.orientation = .portrait
+            }
+        }
+        app.buttons["searchButton"].tap()
+        let search = app.searchFields[unifiedSearchPrompt]
+        XCTAssertTrue(search.waitForExistence(timeout: 5))
+        search.tap()
+        search.typeText("Wall\n")
+        selectSearchResult("419", query: "Wall", in: app)
+        let list = app.collectionViews["stationArrivalsList"]
+        XCTAssertTrue(list.waitForExistence(timeout: 5))
+        if expanded {
+            let window = app.windows.firstMatch.frame
+            XCTAssertGreaterThan(list.frame.midX, window.midX, "Station details should occupy the expanded right-side control region")
+            XCTAssertLessThanOrEqual(list.frame.width, window.width / 2)
+        }
+        let retry = list.buttons["stationAlertsRetry"]
+        XCTAssertTrue(retry.waitForExistence(timeout: 10))
+        XCTAssertTrue(list.staticTexts["Alert status unconfirmed"].exists)
+        XCTAssertTrue(list.staticTexts["stationAlertLastReport"].exists)
+        XCTAssertFalse(list.staticTexts["Arrival feed connected"].exists)
+        XCTAssertFalse(list.staticTexts["Service alerts"].exists, "A separate heading must not displace arrivals")
+        XCTAssertGreaterThanOrEqual(retry.frame.height, 44)
+        retry.tap()
+        let summary = list.buttons["stationAlertsSummary"]
+        XCTAssertTrue(summary.waitForExistence(timeout: 10))
+        XCTAssertTrue(summary.label.contains("1 severe"), "Stale evidence must retain the last reported advisory and its severity")
+        let arrival = list.buttons["arrivalRow-ui-fixture-4-n:419:N"]
+        if !accessibilityText {
+            XCTAssertTrue(arrival.waitForExistence(timeout: 5))
+            XCTAssertTrue(list.frame.contains(arrival.frame), "The first station prediction should be visible without scrolling at standard text size")
+        }
+        let first = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        first.name = expanded ? "Expanded station alerts and first arrival" : accessibilityText ? "Station status at largest accessibility text" : "Compact station alerts and first arrival"
+        first.lifetime = .keepAlways
+        add(first)
+
+        func reveal(_ element: XCUIElement) {
+            for _ in 0 ..< 8 {
+                if element.exists, element.frame.height > 0, list.frame.contains(element.frame), element.isHittable {
+                    return
+                }
+                list.swipeUp()
+            }
+            XCTFail("Could not reveal \(element.identifier)")
+        }
+        reveal(summary)
+        summary.tap()
+        let advisory = list.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "Allow extra travel time at Wall St.")).firstMatch
+        XCTAssertTrue(advisory.waitForExistence(timeout: 5))
+        summary.tap()
+        reveal(arrival)
+        XCTAssertTrue(arrival.label.contains("Northbound"), "Direction remains available to VoiceOver even when its section supplies the visual label")
+        XCTAssertTrue(arrival.label.contains("59 St"))
+        XCTAssertTrue(arrival.label.contains("Predicted in"))
+        XCTAssertGreaterThanOrEqual(arrival.frame.height, 44)
+        arrival.tap()
+        let clock = list.staticTexts.matching(NSPredicate(format: "identifier == %@ AND label BEGINSWITH %@", arrival.identifier, "Predicted arrival:")).firstMatch
+        XCTAssertTrue(clock.waitForExistence(timeout: 5))
+        let detail = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        detail.name = expanded ? "Expanded station arrival clock disclosure" : accessibilityText ? "Station arrival at largest accessibility text" : "Station arrival clock disclosure"
+        detail.lifetime = .keepAlways
+        add(detail)
+    }
+
+    @MainActor
     func testBusyStationArrivalGroupsExpandIndependently() {
         let app = XCUIApplication()
         app.terminate()
