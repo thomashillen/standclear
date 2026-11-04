@@ -368,3 +368,42 @@ final class FavoriteStationsTests: XCTestCase {
         XCTAssertEqual(FavoriteStations(defaults: defaults).ids, ["127"])
     }
 }
+
+@MainActor
+final class SavedPlacesTests: XCTestCase {
+    func testPersistsReplacesMovesAndRemovesAddresses() throws {
+        let domain = "StandClear.SavedPlacesTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: domain))
+        defer { defaults.removePersistentDomain(forName: domain) }
+        let home = PlaceResult(id: "home", name: "Home address", subtitle: "NYC", latitude: 40.75, longitude: -74)
+        let work = PlaceResult(id: "work", name: "Work address", subtitle: "NYC", latitude: 40.76, longitude: -74)
+        let saved = SavedPlaces(defaults: defaults)
+        saved.set(home, for: .home)
+        saved.set(work, for: .work)
+        let restored = SavedPlaces(defaults: defaults)
+        XCTAssertEqual(restored.places["Home"], home)
+        XCTAssertEqual(restored.places["Work"], work)
+        let refreshedHome = PlaceResult(id: "new-search-id", name: home.name, subtitle: home.subtitle,
+                                        latitude: home.latitude, longitude: home.longitude)
+        restored.set(refreshedHome, for: .work)
+        XCTAssertNil(restored.places["Home"], "One address occupies only one anchor, even after a new lookup")
+        XCTAssertEqual(SavedPlaces(defaults: defaults).places["Work"], refreshedHome)
+        restored.set(work, for: .work)
+        XCTAssertEqual(SavedPlaces(defaults: defaults).places["Work"], work)
+        restored.set(nil, for: .work)
+        XCTAssertTrue(SavedPlaces(defaults: defaults).places.isEmpty)
+    }
+
+    func testInvalidSavedCoordinatesAndNamesAreDiscarded() throws {
+        let domain = "StandClear.SavedPlacesTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: domain))
+        defer { defaults.removePersistentDomain(forName: domain) }
+        let invalid = PlaceResult(id: "bad", name: "Invalid", subtitle: "", latitude: 999, longitude: 0)
+        try defaults.set(JSONEncoder().encode(["Home": invalid]), forKey: SavedPlaces.storageKey)
+        let saved = SavedPlaces(defaults: defaults)
+        XCTAssertTrue(saved.places.isEmpty)
+        saved.set(invalid, for: .home)
+        saved.set(PlaceResult(id: "empty", name: " ", subtitle: "", latitude: 40, longitude: -74), for: .work)
+        XCTAssertTrue(saved.places.isEmpty)
+    }
+}
