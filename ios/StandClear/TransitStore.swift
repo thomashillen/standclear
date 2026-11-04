@@ -21,16 +21,20 @@ final class TransitStore {
     private var refreshTask: Task<Snapshot, Error>?
     private var refreshID = UUID()
     private var linesTask: Task<StaticData, Error>?
+    private var linesRequestID = UUID()
     private var active = false
     private var generation = 0
     private let baseURL: URL
     private let session: URLSession
+    private let pollingSleep: @MainActor (Duration) async throws -> Void
 
     init(session: URLSession = .shared,
-         baseURL: URL = URL(string: "https://standclear.vercel.app")!)
+         baseURL: URL = URL(string: "https://standclear.vercel.app")!,
+         pollingSleep: @escaping @MainActor (Duration) async throws -> Void = { try await Task.sleep(for: $0) })
     {
         self.session = session
         self.baseURL = baseURL
+        self.pollingSleep = pollingSleep
     }
 
     private func fetch<T: Decodable>(_ path: String) async throws -> T {
@@ -59,23 +63,28 @@ final class TransitStore {
         let current = generation
         loading = true
         error = nil
-        defer {
-            if current == generation {
-                loading = false; linesTask = nil
-            }
-        }
         if linesTask == nil {
+            linesRequestID = UUID()
             linesTask = Task { try await self.fetch("gtfsData.json") }
         }
         guard let task = linesTask else { return }
+        let requestID = linesRequestID
+        defer {
+            if current == generation, requestID == linesRequestID {
+                loading = false; linesTask = nil
+            }
+        }
         do {
             let data = try await task.value
-            guard active, current == generation else { return }
+            guard active, current == generation, requestID == linesRequestID else { return }
             try Task.checkCancellation()
-            lines = data.lines.values.sorted { $0.routeId < $1.routeId }
-            stations = Transit.stations(lines)
+            let loadedLines = data.lines.values.sorted { $0.routeId < $1.routeId }
+            let loadedStations = Transit.stations(loadedLines)
+            guard !loadedStations.isEmpty else { throw URLError(.cannotParseResponse) }
+            lines = loadedLines
+            stations = loadedStations
         } catch is CancellationError {} catch {
-            if active, current == generation, !Task.isCancelled {
+            if active, current == generation, requestID == linesRequestID, !Task.isCancelled {
                 self.error = "Subway data couldn’t load. Check your connection and try again."
             }
         }
@@ -124,13 +133,21 @@ final class TransitStore {
     }
 
     func run() async {
+        guard !Task.isCancelled else { return }
         active = true
-        if lines.isEmpty {
-            await loadLines()
-        }
-        while !Task.isCancelled {
+        let current = generation
+        var staticAttempts = 0
+        // Retry a transient cold-start failure at the existing polling cadence,
+        // at most three times after the first attempt. Manual Retry stays usable.
+        while active, current == generation, !Task.isCancelled {
+            if lines.isEmpty, staticAttempts < 4 {
+                staticAttempts += 1
+                await loadLines()
+            }
+            guard active, current == generation, !Task.isCancelled else { return }
             await refresh()
-            do { try await Task.sleep(for: .seconds(feedError ? 30 : 8)) } catch { return }
+            guard active, current == generation, !Task.isCancelled else { return }
+            do { try await pollingSleep(.seconds(feedError ? 30 : 8)) } catch { return }
         }
     }
 

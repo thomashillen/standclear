@@ -251,15 +251,117 @@ final class TransitStoreTests: XCTestCase {
         XCTAssertFalse(store.feedError)
     }
 
-    private func makeStore(_ fixture: ResponseFixture) -> (TransitStore, URLSession) {
+    func testStaticStartupFailureRecoversAutomaticallyWithoutStoppingTrainPolling() async throws {
+        let fixture = ResponseFixture(), gate = PollingGate()
+        let (store, session) = makeStore(fixture, preloadLines: false, pollingSleep: gate.sleep)
+        let run = Task { await store.run() }
+        defer { run.cancel(); store.stop(); gate.cancel(); session.invalidateAndCancel() }
+        try await waitUntil { fixture.requestCount(for: "/gtfsData.json") == 1 }
+        fixture.respondStatic(statusCode: 503)
+        try await waitUntil { fixture.requestCount(for: "/api/trains") == 1 }
+        XCTAssertNotNil(store.error)
+        XCTAssertFalse(store.loading)
+        fixture.respond(generatedAt: generatedAt)
+        try await waitUntil { gate.durations.count == 1 }
+        XCTAssertEqual(gate.durations, [.seconds(8)])
+        XCTAssertNotNil(store.error, "The retry delay must retain the visible failure")
+        gate.advance()
+        try await waitUntil { fixture.requestCount(for: "/gtfsData.json") == 2 }
+        fixture.respondStatic()
+        try await waitUntil { fixture.requestCount(for: "/api/trains") == 2 }
+        XCTAssertEqual(store.stations.map(\.id), ["127"])
+        XCTAssertNil(store.error)
+        fixture.respond(generatedAt: generatedAt)
+        try await waitUntil { gate.durations.count == 2 }
+        gate.advance()
+        try await waitUntil { fixture.requestCount(for: "/api/trains") == 3 }
+        XCTAssertEqual(fixture.requestCount(for: "/gtfsData.json"), 2, "Static requests stop after recovery")
+    }
+
+    func testStaticRetryLimitRejectsEmptyPayloadAndManualRetryStillSharesRequest() async throws {
+        let fixture = ResponseFixture(), gate = PollingGate()
+        let (store, session) = makeStore(fixture, preloadLines: false, pollingSleep: gate.sleep)
+        let run = Task { await store.run() }
+        defer { run.cancel(); store.stop(); gate.cancel(); session.invalidateAndCancel() }
+        for attempt in 1 ... 4 {
+            try await waitUntil { fixture.requestCount(for: "/gtfsData.json") == attempt }
+            fixture.respondStatic(empty: true)
+            try await waitUntil { fixture.requestCount(for: "/api/trains") == attempt }
+            XCTAssertTrue(store.lines.isEmpty && store.stations.isEmpty)
+            XCTAssertNotNil(store.error, "An empty decoded payload is not recovery")
+            fixture.respond(generatedAt: generatedAt, statusCode: 503)
+            try await waitUntil { gate.durations.count == attempt }
+            XCTAssertEqual(gate.durations.last, .seconds(30))
+            gate.advance()
+        }
+        try await waitUntil { fixture.requestCount(for: "/api/trains") == 5 }
+        XCTAssertEqual(fixture.requestCount(for: "/gtfsData.json"), 4)
+        fixture.respond(generatedAt: generatedAt)
+        try await waitUntil { gate.durations.count == 5 }
+        let manual = Task { await store.loadLines() }
+        try await waitUntil { fixture.requestCount(for: "/gtfsData.json") == 5 }
+        var joined = false
+        let overlapping = Task { joined = true; await store.loadLines() }
+        try await waitUntil { joined }
+        XCTAssertEqual(fixture.requestCount(for: "/gtfsData.json"), 5, "Manual retries share an in-flight request")
+        fixture.respondStatic()
+        await manual.value
+        await overlapping.value
+        XCTAssertEqual(store.stations.map(\.id), ["127"])
+        XCTAssertNil(store.error)
+    }
+
+    func testStoppedStaticRetryCannotResumeInANewerActiveGeneration() async throws {
+        let fixture = ResponseFixture(), oldGate = PollingGate()
+        let (store, session) = makeStore(fixture, preloadLines: false, pollingSleep: oldGate.sleep)
+        let oldRun = Task { await store.run() }
+        defer { oldRun.cancel(); store.stop(); oldGate.cancel(); session.invalidateAndCancel() }
+        try await waitUntil { fixture.requestCount == 1 }
+        fixture.respondStatic(statusCode: 503)
+        try await waitUntil { fixture.requestCount == 2 }
+        fixture.respond(generatedAt: generatedAt)
+        try await waitUntil { oldGate.durations.count == 1 }
+        store.stop()
+        let resumed = Task { await store.run() }
+        defer { resumed.cancel() }
+        try await waitUntil { fixture.requestCount(for: "/gtfsData.json") == 2 }
+        oldGate.advance()
+        await oldRun.value
+        XCTAssertEqual(fixture.requestCount, 3, "The old run must not join the new generation's work")
+        store.stop()
+        try await waitUntil { fixture.cancellationCount > 0 }
+        await resumed.value
+        XCTAssertTrue(store.lines.isEmpty && store.stations.isEmpty)
+        XCTAssertFalse(store.loading)
+    }
+
+    func testLateStaticResponseCannotPublishAfterStop() async throws {
+        let fixture = ResponseFixture()
+        let (store, session) = makeStore(fixture, preloadLines: false)
+        let run = Task { await store.run() }
+        defer { run.cancel(); store.stop(); session.invalidateAndCancel() }
+        try await waitUntil { fixture.requestCount == 1 }
+        fixture.respondStatic()
+        store.stop()
+        await run.value
+        XCTAssertTrue(store.lines.isEmpty && store.stations.isEmpty)
+        XCTAssertEqual(fixture.requestCount(for: "/api/trains"), 0)
+        XCTAssertFalse(store.loading)
+    }
+
+    private func makeStore(_ fixture: ResponseFixture, preloadLines: Bool = true,
+                           pollingSleep: @escaping @MainActor (Duration) async throws -> Void = { try await Task.sleep(for: $0) }) -> (TransitStore, URLSession)
+    {
         let host = "fixture-\(UUID().uuidString.lowercased()).example"
         FixtureRegistry.shared.register(fixture, host: host)
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [FixtureURLProtocol.self]
         let session = URLSession(configuration: configuration)
-        let store = TransitStore(session: session, baseURL: URL(string: "https://\(host)")!)
+        let store = TransitStore(session: session, baseURL: URL(string: "https://\(host)")!, pollingSleep: pollingSleep)
         // These tests isolate train polling; static-data parsing has separate coverage.
-        store.lines = [SubwayLine(id: "1", routeId: "1", color: "EE352E", stops: [], shape: [])]
+        if preloadLines {
+            store.lines = [SubwayLine(id: "1", routeId: "1", color: "EE352E", stops: [], shape: [])]
+        }
         return (store, session)
     }
 
@@ -272,6 +374,32 @@ final class TransitStoreTests: XCTestCase {
             }
             try await Task.sleep(for: .milliseconds(10))
         }
+    }
+}
+
+@MainActor
+private final class PollingGate {
+    private(set) var durations: [Duration] = []
+    private var pending: CheckedContinuation<Void, Error>?
+
+    func sleep(_ duration: Duration) async throws {
+        try Task.checkCancellation()
+        try await withCheckedThrowingContinuation { continuation in
+            durations.append(duration)
+            pending = continuation
+        }
+    }
+
+    func advance() {
+        let continuation = pending
+        pending = nil
+        continuation?.resume()
+    }
+
+    func cancel() {
+        let continuation = pending
+        pending = nil
+        continuation?.resume(throwing: CancellationError())
     }
 }
 
@@ -296,6 +424,7 @@ private final class ResponseFixture: @unchecked Sendable {
     private let lock = NSLock()
     private var pending: FixtureURLProtocol?
     private var requests = 0
+    private var paths: [String] = []
     private var cancellations = 0
     var requestCount: Int {
         lock.lock(); defer { lock.unlock() }; return requests
@@ -305,10 +434,16 @@ private final class ResponseFixture: @unchecked Sendable {
         lock.lock(); defer { lock.unlock() }; return cancellations
     }
 
+    func requestCount(for path: String) -> Int {
+        lock.lock(); defer { lock.unlock() }
+        return paths.filter { $0 == path }.count
+    }
+
     func started(_ request: FixtureURLProtocol) {
         lock.lock(); defer { lock.unlock() }
         pending = request
         requests += 1
+        paths.append(request.request.url?.path ?? "")
     }
 
     func stopped() {
@@ -318,13 +453,22 @@ private final class ResponseFixture: @unchecked Sendable {
     }
 
     func respond(generatedAt: Double, includesTrain: Bool = false, statusCode: Int = 200) {
+        let trains = includesTrain ? #"[{"id":"fixture-train","routeId":"1","direction":"S","progress":0.5,"prevStopId":"126","nextStopId":"127","status":"IN_TRANSIT_TO"}]"# : "[]"
+        let data = Data("{\"generatedAt\":\(generatedAt),\"trains\":\(trains),\"arrivals\":[]}".utf8)
+        respond(data: data, statusCode: statusCode)
+    }
+
+    func respondStatic(statusCode: Int = 200, empty: Bool = false) {
+        let data = Data((empty ? #"{"lines":{}}"# : #"{"lines":{"1":{"id":"1","routeId":"1","color":"EE352E","stops":[{"id":"127","name":"Times Sq-42 St","lat":40.75529,"lng":-73.987495,"shapeIdx":0}],"shape":[[-73.987495,40.75529]]}}}"#).utf8)
+        respond(data: data, statusCode: statusCode)
+    }
+
+    private func respond(data: Data, statusCode: Int) {
         lock.lock()
         let request = pending
         pending = nil
         lock.unlock()
         guard let request, let url = request.request.url else { return }
-        let trains = includesTrain ? #"[{"id":"fixture-train","routeId":"1","direction":"S","progress":0.5,"prevStopId":"126","nextStopId":"127","status":"IN_TRANSIT_TO"}]"# : "[]"
-        let data = Data("{\"generatedAt\":\(generatedAt),\"trains\":\(trains),\"arrivals\":[]}".utf8)
         request.client?.urlProtocol(request, didReceive: HTTPURLResponse(url: url, statusCode: statusCode, httpVersion: nil, headerFields: nil)!, cacheStoragePolicy: .notAllowed)
         request.client?.urlProtocol(request, didLoad: data)
         request.client?.urlProtocolDidFinishLoading(request)

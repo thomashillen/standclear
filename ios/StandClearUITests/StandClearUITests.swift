@@ -316,7 +316,7 @@ final class StandClearUITests: XCTestCase {
         app.buttons["searchButton"].tap()
         let field = app.searchFields[unifiedSearchPrompt]
         XCTAssertTrue(field.waitForExistence(timeout: 5))
-        field.tap()
+        guard focusSearchField(field, in: app) else { return }
         field.typeText("Grand Central\n")
         selectSearchResult("631", query: "Grand Central", in: app)
         XCTAssertTrue(app.navigationBars["Grand Central-42 St"].waitForExistence(timeout: 5))
@@ -462,8 +462,7 @@ final class StandClearUITests: XCTestCase {
         activatePermissionPrompt(in: app)
         app.buttons["searchButton"].tap()
         let field = app.searchFields[unifiedSearchPrompt]
-        XCTAssertTrue(field.waitForExistence(timeout: 5))
-        field.tap()
+        guard focusSearchField(field, in: app) else { return }
         field.typeText("Wall\n")
         selectSearchResult("419", query: "Wall", in: app)
         let detail = app.navigationBars["Wall St"]
@@ -620,7 +619,7 @@ final class StandClearUITests: XCTestCase {
             app.buttons["searchButton"].tap()
             let search = app.searchFields[unifiedSearchPrompt]
             XCTAssertTrue(search.waitForExistence(timeout: 5))
-            search.tap()
+            guard focusSearchField(search, in: app) else { return }
             search.typeText("Pelham Bay Park\n")
             selectSearchResult("601", query: "Pelham Bay Park", in: app)
             let alerts = app.buttons["stationAlertsSummary"]
@@ -661,10 +660,10 @@ final class StandClearUITests: XCTestCase {
         XCTAssertTrue(stations.waitForExistence(timeout: 10))
         if clearHistory.exists {
             clearHistory.tap()
+            XCTAssertTrue(clearHistory.waitForNonExistence(timeout: 5))
         }
         XCTAssertFalse(recent.exists)
-        XCTAssertTrue(field.waitForExistence(timeout: 5))
-        field.tap()
+        guard focusSearchField(field, in: app) else { return }
         field.typeText("Times Square\n")
         let match = app.buttons["station-127"]
         XCTAssertTrue(match.waitForExistence(timeout: 10))
@@ -704,6 +703,25 @@ final class StandClearUITests: XCTestCase {
         XCTAssertTrue(recent.waitForNonExistence(timeout: 5))
         XCTAssertFalse(clearHistory.exists)
         XCTAssertTrue(stations.exists, "Clearing recent stations must preserve station browsing")
+    }
+
+    @MainActor
+    private func focusSearchField(_ field: XCUIElement, in app: XCUIApplication,
+                                  file: StaticString = #filePath, line: UInt = #line) -> Bool
+    {
+        let ready = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == true AND hittable == true"), object: field)
+        guard XCTWaiter.wait(for: [ready], timeout: 5) == .completed else {
+            XCTFail("Search field did not become interactive", file: file, line: line)
+            return false
+        }
+        // Activate the visible text area only once the native search field
+        // is interactive, then require its keyboard before injecting text.
+        field.coordinate(withNormalizedOffset: CGVector(dx: 0.3, dy: 0.5)).tap()
+        guard app.keyboards.firstMatch.waitForExistence(timeout: 10) else {
+            XCTFail("Search did not present its keyboard: \(field.debugDescription)", file: file, line: line)
+            return false
+        }
+        return true
     }
 
     @MainActor
@@ -749,7 +767,7 @@ final class StandClearUITests: XCTestCase {
         let field = app.searchFields[unifiedSearchPrompt]
         XCTAssertTrue(field.waitForExistence(timeout: 10))
         XCTAssertEqual(app.searchFields.count, 1)
-        field.tap()
+        guard focusSearchField(field, in: app) else { return }
         field.typeText("550 Madison\n")
         let result = app.buttons["placeResult-fixture-550-madison"]
         XCTAssertTrue(result.waitForExistence(timeout: 10))
@@ -769,7 +787,7 @@ final class StandClearUITests: XCTestCase {
         origin.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
         let picker = app.searchFields[unifiedSearchPrompt]
         XCTAssertTrue(picker.waitForExistence(timeout: 10))
-        picker.tap()
+        guard focusSearchField(picker, in: app) else { return }
         picker.typeText("Wall\n")
         let chosen = app.buttons["stationChoice-419"]
         revealPlaceElement(chosen, in: app.collectionViews.firstMatch)
@@ -834,7 +852,7 @@ final class StandClearUITests: XCTestCase {
         app.buttons["searchButton"].tap()
         let field = app.searchFields[unifiedSearchPrompt]
         XCTAssertTrue(field.waitForExistence(timeout: 5))
-        field.tap()
+        guard focusSearchField(field, in: app) else { return }
         field.typeText("Noguchi\n")
         let museum = app.buttons["placeResult-fixture-noguchi"]
         XCTAssertTrue(museum.waitForExistence(timeout: 10))
@@ -844,7 +862,7 @@ final class StandClearUITests: XCTestCase {
         origin.tap()
         let picker = app.searchFields[unifiedSearchPrompt]
         XCTAssertTrue(picker.waitForExistence(timeout: 5))
-        picker.tap()
+        guard focusSearchField(picker, in: app) else { return }
         picker.typeText("55 Wall Street\n")
         let address = app.buttons["placeOriginResult-fixture-55-wall-street"]
         XCTAssertTrue(address.waitForExistence(timeout: 10))
@@ -934,7 +952,7 @@ final class StandClearUITests: XCTestCase {
         app.buttons["searchButton"].tap()
         let field = app.searchFields[unifiedSearchPrompt]
         XCTAssertTrue(field.waitForExistence(timeout: 10))
-        field.tap()
+        guard focusSearchField(field, in: app) else { return }
         field.typeText("Noguchi\n")
         let museum = app.buttons["placeResult-fixture-noguchi"]
         XCTAssertTrue(museum.waitForExistence(timeout: 10))
@@ -1015,7 +1033,7 @@ final class StandClearUITests: XCTestCase {
             origin.tap()
             let picker = app.searchFields[unifiedSearchPrompt]
             XCTAssertTrue(picker.waitForExistence(timeout: 5))
-            picker.tap()
+            guard focusSearchField(picker, in: app) else { return }
             picker.typeText("49 St\n")
             let manual = app.buttons["stationChoice-R15"]
             revealPlaceElement(manual, in: app.collectionViews.firstMatch)
@@ -1220,7 +1238,7 @@ final class StandClearUITests: XCTestCase {
         app.buttons["searchButton"].tap()
         let field = app.searchFields[unifiedSearchPrompt]
         XCTAssertTrue(field.waitForExistence(timeout: 5))
-        field.tap()
+        guard focusSearchField(field, in: app) else { return }
         field.typeText("Wall\n")
         selectSearchResult("419", query: "Wall", in: app)
         XCTAssertTrue(app.navigationBars["Wall St"].waitForExistence(timeout: 5))
@@ -1336,9 +1354,7 @@ final class StandClearUITests: XCTestCase {
         app.buttons["searchButton"].tap()
         let search = app.searchFields[unifiedSearchPrompt]
         XCTAssertTrue(search.waitForExistence(timeout: 5))
-        search.tap()
-        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 10),
-                      "Tapping Search must present a usable keyboard before entering a station")
+        guard focusSearchField(search, in: app) else { return }
         search.typeText("Wall\n")
         if !expanded, !locationGranted {
             // The same submitted query offers both a place and a station.
@@ -1371,7 +1387,12 @@ final class StandClearUITests: XCTestCase {
             // Search may outlast the real 30-second fix lifetime on a hosted
             // simulator. Deliver a fresh measurement on foreground entry.
             XCUIDevice.shared.press(.home)
-            XCTAssertTrue(app.wait(for: .runningBackground, timeout: 5))
+            let backgrounded = NSPredicate { _, _ in MainActor.assumeIsolated {
+                let state = app.state
+                return state == .runningBackground || state == .runningBackgroundSuspended
+            } }
+            expectation(for: backgrounded, evaluatedWith: app)
+            waitForExpectations(timeout: 5)
             XCUIDevice.shared.location = XCUILocation(location: CLLocation(latitude: 40.7553, longitude: -73.987))
             app.activate()
             XCTAssertTrue(app.wait(for: .runningForeground, timeout: 5))
