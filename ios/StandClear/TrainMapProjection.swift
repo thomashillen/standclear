@@ -14,6 +14,31 @@ struct TrainMapMarker: Identifiable {
     var stale: Bool {
         opacity < 1
     }
+
+    var spokenRouteName: String {
+        if let base = TrainRouteGeometry.expressBaseID(routeID) {
+            return "\(base) Express"
+        }
+        return ["GS", "FS", "H"].contains(routeID) ? "S" : displayLetter
+    }
+}
+
+/// Geometry aliases do not change reported service identity or boarding rules.
+/// Only known express services may use a base shape when no exact shape exists.
+enum TrainRouteGeometry {
+    static func expressBaseID(_ routeID: String) -> String? {
+        ["6X": "6", "7X": "7", "FX": "F"][routeID]
+    }
+
+    static func routeIDs(in lines: [SubwayLine]) -> [String: String] {
+        var ids = Dictionary(lines.map { ($0.routeId, $0.routeId) }, uniquingKeysWith: { first, _ in first })
+        for express in ["6X", "7X", "FX"] where ids[express] == nil {
+            if let base = expressBaseID(express), ids[base] != nil {
+                ids[express] = base
+            }
+        }
+        return ids
+    }
 }
 
 enum TrainMapProjection {
@@ -21,6 +46,9 @@ enum TrainMapProjection {
                         feedUnavailable: Bool = false) -> [TrainMapMarker]
     {
         guard !feedUnavailable, let snapshot, snapshot.isFresh(at: now) else { return [] }
+        // Build aliases before validation: an unusable exact shape must not
+        // silently redirect the train onto a different representative shape.
+        let geometryIDs = TrainRouteGeometry.routeIDs(in: lines)
         var routes: [String: Geometry] = [:]
         for line in lines where line.shape.allSatisfy({ $0.count == 2 && valid(.init(latitude: $0[1], longitude: $0[0])) }) {
             var stops: [String: Stop] = [:]
@@ -31,7 +59,8 @@ enum TrainMapProjection {
         }
         let arrivalsByTrip = Dictionary(grouping: snapshot.arrivals, by: \.tripId)
         return snapshot.uniqueTrains.compactMap { train in
-            guard let geometry = routes[train.routeId],
+            guard let geometryID = geometryIDs[train.routeId], let geometry = routes[geometryID],
+                  geometryID == train.routeId || supportsExpressFallback(train, geometry: geometry),
                   let coordinate = position(train, geometry: geometry), valid(coordinate) else { return nil }
             let line = geometry.line
             let timestamp = train.lastReportedAt ?? snapshot.generatedAt / 1000
@@ -40,7 +69,7 @@ enum TrainMapProjection {
             guard age <= 360 else { return nil }
             return TrainMapMarker(id: train.id, coordinate: coordinate,
                                   bearingDegrees: heading(train, geometry: geometry, arrivals: arrivalsByTrip[train.id] ?? [], generatedAt: snapshot.generatedAt),
-                                  routeID: train.routeId, displayLetter: line.id, color: line.color,
+                                  routeID: train.routeId, displayLetter: TrainRouteGeometry.expressBaseID(train.routeId) == nil ? line.id : train.routeId, color: line.color,
                                   textColor: contrastingTextColor(line.color),
                                   opacity: age <= 90 ? 1 : 1 - 0.6 * (age - 90) / 270)
         }
@@ -50,6 +79,16 @@ enum TrainMapProjection {
         let line: SubwayLine
         let coordinates: [CLLocationCoordinate2D]
         let stops: [String: Stop]
+    }
+
+    private static func supportsExpressFallback(_ train: Train, geometry: Geometry) -> Bool {
+        guard let next = geometry.stops[train.nextStopId] else { return false }
+        if train.status == "STOPPED_AT" {
+            return true
+        }
+        guard let previous = geometry.stops[train.prevStopId] else { return false }
+        return previous.id == next.id ||
+            (geometry.coordinates.indices.contains(previous.shapeIdx) && geometry.coordinates.indices.contains(next.shapeIdx))
     }
 
     private static func position(_ train: Train, geometry: Geometry) -> CLLocationCoordinate2D? {
