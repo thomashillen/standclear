@@ -4,6 +4,8 @@ import XCTest
 
 @MainActor
 final class TransitStoreTests: XCTestCase {
+    private let generatedAt = Date.now.timeIntervalSince1970 * 1000
+
     func testPlaceRenewalRequestsOncePerSourceTimestampAndDoesNotExtendExpiry() {
         let start = Date(timeIntervalSince1970: 1_800_000_000)
         var schedule = LocationFixSchedule()
@@ -70,14 +72,77 @@ final class TransitStoreTests: XCTestCase {
         let thirdRefresh = Task { await sharedRefresh() }
         try await waitUntil { entered == 2 }
         XCTAssertEqual(fixture.requestCount, 1)
-        fixture.respond(generatedAt: 1_800_000_000_000)
+        fixture.respond(generatedAt: generatedAt)
         let secondRevision = await secondRefresh.value
         let thirdRevision = await thirdRefresh.value
         let accepted = try XCTUnwrap(store.motionSnapshotRevision)
         XCTAssertEqual(secondRevision, accepted)
         XCTAssertEqual(thirdRevision, accepted)
-        XCTAssertEqual(store.snapshot?.generatedAt, 1_800_000_000_000)
+        XCTAssertEqual(store.snapshot?.generatedAt, generatedAt)
         XCTAssertEqual(fixture.requestCount, 1)
+    }
+
+    func testFutureSnapshotCannotBlockRecoveryToValidFeed() async throws {
+        let fixture = ResponseFixture()
+        let (store, session) = makeStore(fixture)
+        defer { session.invalidateAndCancel() }
+        let run = Task { await store.run() }
+        defer { run.cancel(); store.stop() }
+        let now = Date.now.timeIntervalSince1970 * 1000
+        try await waitUntil { fixture.requestCount == 1 }
+        fixture.respond(generatedAt: now + 86_400_000)
+        try await waitUntil { store.feedError || store.snapshot != nil }
+        XCTAssertNil(store.snapshot, "A future timestamp must not become the comparison baseline")
+        XCTAssertTrue(store.feedError)
+        XCTAssertNil(store.motionSnapshotRevision)
+
+        let recovery = Task { await store.refresh() }
+        try await waitUntil { fixture.requestCount == 2 }
+        fixture.respond(generatedAt: now)
+        await recovery.value
+        XCTAssertEqual(store.snapshot?.generatedAt, now)
+        XCTAssertFalse(store.feedError)
+        XCTAssertNotNil(store.motionSnapshotRevision)
+    }
+
+    func testInvalidRefreshPreservesCacheUntilValidRecovery() async throws {
+        let fixture = ResponseFixture()
+        let (store, session) = makeStore(fixture)
+        defer { session.invalidateAndCancel() }
+        let run = Task { await store.run() }
+        defer { run.cancel(); store.stop() }
+        try await waitUntil { fixture.requestCount == 1 }
+        fixture.respond(generatedAt: generatedAt)
+        try await waitUntil { store.motionSnapshotRevision != nil }
+        for (index, invalid) in [0.0, -1, generatedAt + 86_400_000].enumerated() {
+            let refresh = Task { await store.refresh() }
+            try await waitUntil { fixture.requestCount == index + 2 }
+            fixture.respond(generatedAt: invalid)
+            await refresh.value
+            XCTAssertEqual(store.snapshot?.generatedAt, generatedAt)
+            XCTAssertTrue(store.feedError)
+            XCTAssertNil(store.motionSnapshotRevision)
+        }
+        let recovery = Task { await store.refresh() }
+        try await waitUntil { fixture.requestCount == 5 }
+        fixture.respond(generatedAt: generatedAt)
+        await recovery.value
+        XCTAssertFalse(store.feedError)
+        XCTAssertNotNil(store.motionSnapshotRevision)
+    }
+
+    func testValidResponseReplacesFutureCacheAfterClockChange() async throws {
+        let fixture = ResponseFixture()
+        let (store, session) = makeStore(fixture)
+        defer { session.invalidateAndCancel() }
+        store.snapshot = Snapshot(generatedAt: generatedAt + 86_400_000, trains: [], arrivals: [])
+        let run = Task { await store.run() }
+        defer { run.cancel(); store.stop() }
+        try await waitUntil { fixture.requestCount == 1 }
+        fixture.respond(generatedAt: generatedAt)
+        try await waitUntil { store.motionSnapshotRevision != nil }
+        XCTAssertEqual(store.snapshot?.generatedAt, generatedAt)
+        XCTAssertFalse(store.feedError)
     }
 
     func testOlderSnapshotCannotReplaceNewerPredictions() async throws {
@@ -87,15 +152,15 @@ final class TransitStoreTests: XCTestCase {
         let run = Task { await store.run() }
         defer { run.cancel(); store.stop() }
         try await waitUntil { fixture.requestCount == 1 }
-        fixture.respond(generatedAt: 1_800_000_000_000)
+        fixture.respond(generatedAt: generatedAt)
         try await waitUntil { store.snapshot != nil }
         let accepted = try XCTUnwrap(store.motionSnapshotRevision)
 
         let refresh = Task { await store.refresh() }
         try await waitUntil { fixture.requestCount == 2 }
-        fixture.respond(generatedAt: 1_799_999_990_000)
+        fixture.respond(generatedAt: generatedAt - 10000)
         await refresh.value
-        XCTAssertEqual(store.snapshot?.generatedAt, 1_800_000_000_000)
+        XCTAssertEqual(store.snapshot?.generatedAt, generatedAt)
         XCTAssertEqual(store.motionSnapshotRevision, accepted, "Rejected older responses must not advance the motion input")
     }
 
@@ -105,7 +170,7 @@ final class TransitStoreTests: XCTestCase {
         defer { session.invalidateAndCancel() }
         let run = Task { await store.run() }
         defer { run.cancel(); store.stop() }
-        let timestamp = 1_800_000_000_000.0
+        let timestamp = generatedAt
         try await waitUntil { fixture.requestCount == 1 }
         fixture.respond(generatedAt: timestamp, includesTrain: true)
         try await waitUntil { store.snapshot?.trains.first?.id == "fixture-train" }
@@ -126,7 +191,7 @@ final class TransitStoreTests: XCTestCase {
         defer { session.invalidateAndCancel() }
         let firstRun = Task { await store.run() }
         defer { firstRun.cancel(); store.stop() }
-        let timestamp = 1_800_000_000_000.0
+        let timestamp = generatedAt
         try await waitUntil { fixture.requestCount == 1 }
         fixture.respond(generatedAt: timestamp)
         try await waitUntil { store.motionSnapshotRevision != nil }
@@ -176,7 +241,7 @@ final class TransitStoreTests: XCTestCase {
         try await waitUntil { fixture.requestCount == 1 }
         // The response has been handed to URLSession, but the main actor has not
         // yielded to the refresh continuation. Backgrounding wins this race.
-        fixture.respond(generatedAt: 1_800_000_000_000)
+        fixture.respond(generatedAt: generatedAt)
         store.stop()
         for _ in 0 ..< 10 {
             await Task.yield()

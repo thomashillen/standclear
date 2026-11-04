@@ -104,7 +104,10 @@ final class TransitStore {
         do {
             let data = try await task.value
             guard active, current == generation else { return }
-            if data.generatedAt >= (snapshot?.generatedAt ?? 0) {
+            let now = Date.now
+            guard data.hasValidTimestamp(at: now) else { throw URLError(.badServerResponse) }
+            // A clock change or an invalid cached timestamp must not block recovery.
+            if data.generatedAt >= (snapshot?.generatedAt ?? 0) || snapshot?.hasValidTimestamp(at: now) == false {
                 snapshot = data
                 motionSnapshotRevision = requestID
             }
