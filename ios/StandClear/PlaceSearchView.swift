@@ -243,6 +243,8 @@ struct PlaceSearchView<StationRow: View>: View {
                 ForEach(SavedPlaces.Anchor.allCases, id: \.self) { anchor in
                     Button("Set as \(anchor.rawValue)", systemImage: anchor.symbol) {
                         savedPlaces.set(item, for: anchor)
+                        clearFocus()
+                        query = ""
                     }
                 }
             } label: { Image(systemName: "ellipsis").frame(minWidth: 44, minHeight: 44) }

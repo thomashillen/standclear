@@ -382,7 +382,6 @@ final class StandClearUITests: XCTestCase {
         XCTAssertTrue(result.waitForExistence(timeout: 10))
         app.buttons["Save 550 Madison Avenue"].tap()
         app.buttons["Set as Home"].tap()
-        field.buttons["Clear text"].tap()
         let saved = app.buttons["savedPlace-Home"]
         XCTAssertTrue(saved.waitForExistence(timeout: 5))
         XCTAssertTrue(saved.label.contains("550 Madison"))
