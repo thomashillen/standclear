@@ -140,10 +140,13 @@ struct Snapshot: Decodable {
     let generatedAt: Double // API epoch milliseconds.
     let trains: [Train]
     let arrivals: [Arrival]
-    func isFresh(at date: Date) -> Bool {
+    func hasValidTimestamp(at date: Date) -> Bool {
         generatedAt.isFinite && generatedAt > 0 &&
-            date.timeIntervalSince1970 - generatedAt / 1000 < 60 &&
             generatedAt / 1000 <= date.timeIntervalSince1970 + 5
+    }
+
+    func isFresh(at date: Date) -> Bool {
+        hasValidTimestamp(at: date) && date.timeIntervalSince1970 - generatedAt / 1000 < 60
     }
 
     var uniqueTrains: [Train] {
