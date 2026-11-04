@@ -689,7 +689,12 @@ struct PlacePreview: View {
                                                                 now: now, feedUnavailable: store.feedError)
                         VStack(alignment: .leading, spacing: 2) {
                             if let departure = departures.first, let countdown = departure.countdown(at: now) {
-                                Text("Next \(TransitRouteIdentity(departure.routeId).spokenName) boarding prediction: \(countdown).")
+                                let service = TransitRouteIdentity(departure.routeId).spokenName
+                                if index == 0 {
+                                    Text("Next \(service) boarding prediction: \(countdown).")
+                                } else {
+                                    Text("Next \(service) departure at the transfer platform: \(countdown) from now.")
+                                }
                                 if index == 0, let early = TripPlanner.EarlyDeparture(departures: departures, walkSeconds: option.access.connection?.seconds, now: now) {
                                     if let later = early.nextAfterWalk, let time = later.countdown(at: now) {
                                         Text("After the estimated walk and entry: \(TransitRouteIdentity(later.routeId).spokenName) in \(time) from now.")
