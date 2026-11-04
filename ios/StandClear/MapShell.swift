@@ -1,18 +1,12 @@
 import CoreLocation
-import MapboxMaps
 import SwiftUI
 
 struct MapShell: View {
-    @Environment(\.accessibilityDifferentiateWithoutColor) private var differentiateWithoutColor
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
-    @Environment(\.colorScheme) private var colorScheme
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.dynamicTypeSize) private var typeSize
     @State private var store = TransitStore()
     @State private var location = LocationStore()
-    @State private var viewport = Viewport.camera(
-        center: CLLocationCoordinate2D(latitude: 40.754, longitude: -73.984), zoom: 11
-    )
     @State private var linePath: [LineDestination] = []
     @State private var searchPath: [StationBrowserDestination] = []
     @State private var nearbyPath: [StationBrowserDestination] = []
@@ -47,19 +41,7 @@ struct MapShell: View {
     @FocusState private var stationSearchFocused: Bool
     @State private var arrivalStatusMessage = ""
     @State private var showingArrivalStatus = false
-    @State private var mapError = false
-    @State private var mapLoaded = false
-    @State private var mapID = UUID()
-    @AppStorage("mapProvider") private var mapProvider = MapProvider.apple
-    @State private var mapZoom: Double = 11
     @State private var focus = MapFocusState()
-    enum MapProvider: String, CaseIterable, Identifiable {
-        case mapbox = "Mapbox", apple = "Apple Maps"
-        var id: String {
-            rawValue
-        }
-    }
-
     enum Panel: Hashable, Identifiable {
         case search, nearby, directions, lines
         case station(String)
@@ -74,10 +56,6 @@ struct MapShell: View {
         var id: Self {
             self
         }
-    }
-
-    private var hasToken: Bool {
-        (Bundle.main.object(forInfoDictionaryKey: "MBXAccessToken") as? String)?.hasPrefix("pk.") == true
     }
 
     var body: some View {
@@ -212,7 +190,6 @@ struct MapShell: View {
         } message: {
             Text(arrivalStatusMessage)
         }
-        .onChange(of: panel) { _, _ in viewport = viewport.padding(focusPadding) }
         .onChange(of: expandedPanel) { _, selection in
             if selection != .nearby {
                 expandedNearbyRequested = false
@@ -227,13 +204,10 @@ struct MapShell: View {
                 placeRoute = nil
             }
         }
-        .onChange(of: sheetDetent) { _, _ in viewport = viewport.padding(focusPadding) }
-        .onChange(of: windowSize) { _, _ in viewport = viewport.padding(focusPadding) }
         .onChange(of: typeSize, initial: true) { _, _ in
             if typeSize.isAccessibilitySize {
                 sheetDetent = .large
             }
-            viewport = viewport.padding(focusPadding)
         }
         .onChange(of: scenePhase) { _, phase in
             if phase != .active {
@@ -245,8 +219,8 @@ struct MapShell: View {
             }
         }
         .onChange(of: location.availableCoordinate != nil) { _, available in
-            if available, focus.receiveLocation(location.availableCoordinate) {
-                applyFocus()
+            if available {
+                focus.receiveLocation(location.availableCoordinate)
             }
         }
         .task(id: placeRenewalFix) { [timestamp = placeRenewalFix] in
@@ -260,123 +234,23 @@ struct MapShell: View {
         }
     }
 
-    @ViewBuilder private func map(statusWidth: CGFloat, coveredWidth: CGFloat, coveredBottom: CGFloat, maximumGlanceHeight: CGFloat) -> some View {
-        if hasToken || mapProvider == .apple {
-            ZStack(alignment: .topLeading) {
-                if mapProvider == .apple {
-                    AppleTransitMap(store: store, mapExposed: panel == nil || sheetDetent != .large, focusedCoordinate: focus.coordinate, focusRevision: focus.revision,
-                                    coveredWidth: coveredWidth, coveredBottom: coveredBottom, currentLocation: location.availableCoordinate,
-                                    tripOverlays: tripOverlays, tripFocusRevision: tripFocusRevision,
-                                    destination: activeDestination, placeRoute: visiblePlaceRoute, placeGeometryRevision: placeGeometryRevision, transferMarker: transferMarker)
-                } else {
-                    TimelineView(.periodic(from: .now, by: 5)) { timeline in
-                        Map(viewport: $viewport) {
-                            ForEvery(showsJourney ? [] : store.lines, id: \.routeId) { line in
-                                PolylineAnnotation(lineCoordinates: line.coordinates)
-                                    .lineColor(StyleColor(transitColor(line.color)))
-                                    .lineWidth(3)
-                            }
-                            ForEvery(tripOverlays) { overlay in
-                                PolylineAnnotation(lineCoordinates: overlay.coordinates)
-                                    .lineColor(.white)
-                                    .lineWidth(10)
-                                PolylineAnnotation(lineCoordinates: overlay.coordinates)
-                                    .lineColor(StyleColor(transitColor(overlay.color)))
-                                    .lineWidth(overlay.walking ? 4 : 6)
-                            }
-                            if let place = activeDestination {
-                                PointAnnotation(coordinate: place.coordinate)
-                                    .textField(place.name)
-                                    .textHaloColor(.white)
-                                    .textHaloWidth(2)
-                            }
-                            if let transfer = transferMarker {
-                                PointAnnotation(coordinate: transfer.coordinate)
-                                    .textField(transfer.text)
-                                    .textHaloColor(.white)
-                                    .textHaloWidth(2)
-                            }
-                            let projected = !showsJourney ? TrainMapProjection.markers(snapshot: store.snapshot, lines: store.lines,
-                                                                                       now: timeline.date, feedUnavailable: store.feedError) : []
-                            CircleAnnotationGroup(projected.filter { $0.bearingDegrees == nil }) { marker in
-                                CircleAnnotation(centerCoordinate: marker.coordinate)
-                                    .circleColor(StyleColor(transitColor(marker.color)))
-                                    .circleRadius(12 * markerScale)
-                                    .circleStrokeWidth(1.5)
-                                    .circleStrokeColor(.white)
-                                    .circleOpacity(marker.opacity)
-                            }
-                            PointAnnotationGroup(projected.filter { $0.bearingDegrees != nil }) { marker in
-                                PointAnnotation(coordinate: marker.coordinate)
-                                    .image(.init(image: TrainSpriteCache.shared.image(routeID: marker.routeID, color: marker.color),
-                                                 name: "car-\(marker.routeID)-\(marker.color)"))
-                                    .iconRotate((marker.bearingDegrees ?? 90) - 90)
-                                    .iconSize(markerScale)
-                                    .iconOpacity(marker.opacity)
-                            }
-                            .iconRotationAlignment(.map)
-                            .iconAllowOverlap(true)
-                            PointAnnotationGroup(projected) { marker in
-                                PointAnnotation(coordinate: marker.coordinate)
-                                    .textField(RouteBadge.displayID(marker.displayLetter))
-                                    .textColor(StyleColor(marker.textColor == "black" ? UIColor.black : UIColor.white))
-                                    .textSize(max(9, 12 * markerScale))
-                                    .textOpacity(marker.opacity * (differentiateWithoutColor ? 1 : TrainMarkerSizing.labelOpacity(zoom: mapZoom)))
-                            }
-                            .textRotationAlignment(.viewport)
-                            .textAllowOverlap(true)
-                            if let coordinate = location.availableCoordinate {
-                                CircleAnnotation(centerCoordinate: coordinate)
-                                    .circleRadius(6)
-                                    .circleColor(StyleColor(UIColor.systemBlue))
-                                    .circleStrokeWidth(3)
-                                    .circleStrokeColor(.white)
-                            }
-                        }
-                        .mapStyle(colorScheme == .dark ? .dark : .light)
-                        .ornamentOptions(ornaments(coveredWidth: coveredWidth))
-                        .onCameraChanged { event in
-                            let quantized = (event.cameraState.zoom * 4).rounded() / 4
-                            if mapZoom != quantized {
-                                mapZoom = quantized
-                            }
-                        }
-                        .onMapLoaded { _ in mapLoaded = true; mapError = false }
-                        .onMapLoadingError { _ in mapError = true }
-                        .accessibilityLabel("Subway map. Use Search or Nearby for accessible station arrivals.")
-                        .accessibilityIdentifier("mapboxTransitMap")
-                        .accessibilityValue([transferMarker?.text, location.availableCoordinate == nil ? "Location unavailable" : "Your approximate location is shown"].compactMap(\.self).joined(separator: ", "))
-                        .ignoresSafeArea(edges: .top)
-                        .id(mapID)
-                    }
-                }
-                if !showsJourney, panel == nil || coveredWidth > 0 {
-                    TimelineView(.periodic(from: .now, by: 5)) { timeline in
-                        NearbyGlancePanel(store: store, location: location, now: timeline.date,
-                                          maximumHeight: maximumGlanceHeight,
-                                          mapUnavailable: mapError && mapProvider == .mapbox,
-                                          retryMap: { mapError = false; mapLoaded = false; mapID = UUID() },
-                                          openStation: { showGlanceStation($0, expanded: coveredWidth > 0) },
-                                          openNearby: {
-                                              showNearby(expanded: coveredWidth > 0)
-                                          })
-                                          .frame(maxWidth: min(typeSize.isAccessibilitySize ? 260 : 220, max(0, statusWidth - 32)))
-                                          .padding()
-                                          .frame(maxWidth: statusWidth, alignment: .leading)
-                    }
+    private func map(statusWidth: CGFloat, coveredWidth: CGFloat, coveredBottom: CGFloat, maximumGlanceHeight: CGFloat) -> some View {
+        ZStack(alignment: .topLeading) {
+            AppleTransitMap(store: store, mapExposed: panel == nil || sheetDetent != .large, focusedCoordinate: focus.coordinate, focusRevision: focus.revision,
+                            coveredWidth: coveredWidth, coveredBottom: coveredBottom, currentLocation: location.availableCoordinate,
+                            tripOverlays: tripOverlays, tripFocusRevision: tripFocusRevision,
+                            destination: activeDestination, placeRoute: visiblePlaceRoute, placeGeometryRevision: placeGeometryRevision, transferMarker: transferMarker)
+            if !showsJourney, panel == nil || coveredWidth > 0 {
+                TimelineView(.periodic(from: .now, by: 5)) { timeline in
+                    NearbyGlancePanel(store: store, location: location, now: timeline.date,
+                                      maximumHeight: maximumGlanceHeight,
+                                      openStation: { showGlanceStation($0, expanded: coveredWidth > 0) },
+                                      openNearby: { showNearby(expanded: coveredWidth > 0) })
+                        .frame(maxWidth: min(typeSize.isAccessibilitySize ? 260 : 220, max(0, statusWidth - 32)))
+                        .padding()
+                        .frame(maxWidth: statusWidth, alignment: .leading)
                 }
             }
-        } else {
-            ContentUnavailableView {
-                Label("Mapbox unavailable", systemImage: "map")
-            } description: {
-                Text("You can view subway lines, trains and stations with Apple Maps.")
-            } actions: {
-                Button("Use Apple Maps") { mapProvider = .apple }
-            }
-            .frame(width: statusWidth)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .accessibilityIdentifier("mapboxConfigurationUnavailable")
         }
     }
 
@@ -402,11 +276,6 @@ struct MapShell: View {
                 }
             }
             .accessibilityIdentifier("directionsButton")
-            Picker("Map provider", selection: $mapProvider) {
-                ForEach(MapProvider.allCases) { provider in Text(provider.rawValue).tag(provider) }
-            }
-            .pickerStyle(.inline)
-            .accessibilityIdentifier("mapProviderPicker")
             Button("Arrival status", systemImage: "info.circle", action: showArrivalStatus)
                 .accessibilityIdentifier("arrivalStatusButton")
             Button("Refresh arrivals", systemImage: "arrow.clockwise") { Task { await store.refresh() } }
@@ -426,19 +295,6 @@ struct MapShell: View {
         lines.append("Predictions are estimates. A dash means no prediction within 45 minutes, not no service.")
         arrivalStatusMessage = lines.joined(separator: "\n\n")
         showingArrivalStatus = true
-    }
-
-    private func ornaments(coveredWidth: CGFloat) -> OrnamentOptions {
-        // Preserve the SDK's attribution/compass controls beside the trailing region.
-        var options = OrnamentOptions()
-        options.attributionButton.margins.x += coveredWidth
-        options.compass.margins.x += coveredWidth
-        return options
-    }
-
-    private var markerScale: Double {
-        let scale = TrainMarkerSizing.scale(zoom: mapZoom)
-        return differentiateWithoutColor ? max(0.85, scale) : scale
     }
 
     private func showSearch(expanded: Bool) {
@@ -461,9 +317,7 @@ struct MapShell: View {
             nearbyPath = []
             panel = .nearby
         }
-        if focus.requestNearby(location.availableCoordinate) {
-            applyFocus()
-        }
+        focus.requestNearby(location.availableCoordinate)
         location.start()
     }
 
@@ -488,18 +342,6 @@ struct MapShell: View {
 
     private var mediumSheetCoversMap: Bool {
         panel != nil && panel != .search && sheetDetent == .medium
-    }
-
-    private var focusPadding: SwiftUI.EdgeInsets {
-        let expanded = windowSize.width >= 640 && !typeSize.isAccessibilitySize
-        let right = expanded ? min(windowSize.width * 0.4, 380) : 0
-        let bottom = !expanded && mediumSheetCoversMap ? windowSize.height / 2 : 0
-        return SwiftUI.EdgeInsets(top: 0, leading: 0, bottom: bottom, trailing: right)
-    }
-
-    private func applyFocus() {
-        guard let coordinate = focus.coordinate else { return }
-        viewport = .camera(center: coordinate, zoom: 14).padding(focusPadding)
     }
 
     private var isWide: Bool {
@@ -556,7 +398,6 @@ struct MapShell: View {
             sheetDetent = typeSize.isAccessibilitySize ? .large : .medium
         }
         tripFocusRevision += 1
-        viewport = .camera(center: place.coordinate, zoom: 13).padding(focusPadding)
     }
 
     private func updatePlaceMap(_ route: PlaceMapRoute?, destination: PlaceResult) {
@@ -571,11 +412,6 @@ struct MapShell: View {
         guard choice != framedPlaceChoice else { return }
         framedPlaceChoice = choice
         tripFocusRevision += 1
-        let points = tripOverlays.flatMap(\.coordinates) + route.endpoints
-        if points.count > 1 {
-            viewport = .overview(geometry: LineString(points), geometryPadding: .init(top: 24, leading: 24, bottom: 24, trailing: 24), maxZoom: 14)
-                .padding(focusPadding)
-        }
     }
 
     @ViewBuilder private func panelNavigation(_ mode: Panel, expanded: Bool) -> some View {
@@ -683,12 +519,6 @@ struct MapShell: View {
         selectedTrip = plan
         guard plan != nil else { return }
         tripFocusRevision += 1
-        let coordinates = tripOverlays.flatMap(\.coordinates)
-        if coordinates.count >= 2 {
-            viewport = .overview(geometry: LineString(coordinates),
-                                 geometryPadding: SwiftUI.EdgeInsets(top: 32, leading: 32, bottom: 32, trailing: 32),
-                                 maxZoom: 14).padding(focusPadding)
-        }
     }
 
     private func stationBrowser(search: Bool, expanded: Bool) -> some View {
@@ -702,9 +532,7 @@ struct MapShell: View {
     private func focusStation(_ station: Station) {
         stationSearchFocused = false
         selectedTrip = nil
-        if focus.focus(on: station.stop.coordinate) {
-            applyFocus()
-        }
+        focus.focus(on: station.stop.coordinate)
     }
 }
 

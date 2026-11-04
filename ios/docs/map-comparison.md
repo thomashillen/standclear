@@ -1,5 +1,7 @@
 # Native map comparison
 
+> Historical record: these observations describe the earlier proof of concept. The native app now uses MapKit exclusively; see [the migration record](mapkit-migration.md) for current scope.
+
 This increment adds an optional Apple Maps renderer to the existing native proof of concept. Mapbox remains the default and the web application is unchanged. Select **More → Map provider** in the native app to compare them.
 
 ## Shared transit behavior

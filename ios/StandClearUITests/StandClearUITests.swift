@@ -12,7 +12,7 @@ final class StandClearUITests: XCTestCase {
         app.resetAuthorizationStatus(for: .location)
         XCUIDevice.shared.location = XCUILocation(location: CLLocation(latitude: 40.7553, longitude: -73.987))
         defer { XCUIDevice.shared.location = nil }
-        app.launchArguments = ["--ui-test-fixture", "-mapProvider", "Apple Maps"]
+        app.launchArguments = ["--ui-test-fixture"]
         addUIInterruptionMonitor(withDescription: "Location permission") { alert in
             let allow = alert.buttons["Allow While Using App"]
             if allow.exists {
@@ -117,7 +117,7 @@ final class StandClearUITests: XCTestCase {
         app.resetAuthorizationStatus(for: .location)
         XCUIDevice.shared.location = XCUILocation(location: CLLocation(latitude: 40.7553, longitude: -73.987))
         defer { XCUIDevice.shared.location = nil }
-        app.launchArguments = ["--ui-test-fixture", "-mapProvider", "Apple Maps",
+        app.launchArguments = ["--ui-test-fixture",
                                "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
         addUIInterruptionMonitor(withDescription: "Location permission") { alert in
             let allow = alert.buttons["Allow While Using App"]
@@ -158,7 +158,7 @@ final class StandClearUITests: XCTestCase {
         app.terminate()
         XCUIDevice.shared.orientation = .portrait
         app.resetAuthorizationStatus(for: .location)
-        app.launchArguments = ["--ui-test-fixture", "--ui-test-grouped-arrivals", "-mapProvider", "Apple Maps"]
+        app.launchArguments = ["--ui-test-fixture", "--ui-test-grouped-arrivals"]
         addUIInterruptionMonitor(withDescription: "Location permission") { alert in
             let deny = alert.buttons["Don’t Allow"]
             guard deny.exists else { return false }
@@ -223,7 +223,7 @@ final class StandClearUITests: XCTestCase {
         app.resetAuthorizationStatus(for: .location)
         XCUIDevice.shared.location = XCUILocation(location: CLLocation(latitude: 40.833226, longitude: -73.860816))
         defer { XCUIDevice.shared.location = nil }
-        app.launchArguments = ["--ui-test-fixture", "--ui-test-express-arrivals", "-mapProvider", "Apple Maps"]
+        app.launchArguments = ["--ui-test-fixture", "--ui-test-express-arrivals"]
         addUIInterruptionMonitor(withDescription: "Location permission") { alert in
             let allow = alert.buttons["Allow While Using App"]
             guard allow.exists else { return false }
@@ -273,7 +273,7 @@ final class StandClearUITests: XCTestCase {
         app.terminate()
         XCUIDevice.shared.orientation = .portrait
         app.resetAuthorizationStatus(for: .location)
-        app.launchArguments = ["--ui-test-fixture", "-mapProvider", "Apple Maps"]
+        app.launchArguments = ["--ui-test-fixture"]
         addUIInterruptionMonitor(withDescription: "Location permission") { alert in
             let deny = alert.buttons["Don’t Allow"]
             guard deny.exists else { return false }
@@ -360,7 +360,7 @@ final class StandClearUITests: XCTestCase {
         let app = XCUIApplication()
         app.terminate()
         XCUIDevice.shared.orientation = .portrait
-        app.launchArguments = ["--ui-test-fixture", "-mapProvider", "Apple Maps"]
+        app.launchArguments = ["--ui-test-fixture"]
         app.launch()
         activatePermissionPrompt(in: app)
         app.buttons["moreButton"].tap()
@@ -425,7 +425,7 @@ final class StandClearUITests: XCTestCase {
         for expanded in [false, true] {
             app.terminate()
             XCUIDevice.shared.orientation = expanded ? .landscapeLeft : .portrait
-            app.launchArguments = ["--ui-test-fixture", "--ui-test-express-arrivals", "-mapProvider", "Apple Maps"]
+            app.launchArguments = ["--ui-test-fixture", "--ui-test-express-arrivals"]
             app.launch()
             if !expanded {
                 activatePermissionPrompt(in: app)
@@ -457,7 +457,7 @@ final class StandClearUITests: XCTestCase {
         app.terminate()
         XCUIDevice.shared.orientation = .portrait
         app.resetAuthorizationStatus(for: .location)
-        app.launchArguments = ["--ui-test-fixture", "-mapProvider", "Apple Maps"]
+        app.launchArguments = ["--ui-test-fixture"]
         addUIInterruptionMonitor(withDescription: "Location permission") { alert in
             let deny = alert.buttons["Don’t Allow"]
             guard deny.exists else { return false }
@@ -537,7 +537,7 @@ final class StandClearUITests: XCTestCase {
         XCUIDevice.shared.orientation = expanded ? .landscapeLeft : .portrait
         defer { XCUIDevice.shared.orientation = .portrait }
         app.resetAuthorizationStatus(for: .location)
-        app.launchArguments = ["--ui-test-fixture", "-mapProvider", "Apple Maps"]
+        app.launchArguments = ["--ui-test-fixture"]
         addUIInterruptionMonitor(withDescription: "Location permission") { alert in
             let deny = alert.buttons["Don’t Allow"]
             guard deny.exists else { return false }
@@ -633,7 +633,7 @@ final class StandClearUITests: XCTestCase {
         app.terminate()
         XCUIDevice.shared.orientation = .portrait
         app.resetAuthorizationStatus(for: .location)
-        app.launchArguments = ["--ui-test-fixture", "--ui-test-noguchi", "-mapProvider", "Apple Maps"]
+        app.launchArguments = ["--ui-test-fixture", "--ui-test-noguchi"]
         addUIInterruptionMonitor(withDescription: "Location permission") { alert in
             let deny = alert.buttons["Don’t Allow"]
             guard deny.exists else { return false }
@@ -730,7 +730,7 @@ final class StandClearUITests: XCTestCase {
             XCUIDevice.shared.location = nil
             XCUIDevice.shared.orientation = .portrait
         }
-        app.launchArguments = ["--ui-test-fixture", "--ui-test-noguchi", "-mapProvider", "Apple Maps"]
+        app.launchArguments = ["--ui-test-fixture", "--ui-test-noguchi"]
         addUIInterruptionMonitor(withDescription: "Location permission") { alert in
             let allow = alert.buttons["Allow While Using App"]
             guard allow.exists else { return false }
@@ -885,50 +885,43 @@ final class StandClearUITests: XCTestCase {
     }
 
     @MainActor
-    func testMapProviderComparisonKeepsNativeControls() {
+    func testMapKitLaunchIgnoresLegacyProviderAndKeepsNativeControls() {
         let app = XCUIApplication()
-        app.launchArguments = ["--ui-test-fixture"]
         addUIInterruptionMonitor(withDescription: "Location permission") { alert in
             let deny = alert.buttons["Don’t Allow"]
-            if deny.exists {
-                deny.tap(); return true
-            }
-            return false
+            guard deny.exists else { return false }
+            deny.tap()
+            return true
         }
         app.terminate()
         XCUIDevice.shared.orientation = .portrait
         app.resetAuthorizationStatus(for: .location)
-        app.launch()
-        XCTAssertTrue(app.buttons["moreButton"].waitForExistence(timeout: 15))
-        activatePermissionPrompt(in: app)
-        for (provider, mapID) in [("Apple Maps", "appleTransitMap"), ("Mapbox", "mapboxTransitMap")] {
-            app.buttons["moreButton"].tap()
-            let option = app.buttons[provider]
-            XCTAssertTrue(option.waitForExistence(timeout: 5))
-            option.tap()
-            let unavailable = app.descendants(matching: .any)["mapboxConfigurationUnavailable"]
-            if provider == "Mapbox", unavailable.exists {
-                XCTAssertTrue(app.staticTexts["Mapbox unavailable"].exists, "CI should retain an explicit missing-token state")
-            } else {
-                XCTAssertTrue(app.descendants(matching: .any)[mapID].waitForExistence(timeout: 10))
-            }
+        // Launch arguments override the same defaults key used by earlier builds.
+        // Neither a fresh launch nor an old Mapbox preference may gate the map.
+        for legacyPreference in [false, true] {
+            app.terminate()
+            app.launchArguments = ["--ui-test-fixture"] + (legacyPreference ? ["-mapProvider", "Mapbox"] : [])
+            app.launch()
+            XCTAssertTrue(app.buttons["moreButton"].waitForExistence(timeout: 15))
+            activatePermissionPrompt(in: app)
+            XCTAssertTrue(app.descendants(matching: .any)["appleTransitMap"].waitForExistence(timeout: 10))
+            XCTAssertFalse(app.descendants(matching: .any)["mapboxConfigurationUnavailable"].exists)
             XCTAssertTrue(app.buttons["searchButton"].exists)
             XCTAssertTrue(app.buttons["nearbyButton"].exists)
+            app.buttons["moreButton"].tap()
+            XCTAssertFalse(app.descendants(matching: .any)["mapProviderPicker"].exists)
+            XCTAssertFalse(app.buttons["Mapbox"].exists)
+            XCTAssertTrue(app.buttons["linesButton"].exists)
+            XCTAssertTrue(app.buttons["directionsButton"].exists)
+            app.buttons["arrivalStatusButton"].tap()
+            XCTAssertTrue(app.alerts["Arrival status"].waitForExistence(timeout: 5))
+            XCTAssertTrue(app.alerts.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Status when opened:")).firstMatch.exists)
+            app.alerts.buttons["OK"].tap()
             let capture = XCTAttachment(screenshot: app.screenshot())
-            capture.name = provider + " transit comparison"
+            capture.name = legacyPreference ? "MapKit ignores legacy Mapbox preference" : "MapKit native map and controls"
             capture.lifetime = .keepAlways
             add(capture)
-            if provider == "Mapbox", unavailable.exists {
-                app.buttons["Use Apple Maps"].tap()
-                XCTAssertTrue(app.descendants(matching: .any)["appleTransitMap"].waitForExistence(timeout: 10))
-                XCTAssertTrue(unavailable.waitForNonExistence(timeout: 5))
-            }
         }
-        app.buttons["moreButton"].tap()
-        app.buttons["arrivalStatusButton"].tap()
-        XCTAssertTrue(app.alerts["Arrival status"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.alerts.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Status when opened:")).firstMatch.exists)
-        app.alerts.buttons["OK"].tap()
     }
 
     @MainActor
@@ -944,7 +937,7 @@ final class StandClearUITests: XCTestCase {
         }
         app.terminate()
         XCUIDevice.shared.orientation = .portrait
-        app.launchArguments = ["--ui-test-fixture", "-mapProvider", "Apple Maps"]
+        app.launchArguments = ["--ui-test-fixture"]
         app.launch()
         let search = app.buttons["searchButton"]
         XCTAssertTrue(search.waitForExistence(timeout: 15))
@@ -1124,7 +1117,7 @@ final class StandClearUITests: XCTestCase {
             XCUIDevice.shared.location = XCUILocation(location: CLLocation(latitude: 40.7553, longitude: -73.987))
         }
         defer { XCUIDevice.shared.location = nil }
-        app.launchArguments = ["--ui-test-fixture", "-mapProvider", "Apple Maps"]
+        app.launchArguments = ["--ui-test-fixture"]
         addUIInterruptionMonitor(withDescription: "Location permission") { alert in
             let deny = alert.buttons[locationGranted ? "Allow While Using App" : "Don’t Allow"]
             if deny.exists {
@@ -1282,7 +1275,7 @@ final class StandClearUITests: XCTestCase {
         app.terminate()
         XCUIDevice.shared.orientation = .portrait
         app.resetAuthorizationStatus(for: .location)
-        app.launchArguments = ["--ui-test-fixture", "--ui-test-noguchi", "-mapProvider", "Apple Maps"]
+        app.launchArguments = ["--ui-test-fixture", "--ui-test-noguchi"]
         addUIInterruptionMonitor(withDescription: "Location permission") { alert in
             let deny = alert.buttons["Don’t Allow"]
             guard deny.exists else { return false }
@@ -1338,22 +1331,12 @@ final class StandClearUITests: XCTestCase {
     }
 
     @MainActor
-    func testStationDirectionsAndSwap() throws {
-        try checkStationDirectionsAndSwap(provider: "Apple Maps")
-    }
-
-    @MainActor
-    func testMapboxStationDirectionsAndSwap() throws {
-        try checkStationDirectionsAndSwap(provider: "Mapbox")
-    }
-
-    @MainActor
-    private func checkStationDirectionsAndSwap(provider: String) throws {
+    func testStationDirectionsAndSwap() {
         let app = XCUIApplication()
         app.terminate()
         XCUIDevice.shared.orientation = .portrait
         app.resetAuthorizationStatus(for: .location)
-        app.launchArguments = ["--ui-test-fixture", "-mapProvider", provider]
+        app.launchArguments = ["--ui-test-fixture"]
         addUIInterruptionMonitor(withDescription: "Location permission") { alert in
             let deny = alert.buttons["Don’t Allow"]
             if deny.exists {
@@ -1366,9 +1349,6 @@ final class StandClearUITests: XCTestCase {
         // Trigger permission handling on the inert title, not the map center,
         // which can contain the large-text Open Settings link.
         activatePermissionPrompt(in: app)
-        if provider == "Mapbox", app.staticTexts["Mapbox unavailable"].exists {
-            throw XCTSkip("Mapbox rendering needs an ignored local public token. CI verifies its missing-configuration state separately.")
-        }
         app.buttons["moreButton"].tap()
         XCTAssertTrue(app.buttons["directionsButton"].waitForExistence(timeout: 5))
         app.buttons["directionsButton"].tap()
@@ -1401,7 +1381,7 @@ final class StandClearUITests: XCTestCase {
         XCTAssertTrue(app.buttons["moreButton"].waitForExistence(timeout: 5))
         XCTAssertFalse(app.navigationBars["Trip details"].exists)
         let routeMap = XCTAttachment(screenshot: app.screenshot())
-        routeMap.name = "Selected itinerary on " + provider
+        routeMap.name = "Selected itinerary on Apple Maps"
         routeMap.lifetime = .keepAlways
         add(routeMap)
         app.buttons["moreButton"].tap()
