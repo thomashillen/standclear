@@ -99,7 +99,7 @@ struct StationAlertSection: View {
     let retry: () -> Void
     var body: some View {
         ServiceAlertSection(load: load, now: now, retry: retry, includes: { $0.applies(to: station) },
-                            emptyMessage: "No service alerts reported for this station.", summaryIdentifier: "stationAlertsSummary")
+                            emptyMessage: "No service alerts reported for this station.", summaryIdentifier: "stationAlertsSummary", compact: true)
     }
 }
 
@@ -122,10 +122,11 @@ private struct ServiceAlertSection: View {
     let includes: (StationAlert) -> Bool
     let emptyMessage: String
     let summaryIdentifier: String
+    var compact = false
     @State private var expanded = false
 
     var body: some View {
-        Section("Service alerts") {
+        Section {
             switch load {
             case .loading: ProgressView("Checking service alerts…")
             case .failed: unavailable
@@ -137,15 +138,23 @@ private struct ServiceAlertSection: View {
                     let matches = snapshot.alerts.filter(includes)
                     switch evidence {
                     case .current:
-                        if matches.isEmpty {
+                        if matches.isEmpty, !compact {
                             Text(emptyMessage)
                         }
                     case let .lastReported(date):
-                        Label("Last reported \(date.formatted(date: .abbreviated, time: .shortened)). Current alert status is unconfirmed.", systemImage: "clock")
-                        Button("Retry alerts", action: retry)
+                        if compact {
+                            compactStatus("Alert status unconfirmed", symbol: "clock", lastReported: date)
+                        } else {
+                            Label("Last reported \(date.formatted(date: .abbreviated, time: .shortened)). Current alert status is unconfirmed.", systemImage: "clock")
+                            Button("Retry alerts", action: retry)
+                        }
                     case .unknown:
-                        Label("Current alert status is unconfirmed.", systemImage: "questionmark.circle")
-                        Button("Retry alerts", action: retry)
+                        if compact {
+                            compactStatus("Alert status unconfirmed", symbol: "questionmark.circle")
+                        } else {
+                            Label("Current alert status is unconfirmed.", systemImage: "questionmark.circle")
+                            Button("Retry alerts", action: retry)
+                        }
                     case .unavailable: EmptyView()
                     }
                     if !matches.isEmpty {
@@ -176,12 +185,62 @@ private struct ServiceAlertSection: View {
                     }
                 }
             }
+        } header: {
+            if !compact {
+                Text("Service alerts")
+            }
         }
         .listRowBackground(Color.clear)
     }
 
+    private func compactStatus(_ title: String, symbol: String, lastReported: Date? = nil) -> some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(alignment: .center, spacing: 12) {
+                statusLabel(title, symbol: symbol, lastReported: lastReported)
+                Spacer(minLength: 0)
+                retryButton
+            }
+            VStack(alignment: .leading, spacing: 4) {
+                statusLabel(title, symbol: symbol, lastReported: lastReported)
+                retryButton
+            }
+        }
+        .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
+    }
+
+    private func statusLabel(_ title: String, symbol: String, lastReported: Date?) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Label(title, systemImage: symbol)
+                .font(.subheadline)
+            if let lastReported {
+                let dateStyle: Date.FormatStyle.DateStyle = Calendar.current.isDate(lastReported, inSameDayAs: now) ? .omitted : .abbreviated
+                Text("Last report \(lastReported.formatted(date: dateStyle, time: .shortened))")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .accessibilityLabel("Last reported \(lastReported.formatted(date: .complete, time: .shortened))")
+                    .accessibilityIdentifier("stationAlertLastReport")
+            }
+        }
+        .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private var retryButton: some View {
+        Button(action: retry) {
+            Text("Retry")
+                .frame(minWidth: 44, minHeight: 44)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.borderless)
+        .accessibilityLabel("Retry service alerts")
+        .accessibilityIdentifier("stationAlertsRetry")
+    }
+
     @ViewBuilder private var unavailable: some View {
-        Label("Service alerts unavailable", systemImage: "wifi.exclamationmark")
-        Button("Retry alerts", action: retry)
+        if compact {
+            compactStatus("Service alerts unavailable", symbol: "wifi.exclamationmark")
+        } else {
+            Label("Service alerts unavailable", systemImage: "wifi.exclamationmark")
+            Button("Retry alerts", action: retry)
+        }
     }
 }

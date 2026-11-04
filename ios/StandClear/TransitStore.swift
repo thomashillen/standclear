@@ -189,7 +189,7 @@ final class TransitStore {
                 payload = ["lines": lines]
             case "api/alerts":
                 payload = ["available": true, "generatedAt": now.timeIntervalSince1970 * 1000,
-                           "feedTimestamp": now.timeIntervalSince1970, "alerts": [
+                           "feedTimestamp": now.timeIntervalSince1970 - (ProcessInfo.processInfo.arguments.contains("--ui-test-stale-alerts") ? 780 : 0), "alerts": [
                                ["id": "fixture-wall", "header": "Downtown 4 trains are delayed at Wall St",
                                 "description": "Allow extra travel time at Wall St.", "effect": "SIGNIFICANT_DELAYS", "severity": "severe",
                                 "routeIds": ["4"], "stopIds": ["419"], "selectors": [["routeId": "4", "stopId": "419"]]],

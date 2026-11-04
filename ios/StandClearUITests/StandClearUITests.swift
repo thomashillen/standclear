@@ -153,6 +153,152 @@ final class StandClearUITests: XCTestCase {
     }
 
     @MainActor
+    func testStationDensityPreservesStaleAlertsAndArrivalDetails() {
+        checkCompactStationDetails(accessibilityText: false)
+    }
+
+    @MainActor
+    func testStationWithoutAdvisoriesStaysQuietOnlyWhenCurrent() {
+        let app = XCUIApplication()
+        XCUIDevice.shared.orientation = .portrait
+        app.resetAuthorizationStatus(for: .location)
+        addUIInterruptionMonitor(withDescription: "Location permission") { alert in
+            let deny = alert.buttons["Don’t Allow"]
+            guard deny.exists else { return false }
+            deny.tap()
+            return true
+        }
+        for stale in [false, true] {
+            app.terminate()
+            app.launchArguments = ["--ui-test-fixture", "-mapProvider", "Apple Maps"]
+            if stale {
+                app.launchArguments.append("--ui-test-stale-alerts")
+            }
+            app.launch()
+            activatePermissionPrompt(in: app)
+            app.buttons["searchButton"].tap()
+            let search = app.searchFields[unifiedSearchPrompt]
+            XCTAssertTrue(search.waitForExistence(timeout: 5))
+            search.tap()
+            search.typeText("Times Sq\n")
+            selectSearchResult("127", query: "Times Sq", in: app)
+            let list = app.collectionViews["stationArrivalsList"]
+            XCTAssertTrue(list.buttons["arrivalRow-ui-fixture-1-n:127:N"].waitForExistence(timeout: 10))
+            XCTAssertFalse(list.staticTexts["Arrival feed connected"].exists)
+            XCTAssertFalse(list.staticTexts["No service alerts reported for this station."].exists)
+            if stale {
+                XCTAssertTrue(list.buttons["stationAlertsRetry"].waitForExistence(timeout: 10))
+                XCTAssertTrue(list.staticTexts["Alert status unconfirmed"].exists, "Empty stale evidence must remain visibly unconfirmed")
+                XCTAssertTrue(list.staticTexts["stationAlertLastReport"].exists)
+            } else {
+                XCTAssertFalse(list.buttons["stationAlertsRetry"].exists)
+            }
+        }
+    }
+
+    @MainActor
+    func testStationDensityAtLargestAccessibilityText() {
+        checkCompactStationDetails(accessibilityText: true)
+    }
+
+    @MainActor
+    func testStationDensityInExpandedControlRegion() {
+        checkCompactStationDetails(accessibilityText: false, expanded: true)
+    }
+
+    @MainActor
+    private func checkCompactStationDetails(accessibilityText: Bool, expanded: Bool = false) {
+        let app = XCUIApplication()
+        app.terminate()
+        XCUIDevice.shared.orientation = .portrait
+        app.resetAuthorizationStatus(for: .location)
+        app.launchArguments = ["--ui-test-fixture", "--ui-test-stale-alerts", "-mapProvider", "Apple Maps"]
+        if accessibilityText {
+            app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
+        }
+        addUIInterruptionMonitor(withDescription: "Location permission") { alert in
+            let deny = alert.buttons["Don’t Allow"]
+            guard deny.exists else { return false }
+            deny.tap()
+            return true
+        }
+        app.launch()
+        activatePermissionPrompt(in: app)
+        if expanded {
+            XCUIDevice.shared.orientation = .landscapeLeft
+            waitForLayout(in: app, expanded: true)
+        }
+        defer {
+            if expanded {
+                XCUIDevice.shared.orientation = .portrait
+            }
+        }
+        app.buttons["searchButton"].tap()
+        let search = app.searchFields[unifiedSearchPrompt]
+        XCTAssertTrue(search.waitForExistence(timeout: 5))
+        search.tap()
+        search.typeText("Wall\n")
+        selectSearchResult("419", query: "Wall", in: app)
+        let list = app.collectionViews["stationArrivalsList"]
+        XCTAssertTrue(list.waitForExistence(timeout: 5))
+        let stationTitle = app.navigationBars["Wall St"].staticTexts["Wall St"]
+        XCTAssertTrue(stationTitle.waitForExistence(timeout: 5), "Station identity must remain visible alongside native toolbar actions")
+        XCTAssertGreaterThan(stationTitle.frame.width, 0)
+        if expanded {
+            let window = app.windows.firstMatch.frame
+            XCTAssertGreaterThan(list.frame.midX, window.midX, "Station details should occupy the expanded right-side control region")
+            XCTAssertLessThanOrEqual(list.frame.width, window.width / 2)
+        }
+        let retry = list.buttons["stationAlertsRetry"]
+        XCTAssertTrue(retry.waitForExistence(timeout: 10))
+        XCTAssertTrue(list.staticTexts["Alert status unconfirmed"].exists)
+        XCTAssertTrue(list.staticTexts["stationAlertLastReport"].exists)
+        XCTAssertFalse(list.staticTexts["Arrival feed connected"].exists)
+        XCTAssertFalse(list.staticTexts["Service alerts"].exists, "A separate heading must not displace arrivals")
+        XCTAssertGreaterThanOrEqual(retry.frame.height, 44)
+        retry.tap()
+        let summary = list.buttons["stationAlertsSummary"]
+        XCTAssertTrue(summary.waitForExistence(timeout: 10))
+        XCTAssertTrue(summary.label.contains("1 severe"), "Stale evidence must retain the last reported advisory and its severity")
+        let arrival = list.buttons["arrivalRow-ui-fixture-4-n:419:N"]
+        if !accessibilityText {
+            XCTAssertTrue(arrival.waitForExistence(timeout: 5))
+            XCTAssertTrue(list.frame.contains(arrival.frame), "The first station prediction should be visible without scrolling at standard text size")
+        }
+        let first = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        first.name = expanded ? "Expanded station alerts and first arrival" : accessibilityText ? "Station status at largest accessibility text" : "Compact station alerts and first arrival"
+        first.lifetime = .keepAlways
+        add(first)
+
+        func reveal(_ element: XCUIElement) {
+            for _ in 0 ..< 8 {
+                if element.exists, element.frame.height > 0, list.frame.contains(element.frame), element.isHittable {
+                    return
+                }
+                list.swipeUp()
+            }
+            XCTFail("Could not reveal \(element.identifier)")
+        }
+        reveal(summary)
+        summary.tap()
+        let advisory = list.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "Allow extra travel time at Wall St.")).firstMatch
+        XCTAssertTrue(advisory.waitForExistence(timeout: 5))
+        summary.tap()
+        reveal(arrival)
+        XCTAssertTrue(arrival.label.contains("Northbound"), "Direction remains available to VoiceOver even when its section supplies the visual label")
+        XCTAssertTrue(arrival.label.contains("59 St"))
+        XCTAssertTrue(arrival.label.contains("Predicted in"))
+        XCTAssertGreaterThanOrEqual(arrival.frame.height, 44)
+        arrival.tap()
+        let clock = list.staticTexts.matching(NSPredicate(format: "identifier == %@ AND label BEGINSWITH %@", arrival.identifier, "Predicted arrival:")).firstMatch
+        XCTAssertTrue(clock.waitForExistence(timeout: 5))
+        let detail = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        detail.name = expanded ? "Expanded station arrival clock disclosure" : accessibilityText ? "Station arrival at largest accessibility text" : "Station arrival clock disclosure"
+        detail.lifetime = .keepAlways
+        add(detail)
+    }
+
+    @MainActor
     func testBusyStationArrivalGroupsExpandIndependently() {
         let app = XCUIApplication()
         app.terminate()
@@ -174,6 +320,13 @@ final class StandClearUITests: XCTestCase {
         field.typeText("Grand Central\n")
         selectSearchResult("631", query: "Grand Central", in: app)
         XCTAssertTrue(app.navigationBars["Grand Central-42 St"].waitForExistence(timeout: 5))
+        let title = app.navigationBars["Grand Central-42 St"].staticTexts["Grand Central-42 St"]
+        XCTAssertTrue(title.waitForExistence(timeout: 5), "A long station title must retain visible space in the compact toolbar")
+        XCTAssertGreaterThan(title.frame.width, 0)
+        let titleCapture = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        titleCapture.name = "Compact station title and native toolbar"
+        titleCapture.lifetime = .keepAlways
+        add(titleCapture)
         let list = app.collectionViews["stationArrivalsList"]
         XCTAssertTrue(list.waitForExistence(timeout: 5))
         let north = list.buttons["stationArrivalToggle-N"]
@@ -183,14 +336,31 @@ final class StandClearUITests: XCTestCase {
         let unknown = list.buttons["arrivalRow-busy-unknown:631:?"]
         func reveal(_ row: XCUIElement, towardBottom: Bool) {
             for _ in 0 ..< 8 {
-                if row.exists, row.frame.height > 0, list.frame.contains(row.frame), row.isHittable {
-                    return
+                let viewport = list.frame.intersection(app.windows.firstMatch.frame)
+                let interior = viewport.insetBy(dx: 0, dy: 44)
+                var scrollTowardBottom = towardBottom
+                if row.exists {
+                    // A collapsed List can expose a row's AX frame under the
+                    // sheet edge before it has any valid activation point.
+                    // Move it into the viewport interior before asking for
+                    // hittability, which raises an XCTest error at that edge.
+                    let frame = row.frame
+                    if !frame.isNull, !frame.isInfinite, frame.width > 0, frame.height > 0 {
+                        if interior.contains(frame), row.isHittable {
+                            return
+                        }
+                        scrollTowardBottom = frame.midY > interior.midY
+                    }
                 }
-                let start = list.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: towardBottom ? 0.8 : 0.35))
-                let end = list.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: towardBottom ? 0.35 : 0.8))
+                let start = list.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: scrollTowardBottom ? 0.8 : 0.35))
+                let end = list.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: scrollTowardBottom ? 0.35 : 0.8))
                 start.press(forDuration: 0.1, thenDragTo: end)
             }
-            XCTFail("Could not reveal \(row)")
+            let failure = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            failure.name = "Busy station row outside usable viewport"
+            failure.lifetime = .keepAlways
+            add(failure)
+            XCTFail("Could not reveal \(row.identifier); row \(row.exists ? row.frame.debugDescription : "missing"), list \(list.frame)")
         }
         reveal(north, towardBottom: true)
         XCTAssertTrue(north.label.contains("18 more"))
@@ -213,6 +383,14 @@ final class StandClearUITests: XCTestCase {
         reveal(unknown, towardBottom: true)
         XCTAssertFalse(fifthSouth.exists)
         XCTAssertTrue(south.label.contains("2 more"), "Southbound should return to its four-row preview")
+        XCTAssertTrue(unknown.label.localizedCaseInsensitiveContains("direction unavailable"))
+        unknown.tap()
+        let clock = list.staticTexts.matching(NSPredicate(format: "identifier == %@ AND label BEGINSWITH %@", unknown.identifier, "Predicted arrival:")).firstMatch
+        XCTAssertTrue(clock.waitForExistence(timeout: 5), "The unknown-direction prediction must remain usable after both groups collapse")
+        let capture = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        capture.name = "Unknown direction prediction remains usable after group collapse"
+        capture.lifetime = .keepAlways
+        add(capture)
     }
 
     @MainActor
@@ -290,22 +468,25 @@ final class StandClearUITests: XCTestCase {
         selectSearchResult("419", query: "Wall", in: app)
         let detail = app.navigationBars["Wall St"]
         XCTAssertTrue(detail.waitForExistence(timeout: 5))
+        let anchors = app.buttons["stationAnchorMenu"]
+        anchors.tap()
         let toggle = app.buttons["favoriteStationToggle"]
         XCTAssertTrue(toggle.waitForExistence(timeout: 5))
         // Restore a known starting state if a previous simulator run stopped
         // before cleanup. Preserve any other station the rider saved.
         if toggle.label == "Remove from favorites" {
             toggle.tap()
+            anchors.tap()
         }
         XCTAssertEqual(toggle.label, "Add to favorites")
-        let anchors = app.buttons["stationAnchorMenu"]
-        anchors.tap()
         if app.buttons["Remove Home"].exists {
             app.buttons["Remove Home"].tap()
             anchors.tap()
         }
         app.buttons["Set as Home"].tap()
+        anchors.tap()
         XCTAssertEqual(toggle.label, "Remove from favorites", "Assigning a station anchor also favorites it")
+        detail.staticTexts["Wall St"].tap()
 
         app.terminate()
         app.launch()
@@ -323,7 +504,9 @@ final class StandClearUITests: XCTestCase {
         XCTAssertTrue(app.buttons["directionsHere"].exists)
         anchors.tap()
         app.buttons["Remove Home"].tap()
+        anchors.tap()
         XCTAssertEqual(toggle.label, "Remove from favorites", "Removing an anchor preserves the station favorite")
+        detail.staticTexts["Wall St"].tap()
         detail.buttons.element(boundBy: 0).tap()
         XCTAssertTrue(shortcut.waitForNonExistence(timeout: 5))
         app.buttons["Done"].tap()
@@ -346,9 +529,12 @@ final class StandClearUITests: XCTestCase {
         add(capture)
         favorite.tap()
         XCTAssertTrue(detail.waitForExistence(timeout: 5))
+        anchors.tap()
         XCTAssertEqual(toggle.label, "Remove from favorites")
         toggle.tap()
+        anchors.tap()
         XCTAssertEqual(toggle.label, "Add to favorites")
+        detail.staticTexts["Wall St"].tap()
         detail.buttons.element(boundBy: 0).tap()
         XCTAssertTrue(app.navigationBars["Nearby arrivals"].waitForExistence(timeout: 5))
         XCTAssertTrue(favorite.waitForNonExistence(timeout: 5))
@@ -1042,11 +1228,19 @@ final class StandClearUITests: XCTestCase {
         XCUIDevice.shared.orientation = .landscapeLeft
         waitForLayout(in: app, expanded: true, readyControl: "directionsHere")
         XCTAssertTrue(app.navigationBars["Wall St"].exists)
-        XCTAssertGreaterThanOrEqual(app.buttons["directionsHere"].frame.height, 44)
+        // SwiftUI owns the native toolbar button's metrics. Verify activation
+        // instead of applying the former custom list-row height requirement.
+        XCTAssertTrue(app.buttons["directionsHere"].isHittable)
         let wide = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         wide.name = "Search station survives expansion"
         wide.lifetime = .keepAlways
         add(wide)
+        app.buttons["directionsHere"].tap()
+        let destination = app.buttons["destinationPicker"]
+        XCTAssertTrue(destination.waitForExistence(timeout: 5))
+        XCTAssertTrue(destination.label.contains("Wall St"))
+        app.navigationBars["Directions"].buttons.element(boundBy: 0).tap()
+        XCTAssertTrue(app.navigationBars["Wall St"].waitForExistence(timeout: 5))
         // Nearby owns a separate stack: it must not inherit Search's Wall St.
         app.buttons["nearbyButton"].tap()
         XCTAssertTrue(app.navigationBars["Nearby arrivals"].waitForExistence(timeout: 5))
