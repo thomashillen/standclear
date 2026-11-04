@@ -39,6 +39,41 @@ final class StationAlertsTests: XCTestCase {
         XCTAssertTrue(matches([]))
     }
 
+    func testLineAlertsKeepExplicitRouteScopeBeyondRepresentativeStops() {
+        let line = SubwayLine(id: "4", routeId: "4", color: "00933C",
+                              stops: [Stop(id: "419", name: "Wall St", lat: 40.7, lng: -74, shapeIdx: 0)], shape: [])
+        func matches(_ selectors: [StationAlert.Selector]?, routes: [String] = [], stops: [String] = []) -> Bool {
+            StationAlert(id: "alert", header: "", description: "", effect: "", severity: "warning",
+                         routeIds: routes, stopIds: stops, selectors: selectors).applies(to: line)
+        }
+        XCTAssertTrue(matches([.init(routeId: "4", stopId: nil)]))
+        XCTAssertTrue(matches([.init(routeId: "4", stopId: "419")]))
+        XCTAssertTrue(matches([.init(routeId: "4", stopId: "variant-stop")]), "A line advisory may describe a detour beyond the static pattern")
+        XCTAssertFalse(matches([.init(routeId: "5", stopId: "419")]), "Another service at a shared station is not an advisory for this line")
+        XCTAssertTrue(matches([.init(routeId: nil, stopId: "419")]))
+        XCTAssertFalse(matches([.init(routeId: nil, stopId: "other")]))
+        XCTAssertFalse(matches([.init(routeId: nil, stopId: nil)]))
+        XCTAssertFalse(matches([.init(routeId: "5", stopId: "419")], routes: ["4"], stops: ["419"]), "Selectors take precedence over flattened arrays")
+        XCTAssertTrue(matches([.init(routeId: "5", stopId: "419"), .init(routeId: "4", stopId: "other")]))
+        XCTAssertTrue(matches(nil, routes: ["4"]))
+        XCTAssertTrue(matches([], stops: ["419"]))
+        XCTAssertFalse(matches(nil, routes: ["5"], stops: ["other"]))
+    }
+
+    func testBaseLineIncludesReportedExpressServiceWithoutCombiningUnrelatedShuttles() {
+        func matches(lineID: String, alertRoute: String) -> Bool {
+            let line = SubwayLine(id: lineID, routeId: lineID, color: "808080", stops: [], shape: [])
+            return StationAlert(id: "alert", header: "", description: "", effect: "", severity: "warning",
+                                routeIds: [], stopIds: [], selectors: [.init(routeId: alertRoute, stopId: nil)]).applies(to: line)
+        }
+        XCTAssertTrue(matches(lineID: "6", alertRoute: "6X"))
+        XCTAssertTrue(matches(lineID: "7", alertRoute: "7X"))
+        XCTAssertTrue(matches(lineID: "F", alertRoute: "FX"))
+        XCTAssertFalse(matches(lineID: "6", alertRoute: "7X"))
+        XCTAssertFalse(matches(lineID: "GS", alertRoute: "FS"))
+        XCTAssertFalse(matches(lineID: "FS", alertRoute: "H"))
+    }
+
     private func evidence(available: Bool? = true, generatedAge: Double = 0, sourceAge: Double? = 0) -> StationAlertSnapshot.Evidence {
         StationAlertSnapshot(generatedAt: (now.timeIntervalSince1970 - generatedAge) * 1000, available: available,
                              feedTimestamp: sourceAge.map { now.timeIntervalSince1970 - $0 }, alerts: []).evidence(at: now)

@@ -35,6 +35,26 @@ struct StationAlert: Decodable, Identifiable {
         let routeId, stopId: String?
     }
 
+    /// A line includes its reported express service and variants beyond the
+    /// representative static stopping pattern. An explicit different route
+    /// never matches merely because it shares a station with this line.
+    func applies(to line: SubwayLine) -> Bool {
+        let routeID = TransitRouteIdentity(line.routeId).baseID
+        let stopIDs = Set(line.stops.map(\.id))
+        func matchesRoute(_ id: String) -> Bool {
+            TransitRouteIdentity(id).baseID == routeID
+        }
+        guard let selectors, !selectors.isEmpty else {
+            return routeIds.contains(where: matchesRoute) || stopIds.contains(where: stopIDs.contains)
+        }
+        return selectors.contains { selector in
+            if let route = selector.routeId {
+                return matchesRoute(route)
+            }
+            return selector.stopId.map(stopIDs.contains) ?? false
+        }
+    }
+
     func applies(to station: Station) -> Bool {
         guard let selectors, !selectors.isEmpty else {
             return stopIds.contains(where: station.stopIDs.contains) || routeIds.contains(where: station.routes.contains)
@@ -60,6 +80,31 @@ struct StationAlertSection: View {
     let load: StationAlertsLoad
     let now: Date
     let retry: () -> Void
+    var body: some View {
+        ServiceAlertSection(load: load, now: now, retry: retry, includes: { $0.applies(to: station) },
+                            emptyMessage: "No service alerts reported for this station.", summaryIdentifier: "stationAlertsSummary")
+    }
+}
+
+struct LineAlertSection: View {
+    let line: SubwayLine
+    let load: StationAlertsLoad
+    let now: Date
+    let retry: () -> Void
+
+    var body: some View {
+        ServiceAlertSection(load: load, now: now, retry: retry, includes: { $0.applies(to: line) },
+                            emptyMessage: "No service alerts reported for this line.", summaryIdentifier: "lineAlertsSummary")
+    }
+}
+
+private struct ServiceAlertSection: View {
+    let load: StationAlertsLoad
+    let now: Date
+    let retry: () -> Void
+    let includes: (StationAlert) -> Bool
+    let emptyMessage: String
+    let summaryIdentifier: String
     @State private var expanded = false
 
     var body: some View {
@@ -72,11 +117,11 @@ struct StationAlertSection: View {
                 if evidence == .unavailable {
                     unavailable
                 } else {
-                    let matches = snapshot.alerts.filter { $0.applies(to: station) }
+                    let matches = snapshot.alerts.filter(includes)
                     switch evidence {
                     case .current:
                         if matches.isEmpty {
-                            Text("No service alerts reported for this station.")
+                            Text(emptyMessage)
                         }
                     case let .lastReported(date):
                         Label("Last reported \(date.formatted(date: .abbreviated, time: .shortened)). Current alert status is unconfirmed.", systemImage: "clock")
@@ -110,7 +155,7 @@ struct StationAlertSection: View {
                                 Text(count)
                             }
                         }
-                        .accessibilityIdentifier("stationAlertsSummary")
+                        .accessibilityIdentifier(summaryIdentifier)
                     }
                 }
             }

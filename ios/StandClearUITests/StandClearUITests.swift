@@ -367,6 +367,29 @@ final class StandClearUITests: XCTestCase {
         XCTAssertTrue(line.waitForExistence(timeout: 10))
         line.tap()
         let stops = app.collectionViews["lineStationList"]
+        let alerts = stops.buttons["lineAlertsSummary"]
+        XCTAssertTrue(alerts.waitForExistence(timeout: 10))
+        XCTAssertTrue(alerts.label.contains("1 advisory"))
+        XCTAssertTrue(alerts.label.contains("1 severe"))
+        XCTAssertGreaterThanOrEqual(alerts.frame.height, 44)
+        alerts.tap()
+        let warning = stops.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "Downtown 4 trains are delayed at Wall St")).firstMatch
+        XCTAssertTrue(warning.waitForExistence(timeout: 5))
+        let alertCapture = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        alertCapture.name = "4 line advisory before choosing a station"
+        alertCapture.lifetime = .keepAlways
+        add(alertCapture)
+        alerts.tap()
+        XCUIDevice.shared.orientation = .landscapeLeft
+        waitForLayout(in: app, expanded: true, readyControl: "lineAlertsSummary")
+        XCTAssertTrue(app.navigationBars["4 line"].exists)
+        XCTAssertTrue(app.buttons["lineAlertsSummary"].label.contains("1 severe"))
+        let wideAlerts = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        wideAlerts.name = "Expanded line advisory summary"
+        wideAlerts.lifetime = .keepAlways
+        add(wideAlerts)
+        XCUIDevice.shared.orientation = .portrait
+        waitForLayout(in: app, expanded: false, readyControl: "lineAlertsSummary")
         let wall = stops.buttons["lineStation-419"]
         revealPlaceElement(wall, in: stops)
         XCTAssertTrue(wall.label.contains("Wall St"))
