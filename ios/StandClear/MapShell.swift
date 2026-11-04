@@ -564,7 +564,7 @@ struct MapShell: View {
                          }
         case let .station(id):
             if let station = store.stations.first(where: { $0.id == id }) {
-                StationArrivals(station: station, store: store, favoriteStations: favoriteStations, directionsSelection: $directionsSelection,
+                StationArrivals(station: station, store: store, favoriteStations: favoriteStations, savedPlaces: savedPlaces, directionsSelection: $directionsSelection,
                                 onDirectionsHere: beginDirections, onSelectTrip: selectTrip, onShowTripMap: showTripOnMap)
             } else {
                 ContentUnavailableView("Station unavailable", systemImage: "tram",

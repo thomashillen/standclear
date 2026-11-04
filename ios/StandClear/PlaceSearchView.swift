@@ -33,7 +33,7 @@ final class RecentStations {
     }
 }
 
-/// Home and Work stay on this device and reuse the existing place route flow.
+/// Home and Work stay on this device as addresses or stable station identities.
 @MainActor @Observable
 final class SavedPlaces {
     enum Anchor: String, CaseIterable {
@@ -44,34 +44,72 @@ final class SavedPlaces {
         }
     }
 
+    enum Destination: Codable, Equatable {
+        case place(PlaceResult)
+        case station(String)
+
+        var isValid: Bool {
+            switch self {
+            case let .place(place):
+                !place.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+                    CLLocationCoordinate2DIsValid(place.coordinate)
+            case let .station(id):
+                !id.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            }
+        }
+
+        func matches(_ other: Destination) -> Bool {
+            switch (self, other) {
+            case let (.place(a), .place(b)):
+                a.name == b.name && a.latitude == b.latitude && a.longitude == b.longitude
+            case let (.station(a), .station(b)):
+                a == b
+            default:
+                false
+            }
+        }
+    }
+
     static let storageKey = "savedPlaces"
     private let defaults: UserDefaults
-    private(set) var places: [String: PlaceResult]
+    private(set) var destinations: [String: Destination]
+    var places: [String: PlaceResult] {
+        destinations.compactMapValues {
+            if case let .place(place) = $0 {
+                return place
+            }
+            return nil
+        }
+    }
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
-        let stored = defaults.data(forKey: Self.storageKey)
-            .flatMap { try? JSONDecoder().decode([String: PlaceResult].self, from: $0) } ?? [:]
-        places = stored.filter { Anchor(rawValue: $0.key) != nil && Self.isValid($0.value) }
+        let data = defaults.data(forKey: Self.storageKey)
+        let decoder = JSONDecoder()
+        // Upgrade address-only storage without dropping previously saved places.
+        let stored = data.flatMap { try? decoder.decode([String: Destination].self, from: $0) }
+            ?? data.flatMap { try? decoder.decode([String: PlaceResult].self, from: $0) }?.mapValues(Destination.place)
+            ?? [:]
+        destinations = stored.filter { Anchor(rawValue: $0.key) != nil && $0.value.isValid }
     }
 
     func set(_ place: PlaceResult?, for anchor: Anchor) {
-        if let place {
-            guard Self.isValid(place) else { return }
-            // Match the web's address identity even when a new search assigns a new ID.
-            places = places.filter {
-                $0.value.name != place.name || $0.value.latitude != place.latitude || $0.value.longitude != place.longitude
-            }
-        }
-        places[anchor.rawValue] = place
-        if let data = try? JSONEncoder().encode(places) {
-            defaults.set(data, forKey: Self.storageKey)
-        }
+        setDestination(place.map(Destination.place), for: anchor)
     }
 
-    private static func isValid(_ place: PlaceResult) -> Bool {
-        !place.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
-            CLLocationCoordinate2DIsValid(place.coordinate)
+    func setStation(_ stationID: String, for anchor: Anchor) {
+        setDestination(.station(stationID), for: anchor)
+    }
+
+    private func setDestination(_ destination: Destination?, for anchor: Anchor) {
+        if let destination {
+            guard destination.isValid else { return }
+            destinations = destinations.filter { !$0.value.matches(destination) }
+        }
+        destinations[anchor.rawValue] = destination
+        if let data = try? JSONEncoder().encode(destinations) {
+            defaults.set(data, forKey: Self.storageKey)
+        }
     }
 }
 
@@ -99,6 +137,7 @@ struct PlaceSearchView<StationRow: View>: View {
     let savedPlaces: SavedPlaces
     let placeSearchMemory: PlaceSearchMemory
     let openPlace: (PlaceResult) -> Void
+    let openStation: (Station) -> Void
     @Binding var query: String
     let clearFocus: () -> Void
     let stationRow: (Station, Bool) -> StationRow
@@ -120,19 +159,25 @@ struct PlaceSearchView<StationRow: View>: View {
         let stations = Transit.searchStations(store.stations, query: text)
         let recent = text.isEmpty ? recentStations.resolved(in: store.stations) : []
         List {
-            if text.isEmpty, !savedPlaces.places.isEmpty {
+            if text.isEmpty, !savedPlaces.destinations.isEmpty {
                 Section("Saved places") {
                     ForEach(SavedPlaces.Anchor.allCases, id: \.self) { anchor in
-                        if let place = savedPlaces.places[anchor.rawValue] {
+                        if let destination = savedPlaces.destinations[anchor.rawValue] {
                             HStack {
                                 Button {
                                     clearFocus()
-                                    openPlace(place)
+                                    switch destination {
+                                    case let .place(place): openPlace(place)
+                                    case let .station(id):
+                                        if let station = store.stations.first(where: { $0.id == id }) {
+                                            openStation(station)
+                                        }
+                                    }
                                 } label: {
                                     Label {
                                         VStack(alignment: .leading) {
                                             Text(anchor.rawValue)
-                                            Text(place.name).font(.subheadline).foregroundStyle(.secondary)
+                                            Text(savedName(destination)).font(.subheadline).foregroundStyle(.secondary)
                                         }
                                     } icon: { Image(systemName: anchor.symbol) }
                                         .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
@@ -140,6 +185,7 @@ struct PlaceSearchView<StationRow: View>: View {
                                 }
                                 .buttonStyle(.plain)
                                 .accessibilityIdentifier("savedPlace-\(anchor.rawValue)")
+                                .disabled(!canOpen(destination))
                                 Menu {
                                     Button("Remove \(anchor.rawValue)", role: .destructive) {
                                         savedPlaces.set(nil, for: anchor)
@@ -210,6 +256,21 @@ struct PlaceSearchView<StationRow: View>: View {
             }
             completedQuery = request.text
         }
+    }
+
+    private func savedName(_ destination: SavedPlaces.Destination) -> String {
+        switch destination {
+        case let .place(place): place.name
+        case let .station(id):
+            store.stations.first(where: { $0.id == id })?.stop.name ?? (store.loading ? "Loading station…" : "Station unavailable")
+        }
+    }
+
+    private func canOpen(_ destination: SavedPlaces.Destination) -> Bool {
+        if case let .station(id) = destination {
+            return store.stations.contains { $0.id == id }
+        }
+        return true
     }
 
     @ViewBuilder private func places(for text: String) -> some View {

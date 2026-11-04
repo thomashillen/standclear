@@ -59,7 +59,7 @@ struct StationBrowser: View {
     var body: some View {
         Group {
             if search {
-                PlaceSearchView(store: store, recentStations: recentStations, savedPlaces: savedPlaces, placeSearchMemory: placeSearchMemory, openPlace: openPlace,
+                PlaceSearchView(store: store, recentStations: recentStations, savedPlaces: savedPlaces, placeSearchMemory: placeSearchMemory, openPlace: openPlace, openStation: openSearchStation,
                                 query: $query, clearFocus: { searchFocus.wrappedValue = false }, stationRow: searchStationRow)
                     .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Address, place or station")
                     .searchFocused(searchFocus)
@@ -176,16 +176,20 @@ struct StationBrowser: View {
     }
 
     private func stationDetails(_ station: Station) -> some View {
-        StationArrivals(station: station, store: store, favoriteStations: favoriteStations, directionsSelection: $directionsSelection,
+        StationArrivals(station: station, store: store, favoriteStations: favoriteStations, savedPlaces: savedPlaces, directionsSelection: $directionsSelection,
                         onDirectionsHere: onDirectionsHere, onSelectTrip: onSelectTrip, onShowTripMap: onShowTripMap)
             .onAppear { select(station) }
     }
 
+    private func openSearchStation(_ station: Station) {
+        recentStations.record(station.id)
+        searchFocus.wrappedValue = false
+        selectedStationID = station.id
+    }
+
     private func searchStationRow(_ station: Station, recent: Bool) -> some View {
         Button {
-            recentStations.record(station.id)
-            searchFocus.wrappedValue = false
-            selectedStationID = station.id
+            openSearchStation(station)
         } label: {
             stationLabel(station)
         }
@@ -263,6 +267,7 @@ struct StationArrivals: View {
     let station: Station
     let store: TransitStore
     let favoriteStations: FavoriteStations
+    let savedPlaces: SavedPlaces
     @Binding var directionsSelection: DirectionsSelection
     let onDirectionsHere: (Station) -> Void
     let onSelectTrip: (NativeTripPlan?) -> Void
@@ -346,6 +351,23 @@ struct StationArrivals: View {
             }
         }
         .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Menu("Save station", systemImage: "ellipsis") {
+                    ForEach(SavedPlaces.Anchor.allCases, id: \.self) { anchor in
+                        if savedPlaces.destinations[anchor.rawValue] == .station(station.id) {
+                            Button("Remove \(anchor.rawValue)", role: .destructive) { savedPlaces.set(nil, for: anchor) }
+                        } else {
+                            Button("Set as \(anchor.rawValue)", systemImage: anchor.symbol) {
+                                savedPlaces.setStation(station.id, for: anchor)
+                                if !favoriteStations.contains(station.id) {
+                                    favoriteStations.toggle(station.id)
+                                }
+                            }
+                        }
+                    }
+                }
+                .accessibilityIdentifier("stationAnchorMenu")
+            }
             ToolbarItem(placement: .topBarTrailing) {
                 let saved = favoriteStations.contains(station.id)
                 Button(saved ? "Remove from favorites" : "Add to favorites", systemImage: saved ? "star.fill" : "star") {

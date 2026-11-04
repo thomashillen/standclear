@@ -231,11 +231,35 @@ final class StandClearUITests: XCTestCase {
             toggle.tap()
         }
         XCTAssertEqual(toggle.label, "Add to favorites")
-        toggle.tap()
-        XCTAssertEqual(toggle.label, "Remove from favorites")
+        let anchors = app.buttons["stationAnchorMenu"]
+        anchors.tap()
+        if app.buttons["Remove Home"].exists {
+            app.buttons["Remove Home"].tap()
+            anchors.tap()
+        }
+        app.buttons["Set as Home"].tap()
+        XCTAssertEqual(toggle.label, "Remove from favorites", "Assigning a station anchor also favorites it")
 
         app.terminate()
         app.launch()
+        XCTAssertTrue(app.buttons["searchButton"].waitForExistence(timeout: 15))
+        app.buttons["searchButton"].tap()
+        let shortcut = app.buttons["savedPlace-Home"]
+        XCTAssertTrue(shortcut.waitForExistence(timeout: 10))
+        XCTAssertTrue(shortcut.label.contains("Wall St"))
+        let shortcutCapture = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        shortcutCapture.name = "Home station shortcut after relaunch without location"
+        shortcutCapture.lifetime = .keepAlways
+        add(shortcutCapture)
+        shortcut.tap()
+        XCTAssertTrue(detail.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["directionsHere"].exists)
+        anchors.tap()
+        app.buttons["Remove Home"].tap()
+        XCTAssertEqual(toggle.label, "Remove from favorites", "Removing an anchor preserves the station favorite")
+        detail.buttons.element(boundBy: 0).tap()
+        XCTAssertTrue(shortcut.waitForNonExistence(timeout: 5))
+        app.buttons["Done"].tap()
         let nearby = app.buttons["nearbyButton"]
         XCTAssertTrue(nearby.waitForExistence(timeout: 15))
         nearby.tap()

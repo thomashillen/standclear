@@ -394,6 +394,30 @@ final class SavedPlacesTests: XCTestCase {
         XCTAssertTrue(SavedPlaces(defaults: defaults).places.isEmpty)
     }
 
+    func testAddressUpgradeAndStationReplacementPreserveBothAnchorKinds() throws {
+        let domain = "StandClear.StationAnchorTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: domain))
+        defer { defaults.removePersistentDomain(forName: domain) }
+        let address = PlaceResult(id: "old", name: "Existing address", subtitle: "", latitude: 40.75, longitude: -74)
+        try defaults.set(JSONEncoder().encode(["Home": address]), forKey: SavedPlaces.storageKey)
+        let saved = SavedPlaces(defaults: defaults)
+        XCTAssertEqual(saved.places["Home"], address)
+        saved.setStation("419", for: .work)
+        let restored = SavedPlaces(defaults: defaults)
+        XCTAssertEqual(restored.places["Home"], address)
+        XCTAssertEqual(restored.destinations["Work"], .station("419"))
+        restored.setStation("419", for: .home)
+        XCTAssertNil(restored.destinations["Work"])
+        XCTAssertNil(restored.places["Home"])
+        XCTAssertEqual(SavedPlaces(defaults: defaults).destinations["Home"], .station("419"))
+        restored.setStation(" ", for: .home)
+        XCTAssertEqual(restored.destinations["Home"], .station("419"))
+        restored.set(address, for: .home)
+        XCTAssertEqual(SavedPlaces(defaults: defaults).places["Home"], address)
+        restored.set(nil, for: .home)
+        XCTAssertTrue(SavedPlaces(defaults: defaults).destinations.isEmpty)
+    }
+
     func testInvalidSavedCoordinatesAndNamesAreDiscarded() throws {
         let domain = "StandClear.SavedPlacesTests.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: domain))
