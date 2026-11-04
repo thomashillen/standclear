@@ -221,7 +221,10 @@ final class TransitStore {
                     "trains": [
                         train(id: "ui-fixture-1-n", route: "1", direction: "N", previous: "128", next: "127", timestamp: timestamp),
                         train(id: "ui-fixture-4-map", route: "4", direction: "N", previous: "631", next: "629", timestamp: timestamp),
-                    ],
+                    ] + (includeExpress ? [
+                        train(id: "ui-fixture-6x-n", route: "6X", direction: "N", previous: "613", next: "608", timestamp: timestamp)
+                            .merging(["progress": 0.85]) { _, updated in updated },
+                    ] : []),
                     "arrivals": [
                         arrival(id: "ui-fixture-1-n", route: "1", stop: "127", direction: "N", destination: "126", eta: timestamp + 150),
                         arrival(id: "ui-fixture-1-s", route: "1", stop: "127", direction: "S", destination: "128", eta: timestamp + 300),
