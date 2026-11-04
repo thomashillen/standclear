@@ -99,6 +99,39 @@ struct StationArrivalGroup: Identifiable {
     }
 }
 
+/// A compact preview of the same first three eligible station predictions.
+/// Only explicitly identical reported services share a row; missing destinations
+/// or directions never establish that two trains are going to the same place.
+struct NearbyArrivalGroup: Identifiable {
+    let first: Arrival
+    var later: [Arrival] = []
+    var id: String {
+        first.id
+    }
+
+    var arrivals: [Arrival] {
+        [first] + later
+    }
+
+    static func groups(_ arrivals: [Arrival]) -> [Self] {
+        var groups: [Self] = []
+        for arrival in arrivals.prefix(3) {
+            let destinationKnown = arrival.destStopId?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+            if destinationKnown, ArrivalDirection(arrival.direction) != .unknown,
+               let index = groups.firstIndex(where: {
+                   $0.first.routeId == arrival.routeId && $0.first.stopId == arrival.stopId &&
+                       $0.first.direction == arrival.direction && $0.first.destStopId == arrival.destStopId
+               })
+            {
+                groups[index].later.append(arrival)
+            } else {
+                groups.append(Self(first: arrival))
+            }
+        }
+        return groups
+    }
+}
+
 struct Arrival: Decodable, Identifiable {
     let routeId: String
     let stopId: String

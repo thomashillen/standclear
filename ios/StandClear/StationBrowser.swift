@@ -131,6 +131,11 @@ struct StationBrowser: View {
                             .listRowBackground(Color.clear)
                             .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
                         }
+                        if !results.isEmpty {
+                            Section {} footer: {
+                                Text("Distances are approximate, in a straight line.")
+                            }
+                        }
                     }
                 }
                 .listRowBackground(Color.clear)
@@ -150,8 +155,8 @@ struct StationBrowser: View {
                 Text("No upcoming predictions. This does not mean there is no service.")
                     .foregroundStyle(.secondary)
             } else {
-                ForEach(Array(arrivals.prefix(3))) { arrival in
-                    ArrivalRow(arrival: arrival, store: store, now: now)
+                ForEach(NearbyArrivalGroup.groups(arrivals)) { group in
+                    ArrivalRow(arrival: group.first, store: store, now: now, additionalArrivals: group.later)
                 }
             }
         }
@@ -225,11 +230,27 @@ struct StationBrowser: View {
             ViewThatFits(in: .horizontal) {
                 HStack {
                     stationName(station, starred: starred)
+                    if let meters {
+                        stationDistance(meters)
+                    }
                     Spacer(minLength: 8)
                     routeBadges(station)
                 }
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack {
+                        stationName(station, starred: starred)
+                        Spacer(minLength: 8)
+                        routeBadges(station)
+                    }
+                    if let meters {
+                        stationDistance(meters)
+                    }
+                }
                 VStack(alignment: .leading, spacing: 4) {
                     stationName(station, starred: starred)
+                    if let meters {
+                        stationDistance(meters)
+                    }
                     ViewThatFits(in: .horizontal) {
                         routeBadges(station)
                         Text(station.routes.map(RouteBadge.displayID).joined(separator: " · "))
@@ -237,21 +258,19 @@ struct StationBrowser: View {
                     }
                 }
             }
-            if let meters {
-                let distance = Measurement(value: max(100, meters), unit: UnitLength.meters)
-                    .formatted(.measurement(width: .abbreviated, usage: .road, numberFormatStyle: .number.precision(.significantDigits(1 ... 2))))
-                Group {
-                    if meters < 100 {
-                        Text("Within about \(distance) in a straight line")
-                    } else {
-                        Text("About \(distance) away in a straight line")
-                    }
-                }
-                .font(.caption).foregroundStyle(.secondary)
-            }
         }
         .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
         .contentShape(Rectangle())
+    }
+
+    private func stationDistance(_ meters: Double) -> some View {
+        let distance = Measurement(value: max(100, meters), unit: UnitLength.meters)
+            .formatted(.measurement(width: .abbreviated, usage: .road, numberFormatStyle: .number.precision(.significantDigits(1 ... 2))))
+        return Text(meters < 100 ? "Within ≈\(distance)" : "≈\(distance)")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+            .accessibilityLabel(meters < 100 ? "Within about \(distance) in a straight line" : "About \(distance) away in a straight line")
     }
 
     private func routeBadges(_ station: Station) -> some View {
@@ -446,13 +465,20 @@ private struct ArrivalRow: View {
     let arrival: Arrival
     let store: TransitStore
     let now: Date
+    var additionalArrivals: [Arrival] = []
+
+    private var arrivals: [Arrival] {
+        [arrival] + additionalArrivals
+    }
 
     var body: some View {
         DisclosureGroup {
-            Text("Predicted arrival: \(Date(timeIntervalSince1970: arrival.eta).formatted(date: .omitted, time: .shortened))")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-                .accessibilityIdentifier("arrivalClockTime")
+            ForEach(arrivals) { prediction in
+                Text("Predicted arrival: \(Date(timeIntervalSince1970: prediction.eta).formatted(date: .omitted, time: .shortened))")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .accessibilityIdentifier("arrivalClockTime")
+            }
         } label: {
             VStack(alignment: .leading, spacing: 2) {
                 ViewThatFits(in: .horizontal) {
@@ -491,10 +517,15 @@ private struct ArrivalRow: View {
     }
 
     private var countdown: some View {
-        Text(arrival.countdown(at: now) ?? "Prediction elapsed")
+        let times = arrivals.map { $0.countdown(at: now) ?? "Prediction elapsed" }
+        let label = times.allSatisfy { $0.hasSuffix(" min") }
+            ? times.map { String($0.dropLast(4)) }.joined(separator: ", ") + " min"
+            : times.joined(separator: ", ")
+        return Text(label)
             .font(.headline)
             .monospacedDigit()
-            .accessibilityLabel(arrival.countdown(at: now).map { "Predicted in \($0)" } ?? "Prediction elapsed")
+            .fixedSize(horizontal: false, vertical: true)
+            .accessibilityLabel(arrivals.map { $0.countdown(at: now).map { "Predicted in \($0)" } ?? "Prediction elapsed" }.joined(separator: ", "))
     }
 }
 

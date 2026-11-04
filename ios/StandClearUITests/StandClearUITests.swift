@@ -60,8 +60,14 @@ final class StandClearUITests: XCTestCase {
         // also traverses hundreds of independently updating train annotations.
         let arrivalsList = app.collectionViews["stationList"]
         XCTAssertTrue(arrivalsList.waitForExistence(timeout: 5))
-        let candidate = arrivalsList.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND NOT label CONTAINS %@", "arrivalRow-", "<1 min")).firstMatch
+        let candidate = arrivalsList.buttons["arrivalRow-ui-fixture-1-n:127:N"]
         XCTAssertTrue(candidate.waitForExistence(timeout: 10), "Fixture arrivals must be available for disclosure coverage")
+        let grouped = arrivalsList.buttons["arrivalRow-ui-fixture-1-n:127:N"]
+        XCTAssertTrue(grouped.waitForExistence(timeout: 10))
+        XCTAssertTrue(grouped.label.contains("Predicted in 3 min"))
+        XCTAssertTrue(grouped.label.contains("Predicted in 11 min"))
+        XCTAssertFalse(arrivalsList.buttons["arrivalRow-ui-fixture-1-n-later:127:N"].exists,
+                       "The later train shares its service row instead of repeating direction and destination")
         let arrivalID = candidate.identifier
         let arrival = arrivalsList.buttons[arrivalID]
         let usable = NSPredicate { _, _ in
@@ -73,9 +79,25 @@ final class StandClearUITests: XCTestCase {
         }
         expectation(for: usable, evaluatedWith: arrival)
         waitForExpectations(timeout: 20)
+        XCTAssertGreaterThanOrEqual(arrival.frame.height, 44)
         arrival.tap()
         XCTAssertTrue(arrivalsList.staticTexts.matching(NSPredicate(format: "identifier == %@ AND label BEGINSWITH %@", arrivalID, "Predicted arrival:")).firstMatch.waitForExistence(timeout: 5))
+        XCTAssertEqual(arrivalsList.staticTexts.matching(NSPredicate(format: "identifier == %@ AND label BEGINSWITH %@", arrivalID, "Predicted arrival:")).count, 2)
+        let compact = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        compact.name = "Compact Nearby groups matching predictions with both clock times"
+        compact.lifetime = .keepAlways
+        add(compact)
         app.buttons["Done"].tap()
+        XCUIDevice.shared.orientation = .landscapeLeft
+        waitForLayout(in: app, expanded: true)
+        app.buttons["nearbyButton"].tap()
+        XCTAssertTrue(app.buttons["arrivalRow-ui-fixture-1-n:127:N"].waitForExistence(timeout: 10))
+        let expanded = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        expanded.name = "Expanded Nearby compact service rows"
+        expanded.lifetime = .keepAlways
+        add(expanded)
+        XCUIDevice.shared.orientation = .portrait
+        waitForLayout(in: app, expanded: false, readyControl: "nearbyButton")
         let neighborhood = XCTAttachment(screenshot: app.screenshot())
         neighborhood.name = "Near Me recentered neighborhood"
         neighborhood.lifetime = .keepAlways
@@ -83,6 +105,49 @@ final class StandClearUITests: XCTestCase {
         app.buttons["searchButton"].tap()
         XCTAssertTrue(app.navigationBars["Search"].waitForExistence(timeout: 5))
         XCTAssertFalse(app.navigationBars["Nearby arrivals"].exists, "Nearby must not interrupt manual search")
+    }
+
+    @MainActor
+    func testNearbyGroupedPredictionsAtAccessibilityTextSize() {
+        let app = XCUIApplication()
+        app.terminate()
+        XCUIDevice.shared.orientation = .portrait
+        app.resetAuthorizationStatus(for: .location)
+        XCUIDevice.shared.location = XCUILocation(location: CLLocation(latitude: 40.7553, longitude: -73.987))
+        defer { XCUIDevice.shared.location = nil }
+        app.launchArguments = ["--ui-test-fixture", "-mapProvider", "Apple Maps",
+                               "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
+        addUIInterruptionMonitor(withDescription: "Location permission") { alert in
+            let allow = alert.buttons["Allow While Using App"]
+            guard allow.exists else { return false }
+            allow.tap()
+            return true
+        }
+        app.launch()
+        XCTAssertTrue(app.buttons["nearbyButton"].waitForExistence(timeout: 15))
+        activatePermissionPrompt(in: app)
+        app.buttons["nearbyButton"].tap()
+        XCTAssertTrue(app.navigationBars["Nearby arrivals"].waitForExistence(timeout: 10))
+        // Accessibility text sizes already use the large detent.
+        let list = app.collectionViews["stationList"]
+        let station = list.buttons["station-127"]
+        XCTAssertTrue(station.waitForExistence(timeout: 10))
+        XCTAssertTrue(station.label.localizedCaseInsensitiveContains("straight line"))
+        let row = list.buttons["arrivalRow-ui-fixture-1-n:127:N"]
+        XCTAssertTrue(row.waitForExistence(timeout: 10))
+        XCTAssertTrue(row.label.contains("Northbound"))
+        XCTAssertTrue(row.label.contains("50 St"))
+        XCTAssertTrue(row.label.contains("Predicted in 3 min"))
+        XCTAssertTrue(row.label.contains("Predicted in 11 min"))
+        XCTAssertGreaterThanOrEqual(row.frame.height, 44)
+        row.tap()
+        let clocks = list.staticTexts.matching(NSPredicate(format: "identifier == %@ AND label BEGINSWITH %@", row.identifier, "Predicted arrival:"))
+        XCTAssertTrue(clocks.firstMatch.waitForExistence(timeout: 5))
+        XCTAssertEqual(clocks.count, 2)
+        let capture = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        capture.name = "Nearby grouped predictions at largest accessibility text size"
+        capture.lifetime = .keepAlways
+        add(capture)
     }
 
     @MainActor
