@@ -1196,7 +1196,12 @@ final class StandClearUITests: XCTestCase {
             // Search may outlast the real 30-second fix lifetime on a hosted
             // simulator. Deliver a fresh measurement on foreground entry.
             XCUIDevice.shared.press(.home)
-            XCTAssertTrue(app.wait(for: .runningBackground, timeout: 5))
+            let backgrounded = NSPredicate { _, _ in MainActor.assumeIsolated {
+                let state = app.state
+                return state == .runningBackground || state == .runningBackgroundSuspended
+            } }
+            expectation(for: backgrounded, evaluatedWith: app)
+            waitForExpectations(timeout: 5)
             XCUIDevice.shared.location = XCUILocation(location: CLLocation(latitude: 40.7553, longitude: -73.987))
             app.activate()
             XCTAssertTrue(app.wait(for: .runningForeground, timeout: 5))
