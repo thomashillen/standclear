@@ -982,9 +982,8 @@ final class StandClearUITests: XCTestCase {
         expanded.lifetime = .keepAlways
         add(expanded)
         XCUIDevice.shared.orientation = .portrait
-        waitForLayout(in: app, expanded: false)
-        XCTAssertTrue(app.navigationBars["StandClear"].waitForExistence(timeout: 5))
-        app.buttons["searchButton"].tap()
+        waitForLayout(in: app, expanded: false, readyControl: "Done")
+        XCTAssertTrue(app.navigationBars["Search"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.buttons["Done"].waitForExistence(timeout: 5))
         let field = app.searchFields.firstMatch
         field.tap()
@@ -1002,9 +1001,11 @@ final class StandClearUITests: XCTestCase {
         app.searchFields.firstMatch.tap()
         app.searchFields.firstMatch.typeText(" Sq")
         XCUIDevice.shared.orientation = .portrait
-        waitForLayout(in: app, expanded: false, readyControl: "nearbyButton")
-        XCTAssertTrue(app.navigationBars["StandClear"].waitForExistence(timeout: 5))
+        waitForLayout(in: app, expanded: false, readyControl: "Done")
+        XCTAssertTrue(app.navigationBars["Search"].waitForExistence(timeout: 5))
         XCTAssertFalse(app.keyboards.firstMatch.exists, "Search keyboard must leave with its presentation")
+        XCTAssertTrue((app.searchFields.firstMatch.value as? String)?.contains("Times Sq") == true)
+        app.buttons["Done"].tap()
         app.buttons["nearbyButton"].tap()
         XCTAssertTrue(app.buttons["Done"].waitForExistence(timeout: 5))
         XCUIDevice.shared.orientation = .landscapeLeft
@@ -1013,6 +1014,87 @@ final class StandClearUITests: XCTestCase {
         waitForExpectations(timeout: 5)
         XCTAssertTrue(app.navigationBars["Nearby arrivals"].exists)
         XCTAssertFalse(app.navigationBars["Search"].exists)
+    }
+
+    @MainActor
+    func testStationBrowsersPreserveIndependentPathsAcrossLayouts() {
+        let app = XCUIApplication()
+        app.terminate()
+        XCUIDevice.shared.orientation = .portrait
+        app.resetAuthorizationStatus(for: .location)
+        XCUIDevice.shared.location = XCUILocation(location: CLLocation(latitude: 40.7553, longitude: -73.987))
+        defer {
+            XCUIDevice.shared.location = nil
+            XCUIDevice.shared.orientation = .portrait
+        }
+        app.launchArguments = ["--ui-test-fixture", "-mapProvider", "Apple Maps"]
+        addUIInterruptionMonitor(withDescription: "Location permission") { alert in
+            let allow = alert.buttons["Allow While Using App"]
+            guard allow.exists else { return false }
+            allow.tap()
+            return true
+        }
+        app.launch()
+        activatePermissionPrompt(in: app)
+        app.buttons["searchButton"].tap()
+        let field = app.searchFields[unifiedSearchPrompt]
+        XCTAssertTrue(field.waitForExistence(timeout: 5))
+        field.tap()
+        field.typeText("Wall\n")
+        selectSearchResult("419", query: "Wall", in: app)
+        XCTAssertTrue(app.navigationBars["Wall St"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["stationAlertsSummary"].waitForExistence(timeout: 10))
+        XCUIDevice.shared.orientation = .landscapeLeft
+        waitForLayout(in: app, expanded: true, readyControl: "directionsHere")
+        XCTAssertTrue(app.navigationBars["Wall St"].exists)
+        XCTAssertGreaterThanOrEqual(app.buttons["directionsHere"].frame.height, 44)
+        let wide = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        wide.name = "Search station survives expansion"
+        wide.lifetime = .keepAlways
+        add(wide)
+        // Nearby owns a separate stack: it must not inherit Search's Wall St.
+        app.buttons["nearbyButton"].tap()
+        XCTAssertTrue(app.navigationBars["Nearby arrivals"].waitForExistence(timeout: 5))
+        let times = app.buttons["station-127"]
+        XCTAssertTrue(times.waitForExistence(timeout: 15))
+        times.tap()
+        XCTAssertTrue(app.navigationBars["Times Sq-42 St"].waitForExistence(timeout: 5))
+        app.buttons["searchButton"].tap()
+        XCTAssertTrue(app.navigationBars["Wall St"].waitForExistence(timeout: 5))
+        app.buttons["nearbyButton"].tap()
+        XCTAssertTrue(app.navigationBars["Times Sq-42 St"].waitForExistence(timeout: 5))
+        XCUIDevice.shared.orientation = .portrait
+        waitForLayout(in: app, expanded: false, readyControl: "directionsHere")
+        XCTAssertTrue(app.navigationBars["Times Sq-42 St"].exists)
+        XCUIDevice.shared.orientation = .landscapeLeft
+        waitForLayout(in: app, expanded: true, readyControl: "directionsHere")
+        XCTAssertTrue(app.navigationBars["Times Sq-42 St"].exists)
+        app.navigationBars["Times Sq-42 St"].buttons.element(boundBy: 0).tap()
+        XCTAssertTrue(app.navigationBars["Nearby arrivals"].waitForExistence(timeout: 5))
+        app.buttons["searchButton"].tap()
+        XCTAssertTrue(app.navigationBars["Wall St"].waitForExistence(timeout: 5))
+        XCUIDevice.shared.orientation = .portrait
+        waitForLayout(in: app, expanded: false, readyControl: "directionsHere")
+        XCTAssertTrue(app.navigationBars["Wall St"].exists)
+        let compact = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        compact.name = "Search station survives return to compact"
+        compact.lifetime = .keepAlways
+        add(compact)
+        app.navigationBars["Wall St"].buttons.element(boundBy: 0).tap()
+        XCTAssertTrue(app.navigationBars["Search"].waitForExistence(timeout: 5))
+        XCTAssertEqual(field.value as? String, "Wall")
+        selectSearchResult("419", query: "Wall", in: app)
+        app.buttons["Done"].tap()
+        app.buttons["searchButton"].tap()
+        XCTAssertTrue(app.navigationBars["Search"].waitForExistence(timeout: 5), "Explicit dismissal resets the station path")
+        XCTAssertEqual(field.value as? String, "Wall")
+        selectSearchResult("419", query: "Wall", in: app)
+        // Drag dismissal has the same reset semantics as Done.
+        app.buttons["Sheet Grabber"].swipeDown()
+        XCTAssertTrue(app.buttons["searchButton"].waitForExistence(timeout: 5))
+        app.buttons["searchButton"].tap()
+        XCTAssertTrue(app.navigationBars["Search"].waitForExistence(timeout: 5))
+        XCTAssertEqual(field.value as? String, "Wall")
     }
 
     @MainActor
