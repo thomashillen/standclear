@@ -497,3 +497,101 @@ private struct ArrivalRow: View {
             .accessibilityLabel(arrival.countdown(at: now).map { "Predicted in \($0)" } ?? "Prediction elapsed")
     }
 }
+
+enum LineDestination: Hashable {
+    case route(String)
+    case station(String)
+}
+
+/// Browse the static route pattern; current arrivals and alerts remain in station details.
+struct LineBrowser<StationDetail: View>: View {
+    let store: TransitStore
+    let stationDetail: (Station) -> StationDetail
+    let select: (Station) -> Void
+
+    var body: some View {
+        List {
+            if store.loading {
+                ProgressView("Loading lines…")
+            } else if store.error != nil {
+                ContentUnavailableView("Lines unavailable", systemImage: "wifi.exclamationmark",
+                                       description: Text("Subway data couldn’t load."))
+                Button("Retry lines") { Task { await store.loadLines() } }
+            } else if store.lines.isEmpty {
+                ContentUnavailableView("No lines available", systemImage: "tram")
+            }
+            ForEach(store.lines) { line in
+                NavigationLink(value: LineDestination.route(line.routeId)) {
+                    HStack {
+                        RouteBadge(routeID: line.routeId, color: line.color)
+                        VStack(alignment: .leading) {
+                            Text("\(RouteBadge.displayID(line.routeId)) line")
+                            if let first = line.stops.first, let last = line.stops.last {
+                                Text("\(first.name) – \(last.name)")
+                                    .font(.subheadline).foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                    .frame(minHeight: 44)
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel("\(TransitRouteIdentity(line.routeId).spokenName) line")
+                    .accessibilityValue([line.stops.first?.name, line.stops.last?.name].compactMap(\.self).joined(separator: " to "))
+                    .accessibilityHint("Browse stations on this route")
+                }
+                .accessibilityIdentifier("line-\(line.routeId)")
+            }
+            .listRowBackground(Color.clear)
+        }
+        .listStyle(.plain)
+        .scrollContentBackground(.hidden)
+        .navigationTitle("Lines")
+        .navigationBarTitleDisplayMode(.inline)
+        .accessibilityIdentifier("lineList")
+        .navigationDestination(for: LineDestination.self) { destination in
+            switch destination {
+            case let .route(id):
+                stops(for: id)
+            case let .station(id):
+                if let station = store.stations.first(where: { $0.id == id }) {
+                    stationDetail(station).onAppear { select(station) }
+                } else {
+                    ContentUnavailableView("Station unavailable", systemImage: "tram")
+                }
+            }
+        }
+    }
+
+    @ViewBuilder private func stops(for routeID: String) -> some View {
+        if let line = store.lines.first(where: { $0.routeId == routeID }) {
+            List {
+                Text("Static route pattern. Service may change. Open a station for reported arrivals and advisories.")
+                    .font(.footnote).foregroundStyle(.secondary)
+                    .listRowBackground(Color.clear)
+                Section {
+                    ForEach(line.stops) { stop in
+                        if let station = store.stations.first(where: { $0.stopIDs.contains(stop.id) }) {
+                            NavigationLink(value: LineDestination.station(station.id)) {
+                                Text(stop.name)
+                                    .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                            }
+                            .accessibilityIdentifier("lineStation-\(stop.id)")
+                        } else {
+                            Text(stop.name).foregroundStyle(.secondary)
+                        }
+                    }
+                } header: {
+                    Text("Stations")
+                }
+                .listRowBackground(Color.clear)
+            }
+            .listStyle(.plain)
+            .scrollContentBackground(.hidden)
+            .navigationTitle("\(RouteBadge.displayID(routeID)) line")
+            .navigationBarTitleDisplayMode(.inline)
+            .accessibilityIdentifier("lineStationList")
+        } else {
+            ContentUnavailableView("Line unavailable", systemImage: "tram",
+                                   description: Text("This line is no longer in the subway data."))
+        }
+    }
+}

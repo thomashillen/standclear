@@ -289,6 +289,46 @@ final class StandClearUITests: XCTestCase {
     }
 
     @MainActor
+    func testLineBrowserOpensStationArrivalsAndDirections() {
+        let app = XCUIApplication()
+        app.terminate()
+        XCUIDevice.shared.orientation = .portrait
+        app.launchArguments = ["--ui-test-fixture", "-mapProvider", "Apple Maps"]
+        app.launch()
+        activatePermissionPrompt(in: app)
+        app.buttons["moreButton"].tap()
+        app.buttons["linesButton"].tap()
+        let line = app.buttons["line-4"]
+        XCTAssertTrue(line.waitForExistence(timeout: 10))
+        line.tap()
+        let stops = app.collectionViews["lineStationList"]
+        let wall = stops.buttons["lineStation-419"]
+        revealPlaceElement(wall, in: stops)
+        XCTAssertTrue(wall.label.contains("Wall St"))
+        let capture = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        capture.name = "4 line station browser"
+        capture.lifetime = .keepAlways
+        add(capture)
+        wall.tap()
+        let details = app.navigationBars["Wall St"]
+        XCTAssertTrue(details.waitForExistence(timeout: 5))
+        XCUIDevice.shared.orientation = .landscapeLeft
+        waitForLayout(in: app, expanded: true, readyControl: "directionsHere")
+        XCTAssertTrue(details.waitForExistence(timeout: 5), "Keep the selected station across layout changes")
+        XCUIDevice.shared.orientation = .portrait
+        waitForLayout(in: app, expanded: false, readyControl: "directionsHere")
+        XCTAssertTrue(details.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["directionsHere"].waitForExistence(timeout: 5))
+        app.buttons["directionsHere"].tap()
+        XCTAssertTrue(app.buttons["destinationPicker"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["destinationPicker"].label.contains("Wall St"))
+        app.navigationBars["Directions"].buttons.element(boundBy: 0).tap()
+        XCTAssertTrue(details.waitForExistence(timeout: 5))
+        details.buttons.element(boundBy: 0).tap()
+        XCTAssertTrue(wall.waitForExistence(timeout: 5))
+    }
+
+    @MainActor
     func testRecentStationPersistsAcrossRelaunchAndCanBeCleared() {
         let app = XCUIApplication()
         app.terminate()
