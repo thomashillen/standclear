@@ -307,7 +307,6 @@ struct MapShell: View {
         }
     }
 
-
     private func showNearby(expanded: Bool) {
         selectedTrip = nil
         sheetDetent = typeSize.isAccessibilitySize ? .large : .medium
