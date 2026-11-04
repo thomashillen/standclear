@@ -3,10 +3,6 @@ options:
   bundleIdPrefix: app.standclear
   deploymentTarget:
     iOS: '26.0'
-packages:
-  MapboxMaps:
-    url: https://github.com/mapbox/mapbox-maps-ios.git
-    exactVersion: 11.26.0
 settings:
   base:
     SWIFT_VERSION: '6.0'
@@ -18,8 +14,6 @@ targets:
     type: application
     platform: iOS
     sources: [StandClear]
-    dependencies:
-      - package: MapboxMaps
     configFiles:
       Debug: Config/App.xcconfig
       Release: Config/App.xcconfig
@@ -28,7 +22,6 @@ targets:
       properties:
         CFBundleDisplayName: StandClear
         UILaunchScreen: {}
-        MBXAccessToken: $(MAPBOX_PUBLIC_TOKEN)
         NSLocationWhenInUseUsageDescription: StandClear uses your location to find nearby subway stations and arrivals.
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
     settings:

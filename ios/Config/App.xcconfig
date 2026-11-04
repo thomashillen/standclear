@@ -1,3 +1,2 @@
-// Optional local configuration; never commit a real token or signing team.
-MAPBOX_PUBLIC_TOKEN =
+// Optional local signing configuration; never commit credentials or a signing team.
 #include? "Local.xcconfig"

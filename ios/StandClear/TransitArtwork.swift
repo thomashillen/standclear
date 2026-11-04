@@ -55,27 +55,6 @@ struct TrainCarArtwork: View {
     }
 }
 
-/// The Mapbox image API needs a UIImage. Rendering the reusable SwiftUI drawing
-/// once per route avoids per-train view snapshots and keeps artwork map-independent.
-@MainActor
-final class TrainSpriteCache {
-    static let shared = TrainSpriteCache()
-    private var images: [String: UIImage] = [:]
-
-    func image(routeID: String, color: String) -> UIImage {
-        let key = "\(routeID):\(color.uppercased())"
-        if let image = images[key] {
-            return image
-        }
-        let renderer = ImageRenderer(content: TrainCarArtwork(color: color))
-        renderer.scale = 3
-        renderer.isOpaque = false
-        let image = renderer.uiImage ?? UIImage(systemName: "tram.fill") ?? UIImage()
-        images[key] = image
-        return image
-    }
-}
-
 /// Transit bullets are deliberately custom: route color and text carry meaning.
 /// Surrounding navigation and controls retain their standard SwiftUI presentation.
 struct RouteBadge: View {
