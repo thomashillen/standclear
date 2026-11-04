@@ -6,12 +6,14 @@ import Foundation
 struct TrainMotion {
     private let lines: [SubwayLine]
     private let tracks: [String: Track]
+    private let geometryIDs: [String: String]
     private var snapshot: Snapshot?
     private var rows: [Row] = []
     private var latestMotionEnd = 0.0
 
     init(lines: [SubwayLine]) {
         self.lines = lines
+        geometryIDs = TrainRouteGeometry.routeIDs(in: lines)
         var tracks: [String: Track] = [:]
         for line in lines {
             tracks[line.routeId] = Track(line)
@@ -58,7 +60,8 @@ struct TrainMotion {
             guard let reported = train.lastReportedAt, time - reported <= 90,
                   ["IN_TRANSIT_TO", "INCOMING_AT"].contains(train.status), ["N", "S"].contains(train.direction),
                   train.progress.isFinite, (0 ... 1).contains(train.progress),
-                  let track = tracks[train.routeId], let from = track.stops[train.prevStopId], let to = track.stops[train.nextStopId],
+                  let geometryID = geometryIDs[train.routeId], let track = tracks[geometryID],
+                  let from = track.stops[train.prevStopId], let to = track.stops[train.nextStopId],
                   from != to, let eta, eta > time else { return row }
             let start = from + (to - from) * train.progress
             // An implausibly fast update or a prediction far outside the
@@ -97,7 +100,7 @@ struct TrainMotion {
             guard (-5 ... 360).contains(age) else { return nil }
             let base = row.base
             var coordinate = base.coordinate, bearing = base.bearingDegrees
-            if !reduceMotion, let leg = row.leg, let track = tracks[base.routeID] {
+            if !reduceMotion, let leg = row.leg, let geometryID = geometryIDs[base.routeID], let track = tracks[geometryID] {
                 let position = track.position(at: leg.arc(at: min(time, row.reported + 90)), forward: leg.forward)
                 coordinate = position.0
                 bearing = position.1
