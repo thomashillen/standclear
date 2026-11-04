@@ -131,7 +131,7 @@ The glance mirrors the web grouping: station complexes remain distinct, services
 
 SwiftUI supplies the glass effect on a soft rounded rectangle. The panel uses three tight rows with no separate header; feed status remains in the native More menu. Reduce Transparency uses a semantic opaque background; typography scales with Dynamic Type, and taller content can scroll within a geometry-bounded panel. No custom animation is introduced.
 
-Use the star in station details to add or remove a favorite on this device. Open **Nearby** to find saved stations even when location is unavailable. A saved station already in the nearby results is marked with a star and appears just once.
+In station details, open **Save station (•••)** to add or remove a favorite on this device. Keeping saved-station actions in this native menu reserves room for the station title, Directions here, and Done. Open **Nearby** to find saved stations even when location is unavailable. A saved station already in the nearby results is marked with a star and appears just once.
 
 Nearby station rows show approximate straight-line distance in local units when a location fix is usable.
 

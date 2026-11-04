@@ -391,6 +391,12 @@ struct StationArrivals: View {
             }
             ToolbarItem(placement: .topBarTrailing) {
                 Menu("Save station", systemImage: "ellipsis") {
+                    let saved = favoriteStations.contains(station.id)
+                    Button(saved ? "Remove from favorites" : "Add to favorites", systemImage: saved ? "star.fill" : "star") {
+                        favoriteStations.toggle(station.id)
+                    }
+                    .accessibilityIdentifier("favoriteStationToggle")
+                    Divider()
                     ForEach(SavedPlaces.Anchor.allCases, id: \.self) { anchor in
                         if savedPlaces.destinations[anchor.rawValue] == .station(station.id) {
                             Button("Remove \(anchor.rawValue)", role: .destructive) { savedPlaces.set(nil, for: anchor) }
@@ -405,14 +411,6 @@ struct StationArrivals: View {
                     }
                 }
                 .accessibilityIdentifier("stationAnchorMenu")
-            }
-            ToolbarItem(placement: .topBarTrailing) {
-                let saved = favoriteStations.contains(station.id)
-                Button(saved ? "Remove from favorites" : "Add to favorites", systemImage: saved ? "star.fill" : "star") {
-                    favoriteStations.toggle(station.id)
-                }
-                .labelStyle(.iconOnly)
-                .accessibilityIdentifier("favoriteStationToggle")
             }
         }
         .navigationTitle(station.stop.name)

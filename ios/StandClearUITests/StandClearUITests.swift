@@ -241,6 +241,9 @@ final class StandClearUITests: XCTestCase {
         selectSearchResult("419", query: "Wall", in: app)
         let list = app.collectionViews["stationArrivalsList"]
         XCTAssertTrue(list.waitForExistence(timeout: 5))
+        let stationTitle = app.navigationBars["Wall St"].staticTexts["Wall St"]
+        XCTAssertTrue(stationTitle.waitForExistence(timeout: 5), "Station identity must remain visible alongside native toolbar actions")
+        XCTAssertGreaterThan(stationTitle.frame.width, 0)
         if expanded {
             let window = app.windows.firstMatch.frame
             XCTAssertGreaterThan(list.frame.midX, window.midX, "Station details should occupy the expanded right-side control region")
@@ -317,6 +320,13 @@ final class StandClearUITests: XCTestCase {
         field.typeText("Grand Central\n")
         selectSearchResult("631", query: "Grand Central", in: app)
         XCTAssertTrue(app.navigationBars["Grand Central-42 St"].waitForExistence(timeout: 5))
+        let title = app.navigationBars["Grand Central-42 St"].staticTexts["Grand Central-42 St"]
+        XCTAssertTrue(title.waitForExistence(timeout: 5), "A long station title must retain visible space in the compact toolbar")
+        XCTAssertGreaterThan(title.frame.width, 0)
+        let titleCapture = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        titleCapture.name = "Compact station title and native toolbar"
+        titleCapture.lifetime = .keepAlways
+        add(titleCapture)
         let list = app.collectionViews["stationArrivalsList"]
         XCTAssertTrue(list.waitForExistence(timeout: 5))
         let north = list.buttons["stationArrivalToggle-N"]
@@ -326,14 +336,31 @@ final class StandClearUITests: XCTestCase {
         let unknown = list.buttons["arrivalRow-busy-unknown:631:?"]
         func reveal(_ row: XCUIElement, towardBottom: Bool) {
             for _ in 0 ..< 8 {
-                if row.exists, row.frame.height > 0, list.frame.contains(row.frame), row.isHittable {
-                    return
+                let viewport = list.frame.intersection(app.windows.firstMatch.frame)
+                let interior = viewport.insetBy(dx: 0, dy: 44)
+                var scrollTowardBottom = towardBottom
+                if row.exists {
+                    // A collapsed List can expose a row's AX frame under the
+                    // sheet edge before it has any valid activation point.
+                    // Move it into the viewport interior before asking for
+                    // hittability, which raises an XCTest error at that edge.
+                    let frame = row.frame
+                    if !frame.isNull, !frame.isInfinite, frame.width > 0, frame.height > 0 {
+                        if interior.contains(frame), row.isHittable {
+                            return
+                        }
+                        scrollTowardBottom = frame.midY > interior.midY
+                    }
                 }
-                let start = list.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: towardBottom ? 0.8 : 0.35))
-                let end = list.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: towardBottom ? 0.35 : 0.8))
+                let start = list.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: scrollTowardBottom ? 0.8 : 0.35))
+                let end = list.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: scrollTowardBottom ? 0.35 : 0.8))
                 start.press(forDuration: 0.1, thenDragTo: end)
             }
-            XCTFail("Could not reveal \(row)")
+            let failure = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            failure.name = "Busy station row outside usable viewport"
+            failure.lifetime = .keepAlways
+            add(failure)
+            XCTFail("Could not reveal \(row.identifier); row \(row.exists ? row.frame.debugDescription : "missing"), list \(list.frame)")
         }
         reveal(north, towardBottom: true)
         XCTAssertTrue(north.label.contains("18 more"))
@@ -356,6 +383,14 @@ final class StandClearUITests: XCTestCase {
         reveal(unknown, towardBottom: true)
         XCTAssertFalse(fifthSouth.exists)
         XCTAssertTrue(south.label.contains("2 more"), "Southbound should return to its four-row preview")
+        XCTAssertTrue(unknown.label.localizedCaseInsensitiveContains("direction unavailable"))
+        unknown.tap()
+        let clock = list.staticTexts.matching(NSPredicate(format: "identifier == %@ AND label BEGINSWITH %@", unknown.identifier, "Predicted arrival:")).firstMatch
+        XCTAssertTrue(clock.waitForExistence(timeout: 5), "The unknown-direction prediction must remain usable after both groups collapse")
+        let capture = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        capture.name = "Unknown direction prediction remains usable after group collapse"
+        capture.lifetime = .keepAlways
+        add(capture)
     }
 
     @MainActor
@@ -433,22 +468,25 @@ final class StandClearUITests: XCTestCase {
         selectSearchResult("419", query: "Wall", in: app)
         let detail = app.navigationBars["Wall St"]
         XCTAssertTrue(detail.waitForExistence(timeout: 5))
+        let anchors = app.buttons["stationAnchorMenu"]
+        anchors.tap()
         let toggle = app.buttons["favoriteStationToggle"]
         XCTAssertTrue(toggle.waitForExistence(timeout: 5))
         // Restore a known starting state if a previous simulator run stopped
         // before cleanup. Preserve any other station the rider saved.
         if toggle.label == "Remove from favorites" {
             toggle.tap()
+            anchors.tap()
         }
         XCTAssertEqual(toggle.label, "Add to favorites")
-        let anchors = app.buttons["stationAnchorMenu"]
-        anchors.tap()
         if app.buttons["Remove Home"].exists {
             app.buttons["Remove Home"].tap()
             anchors.tap()
         }
         app.buttons["Set as Home"].tap()
+        anchors.tap()
         XCTAssertEqual(toggle.label, "Remove from favorites", "Assigning a station anchor also favorites it")
+        detail.staticTexts["Wall St"].tap()
 
         app.terminate()
         app.launch()
@@ -466,7 +504,9 @@ final class StandClearUITests: XCTestCase {
         XCTAssertTrue(app.buttons["directionsHere"].exists)
         anchors.tap()
         app.buttons["Remove Home"].tap()
+        anchors.tap()
         XCTAssertEqual(toggle.label, "Remove from favorites", "Removing an anchor preserves the station favorite")
+        detail.staticTexts["Wall St"].tap()
         detail.buttons.element(boundBy: 0).tap()
         XCTAssertTrue(shortcut.waitForNonExistence(timeout: 5))
         app.buttons["Done"].tap()
@@ -489,9 +529,12 @@ final class StandClearUITests: XCTestCase {
         add(capture)
         favorite.tap()
         XCTAssertTrue(detail.waitForExistence(timeout: 5))
+        anchors.tap()
         XCTAssertEqual(toggle.label, "Remove from favorites")
         toggle.tap()
+        anchors.tap()
         XCTAssertEqual(toggle.label, "Add to favorites")
+        detail.staticTexts["Wall St"].tap()
         detail.buttons.element(boundBy: 0).tap()
         XCTAssertTrue(app.navigationBars["Nearby arrivals"].waitForExistence(timeout: 5))
         XCTAssertTrue(favorite.waitForNonExistence(timeout: 5))
