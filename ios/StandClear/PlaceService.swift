@@ -21,6 +21,25 @@ struct WalkingConnection: Sendable {
 
 enum PlaceServiceError: Error { case unavailable, noWalkingRoute }
 
+/// A coarse search/routing envelope, not a municipal boundary. Include the
+/// southern Staten Island stations already present in StandClear's dataset.
+enum PlaceServiceArea {
+    private static let latitudes = 40.47 ... 40.92
+    private static let longitudes = -74.27 ... -73.70
+
+    static func contains(_ coordinate: CLLocationCoordinate2D) -> Bool {
+        CLLocationCoordinate2DIsValid(coordinate) &&
+            latitudes.contains(coordinate.latitude) && longitudes.contains(coordinate.longitude)
+    }
+
+    static var searchRegion: MKCoordinateRegion {
+        MKCoordinateRegion(center: .init(latitude: (latitudes.lowerBound + latitudes.upperBound) / 2,
+                                         longitude: (longitudes.lowerBound + longitudes.upperBound) / 2),
+                           span: .init(latitudeDelta: latitudes.upperBound - latitudes.lowerBound,
+                                       longitudeDelta: longitudes.upperBound - longitudes.lowerBound))
+    }
+}
+
 struct PlaceService: Sendable {
     typealias Find = @MainActor @Sendable (String) async throws -> [PlaceResult]
     typealias Route = @MainActor @Sendable (CLLocationCoordinate2D, CLLocationCoordinate2D) async throws -> WalkingConnection
@@ -59,13 +78,13 @@ struct PlaceService: Sendable {
         try Task.checkCancellation()
         var ids = Set<String>()
         return Array(places.filter {
-            Self.inNYC($0.coordinate) && !$0.name.isEmpty && ids.insert($0.id).inserted
+            PlaceServiceArea.contains($0.coordinate) && !$0.name.isEmpty && ids.insert($0.id).inserted
         }.prefix(10))
     }
 
     func walk(from: CLLocationCoordinate2D, to: CLLocationCoordinate2D) async throws -> WalkingConnection {
         try Task.checkCancellation()
-        guard Self.inNYC(from), Self.inNYC(to) else { throw PlaceServiceError.noWalkingRoute }
+        guard PlaceServiceArea.contains(from), PlaceServiceArea.contains(to) else { throw PlaceServiceError.noWalkingRoute }
         let connection: WalkingConnection
         do {
             connection = try await route(from, to)
@@ -78,22 +97,17 @@ struct PlaceService: Sendable {
         }
         try Task.checkCancellation()
         guard connection.seconds.isFinite, connection.seconds > 0, connection.meters.isFinite, connection.meters > 0,
-              let first = connection.coordinates.first, connection.coordinates.allSatisfy(Self.inNYC),
+              let first = connection.coordinates.first, connection.coordinates.allSatisfy(PlaceServiceArea.contains),
               connection.coordinates.contains(where: { $0.latitude != first.latitude || $0.longitude != first.longitude })
         else { throw PlaceServiceError.unavailable }
         return connection
-    }
-
-    private static func inNYC(_ coordinate: CLLocationCoordinate2D) -> Bool {
-        (40.55 ... 40.92).contains(coordinate.latitude) && (-74.20 ... -73.70).contains(coordinate.longitude)
     }
 
     @MainActor private static func findMapItems(_ query: String) async throws -> [PlaceResult] {
         let request = MKLocalSearch.Request()
         request.naturalLanguageQuery = query
         request.resultTypes = [.address, .pointOfInterest]
-        request.region = MKCoordinateRegion(center: .init(latitude: 40.735, longitude: -73.95),
-                                            span: .init(latitudeDelta: 0.37, longitudeDelta: 0.5))
+        request.region = PlaceServiceArea.searchRegion
         request.regionPriority = .required
         let search = MKLocalSearch(request: request)
         return try await MapRequest<[PlaceResult]>().run(cancel: { search.cancel() }) { finish in
@@ -179,8 +193,14 @@ private final class MapRequest<Value: Sendable> {
         static let museum = PlaceResult(id: "fixture-noguchi", name: "The Noguchi Museum", subtitle: "9-01 33rd Road, Queens, New York",
                                         latitude: 40.7667, longitude: -73.9381)
 
+        static let tottenville = PlaceResult(id: "fixture-tottenville", name: "Tottenville destination", subtitle: "Representative Staten Island test destination",
+                                             latitude: 40.514, longitude: -74.251)
+
         static func find(_ query: String) -> [PlaceResult] {
-            let candidates = ProcessInfo.processInfo.arguments.contains("--ui-test-noguchi") ? addresses + [museum] : addresses
+            var candidates = ProcessInfo.processInfo.arguments.contains("--ui-test-noguchi") ? addresses + [museum] : addresses
+            if ProcessInfo.processInfo.arguments.contains("--ui-test-staten-island") {
+                candidates.append(tottenville)
+            }
             return candidates.filter { $0.name.localizedCaseInsensitiveContains(query) }
         }
 
@@ -218,6 +238,13 @@ private final class MapRequest<Value: Sendable> {
             ]
             if ProcessInfo.processInfo.arguments.contains("--ui-test-noguchi") {
                 routes += museumWalks
+            }
+            if ProcessInfo.processInfo.arguments.contains("--ui-test-staten-island") {
+                // Deterministic representative path from the checked-in S09
+                // coordinate, not a claim about current pedestrian directions.
+                routes.append(WalkingConnection(coordinates: [.init(latitude: 40.512764, longitude: -74.251961),
+                                                              .init(latitude: 40.5134, longitude: -74.2516), tottenville.coordinate],
+                                                seconds: 180, meters: 240))
             }
             func near(_ a: CLLocationCoordinate2D, _ b: CLLocationCoordinate2D) -> Bool {
                 abs(a.latitude - b.latitude) < 0.00001 && abs(a.longitude - b.longitude) < 0.00001

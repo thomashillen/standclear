@@ -203,6 +203,13 @@ final class TransitStore {
                         lines[route] = astoriaFixtureLine(route)
                     }
                 }
+                if ProcessInfo.processInfo.arguments.contains("--ui-test-staten-island") {
+                    lines["SI"] = line(id: "SI", color: "#0039A6", stops: [
+                        ("S13", "Richmond Valley", 40.519631, -74.229141),
+                        ("S11", "Arthur Kill", 40.516578, -74.242096),
+                        ("S09", "Tottenville", 40.512764, -74.251961),
+                    ])
+                }
                 payload = ["lines": lines]
             case "api/alerts":
                 payload = ["available": true, "generatedAt": now.timeIntervalSince1970 * 1000,
