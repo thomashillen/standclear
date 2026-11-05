@@ -312,7 +312,7 @@ struct StationArrivals: View {
     @State private var showingDirections = false
     @Environment(\.scenePhase) private var scenePhase
     @State private var visible = false
-    @State private var alerts: StationAlertsLoad = .loading
+    @State private var alerts = StationAlertsLoad()
     @State private var alertsRetry = 0
 
     private struct AlertsRequest: Equatable {
@@ -331,7 +331,7 @@ struct StationArrivals: View {
             let groups = fresh ? StationArrivalGroup.groups(Transit.arrivals(for: station, snapshot: store.snapshot, now: context.date)) : []
             let caveat = "MTA predictions may change. Missing predictions do not mean no service. Partial upstream outages may omit routes."
             List {
-                StationAlertSection(station: station, load: alerts, now: context.date) { alertsRetry += 1 }
+                StationAlertSection(station: station, load: alerts.scoped(to: station.id), now: context.date) { alertsRetry += 1 }
                 if !fresh || groups.isEmpty {
                     Section {
                         if !fresh {
@@ -362,15 +362,16 @@ struct StationArrivals: View {
         .onDisappear { visible = false }
         .task(id: alertsRequest) { [alertsRequest] in
             guard alertsRequest.active else { return }
-            alerts = .loading
+            alerts = alerts.scoped(to: alertsRequest.stationID)
             while !Task.isCancelled {
+                alerts.beginRequest()
                 do {
                     let snapshot = try await store.stationAlerts()
                     guard !Task.isCancelled, self.alertsRequest == alertsRequest else { return }
-                    alerts = .received(snapshot)
+                    alerts.receive(snapshot)
                 } catch {
                     guard !Task.isCancelled, self.alertsRequest == alertsRequest else { return }
-                    alerts = .failed
+                    alerts.fail()
                 }
                 do { try await Task.sleep(for: .seconds(60)) } catch { return }
             }
@@ -631,7 +632,7 @@ private struct LineStations: View {
     let store: TransitStore
     @Environment(\.scenePhase) private var scenePhase
     @State private var visible = false
-    @State private var alerts: StationAlertsLoad = .loading
+    @State private var alerts = StationAlertsLoad()
     @State private var alertsRetry = 0
 
     private struct Request: Equatable {
@@ -647,7 +648,7 @@ private struct LineStations: View {
     var body: some View {
         TimelineView(.periodic(from: .now, by: 5)) { context in
             List {
-                LineAlertSection(line: line, load: alerts, now: context.date) { alertsRetry += 1 }
+                LineAlertSection(line: line, load: alerts.scoped(to: line.routeId), now: context.date) { alertsRetry += 1 }
                 Section {
                     ForEach(line.stops) { stop in
                         if let station = store.stations.first(where: { $0.stopIDs.contains(stop.id) }) {
@@ -678,15 +679,16 @@ private struct LineStations: View {
         .onDisappear { visible = false }
         .task(id: request) { [request] in
             guard request.active else { return }
-            alerts = .loading
+            alerts = alerts.scoped(to: request.routeID)
             while !Task.isCancelled {
+                alerts.beginRequest()
                 do {
                     let snapshot = try await store.stationAlerts()
                     guard !Task.isCancelled, self.request == request else { return }
-                    alerts = .received(snapshot)
+                    alerts.receive(snapshot)
                 } catch {
                     guard !Task.isCancelled, self.request == request else { return }
-                    alerts = .failed
+                    alerts.fail()
                 }
                 do { try await Task.sleep(for: .seconds(60)) } catch { return }
             }

@@ -165,7 +165,9 @@ final class TransitStore {
     /// TransitStore and uses its normal polling, cancellation, and freshness gates.
     /// Stable trips keep interaction tests independent of live prediction churn.
     private enum NativeUITestFixture {
-        static func data(for path: String, now: Date) throws -> Data {
+        @MainActor private static var alertRequests = 0
+
+        @MainActor static func data(for path: String, now: Date) throws -> Data {
             let includeExpress = ProcessInfo.processInfo.arguments.contains("--ui-test-express-arrivals")
             let includeOperational = ProcessInfo.processInfo.arguments.contains("--ui-test-operational-direction")
             let includeMuseum = ProcessInfo.processInfo.arguments.contains("--ui-test-noguchi")
@@ -260,8 +262,14 @@ final class TransitStore {
                 }
                 payload = ["lines": lines]
             case "api/alerts":
+                alertRequests += 1
+                let recovery = ProcessInfo.processInfo.arguments.contains("--ui-test-alert-recovery")
+                if recovery, alertRequests == 2 {
+                    throw URLError(.notConnectedToInternet)
+                }
+                let stale = ProcessInfo.processInfo.arguments.contains("--ui-test-stale-alerts") || (recovery && alertRequests == 1)
                 payload = ["available": true, "generatedAt": now.timeIntervalSince1970 * 1000,
-                           "feedTimestamp": now.timeIntervalSince1970 - (ProcessInfo.processInfo.arguments.contains("--ui-test-stale-alerts") ? 780 : 0), "alerts": [
+                           "feedTimestamp": now.timeIntervalSince1970 - (stale ? 780 : 0), "alerts": [
                                ["id": "fixture-wall", "header": "Downtown 4 trains are delayed at Wall St",
                                 "description": "Allow extra travel time at Wall St.", "effect": "SIGNIFICANT_DELAYS", "severity": "severe",
                                 "routeIds": ["4"], "stopIds": ["419"], "selectors": [["routeId": "4", "stopId": "419"]]],

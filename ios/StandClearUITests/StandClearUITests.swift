@@ -153,6 +153,56 @@ final class StandClearUITests: XCTestCase {
     }
 
     @MainActor
+    func testStationAdvisorySurvivesFailedRetryAndRecovers() {
+        let app = XCUIApplication()
+        app.terminate()
+        XCUIDevice.shared.orientation = .portrait
+        app.resetAuthorizationStatus(for: .location)
+        app.launchArguments = ["--ui-test-fixture", "--ui-test-alert-recovery"]
+        addUIInterruptionMonitor(withDescription: "Location permission") { alert in
+            guard alert.buttons["Don’t Allow"].exists else { return false }
+            alert.buttons["Don’t Allow"].tap()
+            return true
+        }
+        app.launch()
+        activatePermissionPrompt(in: app)
+        app.buttons["searchButton"].tap()
+        let search = app.searchFields[unifiedSearchPrompt]
+        guard focusSearchField(search, in: app) else { return }
+        search.typeText("Wall\n")
+        selectSearchResult("419", query: "Wall", in: app)
+        let list = app.collectionViews["stationArrivalsList"]
+        let retry = list.buttons["stationAlertsRetry"]
+        let summary = list.buttons["stationAlertsSummary"]
+        XCTAssertTrue(retry.waitForExistence(timeout: 10))
+        XCTAssertTrue(summary.waitForExistence(timeout: 10))
+        XCTAssertTrue(summary.label.contains("1 severe"))
+        retry.tap()
+        let unavailable = list.staticTexts["Service alerts unavailable"]
+        XCTAssertTrue(unavailable.waitForExistence(timeout: 10))
+        XCTAssertTrue(summary.exists, "A failed advisory request must retain the last reported severe advisory")
+        XCTAssertTrue(list.staticTexts["stationAlertLastReport"].exists, "Retained advisories must keep their last-report time")
+        if summary.exists {
+            summary.tap()
+            let body = list.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "Allow extra travel time at Wall St.")).firstMatch
+            XCTAssertTrue(body.waitForExistence(timeout: 5))
+            summary.tap()
+        }
+        let failure = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        failure.name = "Last reported station advisory after a failed retry"
+        failure.lifetime = .keepAlways
+        add(failure)
+        XCTAssertTrue(list.buttons["arrivalRow-ui-fixture-4-n:419:N"].exists)
+        retry.tap()
+        XCTAssertTrue(unavailable.waitForNonExistence(timeout: 10), "Recovery requires a successful replacement response")
+        XCTAssertTrue(summary.waitForExistence(timeout: 10))
+        XCTAssertFalse(unavailable.exists)
+        XCTAssertFalse(list.staticTexts["Alert status unconfirmed"].exists)
+        XCTAssertFalse(retry.exists, "A successful current report should replace the failed-request state")
+        XCTAssertFalse(list.staticTexts["stationAlertLastReport"].exists)
+    }
+
+    @MainActor
     func testStationDensityPreservesStaleAlertsAndArrivalDetails() {
         checkCompactStationDetails(accessibilityText: false)
     }
