@@ -988,8 +988,14 @@ final class StandClearUITests: XCTestCase {
         let transfer = app.descendants(matching: .any)["stationTripTransfer"].firstMatch
         revealPlaceElement(transfer, in: app.collectionViews.firstMatch)
         XCTAssertTrue(transfer.label.contains(instruction))
-        let showMap = app.buttons["Show route on map"]
-        revealPlaceElement(showMap, in: app.collectionViews.firstMatch, downward: false)
+        let showMap = app.buttons["showStationRouteOnMap"]
+        XCTAssertTrue(showMap.waitForExistence(timeout: 5))
+        XCTAssertTrue(showMap.isHittable, "The native map toolbar action must remain reachable while the itinerary is scrolled")
+        XCTAssertEqual(showMap.label, "Show route on map")
+        let mapAction = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        mapAction.name = "Native map action while scrolled — expanded \(expanded), largest type \(largeType)"
+        mapAction.lifetime = .keepAlways
+        add(mapAction)
         showMap.tap()
         let map = app.descendants(matching: .any)["appleTransitMap"].firstMatch
         expectation(for: NSPredicate(format: "value CONTAINS %@", instruction), evaluatedWith: map)
@@ -1278,7 +1284,11 @@ final class StandClearUITests: XCTestCase {
                                     file: StaticString = #filePath, line: UInt = #line)
     {
         let app = XCUIApplication()
-        let nav = app.navigationBars["From"].exists ? app.navigationBars["From"] : app.navigationBars["Route preview"]
+        // Trip details has a pinned navigation bar too. A row underneath it
+        // needs a drag toward the top, even if it is inside the list frame.
+        let tripDetails = app.navigationBars["Trip details"]
+        let nav = tripDetails.exists ? tripDetails
+            : app.navigationBars["From"].exists ? app.navigationBars["From"] : app.navigationBars["Route preview"]
         var towardBottom = downward
         for _ in 0 ..< 18 {
             let bounds = list.frame
@@ -1666,7 +1676,7 @@ final class StandClearUITests: XCTestCase {
         capture.name = "Station search to directions with preserved origin"
         capture.lifetime = .keepAlways
         add(capture)
-        app.buttons["Show route on map"].tap()
+        app.buttons["showStationRouteOnMap"].tap()
         XCTAssertTrue(app.buttons["searchButton"].waitForExistence(timeout: 5))
         if expanded {
             XCTAssertTrue(app.navigationBars["Trip details"].exists)
@@ -1747,8 +1757,9 @@ final class StandClearUITests: XCTestCase {
         let nextN = prediction.staticTexts["N · 17 min"]
         revealPlaceElement(nextN, in: list)
         XCTAssertTrue(prediction.staticTexts["Train destination: 30 Av"].exists)
-        let showMap = app.buttons["Show route on map"]
-        revealPlaceElement(showMap, in: list, downward: false)
+        let showMap = app.buttons["showStationRouteOnMap"]
+        XCTAssertTrue(showMap.waitForExistence(timeout: 5))
+        XCTAssertTrue(showMap.isHittable, "The native map toolbar action must remain reachable beside the transfer prediction")
         showMap.tap()
         let map = app.descendants(matching: .any)["appleTransitMap"].firstMatch
         expectation(for: NSPredicate(format: "value CONTAINS %@", interchange), evaluatedWith: map)
@@ -1954,7 +1965,7 @@ final class StandClearUITests: XCTestCase {
         screenshot.name = "Native station itinerary and highlighted route"
         screenshot.lifetime = .keepAlways
         add(screenshot)
-        app.buttons["Show route on map"].tap()
+        app.buttons["showStationRouteOnMap"].tap()
         XCTAssertTrue(app.buttons["moreButton"].waitForExistence(timeout: 5))
         XCTAssertFalse(app.navigationBars["Trip details"].exists)
         let routeMap = XCTAttachment(screenshot: app.screenshot())
@@ -2022,8 +2033,12 @@ final class StandClearUITests: XCTestCase {
         let ready = NSPredicate { _, _ in
             MainActor.assumeIsolated {
                 let window = app.windows.firstMatch
-                let control = app.buttons[readyControl]
-                guard window.exists, control.exists else { return false }
+                // SwiftUI can expose both presentations during adaptation.
+                // Wait for a single control before requesting its frame.
+                let controls = app.buttons.matching(identifier: readyControl)
+                guard window.exists, controls.count == 1 else { return false }
+                let control = controls.element(boundBy: 0)
+                guard control.exists else { return false }
                 let bounds = window.frame
                 let frame = control.frame
                 guard !bounds.isNull, !bounds.isInfinite, !frame.isNull, !frame.isInfinite,
