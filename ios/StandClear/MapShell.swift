@@ -244,7 +244,9 @@ struct MapShell: View {
             AppleTransitMap(store: store, mapExposed: panel == nil || sheetDetent != .large, focusedCoordinate: focus.coordinate, focusRevision: focus.revision,
                             coveredWidth: coveredWidth, coveredBottom: coveredBottom, currentLocation: location.availableCoordinate,
                             tripOverlays: tripOverlays, tripFocusRevision: tripFocusRevision,
-                            destination: activeDestination, placeRoute: visiblePlaceRoute, placeGeometryRevision: placeGeometryRevision, transferMarker: transferMarker)
+                            destination: activeDestination, placeRoute: visiblePlaceRoute,
+                            stationEndpoints: activeDestination == nil ? selectedTrip.map { StationTripEndpoints(plan: $0, lines: store.lines) } : nil,
+                            placeGeometryRevision: placeGeometryRevision, transferMarker: transferMarker)
             if !showsJourney, panel == nil || coveredWidth > 0 {
                 TimelineView(.periodic(from: .now, by: 5)) { timeline in
                     NearbyGlancePanel(store: store, location: location, now: timeline.date,

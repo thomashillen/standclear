@@ -15,9 +15,11 @@ struct AppleTransitMap: View {
     var tripFocusRevision: Int = 0
     var destination: PlaceResult?
     var placeRoute: PlaceMapRoute?
+    var stationEndpoints: StationTripEndpoints?
     var placeGeometryRevision = 0
     var transferMarker: (text: String, coordinate: CLLocationCoordinate2D)?
 
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
     @State private var motion = TrainMotion(lines: [])
@@ -35,7 +37,7 @@ struct AppleTransitMap: View {
     @State private var cameraState = AppleTransitCameraState()
 
     private var showsJourney: Bool {
-        destination != nil || !tripOverlays.isEmpty
+        destination != nil || !tripOverlays.isEmpty || stationEndpoints?.boarding != nil || stationEndpoints?.alighting != nil
     }
 
     var body: some View {
@@ -74,6 +76,15 @@ struct AppleTransitMap: View {
                     }
                     if let alighting = placeRoute?.alighting, alighting.id != placeRoute?.boarding?.id {
                         Marker(alighting.name, systemImage: "tram", coordinate: alighting.coordinate)
+                    }
+                } else if let stationEndpoints {
+                    if let boarding = stationEndpoints.boarding {
+                        Marker("Board at \(boarding.name)", systemImage: "tram", coordinate: boarding.coordinate)
+                            .annotationTitles(dynamicTypeSize.isAccessibilitySize ? .hidden : .automatic)
+                    }
+                    if let alighting = stationEndpoints.alighting {
+                        Marker("Arrive at \(alighting.name)", systemImage: "mappin", coordinate: alighting.coordinate)
+                            .annotationTitles(dynamicTypeSize.isAccessibilitySize ? .hidden : .automatic)
                     }
                 }
                 if let transfer = transferMarker {
@@ -116,7 +127,9 @@ struct AppleTransitMap: View {
                 ))
             }
             .onChange(of: tripFocusRevision, initial: true) { _, _ in
-                if let region = TripMapOverlay.region(for: tripOverlays, including: placeRoute?.endpoints ?? [destination?.coordinate].compactMap(\.self)) {
+                let endpoints = placeRoute?.endpoints ?? [destination?.coordinate, stationEndpoints?.boarding?.coordinate,
+                                                          stationEndpoints?.alighting?.coordinate].compactMap(\.self)
+                if let region = TripMapOverlay.region(for: tripOverlays, including: endpoints) {
                     position = .region(region)
                 }
             }
