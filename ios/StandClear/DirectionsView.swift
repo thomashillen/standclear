@@ -5,6 +5,16 @@ struct DirectionsView: View {
     @Binding var selection: DirectionsSelection
     let onSelect: (NativeTripPlan?) -> Void
     let onShowMap: (NativeTripPlan) -> Void
+    @State private var presentedPlan: NativeTripPlan?
+
+    private var showingItinerary: Binding<Bool> {
+        Binding(get: { presentedPlan != nil }, set: { shown in
+            if !shown {
+                presentedPlan = nil
+            }
+        })
+    }
+
     var body: some View {
         List {
             Section {
@@ -62,9 +72,9 @@ struct DirectionsView: View {
                     } else {
                         Section {
                             ForEach(plans) { plan in
-                                NavigationLink {
-                                    TripItineraryView(plan: plan, store: store, onSelect: onSelect, onShowMap: onShowMap)
-                                        .onAppear { onSelect(plan) }
+                                Button {
+                                    onSelect(plan)
+                                    presentedPlan = plan
                                 } label: {
                                     VStack(alignment: .leading) {
                                         Text(plan.routeChoiceTitle(in: store.lines))
@@ -75,6 +85,8 @@ struct DirectionsView: View {
                                         Text("\(plan.totalStops) stops")
                                             .foregroundStyle(.secondary)
                                     }
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .contentShape(Rectangle())
                                 }
                                 .accessibilityHint("Show boarding and transfer instructions and highlight the route on the map")
                                 .accessibilityIdentifier("tripPlan-\(plan.id)")
@@ -89,6 +101,11 @@ struct DirectionsView: View {
             } else {
                 ContentUnavailableView("Choose two stations", systemImage: "point.topleft.down.to.point.bottomright.curvepath",
                                        description: Text("Plan a direct subway trip or a route with one transfer."))
+            }
+        }
+        .navigationDestination(isPresented: showingItinerary) {
+            if let presentedPlan {
+                TripItineraryView(plan: presentedPlan, store: store, onShowMap: onShowMap)
             }
         }
         .accessibilityIdentifier("directionsList")
@@ -148,7 +165,6 @@ struct DirectionStationPicker: View {
 private struct TripItineraryView: View {
     let plan: NativeTripPlan
     let store: TransitStore
-    let onSelect: (NativeTripPlan?) -> Void
     let onShowMap: (NativeTripPlan) -> Void
 
     var body: some View {
