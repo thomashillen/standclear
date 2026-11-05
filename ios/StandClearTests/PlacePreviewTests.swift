@@ -35,10 +35,28 @@ final class PlacePreviewTests: XCTestCase {
         }
     }
 
-    func testPlaceAtStartingStationUsesWalkingOnly() {
+    func testIdenticalAddressEndpointsOutsideStationCoverage() {
+        let museum = CLLocationCoordinate2D(latitude: 40.7667, longitude: -73.9381)
+        let stations = Transit.stations(lexingtonQueensLines())
+        for available in [stations, []] {
+            guard case .sameEndpoints = PlaceRouting.options(to: museum, from: nil, location: museum, stations: available, lines: []) else {
+                return XCTFail("Identical address coordinates need no station lookup")
+            }
+        }
+        let invalid = CLLocationCoordinate2D(latitude: 91, longitude: -74)
+        guard case .noOrigin = PlaceRouting.options(to: invalid, from: nil, location: invalid, stations: stations, lines: []) else {
+            return XCTFail("Invalid coordinates cannot establish identical endpoints")
+        }
+    }
+
+    func testSameEndpointsUseManualStationInsteadOfLocation() {
         let origin = station(stop("nearby", latitude: 40.75))
-        let result = PlaceRouting.options(to: origin.stop.coordinate, from: origin, location: nil, stations: [origin], lines: [])
-        guard case let .routes(routes) = result, let route = routes.first else { return XCTFail("Expected a walk from the station") }
+        let nearby = CLLocationCoordinate2D(latitude: 40.750001, longitude: origin.stop.lng)
+        guard case .sameEndpoints = PlaceRouting.options(to: origin.stop.coordinate, from: origin, location: nearby, stations: [origin], lines: []) else {
+            return XCTFail("The selected station is the starting point")
+        }
+        let result = PlaceRouting.options(to: nearby, from: origin, location: nearby, stations: [origin], lines: [])
+        guard case let .routes(routes) = result, let route = routes.first else { return XCTFail("Distinct nearby coordinates still allow a walk") }
         XCTAssertNil(route.trip)
         XCTAssertEqual(route.id, "walk")
         XCTAssertEqual(route.start.latitude, origin.stop.lat)

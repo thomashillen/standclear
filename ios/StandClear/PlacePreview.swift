@@ -53,7 +53,7 @@ enum PlaceRouting {
     }
 
     enum Options {
-        case noOrigin, noNearbyStation, noConnection, routes([Route])
+        case sameEndpoints, noOrigin, noNearbyStation, noConnection, routes([Route])
     }
 
     static func distance(from coordinate: CLLocationCoordinate2D, to stop: Stop) -> Double? {
@@ -79,6 +79,12 @@ enum PlaceRouting {
                         excludingBoardingStops: Set<String> = [], excludingAlightingStops: Set<String> = [],
                         excludingOptionIDs: Set<String> = []) -> Options
     {
+        let start = manual?.stop.coordinate ?? location
+        if let start, CLLocationCoordinate2DIsValid(start),
+           start.latitude == place.latitude, start.longitude == place.longitude
+        {
+            return .sameEndpoints
+        }
         let origins: [Station]
         if let manual {
             origins = [manual]
@@ -96,7 +102,7 @@ enum PlaceRouting {
         var candidates: [(route: Route, score: Double)] = []
         // Coverage is checked above, but walking uses the actual chosen start
         // regardless of which subway stations are closest to either endpoint.
-        if let start = manual?.stop.coordinate ?? location,
+        if let start,
            let meters = distance(from: start, to: place), meters <= maximumWalkingMeters
         {
             candidates.append((.walk(from: start), meters * 1.3 / 1.4))
@@ -346,7 +352,7 @@ struct PlacePreview: View {
         }
     }
 
-    private enum Issue { case noOrigin, noNearbyStation, noConnection, noUsableWalk }
+    private enum Issue { case sameEndpoints, noOrigin, noNearbyStation, noConnection, noUsableWalk }
 
     private struct Preview {
         let request: Request
@@ -384,7 +390,14 @@ struct PlacePreview: View {
                 }
                 .accessibilityElement(children: .combine)
             }
-            if store.loading {
+            if let issue = current?.issue, case .sameEndpoints = issue {
+                // Identical coordinates need no station data. Keep this known
+                // result visible while static data loads or needs recovery.
+                issueView(issue)
+                if store.error != nil {
+                    Button("Retry stations") { Task { await store.loadLines() } }
+                }
+            } else if store.loading {
                 ProgressView("Loading subway stations…")
             } else if store.error != nil {
                 ContentUnavailableView("Stations unavailable", systemImage: "tram")
@@ -489,6 +502,7 @@ struct PlacePreview: View {
                     }
                 } else {
                     switch candidates {
+                    case .sameEndpoints: result.issue = .sameEndpoints
                     case .noOrigin: result.issue = .noOrigin
                     case .noNearbyStation: result.issue = .noNearbyStation
                     case .noConnection, .routes: result.issue = .noConnection
@@ -582,6 +596,10 @@ struct PlacePreview: View {
 
     @ViewBuilder private func issueView(_ issue: Issue) -> some View {
         switch issue {
+        case .sameEndpoints:
+            ContentUnavailableView("Same starting point and destination", systemImage: "mappin",
+                                   description: Text("Choose a different starting point to plan a trip."))
+                .accessibilityIdentifier("samePlaceRoute")
         case .noOrigin:
             if session.usesCurrentLocation, location.availableCoordinate == nil {
                 if location.status == .denied || location.status == .restricted {
