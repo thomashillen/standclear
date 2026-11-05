@@ -911,6 +911,90 @@ final class StandClearUITests: XCTestCase {
     }
 
     @MainActor
+    func testStationRouteChoicesNameInterchanges() {
+        checkStationRouteInterchanges(expanded: false, largeType: false)
+    }
+
+    @MainActor
+    func testStationRouteChoicesNameInterchangesAtLargestType() {
+        checkStationRouteInterchanges(expanded: false, largeType: true)
+    }
+
+    @MainActor
+    func testStationRouteChoicesNameInterchangesExpanded() {
+        checkStationRouteInterchanges(expanded: true, largeType: false)
+    }
+
+    @MainActor
+    private func checkStationRouteInterchanges(expanded: Bool, largeType: Bool) {
+        let app = XCUIApplication()
+        app.terminate()
+        XCUIDevice.shared.orientation = .portrait
+        app.resetAuthorizationStatus(for: .location)
+        app.launchArguments = ["--ui-test-fixture", "--ui-test-route-interchanges"]
+        if largeType {
+            app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
+        }
+        addUIInterruptionMonitor(withDescription: "Location permission") { alert in
+            let deny = alert.buttons["Don’t Allow"]
+            guard deny.exists else { return false }
+            deny.tap()
+            return true
+        }
+        app.launch()
+        activatePermissionPrompt(in: app)
+        defer { XCUIDevice.shared.orientation = .portrait }
+        app.buttons["moreButton"].tap()
+        let directions = app.buttons["directionsButton"]
+        XCTAssertTrue(directions.waitForExistence(timeout: 5))
+        directions.tap()
+        if expanded {
+            XCUIDevice.shared.orientation = .landscapeLeft
+            waitForLayout(in: app, expanded: true, readyControl: "originPicker")
+        }
+        let origin = app.buttons["originPicker"]
+        XCTAssertTrue(origin.waitForExistence(timeout: 10))
+        origin.tap()
+        let field = app.searchFields.firstMatch
+        XCTAssertTrue(field.waitForExistence(timeout: 10))
+        guard focusSearchField(field, in: app) else { return }
+        field.typeText("Wall\n")
+        selectStationResult("419", query: "Wall", in: app)
+        app.buttons["destinationPicker"].tap()
+        XCTAssertTrue(field.waitForExistence(timeout: 10))
+        guard focusSearchField(field, in: app) else { return }
+        field.typeText("Astoria\n")
+        selectStationResult("R03", query: "Astoria", in: app)
+        let list = app.collectionViews["directionsList"]
+        let union = app.buttons["tripPlan-4:N:419>635|N:N:R20>R03"]
+        let lexington = app.buttons["tripPlan-4:N:419>629|N:N:R11>R03"]
+        revealPlaceElement(union, in: list)
+        XCTAssertTrue(union.label.contains("Change to N/W at 14 St-Union Sq"))
+        let unionCapture = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        unionCapture.name = "Union Square route choice — expanded \(expanded), largest type \(largeType)"
+        unionCapture.lifetime = .keepAlways
+        add(unionCapture)
+        revealPlaceElement(lexington, in: list)
+        let instruction = "Change to N/W at Lexington Av/59 St"
+        XCTAssertTrue(lexington.label.contains(instruction))
+        let capture = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        capture.name = "Lexington route choice — expanded \(expanded), largest type \(largeType)"
+        capture.lifetime = .keepAlways
+        add(capture)
+        lexington.tap()
+        XCTAssertTrue(app.navigationBars["Trip details"].waitForExistence(timeout: 10))
+        let transfer = app.descendants(matching: .any)["stationTripTransfer"].firstMatch
+        revealPlaceElement(transfer, in: app.collectionViews.firstMatch)
+        XCTAssertTrue(transfer.label.contains(instruction))
+        let showMap = app.buttons["Show route on map"]
+        revealPlaceElement(showMap, in: app.collectionViews.firstMatch, downward: false)
+        showMap.tap()
+        let map = app.descendants(matching: .any)["appleTransitMap"].firstMatch
+        expectation(for: NSPredicate(format: "value CONTAINS %@", instruction), evaluatedWith: map)
+        waitForExpectations(timeout: 10)
+    }
+
+    @MainActor
     func testManualStationItineraryFitsExposedCompactMap() {
         let app = XCUIApplication()
         app.terminate()

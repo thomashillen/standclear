@@ -67,7 +67,7 @@ struct DirectionsView: View {
                                         .onAppear { onSelect(plan) }
                                 } label: {
                                     VStack(alignment: .leading) {
-                                        Text(plan.legs.count == 1 ? "Direct" : "1 transfer")
+                                        Text(plan.routeChoiceTitle(in: store.lines))
                                             .font(.headline)
                                         ForEach(plan.legs) { leg in
                                             TripRouteLabels(routes: leg.routeIDs, store: store)

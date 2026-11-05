@@ -46,6 +46,12 @@ struct NativeTripPlan: Identifiable {
         legs.map(\.id).joined(separator: "|")
     }
 
+    func routeChoiceTitle(in lines: [SubwayLine]) -> String {
+        guard legs.count != 1 else { return "Direct" }
+        guard let departing = legs.last, let transfer = transfer(in: lines) else { return "1 transfer" }
+        return transfer.instruction(to: departing)
+    }
+
     func transfer(in lines: [SubwayLine]) -> NativeTripTransfer? {
         guard legs.count == 2, let transferComplexId else { return nil }
         let arriving = legs[0], departing = legs[1]
