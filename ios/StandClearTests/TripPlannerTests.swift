@@ -26,6 +26,9 @@ final class TripPlannerTests: XCTestCase {
         let reverse = try XCTUnwrap(TripPlanner.plans(lines: lines, stations: stations, from: to, to: from).first)
         XCTAssertEqual(reverse.legs[0].direction, "N")
         XCTAssertEqual(reverse.legs[0].alightStopId, "L01")
+        let endpoints = StationTripEndpoints(plan: reverse, lines: lines)
+        XCTAssertEqual(endpoints.boarding?.id, "L08")
+        XCTAssertEqual(endpoints.alighting?.id, "L01")
     }
 
     func testOneTransferUsesCuratedComplexAcrossDifferentPlatforms() throws {
@@ -40,6 +43,24 @@ final class TripPlannerTests: XCTestCase {
         XCTAssertEqual(plan.legs[0].alightComplexId, plan.legs[1].boardComplexId)
         XCTAssertEqual(plan.legs[1].routeIDs, ["4", "5"])
         XCTAssertEqual(plan.totalStops, 2)
+    }
+
+    func testStationTripEndpointsResolveOuterPlatformsOnlyOnTheirSelectedLines() throws {
+        let lines = sampleLines(), stations = Transit.stations(lines)
+        let plan = try XCTUnwrap(try TripPlanner.plans(lines: lines, stations: stations,
+                                                       from: station("L01", in: stations), to: station("419", in: stations)).first)
+        let endpoints = StationTripEndpoints(plan: plan, lines: lines)
+        XCTAssertEqual(endpoints.boarding?.id, "L01")
+        XCTAssertEqual(endpoints.alighting?.id, "419")
+
+        // The same alighting stop also appears on the sibling 5. If the 4
+        // disappears or has invalid coordinates, its endpoint is unavailable.
+        let missing = lines.filter { $0.routeId != "4" }
+        let partial = StationTripEndpoints(plan: plan, lines: missing)
+        XCTAssertEqual(partial.boarding?.id, "L01")
+        XCTAssertNil(partial.alighting)
+        let invalid = line("4", [stop("419", 91)])
+        XCTAssertNil(StationTripEndpoints(plan: plan, lines: missing + [invalid]).alighting)
     }
 
     func testRouteChoiceTitleNamesTransferAndPreservesDirectAndUnavailableFallbacks() throws {

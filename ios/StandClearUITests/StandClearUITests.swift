@@ -1000,6 +1000,10 @@ final class StandClearUITests: XCTestCase {
         let map = app.descendants(matching: .any)["appleTransitMap"].firstMatch
         expectation(for: NSPredicate(format: "value CONTAINS %@", instruction), evaluatedWith: map)
         waitForExpectations(timeout: 10)
+        let endpoints = ["Board at Wall St", "Arrive at Astoria Blvd"]
+        assertStationEndpoints(endpoints, in: app, expanded: expanded)
+        app.buttons["clearMapRoute"].tap()
+        assertStationEndpointsCleared(endpoints + [instruction], in: app)
     }
 
     @MainActor
@@ -1070,6 +1074,8 @@ final class StandClearUITests: XCTestCase {
         tree.lifetime = .keepAlways
         add(tree)
         XCTAssertEqual(result, .completed, "Boarding, transfer, and destination pins must fit between the header and route sheet")
+        XCTAssertFalse(map.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "Board at Wall St")).firstMatch.exists,
+                       "Place journeys must retain their existing platform marker rather than duplicate station-only endpoints")
     }
 
     @MainActor
@@ -1972,6 +1978,10 @@ final class StandClearUITests: XCTestCase {
         routeMap.name = "Selected itinerary on Apple Maps"
         routeMap.lifetime = .keepAlways
         add(routeMap)
+        let endpoints = ["Board at Wall St", "Arrive at 59 St"]
+        assertStationEndpoints(endpoints, in: app)
+        app.buttons["clearMapRoute"].tap()
+        assertStationEndpointsCleared(endpoints, in: app)
         app.buttons["moreButton"].tap()
         XCTAssertTrue(app.buttons["directionsButton"].waitForExistence(timeout: 5))
         app.buttons["directionsButton"].tap()
@@ -1981,6 +1991,49 @@ final class StandClearUITests: XCTestCase {
         XCTAssertTrue(southbound.waitForExistence(timeout: 5))
         XCTAssertTrue(app.buttons["originPicker"].label.contains("59 St"))
         XCTAssertTrue(app.buttons["destinationPicker"].label.contains("Wall St"))
+    }
+
+    @MainActor
+    private func assertStationEndpoints(_ labels: [String], in app: XCUIApplication, expanded: Bool = false,
+                                        file: StaticString = #filePath, line: UInt = #line)
+    {
+        let map = app.descendants(matching: .any)["appleTransitMap"].firstMatch
+        let fitted = NSPredicate { _, _ in MainActor.assumeIsolated {
+            guard map.exists else { return false }
+            let header = app.navigationBars["StandClear"]
+            let panel = app.navigationBars["Trip details"]
+            let top = header.exists ? max(map.frame.minY, header.frame.maxY) : map.frame.minY
+            let right = expanded && panel.exists ? min(map.frame.maxX, panel.frame.minX) : map.frame.maxX
+            return labels.allSatisfy { label in
+                let marker = map.descendants(matching: .any).matching(NSPredicate(format: "label == %@", label)).firstMatch
+                guard marker.exists else { return false }
+                let frame = marker.frame
+                return frame.width > 0 && frame.height > 0 && frame.minY > top && frame.maxY < map.frame.maxY &&
+                    frame.minX >= map.frame.minX && frame.maxX <= right
+            }
+        } }
+        let ready = XCTNSPredicateExpectation(predicate: fitted, object: map)
+        let result = XCTWaiter.wait(for: [ready], timeout: 10)
+        let capture = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        capture.name = "Station itinerary endpoints — expanded \(expanded)"
+        capture.lifetime = .keepAlways
+        add(capture)
+        XCTAssertEqual(result, .completed, "Named boarding and arrival markers must fit in the exposed map", file: file, line: line)
+    }
+
+    @MainActor
+    private func assertStationEndpointsCleared(_ labels: [String], in app: XCUIApplication,
+                                               file: StaticString = #filePath, line: UInt = #line)
+    {
+        let map = app.descendants(matching: .any)["appleTransitMap"].firstMatch
+        let cleared = NSPredicate { _, _ in MainActor.assumeIsolated {
+            guard map.exists else { return false }
+            return !app.buttons["clearMapRoute"].exists && labels.allSatisfy { label in
+                !map.descendants(matching: .any).matching(NSPredicate(format: "label == %@", label)).firstMatch.exists
+            }
+        } }
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: cleared, object: map)], timeout: 5), .completed,
+                       "Clear route must remove the boarding, arrival, and transfer markers", file: file, line: line)
     }
 
     @MainActor

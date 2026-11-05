@@ -34,6 +34,24 @@ struct PlaceMapRoute {
     }
 }
 
+/// The two platform stops used by the selected station-to-station itinerary.
+struct StationTripEndpoints {
+    let boarding: Stop?
+    let alighting: Stop?
+
+    init(plan: NativeTripPlan, lines: [SubwayLine]) {
+        func platform(routeID: String, stopID: String) -> Stop? {
+            guard let line = lines.first(where: { $0.routeId == routeID }),
+                  let stop = line.stops.first(where: { $0.id == stopID }),
+                  CLLocationCoordinate2DIsValid(stop.coordinate) else { return nil }
+            return stop
+        }
+
+        boarding = plan.legs.first.flatMap { platform(routeID: $0.routeId, stopID: $0.boardStopId) }
+        alighting = plan.legs.last.flatMap { platform(routeID: $0.routeId, stopID: $0.alightStopId) }
+    }
+}
+
 struct TripMapOverlay: Identifiable {
     let id: String
     let color: String
