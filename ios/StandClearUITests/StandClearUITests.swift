@@ -709,8 +709,10 @@ final class StandClearUITests: XCTestCase {
     private func focusSearchField(_ field: XCUIElement, in app: XCUIApplication,
                                   file: StaticString = #filePath, line: UInt = #line) -> Bool
     {
-        let ready = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == true AND hittable == true"), object: field)
-        guard XCTWaiter.wait(for: [ready], timeout: 5) == .completed else {
+        // Hittability requires the field to exist. Avoid a separate remote existence
+        // query consuming the readiness budget before XCTest measures hittability.
+        let ready = XCTNSPredicateExpectation(predicate: NSPredicate(format: "hittable == true"), object: field)
+        guard XCTWaiter.wait(for: [ready], timeout: 10) == .completed else {
             XCTFail("Search field did not become interactive", file: file, line: line)
             return false
         }
