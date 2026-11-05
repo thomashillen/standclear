@@ -597,7 +597,7 @@ struct PlacePreview: View {
     @ViewBuilder private func issueView(_ issue: Issue) -> some View {
         switch issue {
         case .sameEndpoints:
-            ContentUnavailableView("Same starting point and destination", systemImage: "mappin",
+            ContentUnavailableView("Same place", systemImage: "mappin",
                                    description: Text("Choose a different starting point to plan a trip."))
                 .accessibilityIdentifier("samePlaceRoute")
         case .noOrigin:

@@ -784,7 +784,7 @@ final class StandClearUITests: XCTestCase {
         expectation(for: NSPredicate(format: "value CONTAINS %@", "N/W"), evaluatedWith: map)
         waitForExpectations(timeout: 15)
         guard chooseOrigin("Noguchi", resultID: "placeOriginResult-fixture-noguchi") else { return }
-        let title = app.staticTexts["Same starting point and destination"]
+        let title = app.staticTexts["Same place"]
         let found = title.waitForExistence(timeout: 10)
         XCTAssertTrue(found, "Identical endpoints must show the native same-endpoint state")
         guard found else { return }
