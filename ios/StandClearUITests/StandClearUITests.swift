@@ -1678,6 +1678,105 @@ final class StandClearUITests: XCTestCase {
     }
 
     @MainActor
+    func testExpandedMoreMenuActionsSurviveLayoutChanges() {
+        let app = launchForMoreMenu()
+        defer { XCUIDevice.shared.orientation = .portrait }
+        XCUIDevice.shared.orientation = .landscapeLeft
+        waitForLayout(in: app, expanded: true)
+        for cycle in 0 ..< 2 {
+            let more = app.buttons["moreButton"]
+            XCTAssertTrue(more.waitForExistence(timeout: 5))
+            let capture = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            capture.name = "Expanded native controls, visit \(cycle + 1)"
+            capture.lifetime = .keepAlways
+            add(capture)
+            guard more.isEnabled else {
+                XCTFail("Expanded More is disabled after layout settles; its native menu must remain enabled")
+                return
+            }
+            XCTAssertTrue(more.isHittable)
+            more.tap()
+            XCTAssertTrue(app.buttons["directionsButton"].waitForExistence(timeout: 5))
+            app.buttons["directionsButton"].tap()
+            XCTAssertTrue(app.navigationBars["Directions"].waitForExistence(timeout: 5))
+            more.tap()
+            XCTAssertTrue(app.buttons["linesButton"].waitForExistence(timeout: 5))
+            app.buttons["linesButton"].tap()
+            XCTAssertTrue(app.navigationBars["Lines"].waitForExistence(timeout: 5))
+            more.tap()
+            XCTAssertTrue(app.buttons["arrivalStatusButton"].waitForExistence(timeout: 5))
+            app.buttons["arrivalStatusButton"].tap()
+            let status = app.alerts["Arrival status"]
+            XCTAssertTrue(status.waitForExistence(timeout: 5))
+            XCTAssertTrue(status.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Status when opened:")).firstMatch.exists)
+            status.buttons["OK"].tap()
+            app.buttons["searchButton"].tap()
+            XCTAssertTrue(app.searchFields[unifiedSearchPrompt].waitForExistence(timeout: 5))
+            app.buttons["nearbyButton"].tap()
+            XCTAssertTrue(app.navigationBars["Nearby arrivals"].waitForExistence(timeout: 5))
+            if cycle == 0 {
+                XCUIDevice.shared.orientation = .portrait
+                waitForLayout(in: app, expanded: false, readyControl: "Done")
+                app.buttons["Done"].tap()
+                XCTAssertTrue(more.waitForExistence(timeout: 5))
+                XCTAssertTrue(more.isEnabled)
+                more.tap()
+                app.buttons["arrivalStatusButton"].tap()
+                XCTAssertTrue(status.waitForExistence(timeout: 5))
+                status.buttons["OK"].tap()
+                XCUIDevice.shared.orientation = .landscapeLeft
+                waitForLayout(in: app, expanded: true)
+            }
+        }
+    }
+
+    @MainActor
+    func testMoreMenuAtLargestAccessibilityTextUsesCompactPresentation() {
+        let app = launchForMoreMenu(accessibilityText: true)
+        let more = app.buttons["moreButton"]
+        for (action, title) in [("directionsButton", "Directions"), ("linesButton", "Lines")] {
+            XCTAssertTrue(more.waitForExistence(timeout: 5))
+            XCTAssertTrue(more.isEnabled)
+            more.tap()
+            XCTAssertTrue(app.buttons[action].waitForExistence(timeout: 5))
+            app.buttons[action].tap()
+            XCTAssertTrue(app.navigationBars[title].waitForExistence(timeout: 5))
+            XCTAssertTrue(app.buttons["Done"].exists, "Accessibility text should retain the native compact sheet")
+            app.buttons["Done"].tap()
+        }
+        more.tap()
+        app.buttons["arrivalStatusButton"].tap()
+        let status = app.alerts["Arrival status"]
+        XCTAssertTrue(status.waitForExistence(timeout: 5))
+        let capture = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        capture.name = "Native More status at largest accessibility text"
+        capture.lifetime = .keepAlways
+        add(capture)
+        status.buttons["OK"].tap()
+    }
+
+    @MainActor
+    private func launchForMoreMenu(accessibilityText: Bool = false) -> XCUIApplication {
+        let app = XCUIApplication()
+        app.terminate()
+        XCUIDevice.shared.orientation = .portrait
+        app.resetAuthorizationStatus(for: .location)
+        app.launchArguments = ["--ui-test-fixture"]
+        if accessibilityText {
+            app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
+        }
+        addUIInterruptionMonitor(withDescription: "Location permission") { alert in
+            let deny = alert.buttons["Don’t Allow"]
+            guard deny.exists else { return false }
+            deny.tap()
+            return true
+        }
+        app.launch()
+        activatePermissionPrompt(in: app)
+        return app
+    }
+
+    @MainActor
     func testStationDirectionsAndSwap() {
         let app = XCUIApplication()
         app.terminate()
