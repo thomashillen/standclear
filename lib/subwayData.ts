@@ -17,6 +17,8 @@ export interface SubwayLine {
   name: string;
   color: string;
   textColor: "white" | "black";
+  // Operational platform suffix for travel in array order, from static GTFS.
+  directionTowardEnd?: "N" | "S";
   stops: Stop[];
   shape: [number, number][]; // [lng, lat] coordinates following actual track
 }
