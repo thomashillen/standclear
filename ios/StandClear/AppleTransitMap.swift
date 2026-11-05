@@ -122,13 +122,14 @@ struct AppleTransitMap: View {
             }
             // Apple uses the safe region for its controls and camera framing; the map
             // itself can continue under the native trailing control presentation.
+            // Keep the inherited top safe area: overriding it makes MapKit fit
+            // itinerary pins behind the compact navigation bar.
             .safeAreaInset(edge: .trailing, spacing: 0) {
                 Color.clear.frame(width: max(0, coveredWidth)).allowsHitTesting(false)
             }
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 Color.clear.frame(height: max(0, coveredBottom)).allowsHitTesting(false)
             }
-            .ignoresSafeArea(edges: .top)
             .accessibilityIdentifier("appleTransitMap")
             .accessibilityLabel("Subway map, Apple Maps")
             .accessibilityValue([transferMarker?.text, placeRoute?.accessibilitySummary ?? destination?.name].compactMap(\.self).joined(separator: ", "))
