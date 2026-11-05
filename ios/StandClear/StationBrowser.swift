@@ -211,14 +211,25 @@ struct StationBrowser: View {
     }
 
     private func searchStationRow(_ station: Station, recent: Bool) -> some View {
-        Button {
+        let isFavorite = favoriteStations.contains(station.id)
+        let favoriteAction = isFavorite ? "Remove from favorites" : "Add to favorites"
+        return Button {
             openSearchStation(station)
         } label: {
-            stationLabel(station)
+            stationLabel(station, starred: isFavorite)
         }
         .buttonStyle(.plain)
         .accessibilityHint("Show station arrivals and focus the map")
         .accessibilityIdentifier(recent ? "recentStation-\(station.id)" : "station-\(station.id)")
+        .contextMenu {
+            Button(favoriteAction, systemImage: isFavorite ? "star.slash" : "star") {
+                favoriteStations.toggle(station.id)
+            }
+            .accessibilityIdentifier("searchFavoriteToggle-\(station.id)")
+        }
+        .accessibilityAction(named: Text(favoriteAction)) {
+            favoriteStations.toggle(station.id)
+        }
     }
 
     private func nearbyStationRow(_ station: Station, savedOnly: Bool, meters: Double? = nil) -> some View {
