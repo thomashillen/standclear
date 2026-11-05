@@ -496,6 +496,123 @@ final class StandClearUITests: XCTestCase {
     }
 
     @MainActor
+    func testSearchFavoriteActionsPreserveNavigationAndHomeAcrossLayouts() {
+        let app = XCUIApplication()
+        app.terminate()
+        XCUIDevice.shared.orientation = .portrait
+        defer { XCUIDevice.shared.orientation = .portrait }
+        app.resetAuthorizationStatus(for: .location)
+        app.launchArguments = ["--ui-test-fixture"]
+        addUIInterruptionMonitor(withDescription: "Location permission") { alert in
+            guard alert.buttons["Don’t Allow"].exists else { return false }
+            alert.buttons["Don’t Allow"].tap()
+            return true
+        }
+        app.launch()
+        activatePermissionPrompt(in: app)
+        let search = app.buttons["searchButton"]
+        search.tap()
+        let home = app.buttons["savedPlace-Home"]
+        let field = app.searchFields[unifiedSearchPrompt]
+        XCTAssertTrue(field.waitForExistence(timeout: 10))
+        // Leave an unrelated preexisting Home untouched.
+        let previousHome = home.exists ? home.label : nil
+        guard focusSearchField(field, in: app) else { return }
+        field.typeText("Wall\n")
+        let wall = app.buttons["station-419"]
+        let toggle = app.buttons["searchFavoriteToggle-419"]
+        let detail = app.navigationBars["Wall St"]
+        XCTAssertTrue(wall.waitForExistence(timeout: 10))
+        wall.press(forDuration: 1)
+        XCTAssertTrue(toggle.waitForExistence(timeout: 5))
+        if toggle.label == "Remove from favorites" {
+            toggle.tap()
+            XCTAssertTrue(toggle.waitForNonExistence(timeout: 5))
+            wall.press(forDuration: 1)
+            XCTAssertTrue(toggle.waitForExistence(timeout: 5))
+        }
+        XCTAssertEqual(toggle.label, "Add to favorites")
+        let compact = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        compact.name = "Add a station favorite from compact Search"
+        compact.lifetime = .keepAlways
+        add(compact)
+        toggle.tap()
+        XCTAssertTrue(toggle.waitForNonExistence(timeout: 5))
+        XCTAssertTrue(wall.label.contains("Favorite"))
+        XCTAssertEqual(field.value as? String, "Wall")
+        XCTAssertFalse(detail.exists)
+        selectSearchResult("419", query: "Wall", in: app)
+        XCTAssertTrue(detail.waitForExistence(timeout: 5))
+        let anchors = app.buttons["stationAnchorMenu"]
+
+        app.terminate()
+        app.launch()
+        let nearby = app.buttons["nearbyButton"]
+        XCTAssertTrue(nearby.waitForExistence(timeout: 15))
+        nearby.tap()
+        XCTAssertTrue(app.navigationBars["Nearby arrivals"].waitForExistence(timeout: 5))
+        app.buttons["Sheet Grabber"].doubleTap()
+        let list = app.collectionViews["stationList"]
+        XCTAssertTrue(list.buttons["favoriteStation-419"].waitForExistence(timeout: 10))
+        XCTAssertTrue(list.descendants(matching: .any).matching(NSPredicate(format: "label IN %@", [
+            "Location access is off", "Location unavailable", "Waiting for your location…",
+        ])).firstMatch.exists)
+        // Prove Search alone persisted the favorite before assigning Home,
+        // which would otherwise independently favorite the same station.
+        list.buttons["favoriteStation-419"].tap()
+        XCTAssertTrue(detail.waitForExistence(timeout: 5))
+        anchors.tap()
+        let wallWasHome = app.buttons["Remove Home"].exists
+        if previousHome == nil, !wallWasHome {
+            app.buttons["Set as Home"].tap()
+        }
+        detail.staticTexts["Wall St"].tap()
+        app.buttons["Done"].tap()
+        XCUIDevice.shared.orientation = .landscapeLeft
+        waitForLayout(in: app, expanded: true)
+        search.tap()
+        let recent = app.buttons["recentStation-419"]
+        revealPlaceElement(recent, in: list)
+        let emptyQuery = field.value as? String
+        XCTAssertTrue(recent.label.contains("Favorite"))
+        recent.press(forDuration: 1)
+        XCTAssertTrue(toggle.waitForExistence(timeout: 5))
+        XCTAssertEqual(toggle.label, "Remove from favorites")
+        toggle.tap()
+        XCTAssertTrue(toggle.waitForNonExistence(timeout: 5))
+        XCTAssertTrue(recent.exists)
+        XCTAssertFalse(recent.label.contains("Favorite"))
+        XCTAssertTrue(field.exists)
+        XCTAssertEqual(field.value as? String, emptyQuery)
+        XCTAssertFalse(detail.exists)
+        let expanded = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        expanded.name = "Recent station stays in expanded Search after removing favorite"
+        expanded.lifetime = .keepAlways
+        add(expanded)
+
+        // Reopen at the native list top rather than using the route-preview
+        // scrolling helper in Search's short landscape region.
+        app.terminate()
+        XCUIDevice.shared.orientation = .portrait
+        app.launch()
+        XCTAssertTrue(search.waitForExistence(timeout: 15))
+        search.tap()
+        XCTAssertTrue(home.waitForExistence(timeout: 10))
+        if previousHome == nil || wallWasHome {
+            XCTAssertTrue(home.label.contains("Wall St"))
+            home.tap()
+            XCTAssertTrue(detail.waitForExistence(timeout: 5))
+            anchors.tap()
+            XCTAssertEqual(app.buttons["favoriteStationToggle"].label, "Add to favorites")
+            if previousHome == nil {
+                app.buttons["Remove Home"].tap()
+            }
+        } else {
+            XCTAssertEqual(home.label, previousHome)
+        }
+    }
+
+    @MainActor
     func testFavoriteStationPersistsAndOpensFromNearbyWithoutLocation() {
         let app = XCUIApplication()
         app.terminate()
