@@ -1876,6 +1876,84 @@ final class StandClearUITests: XCTestCase {
     }
 
     @MainActor
+    func testClearedStationRouteStaysClearedAcrossLayoutsAndCanBeReselected() {
+        let app = XCUIApplication()
+        app.terminate()
+        XCUIDevice.shared.orientation = .portrait
+        defer { XCUIDevice.shared.orientation = .portrait }
+        app.resetAuthorizationStatus(for: .location)
+        app.launchArguments = ["--ui-test-fixture", "--ui-test-noguchi"]
+        addUIInterruptionMonitor(withDescription: "Location permission") { alert in
+            guard alert.buttons["Don’t Allow"].exists else { return false }
+            alert.buttons["Don’t Allow"].tap()
+            return true
+        }
+        app.launch()
+        activatePermissionPrompt(in: app)
+        XCUIDevice.shared.orientation = .landscapeLeft
+        waitForLayout(in: app, expanded: true)
+        app.buttons["moreButton"].tap()
+        app.buttons["directionsButton"].tap()
+        for (picker, query, id) in [("originPicker", "Wall", "419"), ("destinationPicker", "Broadway", "R05")] {
+            let button = app.buttons[picker]
+            XCTAssertTrue(button.waitForExistence(timeout: 10))
+            button.tap()
+            let field = app.searchFields["Search subway stations"]
+            guard focusSearchField(field, in: app) else { return }
+            field.typeText(query + "\n")
+            selectStationResult(id, query: query, in: app)
+        }
+        let plan = app.buttons["tripPlan-4:N:419>629|N:N:R11>R05"]
+        func selectPlan() {
+            let list = app.collectionViews["directionsList"]
+            for _ in 0 ..< 4 where !plan.isHittable {
+                list.swipeUp()
+            }
+            XCTAssertTrue(plan.waitForExistence(timeout: 10))
+            XCTAssertTrue(plan.isHittable)
+            plan.tap()
+        }
+        selectPlan()
+        let map = app.descendants(matching: .any)["appleTransitMap"].firstMatch
+        let interchange = "Change to N/W at Lexington Av/59 St"
+        let labels = ["Board at Wall St", interchange, "Arrive at Broadway"]
+        expectation(for: NSPredicate(format: "value CONTAINS %@", interchange), evaluatedWith: map)
+        waitForExpectations(timeout: 10)
+        assertStationEndpoints([labels[0], labels[2]], in: app, expanded: true)
+        XCTAssertTrue(app.navigationBars["Trip details"].exists)
+        app.buttons["clearMapRoute"].tap()
+        assertStationEndpointsCleared(labels, in: app)
+        func staysCleared(_ reason: String) -> Bool {
+            let restored = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value CONTAINS %@", interchange), object: map)
+            restored.isInverted = true
+            let result = XCTWaiter.wait(for: [restored], timeout: 10)
+            XCTAssertEqual(result, .completed, reason)
+            return result == .completed
+        }
+        guard staysCleared("Feed refreshes must not restore a cleared route") else { return }
+        XCUIDevice.shared.orientation = .portrait
+        waitForLayout(in: app, expanded: false, readyControl: "moreButton")
+        let stayedClear = staysCleared("Narrowing must not restore the cleared itinerary")
+        let compact = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        compact.name = "Cleared station route after narrowing"
+        compact.lifetime = .keepAlways
+        add(compact)
+        guard stayedClear else { return }
+        assertStationEndpointsCleared(labels, in: app)
+        XCUIDevice.shared.orientation = .landscapeLeft
+        waitForLayout(in: app, expanded: true, readyControl: "originPicker")
+        guard staysCleared("Expanding must not restore the cleared itinerary") else { return }
+        assertStationEndpointsCleared(labels, in: app)
+        XCTAssertTrue(app.buttons["originPicker"].label.contains("Wall St"))
+        XCTAssertTrue(app.buttons["destinationPicker"].label.contains("Broadway"))
+        selectPlan()
+        expectation(for: NSPredicate(format: "value CONTAINS %@", interchange), evaluatedWith: map)
+        waitForExpectations(timeout: 10)
+        assertStationEndpoints([labels[0], labels[2]], in: app, expanded: true)
+        XCTAssertTrue(app.buttons["clearMapRoute"].exists, "Explicitly selecting the same itinerary must highlight it again")
+    }
+
+    @MainActor
     func testStationTripShowsTransferPredictionAndClearsMap() {
         let app = XCUIApplication()
         app.terminate()
