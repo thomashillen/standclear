@@ -911,6 +911,76 @@ final class StandClearUITests: XCTestCase {
     }
 
     @MainActor
+    func testManualStationItineraryFitsExposedCompactMap() {
+        let app = XCUIApplication()
+        app.terminate()
+        XCUIDevice.shared.orientation = .portrait
+        app.resetAuthorizationStatus(for: .location)
+        app.launchArguments = ["--ui-test-fixture", "--ui-test-noguchi"]
+        addUIInterruptionMonitor(withDescription: "Location permission") { alert in
+            let deny = alert.buttons["Don’t Allow"]
+            guard deny.exists else { return false }
+            deny.tap()
+            return true
+        }
+        app.launch()
+        activatePermissionPrompt(in: app)
+        app.buttons["searchButton"].tap()
+        let field = app.searchFields[unifiedSearchPrompt]
+        XCTAssertTrue(field.waitForExistence(timeout: 10))
+        guard focusSearchField(field, in: app) else { return }
+        field.typeText("Noguchi\n")
+        let museum = app.buttons["placeResult-fixture-noguchi"]
+        XCTAssertTrue(museum.waitForExistence(timeout: 10))
+        museum.tap()
+        let origin = app.buttons["placeOriginPicker"]
+        XCTAssertTrue(origin.waitForExistence(timeout: 10))
+        origin.tap()
+        let picker = app.searchFields[unifiedSearchPrompt]
+        XCTAssertTrue(picker.waitForExistence(timeout: 10))
+        guard focusSearchField(picker, in: app) else { return }
+        picker.typeText("Wall\n")
+        let station = app.buttons["stationChoice-419"]
+        revealPlaceElement(station, in: app.collectionViews.firstMatch)
+        station.tap()
+        XCTAssertTrue(origin.waitForExistence(timeout: 10))
+        XCTAssertTrue(origin.label.contains("Wall St"))
+        let map = app.descendants(matching: .any)["appleTransitMap"].firstMatch
+        expectation(for: NSPredicate(format: "value CONTAINS %@ AND value CONTAINS %@", "Noguchi", "Wall St"), evaluatedWith: map)
+        waitForExpectations(timeout: 15)
+        let header = app.navigationBars["StandClear"]
+        let sheetHeader = app.navigationBars["Route preview"]
+        XCTAssertTrue(header.exists)
+        XCTAssertTrue(sheetHeader.exists)
+        XCTAssertGreaterThan(header.frame.height, 0)
+        XCTAssertGreaterThan(sheetHeader.frame.height, 0)
+        let labels = ["The Noguchi Museum", "Wall St", "Change to N/W at Lexington Av/59 St"]
+        let fitted = NSPredicate { _, _ in MainActor.assumeIsolated {
+            labels.allSatisfy { label in
+                let pin = map.descendants(matching: .any).matching(NSPredicate(format: "label == %@", label)).firstMatch
+                guard pin.exists else { return false }
+                let frame = pin.frame
+                return frame.width > 0 && frame.height > 0 &&
+                    frame.minY > header.frame.maxY && frame.maxY < sheetHeader.frame.minY &&
+                    frame.minX >= map.frame.minX && frame.maxX <= map.frame.maxX
+            }
+        } }
+        // Allow native sheet dismissal and camera framing to settle. The old
+        // top-safe-area override leaves these pins behind the header indefinitely.
+        let fit = XCTNSPredicateExpectation(predicate: fitted, object: map)
+        let result = XCTWaiter.wait(for: [fit], timeout: 8)
+        let capture = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        capture.name = "Manual Wall St origin initial compact itinerary framing"
+        capture.lifetime = .keepAlways
+        add(capture)
+        let tree = XCTAttachment(string: app.debugDescription)
+        tree.name = "Compact itinerary accessibility geometry"
+        tree.lifetime = .keepAlways
+        add(tree)
+        XCTAssertEqual(result, .completed, "Boarding, transfer, and destination pins must fit between the header and route sheet")
+    }
+
+    @MainActor
     func testNoguchiMuseumOptionsOnCompactMap() {
         checkMuseumRouteOptions(expanded: false)
     }
