@@ -18,6 +18,8 @@ struct SubwayLine: Decodable, Identifiable {
     let color: String
     let stops: [Stop]
     let shape: [[Double]]
+    /// Verified platform suffix for travel in the static stop array order.
+    var directionTowardEnd: String? = nil
     var coordinates: [CLLocationCoordinate2D] {
         shape.compactMap { $0.count == 2 ? .init(latitude: $0[1], longitude: $0[0]) : nil }
     }

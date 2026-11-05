@@ -705,3 +705,45 @@ describe("legGeometry", () => {
     expect(legGeometry(lineWithShape, "Z", "A")).toBeNull();
   });
 });
+
+// Official MTA platform stop IDs run G05S → E01S/M23S despite latitude.
+describe("operational E/J/Z directions for cached static data", () => {
+  for (const route of ["E", "J", "Z"]) {
+    it(`${route} uses platform direction in both orders and rejects opposite arrivals`, () => {
+      const southID = route === "E" ? "E01" : "M23";
+      const routeLine = line({ id: route, routeId: route, stops: [
+        stop("G05", "Jamaica Center", 40.702147, -73.801109),
+        stop("middle", "Intermediate", 40.75, -73.95),
+        stop(southID, "Manhattan terminus", route === "E" ? 40.712582 : 40.706476, route === "E" ? -74.009781 : -74.011056),
+      ] });
+      for (const ordered of [routeLine.stops, [...routeLine.stops].reverse()]) {
+        const lines = { [route]: { ...routeLine, stops: ordered } };
+        const index = buildStationIndex(lines);
+        for (const [destination, expected] of [["G05", "N"], [southID, "S"]] as const) {
+          const plan = planTrips(lines, index, ["middle"], [destination])[0];
+          expect(plan.legs[0].direction).toBe(expected);
+          const arrivalsByStation = new Map([[plan.legs[0].boardComplexId, [{
+            routeId: route, stopId: "middle", direction: expected === "N" ? "S" as const : "N" as const,
+            eta: 60, tripId: "opposite",
+          }]]]);
+          expect(hasReachableFirstLegArrival(plan, { arrivalsByStation, nowSec: 0 })).toBe(false);
+          arrivalsByStation.get(plan.legs[0].boardComplexId)![0].direction = expected;
+          expect(hasReachableFirstLegArrival(plan, { arrivalsByStation, nowSec: 0 })).toBe(true);
+        }
+      }
+    });
+  }
+});
+
+describe("explicit operational direction metadata", () => {
+  it("takes precedence over latitude and remains optional for older assets", () => {
+    const route = line({id: "X", routeId: "X", stops: [stop("x", "X", 40.8, -74), stop("y", "Y", 40.7, -74)]});
+    for (const directionTowardEnd of ["N", "S"] as const) {
+      const lines = {X: {...route, directionTowardEnd}};
+      const index = buildStationIndex(lines);
+      expect(planTrips(lines, index, ["x"], ["y"])[0].legs[0].direction).toBe(directionTowardEnd);
+      expect(planTrips(lines, index, ["y"], ["x"])[0].legs[0].direction).toBe(directionTowardEnd === "N" ? "S" : "N");
+    }
+    expect(planTrips({X: route}, buildStationIndex({X: route}), ["x"], ["y"])[0].legs[0].direction).toBe("S");
+  });
+});

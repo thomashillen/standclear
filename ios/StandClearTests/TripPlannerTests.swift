@@ -132,6 +132,39 @@ final class TripPlannerTests: XCTestCase {
         XCTAssertNil(TripPlanner.nextDeparture(for: leg, stations: stations, snapshot: old, now: now, feedUnavailable: false))
     }
 
+    func testOperationalEJZDirectionsAndOppositeArrivalRejectionForCachedLines() throws {
+        for route in ["E", "J", "Z"] {
+            let southID = route == "E" ? "E01" : "M23"
+            let stops = [stop("G05", 40.702147), stop("middle", 40.75), stop(southID, route == "E" ? 40.712582 : 40.706476)]
+            for ordered in [stops, Array(stops.reversed())] {
+                let lines = [line(route, ordered)], stations = Transit.stations(lines)
+                for (destination, expected) in [("G05", "N"), (southID, "S")] {
+                    let leg = try XCTUnwrap(try TripPlanner.plans(lines: lines, stations: stations,
+                                                                  from: station("middle", in: stations), to: station(destination, in: stations)).first?.legs.first)
+                    XCTAssertEqual(leg.direction, expected, route)
+                    let opposite = arrival("opposite", route: route, stop: "middle", direction: expected == "N" ? "S" : "N", seconds: 30)
+                    let valid = arrival("valid", route: route, stop: "middle", direction: expected, seconds: 60)
+                    let snapshot = Snapshot(generatedAt: now.timeIntervalSince1970 * 1000, trains: [], arrivals: [opposite, valid])
+                    XCTAssertEqual(TripPlanner.nextDeparture(for: leg, stations: stations, snapshot: snapshot, now: now, feedUnavailable: false)?.tripId, "valid", route)
+                }
+            }
+        }
+    }
+
+    func testDirectionMetadataDecodesAndOverridesLatitudeInBothOrders() throws {
+        let json = ##"{"id":"X","routeId":"X","color":"#000000","stops":[{"id":"x","name":"X","lat":40.8,"lng":-74,"shapeIdx":0},{"id":"y","name":"Y","lat":40.7,"lng":-74,"shapeIdx":0}],"shape":[],"directionTowardEnd":"N"}"##
+        let explicit = try JSONDecoder().decode(SubwayLine.self, from: Data(json.utf8))
+        XCTAssertEqual(explicit.directionTowardEnd, "N")
+        let stations = Transit.stations([explicit])
+        for (from, to, expected) in [("x", "y", "N"), ("y", "x", "S")] {
+            let leg = try XCTUnwrap(try TripPlanner.plans(lines: [explicit], stations: stations,
+                                                          from: station(from, in: stations), to: station(to, in: stations)).first?.legs.first)
+            XCTAssertEqual(leg.direction, expected)
+        }
+        let legacyJSON = json.replacingOccurrences(of: #","directionTowardEnd":"N""#, with: "")
+        XCTAssertNil(try JSONDecoder().decode(SubwayLine.self, from: Data(legacyJSON.utf8)).directionTowardEnd)
+    }
+
     private func sampleLines() -> [SubwayLine] {
         let express = [stop("601", 40.80), stop("631", 40.75), stop("635", 40.73), stop("419", 40.70)]
         return [line("4", express), line("5", express),
