@@ -143,7 +143,7 @@ Queued basics: station-to-station directions should reuse the web's direct/one-t
 
 ## Basic station directions
 
-Choose **More → Directions**, then select From and To stations. Native lists, search fields, navigation links, and buttons provide station selection, swap/clear, up to four route alternatives, and boarding/transfer/alighting instructions. Selecting an itinerary highlights its route geometry and frames it in the native map. Selections are stored by station identity and survive adaptive presentation changes; delayed data never chooses a different station for the rider.
+Choose **More → Directions**, then select From and To stations. Native lists, search fields, navigation links, and buttons provide station selection, swap/clear, up to four route alternatives, and boarding/transfer/alighting instructions. Selecting an itinerary highlights its route geometry and frames it in the native map. In Trip details, the native toolbar’s **Show route on map** button remains available while scrolling, including at accessibility text sizes. Selections are stored by station identity and survive adaptive presentation changes; delayed data never chooses a different station for the rider.
 
 `TripPlanner` ports the existing `lib/commuteRouting.ts` direct/one-transfer graph and curated complex membership. Platform IDs remain distinct from complex IDs. Equivalent routes share an option; express/local options with different stop counts remain separate. Plans are ranked by transfers and stops, not total journey time. Geometry uses existing static shapes and rejects malformed data.
 

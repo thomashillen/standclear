@@ -67,7 +67,7 @@ struct DirectionsView: View {
                                         .onAppear { onSelect(plan) }
                                 } label: {
                                     VStack(alignment: .leading) {
-                                        Text(plan.legs.count == 1 ? "Direct" : "1 transfer")
+                                        Text(plan.routeChoiceTitle(in: store.lines))
                                             .font(.headline)
                                         ForEach(plan.legs) { leg in
                                             TripRouteLabels(routes: leg.routeIDs, store: store)
@@ -154,11 +154,6 @@ private struct TripItineraryView: View {
     var body: some View {
         List {
             Section {
-                Button { onShowMap(plan) } label: {
-                    Label("Show route on map", systemImage: "map")
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .contentShape(Rectangle())
-                }
                 Text("\(plan.totalStops) stops · \(plan.legs.count == 1 ? "Direct" : "1 transfer")")
             } footer: {
                 Text("Regular route network only. Check service changes before travel; walking and station access are not included.")
@@ -186,6 +181,12 @@ private struct TripItineraryView: View {
         }
         .navigationTitle("Trip details")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button("Show route on map", systemImage: "map") { onShowMap(plan) }
+                    .accessibilityIdentifier("showStationRouteOnMap")
+            }
+        }
         .scrollContentBackground(.hidden)
         .containerBackground(.clear, for: .navigation)
     }

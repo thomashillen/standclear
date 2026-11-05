@@ -709,8 +709,10 @@ final class StandClearUITests: XCTestCase {
     private func focusSearchField(_ field: XCUIElement, in app: XCUIApplication,
                                   file: StaticString = #filePath, line: UInt = #line) -> Bool
     {
-        let ready = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == true AND hittable == true"), object: field)
-        guard XCTWaiter.wait(for: [ready], timeout: 5) == .completed else {
+        // Hittability requires the field to exist. Avoid a separate remote existence
+        // query consuming the readiness budget before XCTest measures hittability.
+        let ready = XCTNSPredicateExpectation(predicate: NSPredicate(format: "hittable == true"), object: field)
+        guard XCTWaiter.wait(for: [ready], timeout: 10) == .completed else {
             XCTFail("Search field did not become interactive", file: file, line: line)
             return false
         }
@@ -908,6 +910,96 @@ final class StandClearUITests: XCTestCase {
         app.buttons["placeBackToSearch"].tap()
         XCTAssertTrue(museum.waitForExistence(timeout: 5))
         XCTAssertEqual(field.value as? String, "Noguchi")
+    }
+
+    @MainActor
+    func testStationRouteChoicesNameInterchanges() {
+        checkStationRouteInterchanges(expanded: false, largeType: false)
+    }
+
+    @MainActor
+    func testStationRouteChoicesNameInterchangesAtLargestType() {
+        checkStationRouteInterchanges(expanded: false, largeType: true)
+    }
+
+    @MainActor
+    func testStationRouteChoicesNameInterchangesExpanded() {
+        checkStationRouteInterchanges(expanded: true, largeType: false)
+    }
+
+    @MainActor
+    private func checkStationRouteInterchanges(expanded: Bool, largeType: Bool) {
+        let app = XCUIApplication()
+        app.terminate()
+        XCUIDevice.shared.orientation = .portrait
+        app.resetAuthorizationStatus(for: .location)
+        app.launchArguments = ["--ui-test-fixture", "--ui-test-route-interchanges"]
+        if largeType {
+            app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
+        }
+        addUIInterruptionMonitor(withDescription: "Location permission") { alert in
+            let deny = alert.buttons["Don’t Allow"]
+            guard deny.exists else { return false }
+            deny.tap()
+            return true
+        }
+        app.launch()
+        activatePermissionPrompt(in: app)
+        defer { XCUIDevice.shared.orientation = .portrait }
+        app.buttons["moreButton"].tap()
+        let directions = app.buttons["directionsButton"]
+        XCTAssertTrue(directions.waitForExistence(timeout: 5))
+        directions.tap()
+        if expanded {
+            XCUIDevice.shared.orientation = .landscapeLeft
+            waitForLayout(in: app, expanded: true, readyControl: "originPicker")
+        }
+        let origin = app.buttons["originPicker"]
+        XCTAssertTrue(origin.waitForExistence(timeout: 10))
+        origin.tap()
+        let field = app.searchFields.firstMatch
+        XCTAssertTrue(field.waitForExistence(timeout: 10))
+        guard focusSearchField(field, in: app) else { return }
+        field.typeText("Wall\n")
+        selectStationResult("419", query: "Wall", in: app)
+        app.buttons["destinationPicker"].tap()
+        XCTAssertTrue(field.waitForExistence(timeout: 10))
+        guard focusSearchField(field, in: app) else { return }
+        field.typeText("Astoria\n")
+        selectStationResult("R03", query: "Astoria", in: app)
+        let list = app.collectionViews["directionsList"]
+        let union = app.buttons["tripPlan-4:N:419>635|N:N:R20>R03"]
+        let lexington = app.buttons["tripPlan-4:N:419>629|N:N:R11>R03"]
+        revealPlaceElement(union, in: list)
+        XCTAssertTrue(union.label.contains("Change to N/W at 14 St-Union Sq"))
+        let unionCapture = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        unionCapture.name = "Union Square route choice — expanded \(expanded), largest type \(largeType)"
+        unionCapture.lifetime = .keepAlways
+        add(unionCapture)
+        revealPlaceElement(lexington, in: list)
+        let instruction = "Change to N/W at Lexington Av/59 St"
+        XCTAssertTrue(lexington.label.contains(instruction))
+        let capture = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        capture.name = "Lexington route choice — expanded \(expanded), largest type \(largeType)"
+        capture.lifetime = .keepAlways
+        add(capture)
+        lexington.tap()
+        XCTAssertTrue(app.navigationBars["Trip details"].waitForExistence(timeout: 10))
+        let transfer = app.descendants(matching: .any)["stationTripTransfer"].firstMatch
+        revealPlaceElement(transfer, in: app.collectionViews.firstMatch)
+        XCTAssertTrue(transfer.label.contains(instruction))
+        let showMap = app.buttons["showStationRouteOnMap"]
+        XCTAssertTrue(showMap.waitForExistence(timeout: 5))
+        XCTAssertTrue(showMap.isHittable, "The native map toolbar action must remain reachable while the itinerary is scrolled")
+        XCTAssertEqual(showMap.label, "Show route on map")
+        let mapAction = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        mapAction.name = "Native map action while scrolled — expanded \(expanded), largest type \(largeType)"
+        mapAction.lifetime = .keepAlways
+        add(mapAction)
+        showMap.tap()
+        let map = app.descendants(matching: .any)["appleTransitMap"].firstMatch
+        expectation(for: NSPredicate(format: "value CONTAINS %@", instruction), evaluatedWith: map)
+        waitForExpectations(timeout: 10)
     }
 
     @MainActor
@@ -1192,7 +1284,11 @@ final class StandClearUITests: XCTestCase {
                                     file: StaticString = #filePath, line: UInt = #line)
     {
         let app = XCUIApplication()
-        let nav = app.navigationBars["From"].exists ? app.navigationBars["From"] : app.navigationBars["Route preview"]
+        // Trip details has a pinned navigation bar too. A row underneath it
+        // needs a drag toward the top, even if it is inside the list frame.
+        let tripDetails = app.navigationBars["Trip details"]
+        let nav = tripDetails.exists ? tripDetails
+            : app.navigationBars["From"].exists ? app.navigationBars["From"] : app.navigationBars["Route preview"]
         var towardBottom = downward
         for _ in 0 ..< 18 {
             let bounds = list.frame
@@ -1580,7 +1676,7 @@ final class StandClearUITests: XCTestCase {
         capture.name = "Station search to directions with preserved origin"
         capture.lifetime = .keepAlways
         add(capture)
-        app.buttons["Show route on map"].tap()
+        app.buttons["showStationRouteOnMap"].tap()
         XCTAssertTrue(app.buttons["searchButton"].waitForExistence(timeout: 5))
         if expanded {
             XCTAssertTrue(app.navigationBars["Trip details"].exists)
@@ -1661,8 +1757,9 @@ final class StandClearUITests: XCTestCase {
         let nextN = prediction.staticTexts["N · 17 min"]
         revealPlaceElement(nextN, in: list)
         XCTAssertTrue(prediction.staticTexts["Train destination: 30 Av"].exists)
-        let showMap = app.buttons["Show route on map"]
-        revealPlaceElement(showMap, in: list, downward: false)
+        let showMap = app.buttons["showStationRouteOnMap"]
+        XCTAssertTrue(showMap.waitForExistence(timeout: 5))
+        XCTAssertTrue(showMap.isHittable, "The native map toolbar action must remain reachable beside the transfer prediction")
         showMap.tap()
         let map = app.descendants(matching: .any)["appleTransitMap"].firstMatch
         expectation(for: NSPredicate(format: "value CONTAINS %@", interchange), evaluatedWith: map)
@@ -1868,7 +1965,7 @@ final class StandClearUITests: XCTestCase {
         screenshot.name = "Native station itinerary and highlighted route"
         screenshot.lifetime = .keepAlways
         add(screenshot)
-        app.buttons["Show route on map"].tap()
+        app.buttons["showStationRouteOnMap"].tap()
         XCTAssertTrue(app.buttons["moreButton"].waitForExistence(timeout: 5))
         XCTAssertFalse(app.navigationBars["Trip details"].exists)
         let routeMap = XCTAttachment(screenshot: app.screenshot())
@@ -1936,8 +2033,12 @@ final class StandClearUITests: XCTestCase {
         let ready = NSPredicate { _, _ in
             MainActor.assumeIsolated {
                 let window = app.windows.firstMatch
-                let control = app.buttons[readyControl]
-                guard window.exists, control.exists else { return false }
+                // SwiftUI can expose both presentations during adaptation.
+                // Wait for a single control before requesting its frame.
+                let controls = app.buttons.matching(identifier: readyControl)
+                guard window.exists, controls.count == 1 else { return false }
+                let control = controls.element(boundBy: 0)
+                guard control.exists else { return false }
                 let bounds = window.frame
                 let frame = control.frame
                 guard !bounds.isNull, !bounds.isInfinite, !frame.isNull, !frame.isInfinite,

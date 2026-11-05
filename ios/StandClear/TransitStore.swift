@@ -240,6 +240,17 @@ final class TransitStore {
                         lines[route] = astoriaFixtureLine(route)
                     }
                 }
+                if ProcessInfo.processInfo.arguments.contains("--ui-test-route-interchanges") {
+                    // Two representative transfer choices with the same services.
+                    // Coordinates/complex identities are from the checked-in GTFS.
+                    for route in ["N", "W"] {
+                        lines[route] = line(id: route, color: "#FCCC0A", stops: [
+                            ("R03", "Astoria Blvd", 40.770258, -73.917843),
+                            ("R11", "Lexington Av/59 St", 40.76266, -73.967258),
+                            ("R20", "14 St-Union Sq", 40.735736, -73.990568),
+                        ])
+                    }
+                }
                 if ProcessInfo.processInfo.arguments.contains("--ui-test-staten-island") {
                     lines["SI"] = line(id: "SI", color: "#0039A6", stops: [
                         ("S13", "Richmond Valley", 40.519631, -74.229141),

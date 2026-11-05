@@ -42,6 +42,17 @@ final class TripPlannerTests: XCTestCase {
         XCTAssertEqual(plan.totalStops, 2)
     }
 
+    func testRouteChoiceTitleNamesTransferAndPreservesDirectAndUnavailableFallbacks() throws {
+        let lines = sampleLines(), stations = Transit.stations(lines)
+        let transfer = try XCTUnwrap(try TripPlanner.plans(lines: lines, stations: stations,
+                                                           from: station("L01", in: stations), to: station("419", in: stations)).first)
+        XCTAssertEqual(transfer.routeChoiceTitle(in: lines), "Change to 4/5 at 635")
+        XCTAssertEqual(transfer.routeChoiceTitle(in: []), "1 transfer", "Missing platform data must not invent an interchange")
+        let direct = try XCTUnwrap(try TripPlanner.plans(lines: lines, stations: stations,
+                                                         from: station("L01", in: stations), to: station("L08", in: stations)).first)
+        XCTAssertEqual(direct.routeChoiceTitle(in: lines), "Direct")
+    }
+
     func testSiblingRoutesMergeButExpressAndLocalStayDistinct() throws {
         let lines = sampleLines(), stations = Transit.stations(lines)
         let plans = try TripPlanner.plans(lines: lines, stations: stations,
