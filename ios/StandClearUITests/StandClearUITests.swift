@@ -727,6 +727,113 @@ final class StandClearUITests: XCTestCase {
     }
 
     @MainActor
+    func testIdenticalPlaceOriginClearsRouteAndRecoversAcrossLayouts() {
+        checkIdenticalPlaceOrigin(largeType: false)
+    }
+
+    @MainActor
+    func testIdenticalPlaceOriginAtLargestType() {
+        checkIdenticalPlaceOrigin(largeType: true)
+    }
+
+    @MainActor
+    private func checkIdenticalPlaceOrigin(largeType: Bool) {
+        let app = XCUIApplication()
+        app.terminate()
+        XCUIDevice.shared.orientation = .portrait
+        defer { XCUIDevice.shared.orientation = .portrait }
+        app.resetAuthorizationStatus(for: .location)
+        app.launchArguments = ["--ui-test-fixture", "--ui-test-noguchi"]
+        if largeType {
+            app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
+        }
+        addUIInterruptionMonitor(withDescription: "Location permission") { alert in
+            guard alert.buttons["Don’t Allow"].exists else { return false }
+            alert.buttons["Don’t Allow"].tap()
+            return true
+        }
+        app.launch()
+        activatePermissionPrompt(in: app)
+        app.buttons["searchButton"].tap()
+        let field = app.searchFields[unifiedSearchPrompt]
+        guard focusSearchField(field, in: app) else { return }
+        field.typeText("Noguchi\n")
+        let museum = app.buttons["placeResult-fixture-noguchi"]
+        XCTAssertTrue(museum.waitForExistence(timeout: 10))
+        museum.tap()
+
+        func chooseOrigin(_ query: String, resultID: String) -> Bool {
+            let origin = app.buttons["placeOriginPicker"]
+            XCTAssertTrue(origin.waitForExistence(timeout: 10))
+            revealPlaceElement(origin, in: app.collectionViews["placePreviewList"], downward: false)
+            origin.tap()
+            let search = app.searchFields[unifiedSearchPrompt]
+            guard focusSearchField(search, in: app) else { return false }
+            search.typeText(query + "\n")
+            let result = app.buttons[resultID]
+            // At accessibility sizes the address section can put the station
+            // outside the List's realized rows. Scroll to its exact identity.
+            revealPlaceElement(result, in: app.collectionViews.firstMatch)
+            guard result.waitForExistence(timeout: 10) else { XCTFail("Origin result unavailable: \(resultID)"); return false }
+            result.tap()
+            return true
+        }
+
+        guard chooseOrigin("Wall", resultID: "stationChoice-419") else { return }
+        let map = app.descendants(matching: .any)["appleTransitMap"].firstMatch
+        expectation(for: NSPredicate(format: "value CONTAINS %@", "N/W"), evaluatedWith: map)
+        waitForExpectations(timeout: 15)
+        guard chooseOrigin("Noguchi", resultID: "placeOriginResult-fixture-noguchi") else { return }
+        let title = app.staticTexts["Same place"]
+        let found = title.waitForExistence(timeout: 10)
+        XCTAssertTrue(found, "Identical endpoints must show the native same-endpoint state")
+        guard found else { return }
+        let recovery = app.staticTexts["Choose a different starting point to plan a trip."]
+        revealPlaceElement(recovery, in: app.collectionViews["placePreviewList"])
+        let before = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        before.name = "Identical place endpoints — largest text \(largeType)"
+        before.lifetime = .keepAlways
+        add(before)
+        XCTAssertTrue(app.descendants(matching: .any)["samePlaceRoute"].firstMatch.exists)
+        XCTAssertFalse(app.staticTexts["No starting station nearby"].exists)
+        XCTAssertFalse(app.staticTexts["No walk required"].exists)
+        expectation(for: NSPredicate(format: "value == %@", "The Noguchi Museum"), evaluatedWith: map)
+        waitForExpectations(timeout: 10)
+        XCTAssertFalse(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "placeRouteOption-")).firstMatch.exists)
+
+        if !largeType {
+            XCUIDevice.shared.orientation = .landscapeLeft
+            waitForLayout(in: app, expanded: true, readyControl: "placeOriginPicker")
+            XCTAssertTrue(title.waitForExistence(timeout: 10))
+            XCTAssertEqual(map.value as? String, "The Noguchi Museum")
+            revealPlaceElement(recovery, in: app.collectionViews["placePreviewList"])
+            let expanded = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            expanded.name = "Same-endpoint state in expanded native controls"
+            expanded.lifetime = .keepAlways
+            add(expanded)
+            XCUIDevice.shared.orientation = .portrait
+            waitForLayout(in: app, expanded: false, readyControl: "Done")
+        }
+        let grabber = app.buttons["Sheet Grabber"]
+        if grabber.exists, grabber.value as? String == "Half screen" {
+            grabber.doubleTap()
+        }
+        let origin = app.buttons["placeOriginPicker"]
+        revealPlaceElement(origin, in: app.collectionViews["placePreviewList"], downward: false)
+        origin.tap()
+        let from = app.navigationBars["From"]
+        XCTAssertTrue(from.waitForExistence(timeout: 10))
+        from.buttons.firstMatch.tap()
+        XCTAssertTrue(title.waitForExistence(timeout: 10), "Cancelling origin editing must preserve the same-endpoint state")
+        XCTAssertTrue(origin.label.contains("The Noguchi Museum"))
+        guard chooseOrigin("Wall", resultID: "stationChoice-419") else { return }
+        expectation(for: NSPredicate(format: "value CONTAINS %@", "N/W"), evaluatedWith: map)
+        waitForExpectations(timeout: 15)
+        XCTAssertTrue(origin.label.contains("Wall St"))
+        XCTAssertFalse(app.descendants(matching: .any)["samePlaceRoute"].firstMatch.exists)
+    }
+
+    @MainActor
     func testPlaceSearchPreviewsSubwayAndWalkingFromManualStation() {
         checkPlaceSearchPreview(expanded: false)
     }
