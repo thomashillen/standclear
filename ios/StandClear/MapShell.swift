@@ -77,14 +77,19 @@ struct MapShell: View {
                                     .buttonStyle(.bordered)
                                     .padding(.horizontal)
                             }
-                            ControlGroup {
-                                Button("Search", systemImage: "magnifyingglass") { showSearch(expanded: true) }
-                                    .accessibilityIdentifier("searchButton")
-                                Button("Nearby", systemImage: "location") {
-                                    showNearby(expanded: true)
+                            HStack {
+                                ControlGroup {
+                                    Button("Search", systemImage: "magnifyingglass") { showSearch(expanded: true) }
+                                        .accessibilityIdentifier("searchButton")
+                                    Button("Nearby", systemImage: "location") {
+                                        showNearby(expanded: true)
+                                    }
+                                    .accessibilityIdentifier("nearbyButton")
                                 }
-                                .accessibilityIdentifier("nearbyButton")
-                                moreMenu
+                                // Automatic ControlGroup styling disables a
+                                // nested Menu in this expanded layout. Keep the
+                                // menu as a separate native control.
+                                moreMenu.buttonStyle(.bordered)
                             }
                             .labelStyle(.iconOnly)
                             .controlSize(.large)
