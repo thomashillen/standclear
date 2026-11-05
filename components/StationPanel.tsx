@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { ArrowUp, ArrowDown, Compass, Star, X } from "lucide-react";
 import { useLines } from "@/lib/subwayData";
+import { directionalTermini } from "@/lib/operationalDirection";
 import { useTrains, type Arrival, type Train } from "@/lib/useTrains";
 import { useAlerts, alertsForStation } from "@/lib/useAlerts";
 import { useFavorites } from "@/lib/useFavorites";
@@ -404,22 +405,13 @@ export default function StationPanel({ stopId, onClose, onSelectLine, onStartDir
     // tick so trains drop out of "Now" once the grace window expires.
   }, [data, stationIds, stoppedAtMemo, now]);
 
-  // For each route serving the station, figure out which terminus matches
-  // each direction by checking which end of the stop list has a higher
-  // lat (that end is "north"). MTA GTFS orders line.stops consistently
-  // from one terminus to the other, so stops[0] vs stops[last] works.
+  // Static fallback names follow the same verified platform direction as planning.
   const terminusByRouteAndDir = useMemo(() => {
     const m = new Map<string, { N: string; S: string }>();
     if (!lines) return m;
     for (const line of Object.values(lines)) {
-      if (line.stops.length < 2) continue;
-      const first = line.stops[0];
-      const last = line.stops[line.stops.length - 1];
-      const firstIsNorth = first.lat > last.lat;
-      m.set(line.routeId, {
-        N: firstIsNorth ? first.name : last.name,
-        S: firstIsNorth ? last.name : first.name,
-      });
+      const termini = directionalTermini(line);
+      if (termini) m.set(line.routeId, termini);
     }
     return m;
   }, [lines]);

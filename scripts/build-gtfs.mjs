@@ -5,6 +5,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import readline from "node:readline";
+import { platformDirection } from "./gtfs-platform-direction.mjs";
 
 const GTFS_DIR = path.resolve("data/gtfs");
 const OUTPUT = path.resolve("public/gtfsData.json");
@@ -211,6 +212,7 @@ for (const routeId of ROUTES) {
     name: SHUTTLE_NAMES[routeId] || route?.route_long_name || routeId,
     color,
     textColor: isLightColor(color) ? "black" : "white",
+    directionTowardEnd: platformDirection(tripStops[tripId].map(stop => stop.stopId)),
     stops: stopList,
     shape,
   };

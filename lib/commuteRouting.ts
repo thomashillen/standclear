@@ -1,3 +1,4 @@
+import { directionTowardEnd } from "./operationalDirection";
 import type { Lines, SubwayLine } from "./subwayData";
 import { catchVerdict, haversineMeters, type StationEntry } from "./stopsIndex";
 import type { Arrival } from "./useTrains";
@@ -45,21 +46,15 @@ interface TripPlanOptions {
   maxResults?: number;
 }
 
-// Determine the compass direction (N/S) the rider must board to travel
-// from `fromIdx` to `toIdx` along the line's stop array. GTFS lists
-// stops terminus-to-terminus, and the lat of stops[0] vs stops[last]
-// tells us which end is north.
+
 function travelDirection(
   line: SubwayLine,
   fromIdx: number,
   toIdx: number,
 ): "N" | "S" | null {
   if (fromIdx === toIdx) return null;
-  const first = line.stops[0];
-  const last = line.stops[line.stops.length - 1];
-  const firstIsNorth = first.lat > last.lat;
-  const towardEnd = toIdx > fromIdx;
-  return towardEnd ? (firstIsNorth ? "S" : "N") : firstIsNorth ? "N" : "S";
+  const forward = directionTowardEnd(line);
+  return toIdx > fromIdx ? forward : forward === "N" ? "S" : "N";
 }
 
 /**

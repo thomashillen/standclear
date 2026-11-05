@@ -95,7 +95,9 @@ The repository ships with a pre-built `public/gtfsData.json`. To refresh it:
 2. Unzip it to `data/gtfs/` (the raw files are gitignored).
 3. Run `npm run build:gtfs`.
 
-The build script chooses representative route shapes, associates stops with shape geometry, and emits the static dataset used by the client.
+The build script chooses representative route shapes, associates stops with shape geometry, and emits the static dataset used by the client. The optional `directionTowardEnd` field records the selected trip's consistent N/S child-platform suffix in stop-array order. Generation rejects missing or mixed suffixes instead of treating geographic latitude or generic GTFS `direction_id` as operational direction.
+
+The E/J/Z metadata was verified against the [official MTA static feed](https://web.mta.info/developers/data/nyct/subway/google_transit.zip) on November 4, 2026. Its complete representative stop sequences match southbound platform sequences from Jamaica Center (`G05S`) to World Trade Center (`E01S`, E) or Broad St (`M23S`, J/Z). Native and web planners also recognize these exact terminal pairs in older cached assets without metadata. Static direction describes boarding orientation, not current service availability or a realtime prediction.
 
 ### Automated GTFS refresh
 

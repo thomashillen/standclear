@@ -200,8 +200,22 @@ enum TripPlanner {
         guard board.index != alight.index, let first = line.stops.first, let last = line.stops.last,
               first.lat.isFinite, last.lat.isFinite else { return nil }
         let towardEnd = alight.index > board.index
-        let firstIsNorth = first.lat > last.lat
-        let direction = towardEnd ? (firstIsNorth ? "S" : "N") : (firstIsNorth ? "N" : "S")
+        let forward: String
+        if let explicit = line.directionTowardEnd, explicit == "N" || explicit == "S" {
+            forward = explicit
+        } else {
+            // Exact MTA platform endpoints support older cached assets that lack
+            // metadata. G05S → E01S/M23S is southbound despite terminal latitude.
+            let south = line.routeId == "E" ? "E01" : (["J", "Z"].contains(line.routeId) ? "M23" : nil)
+            if let south, first.id == "G05", last.id == south {
+                forward = "S"
+            } else if let south, first.id == south, last.id == "G05" {
+                forward = "N"
+            } else {
+                forward = first.lat > last.lat ? "S" : "N"
+            }
+        }
+        let direction = towardEnd ? forward : (forward == "N" ? "S" : "N")
         return NativeTripLeg(routeId: line.routeId, direction: direction,
                              boardStopId: board.stopID, alightStopId: alight.stopID,
                              boardComplexId: board.complexID, alightComplexId: alight.complexID,

@@ -167,6 +167,7 @@ final class TransitStore {
     private enum NativeUITestFixture {
         static func data(for path: String, now: Date) throws -> Data {
             let includeExpress = ProcessInfo.processInfo.arguments.contains("--ui-test-express-arrivals")
+            let includeOperational = ProcessInfo.processInfo.arguments.contains("--ui-test-operational-direction")
             let includeMuseum = ProcessInfo.processInfo.arguments.contains("--ui-test-noguchi")
             let payload: [String: Any]
             switch path {
@@ -188,6 +189,42 @@ final class TransitStore {
                         ("419", "Wall St", 40.707557, -74.011862),
                     ]),
                 ]
+                if includeOperational {
+                    lines["E"] = line(id: "E", color: "#0039A6", stops: [
+                        ("G05", "Jamaica Center-Parsons/Archer", 40.702147, -73.801109),
+                        ("G06", "Sutphin Blvd-Archer Av-JFK Airport", 40.700486, -73.807969),
+                        ("G07", "Jamaica-Van Wyck", 40.702566, -73.816859),
+                        ("F05", "Briarwood", 40.709179, -73.820574),
+                        ("F06", "Kew Gardens-Union Tpke", 40.714441, -73.831008),
+                        ("F07", "75 Av", 40.718331, -73.837324),
+                        ("G08", "Forest Hills-71 Av", 40.721691, -73.844521),
+                        ("G09", "67 Av", 40.726523, -73.852719),
+                        ("G10", "63 Dr-Rego Park", 40.729846, -73.861604),
+                        ("G11", "Woodhaven Blvd", 40.733106, -73.869229),
+                        ("G12", "Grand Av-Newtown", 40.737015, -73.877223),
+                        ("G13", "Elmhurst Av", 40.742454, -73.882017),
+                        ("G14", "Jackson Hts-Roosevelt Av", 40.746644, -73.891338),
+                        ("G15", "65 St", 40.749669, -73.898453),
+                        ("G16", "Northern Blvd", 40.752885, -73.906006),
+                        ("G18", "46 St", 40.756312, -73.913333),
+                        ("G19", "Steinway St", 40.756879, -73.92074),
+                        ("G20", "36 St", 40.752039, -73.928781),
+                        ("G21", "Queens Plaza", 40.748973, -73.937243),
+                        ("F09", "Court Sq-23 St", 40.747846, -73.946),
+                        ("F11", "Lexington Av/53 St", 40.757552, -73.969055),
+                        ("F12", "5 Av/53 St", 40.760167, -73.975224),
+                        ("D14", "7 Av", 40.762862, -73.981637),
+                        ("A25", "50 St", 40.762456, -73.985984),
+                        ("A27", "42 St-Port Authority Bus Terminal", 40.757308, -73.989735),
+                        ("A28", "34 St-Penn Station", 40.752287, -73.993391),
+                        ("A30", "23 St", 40.745906, -73.998041),
+                        ("A31", "14 St", 40.740893, -74.00169),
+                        ("A32", "W 4 St-Wash Sq", 40.732338, -74.000495),
+                        ("A33", "Spring St", 40.726227, -74.003739),
+                        ("A34", "Canal St", 40.720824, -74.005229),
+                        ("E01", "World Trade Center", 40.712582, -74.009781),
+                    ])
+                }
                 if includeExpress {
                     // Static GTFS lists the base service. Only the trip update
                     // explicitly identifies the first Parkchester train as 6X.
@@ -252,6 +289,9 @@ final class TransitStore {
                     ] + (includeExpress ? [
                         arrival(id: "ui-fixture-6x-n", route: "6X", stop: "608", direction: "N", destination: "601", eta: timestamp + 120),
                         arrival(id: "ui-fixture-6-s", route: "6", stop: "608", direction: "S", destination: "613", eta: timestamp + 240),
+                    ] : []) + (includeOperational ? [
+                        arrival(id: "fixture-e-opposite", route: "E", stop: "F11", direction: "S", destination: "E01", eta: timestamp + 90),
+                        arrival(id: "fixture-e-jamaica", route: "E", stop: "F11", direction: "N", destination: "G05", eta: timestamp + 450),
                     ] : []) + (includeMuseum ? museumArrivals(at: timestamp) : []) + groupedArrivals(at: timestamp),
                 ]
             default:

@@ -1863,6 +1863,51 @@ final class StandClearUITests: XCTestCase {
     }
 
     @MainActor
+    func testJamaicaBoundEUsesNorthboundPlatformPrediction() {
+        let app = XCUIApplication()
+        app.terminate()
+        XCUIDevice.shared.orientation = .portrait
+        app.resetAuthorizationStatus(for: .location)
+        app.launchArguments = ["--ui-test-fixture", "--ui-test-operational-direction"]
+        addUIInterruptionMonitor(withDescription: "Location permission") { alert in
+            let deny = alert.buttons["Don’t Allow"]
+            guard deny.exists else { return false }
+            deny.tap()
+            return true
+        }
+        app.launch()
+        activatePermissionPrompt(in: app)
+        app.buttons["moreButton"].tap()
+        app.buttons["directionsButton"].tap()
+        for (picker, query, stationID) in [("originPicker", "Lexington", "F11"), ("destinationPicker", "Jamaica Center", "G05")] {
+            XCTAssertTrue(app.buttons[picker].waitForExistence(timeout: 10))
+            app.buttons[picker].tap()
+            let field = app.searchFields["Search subway stations"]
+            guard focusSearchField(field, in: app) else { return }
+            field.typeText(query)
+            selectStationResult(stationID, query: query, in: app)
+        }
+        let plan = app.buttons["tripPlan-E:N:F11>G05"]
+        XCTAssertTrue(plan.waitForExistence(timeout: 10))
+        plan.tap()
+        XCTAssertTrue(app.navigationBars["Trip details"].waitForExistence(timeout: 5))
+        let grabber = app.buttons["Sheet Grabber"]
+        if grabber.exists, grabber.value as? String == "Half screen" {
+            grabber.doubleTap()
+        }
+        let prediction = app.descendants(matching: .any)["legPrediction-E:N:F11>G05"].firstMatch
+        let next = prediction.staticTexts["E · 8 min"]
+        revealPlaceElement(next, in: app.collectionViews.firstMatch)
+        XCTAssertTrue(app.staticTexts["Northbound"].exists)
+        XCTAssertTrue(prediction.staticTexts["Train destination: Jamaica Center-Parsons/Archer"].exists)
+        XCTAssertFalse(prediction.staticTexts["E · 2 min"].exists)
+        let capture = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        capture.name = "Jamaica-bound E uses the northbound platform prediction"
+        capture.lifetime = .keepAlways
+        add(capture)
+    }
+
+    @MainActor
     func testStationDirectionsAndSwap() {
         let app = XCUIApplication()
         app.terminate()
