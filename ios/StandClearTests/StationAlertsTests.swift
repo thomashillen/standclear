@@ -17,6 +17,69 @@ final class StationAlertsTests: XCTestCase {
         XCTAssertEqual(evidence(generatedAge: 300, sourceAge: 0), .unknown)
     }
 
+    func testFailedPollKeepsReportUnconfirmedThroughRetryUntilSuccessfulReplacement() {
+        let severe = StationAlert(id: "service-change", header: "Suspended", description: "", effect: "", severity: "severe",
+                                  routeIds: ["4"], stopIds: [], selectors: nil)
+        let source = now.addingTimeInterval(-10)
+        let severeReport = StationAlertSnapshot(generatedAt: now.timeIntervalSince1970 * 1000, available: true,
+                                                feedTimestamp: source.timeIntervalSince1970, alerts: [severe])
+        var load = StationAlertsLoad(scope: "419")
+        load.beginRequest()
+        XCTAssertTrue(load.isRequestInFlight)
+        load.receive(severeReport)
+        XCTAssertFalse(load.isRequestInFlight)
+        XCTAssertEqual(load.evidence(at: now), .current)
+        load.fail()
+        XCTAssertFalse(load.isRequestInFlight)
+        load = load.scoped(to: "419")
+        load.beginRequest()
+        XCTAssertTrue(load.isRequestInFlight)
+        XCTAssertEqual(load.evidence(at: now), .unavailable)
+        XCTAssertEqual(load.snapshot?.alerts.map(\.id), ["service-change"])
+        XCTAssertEqual(load.lastReportAfterFailure(at: now), source)
+
+        for available in [true, false] {
+            load.receive(severeReport)
+            load.fail()
+            load.beginRequest()
+            load.receive(StationAlertSnapshot(generatedAt: now.timeIntervalSince1970 * 1000, available: available,
+                                              feedTimestamp: now.timeIntervalSince1970, alerts: []))
+            XCTAssertFalse(load.isRequestInFlight)
+            XCTAssertEqual(load.evidence(at: now), available ? .current : .unavailable)
+            XCTAssertEqual(load.snapshot?.alerts.count, 0)
+            XCTAssertNil(load.lastReportAfterFailure(at: now))
+        }
+    }
+
+    func testFirstFailureAndChangedScopeHaveNoPriorReport() {
+        var load = StationAlertsLoad(scope: "4")
+        load.fail()
+        XCTAssertEqual(load.evidence(at: now), .unavailable)
+        XCTAssertNil(load.snapshot)
+        XCTAssertNil(load.lastReportAfterFailure(at: now))
+        load.receive(StationAlertSnapshot(generatedAt: now.timeIntervalSince1970 * 1000, available: true,
+                                          feedTimestamp: now.timeIntervalSince1970, alerts: []))
+        load.fail()
+        load.beginRequest()
+        load = load.scoped(to: "5")
+        XCTAssertFalse(load.isRequestInFlight)
+        XCTAssertNil(load.evidence(at: now))
+        XCTAssertNil(load.snapshot)
+        XCTAssertNil(load.lastReportAfterFailure(at: now))
+    }
+
+    func testFailedPollDoesNotAssignAnUnverifiedReportDate() {
+        for timestamp: Double? in [nil, .nan, now.timeIntervalSince1970 + 60] {
+            var load = StationAlertsLoad(scope: "419")
+            load.receive(StationAlertSnapshot(generatedAt: now.timeIntervalSince1970 * 1000, available: true,
+                                              feedTimestamp: timestamp, alerts: []))
+            XCTAssertEqual(load.evidence(at: now), .unknown)
+            load.fail()
+            XCTAssertEqual(load.evidence(at: now), .unavailable)
+            XCTAssertNil(load.lastReportAfterFailure(at: now))
+        }
+    }
+
     func testLegacyEmptyPayloadDecodesWithoutClaimingCurrentCoverage() throws {
         let payload = Data(#"{"generatedAt":1800000000000,"alerts":[]}"#.utf8)
         let snapshot = try JSONDecoder().decode(StationAlertSnapshot.self, from: payload)

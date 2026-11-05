@@ -15,14 +15,18 @@ struct StationAlertSnapshot: Decodable {
         if available == false {
             return .unavailable
         }
+        guard let date = reportDate(at: now) else { return .unknown }
+        return now.timeIntervalSince(date) <= 300 ? .current : .lastReported(date)
+    }
+
+    func reportDate(at now: Date) -> Date? {
         let generated = generatedAt / 1000
         let time = now.timeIntervalSince1970
         guard available == true, let source = feedTimestamp,
               source.isFinite, source > 0, generated.isFinite, generated > 0,
               max(source, generated) <= time + 30, source <= generated + 30
-        else { return .unknown }
-        let oldest = min(source, generated)
-        return time - oldest <= 300 ? .current : .lastReported(Date(timeIntervalSince1970: oldest))
+        else { return nil }
+        return Date(timeIntervalSince1970: min(source, generated))
     }
 }
 
@@ -88,8 +92,43 @@ struct StationAlert: Decodable, Identifiable {
     }
 }
 
-enum StationAlertsLoad {
-    case loading, failed, received(StationAlertSnapshot)
+struct StationAlertsLoad {
+    private let scope: String?
+    private(set) var snapshot: StationAlertSnapshot?
+    private var failed = false
+    private(set) var isRequestInFlight = false
+
+    init(scope: String? = nil) {
+        self.scope = scope
+    }
+
+    func scoped(to id: String) -> Self {
+        scope == id ? self : Self(scope: id)
+    }
+
+    mutating func beginRequest() {
+        isRequestInFlight = true
+    }
+
+    mutating func receive(_ report: StationAlertSnapshot) {
+        isRequestInFlight = false
+        snapshot = report
+        failed = false
+    }
+
+    mutating func fail() {
+        isRequestInFlight = false
+        failed = true
+    }
+
+    func evidence(at now: Date) -> StationAlertSnapshot.Evidence? {
+        failed ? .unavailable : snapshot?.evidence(at: now)
+    }
+
+    func lastReportAfterFailure(at now: Date) -> Date? {
+        guard failed, let date = snapshot?.reportDate(at: now), date <= now else { return nil }
+        return date
+    }
 }
 
 struct StationAlertSection: View {
@@ -127,63 +166,54 @@ private struct ServiceAlertSection: View {
 
     var body: some View {
         Section {
-            switch load {
-            case .loading: ProgressView("Checking service alerts…")
-            case .failed: unavailable
-            case let .received(snapshot):
-                let evidence = snapshot.evidence(at: now)
-                if evidence == .unavailable {
-                    unavailable
+            let matches = load.snapshot?.alerts.filter(includes) ?? []
+            switch load.evidence(at: now) {
+            case nil: ProgressView("Checking service alerts…")
+            case .unavailable: unavailable(lastReported: load.lastReportAfterFailure(at: now))
+            case .current:
+                if matches.isEmpty, !compact {
+                    Text(emptyMessage)
+                }
+            case let .lastReported(date):
+                if compact {
+                    compactStatus("Alert status unconfirmed", symbol: "clock", lastReported: date)
                 } else {
-                    let matches = snapshot.alerts.filter(includes)
-                    switch evidence {
-                    case .current:
-                        if matches.isEmpty, !compact {
-                            Text(emptyMessage)
+                    Label("Last reported \(date.formatted(date: .abbreviated, time: .shortened)). Current alert status is unconfirmed.", systemImage: "clock")
+                    lineRetryButton
+                }
+            case .unknown:
+                if compact {
+                    compactStatus("Alert status unconfirmed", symbol: "questionmark.circle")
+                } else {
+                    Label("Current alert status is unconfirmed.", systemImage: "questionmark.circle")
+                    lineRetryButton
+                }
+            }
+            if load.snapshot?.available != false, !matches.isEmpty {
+                let severeCount = matches.filter { $0.severity == "severe" }.count
+                DisclosureGroup(isExpanded: $expanded) {
+                    ForEach(matches) { alert in
+                        VStack(alignment: .leading, spacing: 4) {
+                            Label(alert.severity == "severe" ? "Severe" : alert.severity == "warning" ? "Warning" : "Information",
+                                  systemImage: alert.severity == "info" ? "info.circle" : "exclamationmark.triangle")
+                                .font(.subheadline)
+                            Text(alert.header.isEmpty ? alert.effect.replacingOccurrences(of: "_", with: " ").capitalized : alert.header)
+                                .font(.headline)
+                            if !alert.description.isEmpty, alert.description != alert.header {
+                                Text(alert.description)
+                            }
                         }
-                    case let .lastReported(date):
-                        if compact {
-                            compactStatus("Alert status unconfirmed", symbol: "clock", lastReported: date)
-                        } else {
-                            Label("Last reported \(date.formatted(date: .abbreviated, time: .shortened)). Current alert status is unconfirmed.", systemImage: "clock")
-                            Button("Retry alerts", action: retry)
-                        }
-                    case .unknown:
-                        if compact {
-                            compactStatus("Alert status unconfirmed", symbol: "questionmark.circle")
-                        } else {
-                            Label("Current alert status is unconfirmed.", systemImage: "questionmark.circle")
-                            Button("Retry alerts", action: retry)
-                        }
-                    case .unavailable: EmptyView()
+                        .accessibilityElement(children: .combine)
                     }
-                    if !matches.isEmpty {
-                        let severeCount = matches.filter { $0.severity == "severe" }.count
-                        DisclosureGroup(isExpanded: $expanded) {
-                            ForEach(matches) { alert in
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Label(alert.severity == "severe" ? "Severe" : alert.severity == "warning" ? "Warning" : "Information",
-                                          systemImage: alert.severity == "info" ? "info.circle" : "exclamationmark.triangle")
-                                        .font(.subheadline)
-                                    Text(alert.header.isEmpty ? alert.effect.replacingOccurrences(of: "_", with: " ").capitalized : alert.header)
-                                        .font(.headline)
-                                    if !alert.description.isEmpty, alert.description != alert.header {
-                                        Text(alert.description)
-                                    }
-                                }
-                                .accessibilityElement(children: .combine)
-                            }
-                        } label: {
-                            let count = "\(matches.count) \(matches.count == 1 ? "advisory" : "advisories")"
-                            if severeCount > 0 {
-                                Label("\(count) · \(severeCount) severe", systemImage: "exclamationmark.triangle.fill")
-                            } else {
-                                Text(count)
-                            }
-                        }
-                        .accessibilityIdentifier(summaryIdentifier)
+                } label: {
+                    let count = "\(matches.count) \(matches.count == 1 ? "advisory" : "advisories")"
+                    if severeCount > 0 {
+                        Label("\(count) · \(severeCount) severe", systemImage: "exclamationmark.triangle.fill")
+                    } else {
+                        Text(count)
                     }
                 }
+                .accessibilityIdentifier(summaryIdentifier)
             }
         } header: {
             if !compact {
@@ -224,23 +254,35 @@ private struct ServiceAlertSection: View {
         .fixedSize(horizontal: false, vertical: true)
     }
 
+    private var lineRetryButton: some View {
+        Button(load.isRequestInFlight ? "Checking service alerts…" : "Retry alerts", action: retry)
+            .disabled(load.isRequestInFlight)
+    }
+
     private var retryButton: some View {
         Button(action: retry) {
-            Text("Retry")
-                .frame(minWidth: 44, minHeight: 44)
-                .contentShape(Rectangle())
+            Group {
+                if load.isRequestInFlight {
+                    ProgressView()
+                } else {
+                    Text("Retry")
+                }
+            }
+            .frame(minWidth: 44, minHeight: 44)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.borderless)
-        .accessibilityLabel("Retry service alerts")
+        .disabled(load.isRequestInFlight)
+        .accessibilityLabel(load.isRequestInFlight ? "Checking service alerts" : "Retry service alerts")
         .accessibilityIdentifier("stationAlertsRetry")
     }
 
-    @ViewBuilder private var unavailable: some View {
+    @ViewBuilder private func unavailable(lastReported: Date?) -> some View {
         if compact {
-            compactStatus("Service alerts unavailable", symbol: "wifi.exclamationmark")
+            compactStatus("Service alerts unavailable", symbol: "wifi.exclamationmark", lastReported: lastReported)
         } else {
-            Label("Service alerts unavailable", systemImage: "wifi.exclamationmark")
-            Button("Retry alerts", action: retry)
+            statusLabel("Service alerts unavailable", symbol: "wifi.exclamationmark", lastReported: lastReported)
+            lineRetryButton
         }
     }
 }
