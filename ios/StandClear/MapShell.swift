@@ -41,9 +41,10 @@ struct MapShell: View {
     @FocusState private var stationSearchFocused: Bool
     @State private var arrivalStatusMessage = ""
     @State private var showingArrivalStatus = false
+    @State private var systemAlerts = StationAlertsLoad()
     @State private var focus = MapFocusState()
     enum Panel: Hashable, Identifiable {
-        case search, nearby, directions, lines
+        case search, nearby, directions, lines, alerts
         case station(String)
         case place(PlaceResult)
 
@@ -150,9 +151,9 @@ struct MapShell: View {
                     sheetDetent = typeSize.isAccessibilitySize ? .large : .medium
                     panel = expandedPanel
                     expandedPanel = .nearby
-                } else if !isExpanded, expandedPanel == .lines {
+                } else if !isExpanded, expandedPanel == .lines || expandedPanel == .alerts {
                     sheetDetent = .large
-                    panel = .lines
+                    panel = expandedPanel
                     expandedPanel = .nearby
                 } else if !isExpanded, case .station = expandedPanel {
                     sheetDetent = .large
@@ -263,6 +264,20 @@ struct MapShell: View {
 
     private var moreMenu: some View {
         Menu("More", systemImage: "ellipsis") {
+            Button("Service alerts", systemImage: "exclamationmark.triangle") {
+                // Reopening the selected pane preserves its active visit and
+                // report; assigning the same panel does not restart its task.
+                guard !isWide || expandedPanel != .alerts else { return }
+                focus.cancelPending()
+                systemAlerts = StationAlertsLoad()
+                if windowSize.width >= 640, !typeSize.isAccessibilitySize {
+                    expandedPanel = .alerts
+                } else {
+                    sheetDetent = .large
+                    panel = .alerts
+                }
+            }
+            .accessibilityIdentifier("serviceAlertsButton")
             Button("Lines", systemImage: "tram") {
                 focus.cancelPending()
                 if windowSize.width >= 640, !typeSize.isAccessibilitySize {
@@ -487,6 +502,8 @@ struct MapShell: View {
             }, select: focusStation)
         case .directions:
             DirectionsView(store: store, selection: $directionsSelection, onSelect: selectTrip, onShowMap: showTripOnMap)
+        case .alerts:
+            SystemAlertsView(store: store, load: $systemAlerts)
         case .nearby, .search:
             stationBrowser(search: mode == .search, expanded: expanded)
         }

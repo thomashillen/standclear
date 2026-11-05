@@ -153,6 +153,83 @@ final class StandClearUITests: XCTestCase {
     }
 
     @MainActor
+    func testSystemAlertsFromMoreRetainBothServicesThroughFailedRetry() {
+        let app = launchForMoreMenu(arguments: ["--ui-test-alert-recovery"])
+        defer { XCUIDevice.shared.orientation = .portrait }
+        app.buttons["moreButton"].tap()
+        app.buttons["serviceAlertsButton"].tap()
+        let list = app.collectionViews["systemAlertsList"]
+        let wall = list.buttons["serviceAlert-fixture-wall"]
+        let express = list.buttons["serviceAlert-fixture-express"]
+        let retry = list.buttons["systemAlertsRetry"]
+        XCTAssertTrue(list.waitForExistence(timeout: 10))
+        XCTAssertTrue(retry.waitForExistence(timeout: 10))
+        revealPlaceElement(wall, in: list)
+        XCTAssertTrue(wall.label.contains("Wall St"))
+        revealPlaceElement(express, in: list)
+        XCTAssertTrue(express.label.contains("Pelham Bay Park"))
+        express.tap()
+        let description = list.staticTexts["Allow extra travel time for express service."]
+        XCTAssertTrue(description.waitForExistence(timeout: 5))
+        express.tap()
+        revealPlaceElement(retry, in: list, downward: false)
+        retry.tap()
+        let unavailable = list.staticTexts["Service alerts unavailable"]
+        XCTAssertTrue(unavailable.waitForExistence(timeout: 10))
+        revealPlaceElement(wall, in: list)
+        XCTAssertTrue(wall.label.contains("Wall St"))
+        revealPlaceElement(express, in: list)
+        XCTAssertTrue(express.label.contains("Pelham Bay Park"))
+        revealPlaceElement(retry, in: list, downward: false)
+        retry.tap()
+        XCTAssertTrue(unavailable.waitForNonExistence(timeout: 10))
+        XCTAssertFalse(retry.exists)
+        XCTAssertFalse(list.descendants(matching: .any)["systemAlertsEmpty"].exists)
+
+        XCUIDevice.shared.orientation = .landscapeLeft
+        waitForLayout(in: app, expanded: true)
+        XCTAssertTrue(list.waitForExistence(timeout: 5), "The alert list should follow the active pane")
+        app.buttons["moreButton"].tap()
+        app.buttons["serviceAlertsButton"].tap()
+        XCTAssertTrue(wall.exists, "Reopening the selected pane must preserve its report")
+        revealPlaceElement(express, in: list)
+        express.tap()
+        revealPlaceElement(description, in: list)
+        XCTAssertTrue(description.waitForExistence(timeout: 5))
+        let capture = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        capture.name = "Expanded system service alert details"
+        capture.lifetime = .keepAlways
+        add(capture)
+    }
+
+    @MainActor
+    func testSystemAlertsDistinguishFreshAndStaleEmptyAtLargestText() {
+        let app = launchForMoreMenu(accessibilityText: true, arguments: ["--ui-test-empty-alerts", "--ui-test-stale-alerts"])
+        let list = app.collectionViews["systemAlertsList"]
+        let empty = list.descendants(matching: .any)["systemAlertsEmpty"].firstMatch
+        let retry = list.buttons["systemAlertsRetry"]
+        app.buttons["moreButton"].tap()
+        app.buttons["serviceAlertsButton"].tap()
+        XCTAssertTrue(retry.waitForExistence(timeout: 10))
+        XCTAssertFalse(empty.exists, "An old empty report cannot establish that there are no advisories")
+
+        app.terminate()
+        app.launchArguments.removeAll { $0 == "--ui-test-stale-alerts" }
+        app.launch()
+        let more = app.buttons["moreButton"]
+        XCTAssertTrue(more.waitForExistence(timeout: 15))
+        more.tap()
+        app.buttons["serviceAlertsButton"].tap()
+        XCTAssertTrue(empty.waitForExistence(timeout: 10))
+        XCTAssertFalse(retry.exists)
+        XCTAssertTrue(app.buttons["systemAlertsRefresh"].exists)
+        let capture = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        capture.name = "Current empty system advisory report at largest accessibility text"
+        capture.lifetime = .keepAlways
+        add(capture)
+    }
+
+    @MainActor
     func testStationAdvisorySurvivesFailedRetryAndRecovers() {
         let app = XCUIApplication()
         app.terminate()
@@ -2211,12 +2288,12 @@ final class StandClearUITests: XCTestCase {
     }
 
     @MainActor
-    private func launchForMoreMenu(accessibilityText: Bool = false) -> XCUIApplication {
+    private func launchForMoreMenu(accessibilityText: Bool = false, arguments: [String] = []) -> XCUIApplication {
         let app = XCUIApplication()
         app.terminate()
         XCUIDevice.shared.orientation = .portrait
         app.resetAuthorizationStatus(for: .location)
-        app.launchArguments = ["--ui-test-fixture"]
+        app.launchArguments = ["--ui-test-fixture"] + arguments
         if accessibilityText {
             app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
         }
