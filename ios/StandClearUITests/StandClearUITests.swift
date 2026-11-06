@@ -5,6 +5,95 @@ final class StandClearUITests: XCTestCase {
     private let unifiedSearchPrompt = "Address, place or station"
 
     @MainActor
+    private func arrivalFeedUpdate(in app: XCUIApplication) -> String {
+        app.buttons["moreButton"].tap()
+        app.buttons["arrivalStatusButton"].tap()
+        let alert = app.alerts["Arrival status"]
+        XCTAssertTrue(alert.waitForExistence(timeout: 5))
+        let text = alert.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "Feed updated")).firstMatch
+        XCTAssertTrue(text.waitForExistence(timeout: 5))
+        let report = text.label
+        alert.buttons["OK"].tap()
+        return report
+    }
+
+    @MainActor
+    private func observeThreeMinuteArrival(_ row: XCUIElement, renewLocation: Bool = false) {
+        XCTAssertTrue(row.waitForExistence(timeout: 15))
+        let start = Date()
+        var samples: [String] = []
+        var lastLocationUpdate = start
+        let observed = NSPredicate { _, _ in MainActor.assumeIsolated {
+            if renewLocation, Date().timeIntervalSince(lastLocationUpdate) >= 10 {
+                XCUIDevice.shared.location = XCUILocation(location: CLLocation(latitude: 40.7076, longitude: -74.0113))
+                lastLocationUpdate = Date()
+            }
+            samples.append(row.exists ? row.label : "Arrival row missing")
+            return Date().timeIntervalSince(start) >= 26
+        } }
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: observed, object: row)], timeout: 35), .completed)
+        let record = XCTAttachment(string: samples.joined(separator: "\n"))
+        record.name = "Wall St northbound 4 countdown samples over fixture refreshes"
+        record.lifetime = .keepAlways
+        add(record)
+        XCTAssertGreaterThan(samples.count, 3)
+        XCTAssertTrue(samples.allSatisfy { $0.contains("3 min") && !$0.contains("4 min") },
+                      "Each fresh fixture prediction is exactly three minutes away: \(samples)")
+        let capture = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        capture.name = "Wall St prediction after repeated feed refreshes"
+        capture.lifetime = .keepAlways
+        add(capture)
+    }
+
+    @MainActor
+    func testStationCountdownUsesTimeOfRefreshedPrediction() {
+        let app = launchForMoreMenu()
+        let initial = arrivalFeedUpdate(in: app)
+        app.buttons["searchButton"].tap()
+        let search = app.searchFields[unifiedSearchPrompt]
+        guard focusSearchField(search, in: app) else { return }
+        search.typeText("Wall\n")
+        selectSearchResult("419", query: "Wall", in: app)
+        let row = app.collectionViews["stationArrivalsList"].buttons["arrivalRow-ui-fixture-4-n:419:N"]
+        observeThreeMinuteArrival(row)
+        app.buttons["Done"].tap()
+        XCTAssertNotEqual(arrivalFeedUpdate(in: app), initial, "The observation must span actual feed refreshes")
+    }
+
+    @MainActor
+    func testNearbyAndGlanceCountdownUseTimeOfRefreshedPrediction() {
+        let app = XCUIApplication()
+        app.terminate()
+        XCUIDevice.shared.orientation = .portrait
+        app.resetAuthorizationStatus(for: .location)
+        XCUIDevice.shared.location = XCUILocation(location: CLLocation(latitude: 40.7076, longitude: -74.0113))
+        defer {
+            XCUIDevice.shared.location = nil
+            XCUIDevice.shared.orientation = .portrait
+        }
+        app.launchArguments = ["--ui-test-fixture"]
+        addUIInterruptionMonitor(withDescription: "Location permission") { alert in
+            guard alert.buttons["Allow While Using App"].exists else { return false }
+            alert.buttons["Allow While Using App"].tap()
+            return true
+        }
+        app.launch()
+        activatePermissionPrompt(in: app)
+        let initial = arrivalFeedUpdate(in: app)
+        let glance = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "glance-419:")).firstMatch
+        observeThreeMinuteArrival(glance, renewLocation: true)
+        XCTAssertNotEqual(arrivalFeedUpdate(in: app), initial)
+        XCUIDevice.shared.location = XCUILocation(location: CLLocation(latitude: 40.7076, longitude: -74.0113))
+        XCUIDevice.shared.orientation = .landscapeLeft
+        waitForLayout(in: app, expanded: true)
+        app.buttons["nearbyButton"].tap()
+        let beforeNearby = arrivalFeedUpdate(in: app)
+        let row = app.collectionViews["stationList"].buttons["arrivalRow-ui-fixture-4-n:419:N"]
+        observeThreeMinuteArrival(row, renewLocation: true)
+        XCTAssertNotEqual(arrivalFeedUpdate(in: app), beforeNearby)
+    }
+
+    @MainActor
     func testTemporalTrainMovesRelativeToReferenceAndResumesAfterBackground() {
         let app = XCUIApplication()
         app.terminate()
