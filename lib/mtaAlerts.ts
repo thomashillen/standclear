@@ -135,6 +135,43 @@ function toSec(t: number | { toNumber(): number } | null | undefined): number | 
   return Number.isFinite(n) ? n : null;
 }
 
+// The response has one pair of display-window bounds. Return the connected
+// union containing now, not an arbitrary past/future period from the feed.
+// GTFS TimeRange starts are inclusive and ends exclusive; missing bounds are
+// unbounded. Presence matters because decoded protobuf fields inherit zero.
+function currentAlertWindow(
+  periods: GtfsRealtimeBindings.transit_realtime.ITimeRange[],
+  now: number,
+): Pick<ServiceAlert, "startTime" | "endTime"> | null {
+  if (periods.length === 0) return { startTime: null, endTime: null };
+  const ranges = periods.flatMap((period) => {
+    const start = Object.hasOwn(period, "start") ? toSec(period.start) : null;
+    const end = Object.hasOwn(period, "end") ? toSec(period.end) : null;
+    if (
+      (start === null && end === null) ||
+      (start !== null && !Number.isFinite(start)) ||
+      (end !== null && !Number.isFinite(end))
+    ) return [];
+    const range = { start: start ?? -Infinity, end: end ?? Infinity };
+    return range.start < range.end ? [range] : [];
+  }).sort((a, b) => a.start < b.start ? -1 : a.start > b.start ? 1 : 0);
+
+  const windows: { start: number; end: number }[] = [];
+  for (const range of ranges) {
+    const previous = windows.at(-1);
+    if (previous && range.start <= previous.end) {
+      previous.end = Math.max(previous.end, range.end);
+    } else {
+      windows.push(range);
+    }
+  }
+  const current = windows.find((range) => range.start <= now && now < range.end);
+  return current ? {
+    startTime: current.start === -Infinity ? null : current.start,
+    endTime: current.end === Infinity ? null : current.end,
+  } : null;
+}
+
 export async function fetchActiveAlerts(): Promise<AlertsResponse> {
   try {
     const res = await fetch(ALERTS_URL, { cache: "no-store" });
@@ -149,19 +186,10 @@ export async function fetchActiveAlerts(): Promise<AlertsResponse> {
       const a = entity.alert;
       if (!a) continue;
 
-      // Active-window filter. Empty active_period = always-on; with
-      // periods, at least one window must contain `now`. Planned-
-      // future alerts get dropped here — both the rider-facing list
-      // and the dispatch path scope to "what matters right now".
-      const periods = a.activePeriod ?? [];
-      const isActive =
-        periods.length === 0 ||
-        periods.some((p) => {
-          const start = toSec(p.start) ?? -Infinity;
-          const end = toSec(p.end) ?? Infinity;
-          return start <= now && now <= end;
-        });
-      if (!isActive) continue;
+      // Filtering and reported bounds must describe the same active window.
+      // Both public display and dispatch exclude future/expired intervals.
+      const window = currentAlertWindow(a.activePeriod ?? [], now);
+      if (!window) continue;
 
       const effect = effectName(a.effect);
       const routeIds = new Set<string>();
@@ -181,7 +209,6 @@ export async function fetchActiveAlerts(): Promise<AlertsResponse> {
         if (selector.routeId || selector.stopId) selectors.push(selector);
       }
 
-      const firstPeriod = periods[0];
       const header = firstEnglish(a.headerText);
       alerts.push({
         id: entity.id || `alert-${alerts.length}`,
@@ -192,8 +219,7 @@ export async function fetchActiveAlerts(): Promise<AlertsResponse> {
         routeIds: [...routeIds],
         stopIds: [...stopIds],
         selectors,
-        startTime: firstPeriod ? toSec(firstPeriod.start) : null,
-        endTime: firstPeriod ? toSec(firstPeriod.end) : null,
+        ...window,
       });
     }
 

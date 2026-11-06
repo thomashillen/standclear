@@ -123,6 +123,8 @@ Open a station from Search or Nearby to see service advisories alongside arrival
 
 More → Service alerts opens a native list of reported advisories across services without first selecting a station or line. Each disclosure shows severity, reported routes when available, headline, and details. The list follows the sheet/right-side pane layout and polls the existing `/api/alerts` endpoint once a minute only while visible and active. Refresh and Retry use the same five-minute source/response evidence and failed-refresh retention rules as station advisories. Only a verified current empty report says no alerts were reported. Reports survive adaptive presentation changes within this visit; reopening after leaving starts a fresh visit. Advisory data does not recalculate routes.
 
+The shared endpoint filters alerts by their current GTFS display window. Its optional `startTime`/`endTime` fields are epoch seconds for the continuous active window containing server time; overlapping/touching periods merge, but separate intervals retain their gaps. Missing bounds stay null. These are reported alert-display windows, not guaranteed service-restoration times. Native timing labels are deferred until this contract correction is deployed; the current native UI continues to use advisory text and source freshness.
+
 MapKit is the only native renderer. See [the migration record](docs/mapkit-migration.md) for the retired dependencies and remaining device checks.
 
 ## Location and compact map glance
