@@ -14,7 +14,7 @@ struct MapShell: View {
     @State private var panel: Panel?
     @State private var sheetDetent: PresentationDetent = .medium
     @State private var routePanelCollapsed = false
-    @State private var stationRoutePanel: Panel?
+    @State private var stationRouteVisit: StationRouteVisit?
     @State private var stationDirectionsVisible = false
     @State private var stationStepsVisible = false
     @State private var windowSize: CGSize = .zero
@@ -60,6 +60,23 @@ struct MapShell: View {
 
         var id: Self {
             self
+        }
+    }
+
+    private enum StationRouteVisit: Equatable {
+        case search([StationBrowserDestination])
+        case nearby([StationBrowserDestination])
+        case lines([LineDestination])
+        case panel(Panel)
+    }
+
+    private var currentStationVisit: StationRouteVisit? {
+        guard let mode = isWide ? expandedPanel : panel else { return nil }
+        switch mode {
+        case .search: return .search(searchPath)
+        case .nearby: return .nearby(nearbyPath)
+        case .lines: return .lines(linePath)
+        default: return .panel(mode)
         }
     }
 
@@ -169,7 +186,7 @@ struct MapShell: View {
                     panel = expandedPanel
                     expandedPanel = .nearby
                 }
-                if !isExpanded, routePanelCollapsed, selectedTrip != nil, panel == stationRoutePanel {
+                if !isExpanded, routePanelCollapsed, selectedTrip != nil, currentStationVisit == stationRouteVisit {
                     sheetDetent = .custom(CollapsedRouteDetent.self)
                 }
             }
@@ -402,7 +419,7 @@ struct MapShell: View {
 
     private var routeCanCollapse: Bool {
         let mode = isWide ? expandedPanel : panel
-        return mode?.destination != nil || (selectedTrip != nil && mode == stationRoutePanel)
+        return mode?.destination != nil || (selectedTrip != nil && stationRouteVisit != nil && currentStationVisit == stationRouteVisit)
     }
 
     private var routePanelIsCollapsed: Bool {
@@ -608,14 +625,14 @@ struct MapShell: View {
                                        description: Text("This station is no longer in the subway data."))
             }
         case .lines:
-            LineBrowser(store: store, restoringRoute: routeCanCollapse, stationDetail: { station in
+            LineBrowser<StationArrivals>(store: store, path: $linePath, stationDetail: { station in
                 StationArrivals(station: station, store: store, favoriteStations: favoriteStations, savedPlaces: savedPlaces,
                                 directionsSelection: $directionsSelection, onDirectionsHere: beginDirections,
                                 onSelectTrip: selectTrip, onShowTripMap: showTripOnMap, initialTrip: routeCanCollapse && stationStepsVisible ? selectedTrip : nil,
                                 restoreDirections: routeCanCollapse && stationDirectionsVisible,
                                 onDirectionsVisibilityChanged: { stationDirectionsVisible = $0 },
                                 onItineraryVisibilityChanged: { stationStepsVisible = $0 })
-            }, select: focusStation)
+            }, select: focusStation, dismissPanel: expanded ? nil : { dismissCurrentPanel() })
         case .directions:
             DirectionsView(store: store, selection: $directionsSelection, onSelect: selectTrip, onShowMap: showTripOnMap, initialPlan: routeCanCollapse && stationStepsVisible ? selectedTrip : nil, onItineraryVisibilityChanged: { stationStepsVisible = $0 })
         case .alerts:
@@ -632,6 +649,13 @@ struct MapShell: View {
         }
         .accessibilityIdentifier("clearMapRoute")
         .accessibilityHint(activeDestination == nil ? "Remove the highlighted route. Your From and To stations are kept." : "Close directions to this place and clear its route.")
+    }
+
+    private func dismissCurrentPanel() {
+        if routeCanCollapse {
+            clearRoute()
+        }
+        panel = nil
     }
 
     private func clearRoute() {
@@ -670,7 +694,7 @@ struct MapShell: View {
         focus.cancelPending()
         selectedTrip = plan
         stationStepsVisible = plan != nil
-        stationRoutePanel = plan == nil ? nil : isWide ? expandedPanel : panel
+        stationRouteVisit = plan == nil ? nil : currentStationVisit
         guard plan != nil else { return }
         tripFocusRevision += 1
     }
@@ -678,7 +702,7 @@ struct MapShell: View {
     private func stationBrowser(search: Bool, expanded: Bool) -> some View {
         StationBrowser(store: store, location: location, search: search, placeSearchMemory: placeSearchMemory, savedPlaces: savedPlaces, recentStations: recentStations, recentPlaces: recentPlaces, favoriteStations: favoriteStations, openPlace: { openPlace($0, expanded: expanded) }, query: $searchQuery, searchFocus: $stationSearchFocused,
                        directionsSelection: $directionsSelection, onDirectionsHere: beginDirections,
-                       onSelectTrip: selectTrip, onShowTripMap: showTripOnMap, initialTrip: routeCanCollapse && stationStepsVisible ? selectedTrip : nil, restoringRoute: routeCanCollapse,
+                       onSelectTrip: selectTrip, onShowTripMap: showTripOnMap, initialTrip: routeCanCollapse && stationStepsVisible ? selectedTrip : nil,
                        restoreDirections: routeCanCollapse && stationDirectionsVisible,
                        onDirectionsVisibilityChanged: { stationDirectionsVisible = $0 },
                        onItineraryVisibilityChanged: { stationStepsVisible = $0 }, select: focusStation,

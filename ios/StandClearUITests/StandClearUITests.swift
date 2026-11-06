@@ -120,10 +120,24 @@ final class StandClearUITests: XCTestCase {
     }
 
     @MainActor
-    private func checkStationRoutePresentation(fromSearch: Bool) {
+    func testLineRouteBackThenNewStationClearsOldTrip() {
+        checkStationRoutePresentation(fromSearch: false, fromLines: true)
+    }
+
+    @MainActor
+    private func checkStationRoutePresentation(fromSearch: Bool, fromLines: Bool = false) {
         let app = launchForMoreMenu(arguments: ["--ui-test-noguchi"])
         defer { XCUIDevice.shared.orientation = .portrait }
-        if fromSearch {
+        let fromBrowser = fromSearch || fromLines
+        if fromLines {
+            app.buttons["moreButton"].tap(); app.buttons["linesButton"].tap()
+            let line = app.buttons["line-N"]
+            XCTAssertTrue(line.waitForExistence(timeout: 10)); line.tap()
+            let broadway = app.buttons["lineStation-R05"]
+            revealPlaceElement(broadway, in: app.collectionViews["lineStationList"]); broadway.tap()
+            XCTAssertTrue(app.buttons["directionsHere"].waitForExistence(timeout: 5))
+            app.buttons["directionsHere"].tap()
+        } else if fromSearch {
             app.buttons["searchButton"].tap()
             let field = app.searchFields[unifiedSearchPrompt]
             guard focusSearchField(field, in: app) else { return }
@@ -133,7 +147,7 @@ final class StandClearUITests: XCTestCase {
         } else {
             app.buttons["moreButton"].tap(); app.buttons["directionsButton"].tap()
         }
-        let endpoints = fromSearch ? [("originPicker", "Wall", "419")] : [("originPicker", "Wall", "419"), ("destinationPicker", "Broadway", "R05")]
+        let endpoints = fromBrowser ? [("originPicker", "Wall", "419")] : [("originPicker", "Wall", "419"), ("destinationPicker", "Broadway", "R05")]
         for (picker, query, id) in endpoints {
             let button = app.buttons[picker]
             XCTAssertTrue(button.waitForExistence(timeout: 10)); button.tap()
@@ -163,7 +177,7 @@ final class StandClearUITests: XCTestCase {
         XCTAssertFalse(app.navigationBars["Trip details"].isHittable, "Back to route choices must not replay steps on widening")
         XCUIDevice.shared.orientation = .portrait
         XCTAssertTrue(app.buttons["originPicker"].waitForExistence(timeout: 10))
-        if fromSearch {
+        if fromBrowser {
             app.navigationBars["Directions"].buttons.firstMatch.tap()
             XCTAssertTrue(app.buttons["directionsHere"].waitForExistence(timeout: 5))
             XCUIDevice.shared.orientation = .landscapeLeft
@@ -171,7 +185,33 @@ final class StandClearUITests: XCTestCase {
             XCTAssertFalse(app.buttons["originPicker"].isHittable, "Back to station details must not reopen Directions")
             XCUIDevice.shared.orientation = .portrait
             XCTAssertTrue(app.buttons["directionsHere"].waitForExistence(timeout: 10))
-            app.buttons["directionsHere"].tap()
+            app.navigationBars["Broadway"].buttons.firstMatch.tap()
+            if fromLines {
+                let next = app.buttons["lineStation-R09"]
+                revealPlaceElement(next, in: app.collectionViews["lineStationList"]); next.tap()
+                XCTAssertTrue(app.navigationBars["Queensboro Plaza"].waitForExistence(timeout: 5))
+            } else {
+                let field = app.searchFields[unifiedSearchPrompt]
+                guard focusSearchField(field, in: app) else { return }
+                let clear = field.buttons["Clear text"]
+                if clear.exists {
+                    clear.tap()
+                }
+                field.typeText("Wall\n")
+                selectSearchResult("419", query: "Wall", in: app)
+                XCTAssertTrue(app.navigationBars["Wall St"].waitForExistence(timeout: 5))
+            }
+            expectation(for: NSPredicate(format: "NOT value CONTAINS %@", interchange), evaluatedWith: map)
+            waitForExpectations(timeout: 10)
+            assertStationEndpointsCleared(["Board at Wall St", interchange, "Arrive at Broadway"], in: app)
+            let stationCapture = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            stationCapture.name = fromLines ? "New Lines station with native Done control" : "New Search station with native Done control"
+            stationCapture.lifetime = .keepAlways; add(stationCapture)
+            app.buttons["Done"].tap()
+            let focused = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            focused.name = fromLines ? "Explicit new Lines station clears trip and focuses Queensboro Plaza" : "Explicit new Search station clears trip and focuses Wall St"
+            focused.lifetime = .keepAlways; add(focused)
+            return
         }
         revealPlaceElement(plan, in: app.collectionViews["directionsList"])
         plan.tap()
