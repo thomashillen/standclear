@@ -6,7 +6,20 @@ struct DirectionsView: View {
     @Binding var selection: DirectionsSelection
     let onSelect: (NativeTripPlan?) -> Void
     let onShowMap: (NativeTripPlan) -> Void
+    let onItineraryVisibilityChanged: (Bool) -> Void
     @State private var presentedPlan: NativeTripPlan?
+
+    init(store: TransitStore, selection: Binding<DirectionsSelection>, onSelect: @escaping (NativeTripPlan?) -> Void,
+         onShowMap: @escaping (NativeTripPlan) -> Void, initialPlan: NativeTripPlan? = nil,
+         onItineraryVisibilityChanged: @escaping (Bool) -> Void = { _ in })
+    {
+        self.store = store
+        _selection = selection
+        self.onSelect = onSelect
+        self.onShowMap = onShowMap
+        self.onItineraryVisibilityChanged = onItineraryVisibilityChanged
+        _presentedPlan = State(initialValue: initialPlan)
+    }
 
     private var showingItinerary: Binding<Bool> {
         Binding(get: { presentedPlan != nil }, set: { shown in
@@ -129,6 +142,7 @@ struct DirectionsView: View {
             }
         }
         .onChange(of: selection) { _, _ in onSelect(nil) }
+        .onChange(of: presentedPlan != nil) { _, shown in onItineraryVisibilityChanged(shown) }
     }
 }
 

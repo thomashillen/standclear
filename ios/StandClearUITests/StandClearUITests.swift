@@ -5,6 +5,194 @@ final class StandClearUITests: XCTestCase {
     private let unifiedSearchPrompt = "Address, place or station"
 
     @MainActor
+    func testPlaceRouteCanCollapseRestoreAndClear() {
+        checkPlaceRouteCollapse(accessibilityText: false)
+    }
+
+    @MainActor
+    func testPlaceRouteCollapseAtLargestText() {
+        checkPlaceRouteCollapse(accessibilityText: true)
+    }
+
+    @MainActor
+    private func dragRouteSheet(in app: XCUIApplication, to heightFraction: CGFloat) {
+        let grabber = app.buttons["Sheet Grabber"]
+        XCTAssertTrue(grabber.waitForExistence(timeout: 5))
+        // A swipe confined to the tiny grabber is too short to resize a sheet.
+        let start = grabber.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        let end = app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: heightFraction))
+        start.press(forDuration: 0.1, thenDragTo: end, withVelocity: .slow, thenHoldForDuration: 0.2)
+    }
+
+    @MainActor
+    private func checkPlaceRouteCollapse(accessibilityText: Bool) {
+        let app = launchForMoreMenu(accessibilityText: accessibilityText)
+        defer { XCUIDevice.shared.orientation = .portrait }
+        app.buttons["searchButton"].tap()
+        let field = app.searchFields[unifiedSearchPrompt]
+        guard focusSearchField(field, in: app) else { return }
+        field.typeText("Madison\n")
+        let result = app.buttons["placeResult-fixture-550-madison"]
+        XCTAssertTrue(result.waitForExistence(timeout: 10)); result.tap()
+        let origin = app.buttons["placeOriginPicker"]
+        XCTAssertTrue(origin.waitForExistence(timeout: 10)); origin.tap()
+        let picker = app.searchFields[unifiedSearchPrompt]
+        guard focusSearchField(picker, in: app) else { return }
+        picker.typeText("Wall\n")
+        let station = app.buttons["stationChoice-419"]
+        revealPlaceElement(station, in: app.collectionViews.firstMatch); station.tap()
+        let map = app.descendants(matching: .any)["appleTransitMap"].firstMatch
+        expectation(for: NSPredicate(format: "value CONTAINS %@ AND value CONTAINS %@", "550 Madison Avenue", "Wall St"), evaluatedWith: map)
+        waitForExpectations(timeout: 15)
+        let route = map.value as? String
+        let restore = app.buttons["restoreRoutePanel"]
+        let clear = app.buttons["clearMapRoute"]
+        if accessibilityText {
+            app.buttons["collapseRoutePanel"].tap()
+        } else {
+            let grabber = app.buttons["Sheet Grabber"]
+            XCTAssertTrue(grabber.waitForExistence(timeout: 5))
+            // Endpoint search can leave the sheet at its large detent.
+            // Exercise the actual medium-to-small gesture from a known state.
+            if grabber.value as? String == "Full screen" {
+                grabber.swipeDown()
+            }
+            print("Route gesture starting detent: \(grabber.value ?? "unknown")")
+            let beforeDrag = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            beforeDrag.name = "Route sheet immediately before collapse gesture"
+            beforeDrag.lifetime = .keepAlways; add(beforeDrag)
+            dragRouteSheet(in: app, to: 0.94)
+        }
+        XCTAssertTrue(restore.waitForExistence(timeout: 5), "Dragging down collapses instead of canceling the trip")
+        XCTAssertEqual(map.value as? String, route)
+        XCTAssertFalse(origin.isHittable, "Collapsed steps must not accept interaction")
+        XCTAssertGreaterThanOrEqual(restore.frame.height, 44)
+        XCTAssertGreaterThanOrEqual(clear.frame.height, 44)
+        XCTAssertTrue(clear.isHittable)
+        let collapsed = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        collapsed.name = accessibilityText ? "Collapsed place route at largest text" : "Place route retained after dragging down"
+        collapsed.lifetime = .keepAlways; add(collapsed)
+        if accessibilityText {
+            restore.tap()
+        } else {
+            dragRouteSheet(in: app, to: 0.4)
+        }
+        XCTAssertTrue(origin.waitForExistence(timeout: 5))
+        XCTAssertTrue(origin.label.contains("Wall St"))
+        XCTAssertTrue(app.buttons["placeDestinationPicker"].label.contains("550 Madison Avenue"))
+        XCTAssertEqual(map.value as? String, route)
+        app.buttons["collapseRoutePanel"].tap()
+        XCTAssertTrue(restore.waitForExistence(timeout: 5))
+        restore.tap()
+        XCTAssertTrue(origin.waitForExistence(timeout: 5))
+        app.buttons["collapseRoutePanel"].tap()
+        XCTAssertTrue(restore.waitForExistence(timeout: 5))
+        if !accessibilityText {
+            XCUIDevice.shared.orientation = .landscapeLeft
+            waitForLayout(in: app, expanded: true, readyControl: "placeOriginPicker")
+            XCTAssertTrue(origin.label.contains("Wall St"))
+            XCTAssertEqual(map.value as? String, route)
+            XCUIDevice.shared.orientation = .portrait
+            XCTAssertTrue(restore.waitForExistence(timeout: 10))
+            XCTAssertEqual(map.value as? String, route)
+            XCUIDevice.shared.press(.home)
+            app.activate()
+            XCTAssertTrue(restore.waitForExistence(timeout: 10))
+            XCTAssertEqual(map.value as? String, route)
+        }
+        clear.tap()
+        XCTAssertTrue(restore.waitForNonExistence(timeout: 5))
+        XCTAssertFalse(clear.exists)
+        XCTAssertFalse((map.value as? String ?? "").contains("550 Madison Avenue"))
+        let canceled = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        canceled.name = accessibilityText ? "Cleared collapsed route at largest text" : "Collapsed route canceled independently"
+        canceled.lifetime = .keepAlways; add(canceled)
+    }
+
+    @MainActor
+    func testStationRouteCanRestoreStepsAfterShowingMap() {
+        checkStationRoutePresentation(fromSearch: false)
+    }
+
+    @MainActor
+    func testStationRouteBackDoesNotReplayAfterLayoutChanges() {
+        checkStationRoutePresentation(fromSearch: true)
+    }
+
+    @MainActor
+    private func checkStationRoutePresentation(fromSearch: Bool) {
+        let app = launchForMoreMenu(arguments: ["--ui-test-noguchi"])
+        defer { XCUIDevice.shared.orientation = .portrait }
+        if fromSearch {
+            app.buttons["searchButton"].tap()
+            let field = app.searchFields[unifiedSearchPrompt]
+            guard focusSearchField(field, in: app) else { return }
+            field.typeText("Broadway\n")
+            selectSearchResult("R05", query: "Broadway", in: app)
+            app.buttons["directionsHere"].tap()
+        } else {
+            app.buttons["moreButton"].tap(); app.buttons["directionsButton"].tap()
+        }
+        let endpoints = fromSearch ? [("originPicker", "Wall", "419")] : [("originPicker", "Wall", "419"), ("destinationPicker", "Broadway", "R05")]
+        for (picker, query, id) in endpoints {
+            let button = app.buttons[picker]
+            XCTAssertTrue(button.waitForExistence(timeout: 10)); button.tap()
+            let field = app.searchFields["Search subway stations"]
+            guard focusSearchField(field, in: app) else { return }
+            field.typeText(query + "\n"); selectStationResult(id, query: query, in: app)
+        }
+        let plan = app.buttons["tripPlan-4:N:419>629|N:N:R11>R05"]
+        XCTAssertTrue(plan.waitForExistence(timeout: 10)); plan.tap()
+        XCTAssertTrue(app.navigationBars["Trip details"].waitForExistence(timeout: 5))
+        app.buttons["showStationRouteOnMap"].tap()
+        let restore = app.buttons["restoreRoutePanel"]
+        XCTAssertTrue(restore.waitForExistence(timeout: 5))
+        let map = app.descendants(matching: .any)["appleTransitMap"].firstMatch
+        let interchange = "Change to N/W at Lexington Av/59 St"
+        XCTAssertTrue((map.value as? String ?? "").contains(interchange))
+        let collapsed = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        collapsed.name = "Collapsed station itinerary retains named transfer"
+        collapsed.lifetime = .keepAlways; add(collapsed)
+        restore.tap()
+        XCTAssertTrue(app.navigationBars["Trip details"].waitForExistence(timeout: 5))
+        XCTAssertTrue((map.value as? String ?? "").contains(interchange))
+        app.navigationBars["Trip details"].buttons.firstMatch.tap()
+        XCTAssertTrue(app.buttons["originPicker"].waitForExistence(timeout: 5))
+        XCUIDevice.shared.orientation = .landscapeLeft
+        waitForLayout(in: app, expanded: true, readyControl: "originPicker")
+        XCTAssertFalse(app.navigationBars["Trip details"].isHittable, "Back to route choices must not replay steps on widening")
+        XCUIDevice.shared.orientation = .portrait
+        XCTAssertTrue(app.buttons["originPicker"].waitForExistence(timeout: 10))
+        if fromSearch {
+            app.navigationBars["Directions"].buttons.firstMatch.tap()
+            XCTAssertTrue(app.buttons["directionsHere"].waitForExistence(timeout: 5))
+            XCUIDevice.shared.orientation = .landscapeLeft
+            waitForLayout(in: app, expanded: true, readyControl: "directionsHere")
+            XCTAssertFalse(app.buttons["originPicker"].isHittable, "Back to station details must not reopen Directions")
+            XCUIDevice.shared.orientation = .portrait
+            XCTAssertTrue(app.buttons["directionsHere"].waitForExistence(timeout: 10))
+            app.buttons["directionsHere"].tap()
+        }
+        revealPlaceElement(plan, in: app.collectionViews["directionsList"])
+        plan.tap()
+        XCTAssertTrue(app.navigationBars["Trip details"].waitForExistence(timeout: 5))
+        app.buttons["showStationRouteOnMap"].tap()
+        XCTAssertTrue(restore.waitForExistence(timeout: 5))
+        XCUIDevice.shared.orientation = .landscapeLeft
+        waitForLayout(in: app, expanded: true, readyControl: "showStationRouteOnMap")
+        XCUIDevice.shared.orientation = .portrait
+        XCTAssertTrue(restore.waitForExistence(timeout: 10))
+        XCTAssertTrue((map.value as? String ?? "").contains(interchange))
+        app.buttons["clearMapRoute"].tap()
+        XCTAssertTrue(restore.waitForNonExistence(timeout: 5))
+        XCTAssertFalse((map.value as? String ?? "").contains(interchange))
+        app.buttons["moreButton"].tap(); app.buttons["directionsButton"].tap()
+        XCTAssertTrue(app.buttons["originPicker"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["originPicker"].label.contains("Wall St"))
+        XCTAssertTrue(app.buttons["destinationPicker"].label.contains("Broadway"))
+    }
+
+    @MainActor
     private func arrivalFeedUpdate(in app: XCUIApplication) -> String {
         app.buttons["moreButton"].tap()
         app.buttons["arrivalStatusButton"].tap()
@@ -2472,7 +2660,7 @@ final class StandClearUITests: XCTestCase {
         if expanded {
             XCTAssertTrue(app.navigationBars["Trip details"].exists)
         } else {
-            XCTAssertTrue(app.navigationBars["Trip details"].waitForNonExistence(timeout: 5))
+            XCTAssertTrue(app.buttons["restoreRoutePanel"].waitForExistence(timeout: 5))
         }
         let mapCapture = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         mapCapture.name = expanded ? "Station-entry route in expanded region" : "Station-entry route after sheet dismissal"
@@ -2482,7 +2670,7 @@ final class StandClearUITests: XCTestCase {
         XCTAssertTrue(clearRoute.waitForExistence(timeout: 5))
         XCTAssertTrue(clearRoute.isHittable)
         clearRoute.tap()
-        XCTAssertFalse(clearRoute.exists, "One map action clears the selected route")
+        XCTAssertTrue(clearRoute.waitForNonExistence(timeout: 5), "One map action clears the selected route")
         if expanded {
             app.navigationBars["Trip details"].buttons.element(boundBy: 0).tap()
         } else {
