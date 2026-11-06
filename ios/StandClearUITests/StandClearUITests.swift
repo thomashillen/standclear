@@ -153,6 +153,181 @@ final class StandClearUITests: XCTestCase {
     }
 
     @MainActor
+    func testSystemAlertsFromMoreRetainBothServicesThroughFailedRetry() {
+        let app = launchForMoreMenu(arguments: ["--ui-test-alert-recovery"])
+        defer { XCUIDevice.shared.orientation = .portrait }
+        app.buttons["moreButton"].tap()
+        app.buttons["serviceAlertsButton"].tap()
+        let list = app.collectionViews["systemAlertsList"]
+        let wall = list.buttons["serviceAlert-fixture-wall"]
+        let express = list.buttons["serviceAlert-fixture-express"]
+        let retry = list.buttons["systemAlertsRetry"]
+        XCTAssertTrue(list.waitForExistence(timeout: 10))
+        XCTAssertTrue(retry.waitForExistence(timeout: 10))
+        revealPlaceElement(wall, in: list)
+        XCTAssertTrue(wall.label.contains("Wall St"))
+        revealPlaceElement(express, in: list)
+        XCTAssertTrue(express.label.contains("Pelham Bay Park"))
+        express.tap()
+        let description = list.staticTexts["Allow extra travel time for express service."]
+        XCTAssertTrue(description.waitForExistence(timeout: 5))
+        express.tap()
+        revealPlaceElement(retry, in: list, downward: false)
+        retry.tap()
+        let unavailable = list.staticTexts["Service alerts unavailable"]
+        XCTAssertTrue(unavailable.waitForExistence(timeout: 10))
+        revealPlaceElement(wall, in: list)
+        XCTAssertTrue(wall.label.contains("Wall St"))
+        revealPlaceElement(express, in: list)
+        XCTAssertTrue(express.label.contains("Pelham Bay Park"))
+        revealPlaceElement(retry, in: list, downward: false)
+        retry.tap()
+        XCTAssertTrue(unavailable.waitForNonExistence(timeout: 10))
+        XCTAssertFalse(retry.exists)
+        XCTAssertFalse(list.descendants(matching: .any)["systemAlertsEmpty"].exists)
+
+        XCUIDevice.shared.orientation = .landscapeLeft
+        waitForLayout(in: app, expanded: true)
+        XCTAssertTrue(list.waitForExistence(timeout: 5), "The alert list should follow the active pane")
+        app.buttons["moreButton"].tap()
+        app.buttons["serviceAlertsButton"].tap()
+        XCTAssertTrue(wall.exists, "Reopening the selected pane must preserve its report")
+        revealPlaceElement(express, in: list)
+        express.tap()
+        revealPlaceElement(description, in: list)
+        XCTAssertTrue(description.waitForExistence(timeout: 5))
+        let capture = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        capture.name = "Expanded system service alert details"
+        capture.lifetime = .keepAlways
+        add(capture)
+    }
+
+    @MainActor
+    func testSystemAlertsDistinguishFreshAndStaleEmptyAtLargestText() {
+        let app = launchForMoreMenu(accessibilityText: true, arguments: ["--ui-test-empty-alerts", "--ui-test-stale-alerts"])
+        let list = app.collectionViews["systemAlertsList"]
+        let empty = list.descendants(matching: .any)["systemAlertsEmpty"].firstMatch
+        let retry = list.buttons["systemAlertsRetry"]
+        app.buttons["moreButton"].tap()
+        app.buttons["serviceAlertsButton"].tap()
+        XCTAssertTrue(retry.waitForExistence(timeout: 10))
+        XCTAssertFalse(empty.exists, "An old empty report cannot establish that there are no advisories")
+
+        app.terminate()
+        app.launchArguments.removeAll { $0 == "--ui-test-stale-alerts" }
+        app.launch()
+        let more = app.buttons["moreButton"]
+        XCTAssertTrue(more.waitForExistence(timeout: 15))
+        more.tap()
+        app.buttons["serviceAlertsButton"].tap()
+        XCTAssertTrue(empty.waitForExistence(timeout: 10))
+        XCTAssertFalse(retry.exists)
+        XCTAssertTrue(app.buttons["systemAlertsRefresh"].exists)
+        let capture = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        capture.name = "Current empty system advisory report at largest accessibility text"
+        capture.lifetime = .keepAlways
+        add(capture)
+    }
+
+    @MainActor
+    func testAdvisoryWindowRequiresCurrentReportAcrossLayouts() {
+        let app = launchForMoreMenu(arguments: ["--ui-test-alert-recovery"])
+        defer { XCUIDevice.shared.orientation = .portrait }
+        app.buttons["moreButton"].tap()
+        app.buttons["serviceAlertsButton"].tap()
+        let list = app.collectionViews["systemAlertsList"]
+        let wall = list.buttons["serviceAlert-fixture-wall"]
+        // A native disclosure may combine its caption into the button's accessible label.
+        let window = list.descendants(matching: .any).matching(NSPredicate(
+            format: "identifier == %@ OR (identifier == %@ AND label CONTAINS %@)",
+            "alertWindow-fixture-wall", "serviceAlert-fixture-wall", "Reported alert display window"
+        )).firstMatch
+        let retry = list.buttons["systemAlertsRetry"]
+        XCTAssertTrue(retry.waitForExistence(timeout: 10))
+        revealPlaceElement(wall, in: list)
+        XCTAssertTrue(wall.label.contains("Wall St"))
+        XCTAssertFalse(window.exists, "A retained stale advisory cannot establish a current reported window")
+        revealPlaceElement(retry, in: list, downward: false)
+        retry.tap()
+        let unavailable = list.staticTexts["Service alerts unavailable"]
+        XCTAssertTrue(unavailable.waitForExistence(timeout: 10))
+        revealPlaceElement(wall, in: list)
+        XCTAssertTrue(wall.label.contains("Wall St"), "Failed refresh must retain the reported advisory")
+        XCTAssertFalse(window.exists, "Failed refresh must not revive a previously reported window")
+        revealPlaceElement(retry, in: list, downward: false)
+        retry.tap()
+        XCTAssertTrue(unavailable.waitForNonExistence(timeout: 10))
+        XCTAssertTrue(window.waitForExistence(timeout: 10))
+        revealPlaceElement(window, in: list)
+        XCTAssertTrue(window.label.contains("Reported"))
+        XCTAssertTrue(window.label.contains("New York"), "VoiceOver must identify the time zone of the reported end")
+        XCTAssertTrue(window.label.contains("Not a guaranteed service restoration time"))
+        XCTAssertFalse(list.descendants(matching: .any)["alertWindow-fixture-express"].exists,
+                       "An advisory without a reported end must not acquire a countdown")
+        let compact = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        compact.name = "Current reported advisory window in compact layout"
+        compact.lifetime = .keepAlways
+        add(compact)
+
+        XCUIDevice.shared.orientation = .landscapeLeft
+        waitForLayout(in: app, expanded: true)
+        XCTAssertTrue(list.waitForExistence(timeout: 5))
+        revealPlaceElement(window, in: list)
+        XCTAssertTrue(window.label.contains("New York"))
+        XCTAssertFalse(retry.exists)
+        revealPlaceElement(wall, in: list)
+        wall.tap()
+        let description = list.staticTexts["Allow extra travel time at Wall St."]
+        XCTAssertTrue(description.waitForExistence(timeout: 5), "Timing must preserve access to actual advisory details")
+        revealPlaceElement(description, in: list)
+        let expanded = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        expanded.name = "Expanded reported advisory window and details"
+        expanded.lifetime = .keepAlways
+        add(expanded)
+    }
+
+    @MainActor
+    func testAdvisoryWindowAndDetailsAtLargestAccessibilityText() {
+        let app = launchForMoreMenu(accessibilityText: true, arguments: ["--ui-test-alert-window-absolute"])
+        defer { XCUIDevice.shared.orientation = .portrait }
+        app.buttons["moreButton"].tap()
+        app.buttons["serviceAlertsButton"].tap()
+        let list = app.collectionViews["systemAlertsList"]
+        // A native disclosure may combine its caption into the button's accessible label.
+        let window = list.descendants(matching: .any).matching(NSPredicate(
+            format: "identifier == %@ OR (identifier == %@ AND label CONTAINS %@)",
+            "alertWindow-fixture-wall", "serviceAlert-fixture-wall", "Reported alert display window"
+        )).firstMatch
+        XCTAssertTrue(window.waitForExistence(timeout: 10))
+        let caption = list.staticTexts["alertWindow-fixture-wall"].firstMatch
+        revealPlaceElement(caption.exists ? caption : window, in: list)
+        XCTAssertTrue(window.label.contains("Reported"))
+        XCTAssertTrue(window.label.contains("New York"))
+        XCTAssertTrue(window.label.contains("Not a guaranteed service restoration time"))
+        XCTAssertGreaterThan(window.frame.height, 0)
+        XCTAssertTrue(list.frame.intersects(window.frame), "Reported timing must remain readable in the native scrolling list")
+        let capture = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        capture.name = "Reported advisory window at largest accessibility text"
+        capture.lifetime = .keepAlways
+        add(capture)
+        let wall = list.buttons["serviceAlert-fixture-wall"]
+        XCTAssertTrue(wall.isEnabled)
+        if caption.exists {
+            caption.tap()
+        } else {
+            wall.tap()
+        }
+        let description = list.staticTexts["Allow extra travel time at Wall St."]
+        XCTAssertTrue(description.waitForExistence(timeout: 5))
+        revealPlaceElement(description, in: list)
+        XCTAssertTrue(description.exists, "The native disclosure must retain full advisory details at largest text")
+        let details = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        details.name = "Largest text advisory details after expanding its timing caption"
+        details.lifetime = .keepAlways
+        add(details)
+    }
+
+    @MainActor
     func testStationAdvisorySurvivesFailedRetryAndRecovers() {
         let app = XCUIApplication()
         app.terminate()
@@ -200,6 +375,10 @@ final class StandClearUITests: XCTestCase {
         XCTAssertFalse(list.staticTexts["Alert status unconfirmed"].exists)
         XCTAssertFalse(retry.exists, "A successful current report should replace the failed-request state")
         XCTAssertFalse(list.staticTexts["stationAlertLastReport"].exists)
+        summary.tap()
+        let currentAdvisory = list.staticTexts["alertWindow-fixture-wall"].firstMatch
+        XCTAssertTrue(currentAdvisory.waitForExistence(timeout: 5))
+        XCTAssertTrue(currentAdvisory.label.contains("Reported alert display window"))
     }
 
     @MainActor
@@ -496,6 +675,123 @@ final class StandClearUITests: XCTestCase {
     }
 
     @MainActor
+    func testSearchFavoriteActionsPreserveNavigationAndHomeAcrossLayouts() {
+        let app = XCUIApplication()
+        app.terminate()
+        XCUIDevice.shared.orientation = .portrait
+        defer { XCUIDevice.shared.orientation = .portrait }
+        app.resetAuthorizationStatus(for: .location)
+        app.launchArguments = ["--ui-test-fixture"]
+        addUIInterruptionMonitor(withDescription: "Location permission") { alert in
+            guard alert.buttons["Don’t Allow"].exists else { return false }
+            alert.buttons["Don’t Allow"].tap()
+            return true
+        }
+        app.launch()
+        activatePermissionPrompt(in: app)
+        let search = app.buttons["searchButton"]
+        search.tap()
+        let home = app.buttons["savedPlace-Home"]
+        let field = app.searchFields[unifiedSearchPrompt]
+        XCTAssertTrue(field.waitForExistence(timeout: 10))
+        // Leave an unrelated preexisting Home untouched.
+        let previousHome = home.exists ? home.label : nil
+        guard focusSearchField(field, in: app) else { return }
+        field.typeText("Wall\n")
+        let wall = app.buttons["station-419"]
+        let toggle = app.buttons["searchFavoriteToggle-419"]
+        let detail = app.navigationBars["Wall St"]
+        XCTAssertTrue(wall.waitForExistence(timeout: 10))
+        wall.press(forDuration: 1)
+        XCTAssertTrue(toggle.waitForExistence(timeout: 5))
+        if toggle.label == "Remove from favorites" {
+            toggle.tap()
+            XCTAssertTrue(toggle.waitForNonExistence(timeout: 5))
+            wall.press(forDuration: 1)
+            XCTAssertTrue(toggle.waitForExistence(timeout: 5))
+        }
+        XCTAssertEqual(toggle.label, "Add to favorites")
+        let compact = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        compact.name = "Add a station favorite from compact Search"
+        compact.lifetime = .keepAlways
+        add(compact)
+        toggle.tap()
+        XCTAssertTrue(toggle.waitForNonExistence(timeout: 5))
+        XCTAssertTrue(wall.label.contains("Favorite"))
+        XCTAssertEqual(field.value as? String, "Wall")
+        XCTAssertFalse(detail.exists)
+        selectSearchResult("419", query: "Wall", in: app)
+        XCTAssertTrue(detail.waitForExistence(timeout: 5))
+        let anchors = app.buttons["stationAnchorMenu"]
+
+        app.terminate()
+        app.launch()
+        let nearby = app.buttons["nearbyButton"]
+        XCTAssertTrue(nearby.waitForExistence(timeout: 15))
+        nearby.tap()
+        XCTAssertTrue(app.navigationBars["Nearby arrivals"].waitForExistence(timeout: 5))
+        app.buttons["Sheet Grabber"].doubleTap()
+        let list = app.collectionViews["stationList"]
+        XCTAssertTrue(list.buttons["favoriteStation-419"].waitForExistence(timeout: 10))
+        XCTAssertTrue(list.descendants(matching: .any).matching(NSPredicate(format: "label IN %@", [
+            "Location access is off", "Location unavailable", "Waiting for your location…",
+        ])).firstMatch.exists)
+        // Prove Search alone persisted the favorite before assigning Home,
+        // which would otherwise independently favorite the same station.
+        list.buttons["favoriteStation-419"].tap()
+        XCTAssertTrue(detail.waitForExistence(timeout: 5))
+        anchors.tap()
+        let wallWasHome = app.buttons["Remove Home"].exists
+        if previousHome == nil, !wallWasHome {
+            app.buttons["Set as Home"].tap()
+        }
+        detail.staticTexts["Wall St"].tap()
+        app.buttons["Done"].tap()
+        XCUIDevice.shared.orientation = .landscapeLeft
+        waitForLayout(in: app, expanded: true)
+        search.tap()
+        let recent = app.buttons["recentStation-419"]
+        revealPlaceElement(recent, in: list)
+        let emptyQuery = field.value as? String
+        XCTAssertTrue(recent.label.contains("Favorite"))
+        recent.press(forDuration: 1)
+        XCTAssertTrue(toggle.waitForExistence(timeout: 5))
+        XCTAssertEqual(toggle.label, "Remove from favorites")
+        toggle.tap()
+        XCTAssertTrue(toggle.waitForNonExistence(timeout: 5))
+        XCTAssertTrue(recent.exists)
+        XCTAssertFalse(recent.label.contains("Favorite"))
+        XCTAssertTrue(field.exists)
+        XCTAssertEqual(field.value as? String, emptyQuery)
+        XCTAssertFalse(detail.exists)
+        let expanded = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        expanded.name = "Recent station stays in expanded Search after removing favorite"
+        expanded.lifetime = .keepAlways
+        add(expanded)
+
+        // Reopen at the native list top rather than using the route-preview
+        // scrolling helper in Search's short landscape region.
+        app.terminate()
+        XCUIDevice.shared.orientation = .portrait
+        app.launch()
+        XCTAssertTrue(search.waitForExistence(timeout: 15))
+        search.tap()
+        XCTAssertTrue(home.waitForExistence(timeout: 10))
+        if previousHome == nil || wallWasHome {
+            XCTAssertTrue(home.label.contains("Wall St"))
+            home.tap()
+            XCTAssertTrue(detail.waitForExistence(timeout: 5))
+            anchors.tap()
+            XCTAssertEqual(app.buttons["favoriteStationToggle"].label, "Add to favorites")
+            if previousHome == nil {
+                app.buttons["Remove Home"].tap()
+            }
+        } else {
+            XCTAssertEqual(home.label, previousHome)
+        }
+    }
+
+    @MainActor
     func testFavoriteStationPersistsAndOpensFromNearbyWithoutLocation() {
         let app = XCUIApplication()
         app.terminate()
@@ -612,6 +908,7 @@ final class StandClearUITests: XCTestCase {
         alerts.tap()
         let warning = stops.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "Downtown 4 trains are delayed at Wall St")).firstMatch
         XCTAssertTrue(warning.waitForExistence(timeout: 5))
+        XCTAssertTrue(warning.label.contains("Reported alert display window"), "Line advisories must share the reported timing context")
         let alertCapture = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         alertCapture.name = "4 line advisory before choosing a station"
         alertCapture.lifetime = .keepAlways
@@ -2094,12 +2391,12 @@ final class StandClearUITests: XCTestCase {
     }
 
     @MainActor
-    private func launchForMoreMenu(accessibilityText: Bool = false) -> XCUIApplication {
+    private func launchForMoreMenu(accessibilityText: Bool = false, arguments: [String] = []) -> XCUIApplication {
         let app = XCUIApplication()
         app.terminate()
         XCUIDevice.shared.orientation = .portrait
         app.resetAuthorizationStatus(for: .location)
-        app.launchArguments = ["--ui-test-fixture"]
+        app.launchArguments = ["--ui-test-fixture"] + arguments
         if accessibilityText {
             app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
         }

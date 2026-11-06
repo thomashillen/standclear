@@ -34,6 +34,39 @@ struct StationAlert: Decodable, Identifiable {
     let id, header, description, effect, severity: String
     let routeIds, stopIds: [String]
     let selectors: [Selector]?
+    let startTime, endTime: Double? // Reported display-window bounds, epoch seconds.
+
+    init(id: String, header: String, description: String, effect: String, severity: String,
+         routeIds: [String], stopIds: [String], selectors: [Selector]?, startTime: Double? = nil, endTime: Double? = nil)
+    {
+        self.id = id
+        self.header = header
+        self.description = description
+        self.effect = effect
+        self.severity = severity
+        self.routeIds = routeIds
+        self.stopIds = stopIds
+        self.selectors = selectors
+        self.startTime = startTime
+        self.endTime = endTime
+    }
+
+    func reportedWindow(at now: Date, evidence: StationAlertSnapshot.Evidence?) -> ReportedAlertWindow? {
+        let time = now.timeIntervalSince1970
+        guard evidence == .current, time.isFinite, time >= 0 else { return nil }
+        let start = startTime.flatMap { $0.isFinite && $0 >= 0 ? $0 : nil }
+        let end = endTime.flatMap { $0.isFinite && $0 >= 0 ? $0 : nil }
+        if let start, let end, start >= end {
+            return nil
+        }
+        let horizon = 14.0 * 86400
+        if let start, start > time {
+            return start - time <= horizon ? .starts(Date(timeIntervalSince1970: start)) : nil
+        }
+        guard let end, end > time, end - time <= horizon else { return nil }
+        let date = Date(timeIntervalSince1970: end)
+        return end - time <= 3600 ? .endsSoon(date, minutes: Int(ceil((end - time) / 60))) : .until(date)
+    }
 
     struct Selector: Decodable {
         let routeId, stopId: String?
@@ -88,6 +121,82 @@ struct StationAlert: Decodable, Identifiable {
             case let (nil, stop?): station.stopIDs.contains(stop)
             case (nil, nil): false
             }
+        }
+    }
+}
+
+extension StationAlert {
+    private enum CodingKeys: String, CodingKey {
+        case id, header, description, effect, severity, routeIds, stopIds, selectors, startTime, endTime
+    }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        try self.init(id: values.decode(String.self, forKey: .id), header: values.decode(String.self, forKey: .header),
+                      description: values.decode(String.self, forKey: .description), effect: values.decode(String.self, forKey: .effect),
+                      severity: values.decode(String.self, forKey: .severity), routeIds: values.decode([String].self, forKey: .routeIds),
+                      stopIds: values.decode([String].self, forKey: .stopIds), selectors: values.decodeIfPresent([Selector].self, forKey: .selectors),
+                      // Optional presentation metadata must not discard the advisory body.
+                      startTime: try? values.decode(Double.self, forKey: .startTime), endTime: try? values.decode(Double.self, forKey: .endTime))
+    }
+}
+
+enum ReportedAlertWindow: Equatable {
+    case starts(Date), endsSoon(Date, minutes: Int), until(Date)
+
+    private static let newYork = TimeZone(identifier: "America/New_York")!
+
+    func text(relativeTo now: Date, locale: Locale = .current) -> String {
+        switch self {
+        case let .starts(date): "Reported window starts \(point(date, relativeTo: now, locale: locale)) (New York time)"
+        case let .endsSoon(_, minutes): "Reported window ends in \(minutes.formatted(.number.locale(locale))) min"
+        case let .until(date): "Reported window until \(point(date, relativeTo: now, locale: locale)) (New York time)"
+        }
+    }
+
+    func accessibilityText(locale: Locale = .current) -> String {
+        let date: Date
+        let prefix: String
+        switch self {
+        case let .starts(value): (date, prefix) = (value, "Reported alert display window starts")
+        case let .endsSoon(value, minutes):
+            (date, prefix) = (value, "Reported alert display window ends in \(minutes.formatted(.number.locale(locale))) minutes, at")
+        case let .until(value): (date, prefix) = (value, "Reported alert display window ends")
+        }
+        let formatter = DateFormatter()
+        formatter.locale = locale
+        formatter.timeZone = Self.newYork
+        formatter.dateStyle = .full
+        formatter.timeStyle = .long
+        return "\(prefix) \(formatter.string(from: date)). New York time. Not a guaranteed service restoration time."
+    }
+
+    private func point(_ date: Date, relativeTo now: Date, locale: Locale) -> String {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = Self.newYork
+        let days = calendar.dateComponents([.day], from: calendar.startOfDay(for: now), to: calendar.startOfDay(for: date)).day ?? 0
+        let formatter = DateFormatter()
+        formatter.locale = locale
+        formatter.calendar = calendar
+        formatter.timeZone = Self.newYork
+        formatter.setLocalizedDateFormatFromTemplate(days <= 0 ? "jmz" : days <= 6 ? "Ejmz" : "MMMdjmz")
+        return formatter.string(from: date)
+    }
+}
+
+private struct AlertWindowLabel: View {
+    let alert: StationAlert
+    let now: Date
+    let evidence: StationAlertSnapshot.Evidence?
+
+    var body: some View {
+        if let window = alert.reportedWindow(at: now, evidence: evidence) {
+            Label(window.text(relativeTo: now), systemImage: "clock")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityLabel(window.accessibilityText())
+                .accessibilityIdentifier("alertWindow-\(alert.id)")
         }
     }
 }
@@ -162,17 +271,20 @@ private struct ServiceAlertSection: View {
     let emptyMessage: String
     let summaryIdentifier: String
     var compact = false
+    var systemwide = false
     @State private var expanded = false
 
     var body: some View {
+        let matches = load.snapshot?.alerts.filter(includes) ?? []
+        let evidence = load.evidence(at: now)
         Section {
-            let matches = load.snapshot?.alerts.filter(includes) ?? []
-            switch load.evidence(at: now) {
+            switch evidence {
             case nil: ProgressView("Checking service alerts…")
             case .unavailable: unavailable(lastReported: load.lastReportAfterFailure(at: now))
             case .current:
                 if matches.isEmpty, !compact {
                     Text(emptyMessage)
+                        .accessibilityIdentifier(systemwide ? "systemAlertsEmpty" : "scopedAlertsEmpty")
                 }
             case let .lastReported(date):
                 if compact {
@@ -191,33 +303,66 @@ private struct ServiceAlertSection: View {
             }
             if load.snapshot?.available != false, !matches.isEmpty {
                 let severeCount = matches.filter { $0.severity == "severe" }.count
-                DisclosureGroup(isExpanded: $expanded) {
+                if systemwide {
                     ForEach(matches) { alert in
-                        VStack(alignment: .leading, spacing: 4) {
-                            Label(alert.severity == "severe" ? "Severe" : alert.severity == "warning" ? "Warning" : "Information",
-                                  systemImage: alert.severity == "info" ? "info.circle" : "exclamationmark.triangle")
-                                .font(.subheadline)
-                            Text(alert.header.isEmpty ? alert.effect.replacingOccurrences(of: "_", with: " ").capitalized : alert.header)
-                                .font(.headline)
+                        DisclosureGroup {
                             if !alert.description.isEmpty, alert.description != alert.header {
                                 Text(alert.description)
+                            } else {
+                                Text("No additional details reported.").foregroundStyle(.secondary)
                             }
+                        } label: {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Label(alert.severity == "severe" ? "Severe" : alert.severity == "warning" ? "Warning" : "Information",
+                                      systemImage: alert.severity == "info" ? "info.circle" : "exclamationmark.triangle")
+                                    .font(.subheadline)
+                                let routes = Array(Set(alert.routeIds + (alert.selectors ?? []).compactMap(\.routeId))).sorted()
+                                if !routes.isEmpty {
+                                    Text("Routes: \(routes.map { TransitRouteIdentity($0).spokenName }.joined(separator: ", "))")
+                                        .font(.subheadline).foregroundStyle(.secondary)
+                                }
+                                Text(alert.header.isEmpty ? alert.effect.replacingOccurrences(of: "_", with: " ").capitalized : alert.header)
+                                    .font(.headline)
+                                AlertWindowLabel(alert: alert, now: now, evidence: evidence)
+                            }
+                            .fixedSize(horizontal: false, vertical: true)
                         }
-                        .accessibilityElement(children: .combine)
+                        .accessibilityIdentifier("serviceAlert-\(alert.id)")
                     }
-                } label: {
-                    let count = "\(matches.count) \(matches.count == 1 ? "advisory" : "advisories")"
-                    if severeCount > 0 {
-                        Label("\(count) · \(severeCount) severe", systemImage: "exclamationmark.triangle.fill")
-                    } else {
-                        Text(count)
+                } else {
+                    DisclosureGroup(isExpanded: $expanded) {
+                        ForEach(matches) { alert in
+                            VStack(alignment: .leading, spacing: 4) {
+                                Label(alert.severity == "severe" ? "Severe" : alert.severity == "warning" ? "Warning" : "Information",
+                                      systemImage: alert.severity == "info" ? "info.circle" : "exclamationmark.triangle")
+                                    .font(.subheadline)
+                                Text(alert.header.isEmpty ? alert.effect.replacingOccurrences(of: "_", with: " ").capitalized : alert.header)
+                                    .font(.headline)
+                                AlertWindowLabel(alert: alert, now: now, evidence: evidence)
+                                if !alert.description.isEmpty, alert.description != alert.header {
+                                    Text(alert.description)
+                                }
+                            }
+                            .accessibilityElement(children: .combine)
+                        }
+                    } label: {
+                        let count = "\(matches.count) \(matches.count == 1 ? "advisory" : "advisories")"
+                        if severeCount > 0 {
+                            Label("\(count) · \(severeCount) severe", systemImage: "exclamationmark.triangle.fill")
+                        } else {
+                            Text(count)
+                        }
                     }
+                    .accessibilityIdentifier(summaryIdentifier)
                 }
-                .accessibilityIdentifier(summaryIdentifier)
             }
         } header: {
-            if !compact {
+            if !compact, !systemwide {
                 Text("Service alerts")
+            }
+        } footer: {
+            if systemwide || expanded, matches.contains(where: { $0.reportedWindow(at: now, evidence: evidence) != nil }) {
+                Text("Reported alert display windows do not guarantee when service will resume.")
             }
         }
         .listRowBackground(Color.clear)
@@ -257,6 +402,7 @@ private struct ServiceAlertSection: View {
     private var lineRetryButton: some View {
         Button(load.isRequestInFlight ? "Checking service alerts…" : "Retry alerts", action: retry)
             .disabled(load.isRequestInFlight)
+            .accessibilityIdentifier(systemwide ? "systemAlertsRetry" : "lineAlertsRetry")
     }
 
     private var retryButton: some View {
@@ -283,6 +429,63 @@ private struct ServiceAlertSection: View {
         } else {
             statusLabel("Service alerts unavailable", symbol: "wifi.exclamationmark", lastReported: lastReported)
             lineRetryButton
+        }
+    }
+}
+
+/// One active visit, using the existing advisory transport and evidence rules.
+/// MapShell keeps the report when the same visit moves between sheet and pane.
+struct SystemAlertsView: View {
+    let store: TransitStore
+    @Binding var load: StationAlertsLoad
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var visible = false
+    @State private var revision = 0
+
+    private struct Request: Equatable {
+        let active: Bool
+        let revision: Int
+    }
+
+    private var request: Request {
+        Request(active: visible && scenePhase == .active, revision: revision)
+    }
+
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 5)) { context in
+            List {
+                ServiceAlertSection(load: load, now: context.date, retry: { revision += 1 }, includes: { _ in true },
+                                    emptyMessage: "No service alerts reported.", summaryIdentifier: "systemAlertsSummary", systemwide: true)
+            }
+            .listStyle(.plain)
+            .scrollContentBackground(.hidden)
+            .navigationTitle("Service alerts")
+            .navigationBarTitleDisplayMode(.inline)
+            .accessibilityIdentifier("systemAlertsList")
+        }
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button("Refresh service alerts", systemImage: "arrow.clockwise") { revision += 1 }
+                    .disabled(load.isRequestInFlight)
+                    .accessibilityIdentifier("systemAlertsRefresh")
+            }
+        }
+        .onAppear { visible = true }
+        .onDisappear { visible = false }
+        .task(id: request) { [request] in
+            guard request.active else { return }
+            while !Task.isCancelled {
+                load.beginRequest()
+                do {
+                    let snapshot = try await store.stationAlerts()
+                    guard !Task.isCancelled, self.request == request else { return }
+                    load.receive(snapshot)
+                } catch {
+                    guard !Task.isCancelled, self.request == request else { return }
+                    load.fail()
+                }
+                do { try await Task.sleep(for: .seconds(60)) } catch { return }
+            }
         }
     }
 }
