@@ -1389,6 +1389,147 @@ final class StandClearUITests: XCTestCase {
     }
 
     @MainActor
+    func testPlaceDestinationEditingPreservesManualOrigin() {
+        checkPlaceDestinationEditing(expanded: false, largeType: false)
+    }
+
+    @MainActor
+    func testPlaceDestinationEditingExpanded() {
+        checkPlaceDestinationEditing(expanded: true, largeType: false)
+    }
+
+    @MainActor
+    func testPlaceDestinationEditingAtLargestType() {
+        checkPlaceDestinationEditing(expanded: false, largeType: true)
+    }
+
+    @MainActor
+    private func checkPlaceDestinationEditing(expanded: Bool, largeType: Bool) {
+        let app = XCUIApplication()
+        app.terminate()
+        XCUIDevice.shared.orientation = .portrait
+        defer { XCUIDevice.shared.orientation = .portrait }
+        app.resetAuthorizationStatus(for: .location)
+        app.launchArguments = ["--ui-test-fixture", "--ui-test-noguchi"]
+        if largeType {
+            app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
+        }
+        addUIInterruptionMonitor(withDescription: "Location permission") { alert in
+            guard alert.buttons["Don’t Allow"].exists else { return false }
+            alert.buttons["Don’t Allow"].tap()
+            return true
+        }
+        app.launch()
+        activatePermissionPrompt(in: app)
+        if expanded {
+            XCUIDevice.shared.orientation = .landscapeLeft
+            waitForLayout(in: app, expanded: true)
+        }
+        app.buttons["searchButton"].tap()
+        let search = app.searchFields[unifiedSearchPrompt]
+        guard focusSearchField(search, in: app) else { return }
+        search.typeText("Noguchi\n")
+        let museum = app.buttons["placeResult-fixture-noguchi"]
+        XCTAssertTrue(museum.waitForExistence(timeout: 10))
+        museum.tap()
+        let list = app.collectionViews["placePreviewList"]
+        let origin = app.buttons["placeOriginPicker"]
+        XCTAssertTrue(origin.waitForExistence(timeout: 10))
+        revealPlaceElement(origin, in: list, downward: false)
+        origin.tap()
+        let fromSearch = app.searchFields[unifiedSearchPrompt]
+        guard focusSearchField(fromSearch, in: app) else { return }
+        fromSearch.typeText("55 Wall Street\n")
+        let from = app.buttons["placeOriginResult-fixture-55-wall-street"]
+        XCTAssertTrue(from.waitForExistence(timeout: 10))
+        from.tap()
+        let map = app.descendants(matching: .any)["appleTransitMap"].firstMatch
+        expectation(for: NSPredicate(format: "value CONTAINS %@ AND value CONTAINS %@", "Noguchi", "Wall St"), evaluatedWith: map)
+        waitForExpectations(timeout: 15)
+        let previousRoute = map.value as? String
+        let destination = app.buttons["placeDestinationPicker"]
+
+        func openDestination() -> Bool {
+            revealPlaceElement(destination, in: list, downward: false)
+            destination.tap()
+            return app.navigationBars["To"].waitForExistence(timeout: 10)
+        }
+        func chooseDestination(_ query: String, id: String) -> Bool {
+            guard openDestination() else { XCTFail("Destination picker did not open"); return false }
+            let field = app.searchFields["Address or place"]
+            guard focusSearchField(field, in: app) else { return false }
+            field.typeText(query + "\n")
+            let result = app.buttons["placeDestinationResult-" + id]
+            guard result.waitForExistence(timeout: 10) else { XCTFail("Destination result missing"); return false }
+            revealPlaceElement(result, in: app.collectionViews.firstMatch)
+            result.tap()
+            return destination.waitForExistence(timeout: 10)
+        }
+
+        // Dismissing an in-progress destination search keeps the current trip.
+        XCTAssertTrue(openDestination())
+        let toSearch = app.searchFields["Address or place"]
+        guard focusSearchField(toSearch, in: app) else { return }
+        toSearch.typeText("Madison\n")
+        XCTAssertTrue(app.buttons["placeDestinationResult-fixture-550-madison"].waitForExistence(timeout: 10))
+        let pickerCapture = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        pickerCapture.name = "Native destination search — expanded \(expanded), largest text \(largeType)"
+        pickerCapture.lifetime = .keepAlways
+        add(pickerCapture)
+        // Active native search exposes its own Close button before navigation
+        // Back. End search, then explicitly leave the endpoint picker.
+        let closeSearch = app.navigationBars["To"].buttons["Close"]
+        if closeSearch.exists {
+            closeSearch.tap()
+        }
+        let back = app.navigationBars["To"].buttons["BackButton"]
+        XCTAssertTrue(back.waitForExistence(timeout: 5))
+        back.tap()
+        XCTAssertTrue(destination.waitForExistence(timeout: 10))
+        XCTAssertTrue(origin.label.contains("55 Wall Street"))
+        XCTAssertEqual(map.value as? String, previousRoute)
+
+        guard chooseDestination("Madison", id: "fixture-550-madison") else { return }
+        XCTAssertTrue(destination.label.contains("550 Madison Avenue"))
+        XCTAssertTrue(origin.label.contains("55 Wall Street"))
+        expectation(for: NSPredicate(format: "value CONTAINS %@ AND value CONTAINS %@ AND NOT value CONTAINS %@", "550 Madison Avenue", "Wall St", "Noguchi"), evaluatedWith: map)
+        waitForExpectations(timeout: 15)
+        let updatedRoute = map.value as? String
+        let capture = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        capture.name = "Edited native destination — expanded \(expanded), largest text \(largeType)"
+        capture.lifetime = .keepAlways
+        add(capture)
+        // Choosing the existing destination is also a no-op for route selection.
+        guard chooseDestination("Madison", id: "fixture-550-madison") else { return }
+        XCTAssertEqual(map.value as? String, updatedRoute)
+        XCUIDevice.shared.press(.home)
+        let backgrounded = NSPredicate { _, _ in MainActor.assumeIsolated {
+            app.state == .runningBackground || app.state == .runningBackgroundSuspended
+        } }
+        expectation(for: backgrounded, evaluatedWith: app)
+        waitForExpectations(timeout: 5)
+        app.activate()
+        XCTAssertTrue(destination.waitForExistence(timeout: 10))
+        XCTAssertTrue(origin.label.contains("55 Wall Street"))
+        XCTAssertTrue(destination.label.contains("550 Madison Avenue"))
+        expectation(for: NSPredicate(format: "value CONTAINS %@ AND value CONTAINS %@", "550 Madison Avenue", "Wall St"), evaluatedWith: map)
+        waitForExpectations(timeout: 15)
+
+        // A replacement equal to From removes the old route and can recover.
+        guard chooseDestination("55 Wall Street", id: "fixture-55-wall-street") else { return }
+        XCTAssertTrue(app.staticTexts["Same place"].waitForExistence(timeout: 10))
+        XCTAssertTrue(origin.label.contains("55 Wall Street"))
+        expectation(for: NSPredicate(format: "value == %@", "55 Wall Street"), evaluatedWith: map)
+        waitForExpectations(timeout: 10)
+        guard chooseDestination("Madison", id: "fixture-550-madison") else { return }
+        expectation(for: NSPredicate(format: "value CONTAINS %@ AND value CONTAINS %@", "550 Madison Avenue", "Wall St"), evaluatedWith: map)
+        waitForExpectations(timeout: 15)
+        app.buttons["placeBackToSearch"].tap()
+        XCTAssertTrue(museum.waitForExistence(timeout: 10))
+        XCTAssertEqual(search.value as? String, "Noguchi", "Endpoint editing keeps the original Search visit")
+    }
+
+    @MainActor
     func testMuseumTransferShowsBothServicesAndInterchangeOnMainMap() {
         let app = XCUIApplication()
         app.terminate()
