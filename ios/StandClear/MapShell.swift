@@ -71,6 +71,7 @@ struct MapShell: View {
                         map(statusWidth: statusWidth, coveredWidth: geometry.size.width - statusWidth, coveredBottom: 0, maximumGlanceHeight: geometry.size.height * 0.55)
                         VStack(spacing: 0) {
                             panelNavigation(expandedPanel, expanded: true)
+                                .environment(\.expandedTransitPanel, true)
                                 .id(expandedPanel)
                                 .id(stationVisit)
                             if selectedTrip != nil {
@@ -565,4 +566,9 @@ func transitColor(_ hex: String) -> UIColor {
     return UIColor(red: CGFloat((value >> 16) & 255) / 255,
                    green: CGFloat((value >> 8) & 255) / 255,
                    blue: CGFloat(value & 255) / 255, alpha: 1)
+}
+
+/// Pushed route screens inherit the same map-backed presentation as their root.
+extension EnvironmentValues {
+    @Entry var expandedTransitPanel = false
 }
