@@ -10,7 +10,7 @@
 //   1. Active-window filter (`isActive`). A planned-future alert
 //      (`start > now`) leaking into the rider-facing list would
 //      announce a Sunday outage on Wednesday morning; an expired
-//      alert (`end < now`) would leave a stale "no service" badge
+//      alert (`end <= now`) would leave a stale "no service" badge
 //      on a station after the work train cleared. Pin both drop
 //      paths plus the "no period = always-on" pass.
 //
@@ -40,6 +40,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import GtfsRealtimeBindings from "gtfs-realtime-bindings";
+import { formatAlertWindow } from "./alertWindow";
 
 const FeedMessage = GtfsRealtimeBindings.transit_realtime.FeedMessage;
 
@@ -215,17 +216,102 @@ describe("fetchActiveAlerts — active-window filter", () => {
 
     const res = await fetchActiveAlerts();
     expect(res.alerts.map((a) => a.id)).toEqual(["rolling"]);
+    expect(res.alerts[0]).toMatchObject({
+      startTime: NOW_SEC - 50, endTime: NOW_SEC + 50,
+    });
+    expect(formatAlertWindow({ ...res.alerts[0], now: NOW_SEC })).toBe("Ends in 1 min");
   });
 
 });
 
-// Note on unbounded period fields: the function signature has a
-// `?? -Infinity` / `?? Infinity` fallback for a missing `start` /
-// `end` on a TimeRange, but in practice the protobuf decoder
-// materializes omitted Long fields as `Long(0)` rather than null
-// (proto3 numeric default), so the fallback never fires on a
-// real round-trip. The MTA feed always emits both endpoints
-// today; not pinning that brittle edge case here on purpose.
+describe("fetchActiveAlerts — reported active interval", () => {
+  async function alertsFor(periods: { start?: number; end?: number }[]) {
+    globalThis.fetch = vi.fn().mockResolvedValue(feedResponse(feed([{
+      id: "window",
+      alert: {
+        activePeriod: periods,
+        effect: 1,
+        headerText: { translation: [{ language: "en", text: "Service change" }] },
+        informedEntity: [{ routeId: "R" }],
+      },
+    }])));
+    const { fetchActiveAlerts } = await freshImport();
+    return (await fetchActiveAlerts()).alerts;
+  }
+
+  it("reports the current interval when a future interval comes first", async () => {
+    const alerts = await alertsFor([
+      { start: NOW_SEC + 500, end: NOW_SEC + 1000 },
+      { start: NOW_SEC - 50, end: NOW_SEC + 50 },
+    ]);
+    expect(alerts).toHaveLength(1);
+    expect(alerts[0]).toMatchObject({ startTime: NOW_SEC - 50, endTime: NOW_SEC + 50 });
+  });
+
+  it("merges overlapping and touching intervals transitively regardless of order", async () => {
+    const periods = [
+      { start: NOW_SEC - 200, end: NOW_SEC - 50 },
+      { start: NOW_SEC - 100, end: NOW_SEC + 10 },
+      { start: NOW_SEC + 10, end: NOW_SEC + 80 },
+      { start: NOW_SEC + 60, end: NOW_SEC + 200 },
+    ];
+    for (const order of [periods, [...periods].reverse(), [periods[2], periods[0], periods[3], periods[1]]]) {
+      const alerts = await alertsFor(order);
+      expect.soft(alerts).toHaveLength(1);
+      expect.soft(alerts[0]).toMatchObject({ startTime: NOW_SEC - 200, endTime: NOW_SEC + 200 });
+    }
+  });
+
+  it("never bridges an inactive gap or extends a current interval across it", async () => {
+    expect(await alertsFor([
+      { start: NOW_SEC - 100, end: NOW_SEC - 1 },
+      { start: NOW_SEC + 1, end: NOW_SEC + 100 },
+    ])).toEqual([]);
+    const periods = [
+      { start: NOW_SEC - 200, end: NOW_SEC - 100 },
+      { start: NOW_SEC - 50, end: NOW_SEC + 50 },
+      { start: NOW_SEC + 100, end: NOW_SEC + 200 },
+    ];
+    for (const order of [periods, [...periods].reverse()]) {
+      expect.soft((await alertsFor(order))[0]).toMatchObject({
+        startTime: NOW_SEC - 50, endTime: NOW_SEC + 50,
+      });
+    }
+  });
+
+  it("treats starts as inclusive and ends as exclusive", async () => {
+    expect.soft((await alertsFor([{ start: NOW_SEC, end: NOW_SEC + 1 }]))[0])
+      .toMatchObject({ startTime: NOW_SEC, endTime: NOW_SEC + 1 });
+    expect.soft(await alertsFor([{ start: NOW_SEC - 1, end: NOW_SEC }])).toEqual([]);
+    expect.soft((await alertsFor([
+      { start: NOW_SEC - 1, end: NOW_SEC },
+      { start: NOW_SEC, end: NOW_SEC + 1 },
+    ]))[0]).toMatchObject({ startTime: NOW_SEC - 1, endTime: NOW_SEC + 1 });
+  });
+
+  it("preserves absent bounds after protobuf decoding instead of inherited zero defaults", async () => {
+    expect.soft((await alertsFor([{ end: NOW_SEC + 50 }]))[0])
+      .toMatchObject({ startTime: null, endTime: NOW_SEC + 50 });
+    expect.soft((await alertsFor([{ start: NOW_SEC - 50 }]))[0])
+      .toMatchObject({ startTime: NOW_SEC - 50, endTime: null });
+  });
+
+  it("preserves an explicitly encoded zero timestamp", async () => {
+    expect((await alertsFor([{ start: 0, end: NOW_SEC + 50 }]))[0])
+      .toMatchObject({ startTime: 0, endTime: NOW_SEC + 50 });
+    expect(await alertsFor([{ end: 0 }])).toEqual([]);
+  });
+
+  it("drops invalid empty, reversed and zero-length intervals without masking valid ones", async () => {
+    const invalid = [{}, { start: NOW_SEC + 50, end: NOW_SEC - 50 }, { start: NOW_SEC, end: NOW_SEC }];
+    for (const period of invalid) {
+      expect.soft(await alertsFor([period])).toEqual([]);
+    }
+    const valid = { start: NOW_SEC - 20, end: NOW_SEC + 20 };
+    expect.soft((await alertsFor([...invalid, valid]))[0])
+      .toMatchObject({ startTime: valid.start, endTime: valid.end });
+  });
+});
 
 describe("fetchActiveAlerts — selectors & stop normalization", () => {
   it("strips N/S suffix from informedEntity stopIds in both the aggregate and the selector list", async () => {
