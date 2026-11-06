@@ -289,26 +289,33 @@ final class StandClearUITests: XCTestCase {
             wide.lifetime = .keepAlways
             add(wide)
         }
-        if accessibilityText {
-            revealPlaceElement(advisory, in: list, downward: false)
-            advisory.tap()
-        } else {
-            // XCTest cannot supply an activation point for this partially
-            // scrolled native disclosure after reparenting. Tap its visible
-            // header below the pinned bar, then require the body to close.
+        // Native disclosure headers may exceed the viewport at large text sizes.
+        // Activate the visible portion below the pinned navigation bar rather
+        // than asking XCTest for an offscreen header's center activation point.
+        var activatedHeader = false
+        for _ in 0 ..< 18 {
             let bounds = list.frame
             let top = max(bounds.minY, app.navigationBars["Service alerts"].frame.maxY)
             let content = CGRect(x: bounds.minX, y: top, width: bounds.width, height: max(0, bounds.maxY - top))
-            let visibleHeader = advisory.frame.intersection(content)
-            guard !visibleHeader.isNull, visibleHeader.width >= 44, visibleHeader.height >= 44 else {
-                XCTFail("The disclosure header must be visible before it can be closed")
-                return
+            let header = advisory.frame
+            let visibleHeader = header.intersection(content)
+            if !visibleHeader.isNull, visibleHeader.width >= 44, visibleHeader.height >= 44 {
+                let window = app.windows.firstMatch
+                window.coordinate(withNormalizedOffset: .zero)
+                    .withOffset(CGVector(dx: visibleHeader.midX - window.frame.minX, dy: visibleHeader.midY - window.frame.minY)).tap()
+                activatedHeader = true
+                break
             }
-            let window = app.windows.firstMatch
-            window.coordinate(withNormalizedOffset: .zero)
-                .withOffset(CGVector(dx: visibleHeader.midX - window.frame.minX, dy: visibleHeader.midY - window.frame.minY)).tap()
+            let start = list.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+            start.press(forDuration: 0.08, thenDragTo: start.withOffset(CGVector(dx: 0, dy: header.maxY <= top ? 150 : -150)),
+                        withVelocity: .slow, thenHoldForDuration: 0.3)
         }
+        XCTAssertTrue(activatedHeader, "The disclosure header must be visible before it can be closed")
         XCTAssertTrue(body.waitForNonExistence(timeout: 5), "Native disclosure must still collapse the advisory")
+        let closed = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        closed.name = accessibilityText ? "Closed advisory at largest text" : "Closed advisory in expanded controls"
+        closed.lifetime = .keepAlways
+        add(closed)
     }
 
     @MainActor
@@ -1968,6 +1975,11 @@ final class StandClearUITests: XCTestCase {
         let outbound = "N:N:R11>R05"
         let choice = list.buttons["placeRouteOption-419>R05:\(inbound)|\(outbound)"]
         revealPlaceElement(choice, in: list)
+        XCTAssertTrue(choice.label.contains("4 → N/W"), "Route bullets must retain the ordered transfer services")
+        let routeOptions = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        routeOptions.name = "Ordered native route bullets for the Lexington Av transfer"
+        routeOptions.lifetime = .keepAlways
+        add(routeOptions)
         choice.tap()
         let map = app.descendants(matching: .any)["appleTransitMap"].firstMatch
         let interchange = "Change to N/W at Lexington Av/59 St"
