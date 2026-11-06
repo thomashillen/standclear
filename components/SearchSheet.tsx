@@ -780,14 +780,25 @@ export default function SearchSheet({
     };
   }, [expandedPlan, onExpandedPlanChange]);
 
+  // A map selection includes walking anchors as well as the subway plan.
+  // Replacing either endpoint invalidates it even if the plan key is unchanged.
+  // Compare endpoint state only so prediction reranking preserves a rider's pick.
+  const selectedEndpoints = useRef({ from: tripFrom, to: tripTo });
+  useEffect(() => {
+    if (selectedEndpoints.current.from === tripFrom && selectedEndpoints.current.to === tripTo) return;
+    selectedEndpoints.current = { from: tripFrom, to: tripTo };
+    onTripSelect?.(null);
+    setExpandedPlan(null);
+  }, [tripFrom, tripTo, onTripSelect]);
+
   // Auto-select the fastest plan whenever a fresh ranked list arrives
   // and nothing is currently selected. The rider almost always wants
   // to see the top result on the map without an extra tap, and the
   // ranked plans are sorted by total time — so tripPlans[0] is the
   // pick. We deliberately don't override a selection the rider has
   // already made (e.g. tapped the second-fastest); that selection
-  // sticks until the trip pair changes (which clears tripPlans and
-  // brings us back through this effect with no selection).
+  // sticks until the trip pair changes and clears the map selection.
+  // The next render then selects from the new pair's ranked plans.
   //
   // Gate on `open` because closing the sheet clears the parent's
   // `selectedTripSelection` (so `selectedTripKey` flips to null) while

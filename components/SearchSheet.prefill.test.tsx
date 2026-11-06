@@ -1,9 +1,11 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { useCallback, useState, type ComponentProps } from "react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Lines } from "@/lib/subwayData";
 import SearchSheet from "./SearchSheet";
 
-const { useLines, useCommute, geo, requestGeolocation, recentSearches } = vi.hoisted(() => ({
+const { useLines, useCommute, geo, requestGeolocation, recentSearches, clock } = vi.hoisted(() => ({
+  clock: { now: 1_800_000_000_000 },
   useLines: vi.fn(),
   useCommute: vi.fn(),
   geo: {
@@ -16,6 +18,7 @@ const { useLines, useCommute, geo, requestGeolocation, recentSearches } = vi.hoi
 }));
 
 vi.mock("@/lib/subwayData", () => ({ useLines }));
+vi.mock("@/lib/useNow", () => ({ useNow: () => clock.now }));
 vi.mock("@/lib/useTrains", () => ({ useTrains: () => null }));
 vi.mock("@/lib/useGeolocation", () => ({
   useGeolocation: () => ({ ...geo, request: requestGeolocation }),
@@ -31,6 +34,12 @@ vi.mock("@/lib/useRecentSearches", () => ({
     addPlace: vi.fn(),
     clear: vi.fn(),
   }),
+}));
+
+vi.mock("@/lib/geocoding", () => ({
+  makeDebouncedSuggester: () => (query: string, _options: unknown, done: (items: unknown[]) => void) =>
+    done(query === "New address" ? [{ mapboxId: "new-address", name: "New address", context: "Manhattan" }] : []),
+  retrievePlace: async () => ({ id: "new-address", name: "New address", context: "Manhattan", lng: -74.0002, lat: 40.8002 }),
 }));
 
 const lines: Lines = {
@@ -58,9 +67,22 @@ beforeEach(() => {
   useLines.mockReturnValue(lines);
   useCommute.mockReturnValue(savedCommute);
   Object.assign(geo, { status: "idle", lat: null, lng: null });
+  clock.now = 1_800_000_000_000;
   requestGeolocation.mockReset();
   recentSearches.current = [];
 });
+
+type TripSelection = Parameters<NonNullable<ComponentProps<typeof SearchSheet>["onTripSelect"]>>[0];
+
+function SelectedTripHarness({ changed, open = true }: { changed: (selection: TripSelection) => void; open?: boolean }) {
+  const [selection, setSelection] = useState<TripSelection>(null);
+  const select = useCallback((next: TripSelection) => {
+    changed(next);
+    setSelection(next);
+  }, [changed]);
+  return <SearchSheet open={open} initialMode="directions" onClose={() => setSelection(null)} onStationOpen={vi.fn()}
+    onTripSelect={select} selectedTripKey={selection ? "selected-plan" : null} />;
+}
 
 describe("SearchSheet directions prefill", () => {
   it("keeps a deliberately cleared saved destination empty and focused, then prefills on reopen", () => {
@@ -214,4 +236,72 @@ describe("SearchSheet directions prefill", () => {
     expect(screen.getByRole<HTMLInputElement>("textbox", { name: "From station search" }).placeholder).toBe("Search start");
     expect(screen.getByRole("button", { name: "To: Home station" })).toBeTruthy();
   });
+  it("replaces a selected map trip after a destination edit and swap, preserving the untouched endpoint", () => {
+    useLines.mockReturnValue({
+      ...lines,
+      A: { ...lines.A, stops: [...lines.A.stops, { id: "test-third", name: "Third station", lng: -74, lat: 40.9, shapeIdx: 2 }] },
+    });
+    const changed = vi.fn();
+    const { rerender } = render(<SelectedTripHarness changed={changed} />);
+    expect(changed.mock.lastCall?.[0]?.plan.legs.at(-1).alightStopId).toBe("test-work");
+    changed.mockClear();
+    fireEvent.click(screen.getByRole("button", { name: "To: Work station" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "To station search" }), { target: { value: "Third" } });
+    fireEvent.click(screen.getByRole("button", { name: /Third station/ }));
+    expect(screen.getByRole("button", { name: "From: Home station" })).toBeTruthy();
+    expect(changed.mock.calls[0]?.[0]).toBeNull();
+    expect(changed.mock.lastCall?.[0]?.plan.legs.at(-1).alightStopId).toBe("test-third");
+
+    changed.mockClear();
+    fireEvent.click(screen.getByRole("button", { name: "Swap from and to" }));
+    expect(changed.mock.calls[0]?.[0]).toBeNull();
+    expect(changed.mock.lastCall?.[0]?.plan.legs[0].boardStopId).toBe("test-third");
+    expect(changed.mock.lastCall?.[0]?.plan.legs.at(-1).alightStopId).toBe("test-home");
+    changed.mockClear();
+    clock.now += 1000;
+    rerender(<SelectedTripHarness changed={changed} />);
+    expect(changed).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Clear from" }));
+    expect(changed.mock.lastCall?.[0]).toBeNull();
+    changed.mockClear();
+    clock.now += 1000;
+    rerender(<SelectedTripHarness changed={changed} />);
+    expect(changed).not.toHaveBeenCalled();
+    rerender(<SelectedTripHarness changed={changed} open={false} />);
+    expect(changed.mock.calls.every(([selection]) => selection === null)).toBe(true);
+  });
+
+  it("replaces the destination walking anchor even when the subway plan is identical", async () => {
+    const changed = vi.fn();
+    render(<SelectedTripHarness changed={changed} />);
+    const originalPlan = changed.mock.lastCall?.[0]?.plan;
+    expect(originalPlan).toBeTruthy();
+    changed.mockClear();
+    fireEvent.click(screen.getByRole("button", { name: "To: Work station" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "To station search" }), { target: { value: "New address" } });
+    fireEvent.click(screen.getByRole("button", { name: /New address Manhattan/ }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "To: New address" })).toBeTruthy());
+    expect(screen.getByRole("button", { name: "From: Home station" })).toBeTruthy();
+    expect(changed.mock.calls[0]?.[0]).toBeNull();
+    await waitFor(() => expect(changed.mock.lastCall?.[0]?.plan).toEqual(originalPlan));
+    expect(changed.mock.lastCall?.[0]?.walkTo).toEqual({ name: "New address", lng: -74.0002, lat: 40.8002 });
+  });
+
+  it("replaces the map route when the origin is edited without clearing the destination", () => {
+    useLines.mockReturnValue({
+      ...lines,
+      A: { ...lines.A, stops: [...lines.A.stops, { id: "test-third", name: "Third station", lng: -74, lat: 40.9, shapeIdx: 2 }] },
+    });
+    const changed = vi.fn();
+    render(<SelectedTripHarness changed={changed} />);
+    changed.mockClear();
+    fireEvent.click(screen.getByRole("button", { name: "From: Home station" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "From station search" }), { target: { value: "Third" } });
+    fireEvent.click(screen.getByRole("button", { name: /Third station/ }));
+    expect(screen.getByRole("button", { name: "To: Work station" })).toBeTruthy();
+    expect(changed.mock.calls[0]?.[0]).toBeNull();
+    expect(changed.mock.lastCall?.[0]?.plan.legs[0].boardStopId).toBe("test-third");
+    expect(changed.mock.lastCall?.[0]?.plan.legs.at(-1).alightStopId).toBe("test-work");
+  });
+
 });
