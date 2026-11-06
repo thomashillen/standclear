@@ -162,6 +162,7 @@ private struct ServiceAlertSection: View {
     let emptyMessage: String
     let summaryIdentifier: String
     var compact = false
+    var systemwide = false
     @State private var expanded = false
 
     var body: some View {
@@ -173,6 +174,7 @@ private struct ServiceAlertSection: View {
             case .current:
                 if matches.isEmpty, !compact {
                     Text(emptyMessage)
+                        .accessibilityIdentifier(systemwide ? "systemAlertsEmpty" : "scopedAlertsEmpty")
                 }
             case let .lastReported(date):
                 if compact {
@@ -191,32 +193,59 @@ private struct ServiceAlertSection: View {
             }
             if load.snapshot?.available != false, !matches.isEmpty {
                 let severeCount = matches.filter { $0.severity == "severe" }.count
-                DisclosureGroup(isExpanded: $expanded) {
+                if systemwide {
                     ForEach(matches) { alert in
-                        VStack(alignment: .leading, spacing: 4) {
-                            Label(alert.severity == "severe" ? "Severe" : alert.severity == "warning" ? "Warning" : "Information",
-                                  systemImage: alert.severity == "info" ? "info.circle" : "exclamationmark.triangle")
-                                .font(.subheadline)
-                            Text(alert.header.isEmpty ? alert.effect.replacingOccurrences(of: "_", with: " ").capitalized : alert.header)
-                                .font(.headline)
+                        DisclosureGroup {
                             if !alert.description.isEmpty, alert.description != alert.header {
                                 Text(alert.description)
+                            } else {
+                                Text("No additional details reported.").foregroundStyle(.secondary)
                             }
+                        } label: {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Label(alert.severity == "severe" ? "Severe" : alert.severity == "warning" ? "Warning" : "Information",
+                                      systemImage: alert.severity == "info" ? "info.circle" : "exclamationmark.triangle")
+                                    .font(.subheadline)
+                                let routes = Array(Set(alert.routeIds + (alert.selectors ?? []).compactMap(\.routeId))).sorted()
+                                if !routes.isEmpty {
+                                    Text("Routes: \(routes.map { TransitRouteIdentity($0).spokenName }.joined(separator: ", "))")
+                                        .font(.subheadline).foregroundStyle(.secondary)
+                                }
+                                Text(alert.header.isEmpty ? alert.effect.replacingOccurrences(of: "_", with: " ").capitalized : alert.header)
+                                    .font(.headline)
+                            }
+                            .fixedSize(horizontal: false, vertical: true)
                         }
-                        .accessibilityElement(children: .combine)
+                        .accessibilityIdentifier("serviceAlert-\(alert.id)")
                     }
-                } label: {
-                    let count = "\(matches.count) \(matches.count == 1 ? "advisory" : "advisories")"
-                    if severeCount > 0 {
-                        Label("\(count) · \(severeCount) severe", systemImage: "exclamationmark.triangle.fill")
-                    } else {
-                        Text(count)
+                } else {
+                    DisclosureGroup(isExpanded: $expanded) {
+                        ForEach(matches) { alert in
+                            VStack(alignment: .leading, spacing: 4) {
+                                Label(alert.severity == "severe" ? "Severe" : alert.severity == "warning" ? "Warning" : "Information",
+                                      systemImage: alert.severity == "info" ? "info.circle" : "exclamationmark.triangle")
+                                    .font(.subheadline)
+                                Text(alert.header.isEmpty ? alert.effect.replacingOccurrences(of: "_", with: " ").capitalized : alert.header)
+                                    .font(.headline)
+                                if !alert.description.isEmpty, alert.description != alert.header {
+                                    Text(alert.description)
+                                }
+                            }
+                            .accessibilityElement(children: .combine)
+                        }
+                    } label: {
+                        let count = "\(matches.count) \(matches.count == 1 ? "advisory" : "advisories")"
+                        if severeCount > 0 {
+                            Label("\(count) · \(severeCount) severe", systemImage: "exclamationmark.triangle.fill")
+                        } else {
+                            Text(count)
+                        }
                     }
+                    .accessibilityIdentifier(summaryIdentifier)
                 }
-                .accessibilityIdentifier(summaryIdentifier)
             }
         } header: {
-            if !compact {
+            if !compact, !systemwide {
                 Text("Service alerts")
             }
         }
@@ -257,6 +286,7 @@ private struct ServiceAlertSection: View {
     private var lineRetryButton: some View {
         Button(load.isRequestInFlight ? "Checking service alerts…" : "Retry alerts", action: retry)
             .disabled(load.isRequestInFlight)
+            .accessibilityIdentifier(systemwide ? "systemAlertsRetry" : "lineAlertsRetry")
     }
 
     private var retryButton: some View {
@@ -283,6 +313,63 @@ private struct ServiceAlertSection: View {
         } else {
             statusLabel("Service alerts unavailable", symbol: "wifi.exclamationmark", lastReported: lastReported)
             lineRetryButton
+        }
+    }
+}
+
+/// One active visit, using the existing advisory transport and evidence rules.
+/// MapShell keeps the report when the same visit moves between sheet and pane.
+struct SystemAlertsView: View {
+    let store: TransitStore
+    @Binding var load: StationAlertsLoad
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var visible = false
+    @State private var revision = 0
+
+    private struct Request: Equatable {
+        let active: Bool
+        let revision: Int
+    }
+
+    private var request: Request {
+        Request(active: visible && scenePhase == .active, revision: revision)
+    }
+
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 5)) { context in
+            List {
+                ServiceAlertSection(load: load, now: context.date, retry: { revision += 1 }, includes: { _ in true },
+                                    emptyMessage: "No service alerts reported.", summaryIdentifier: "systemAlertsSummary", systemwide: true)
+            }
+            .listStyle(.plain)
+            .scrollContentBackground(.hidden)
+            .navigationTitle("Service alerts")
+            .navigationBarTitleDisplayMode(.inline)
+            .accessibilityIdentifier("systemAlertsList")
+        }
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button("Refresh service alerts", systemImage: "arrow.clockwise") { revision += 1 }
+                    .disabled(load.isRequestInFlight)
+                    .accessibilityIdentifier("systemAlertsRefresh")
+            }
+        }
+        .onAppear { visible = true }
+        .onDisappear { visible = false }
+        .task(id: request) { [request] in
+            guard request.active else { return }
+            while !Task.isCancelled {
+                load.beginRequest()
+                do {
+                    let snapshot = try await store.stationAlerts()
+                    guard !Task.isCancelled, self.request == request else { return }
+                    load.receive(snapshot)
+                } catch {
+                    guard !Task.isCancelled, self.request == request else { return }
+                    load.fail()
+                }
+                do { try await Task.sleep(for: .seconds(60)) } catch { return }
+            }
         }
     }
 }
