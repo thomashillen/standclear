@@ -656,7 +656,36 @@ struct PlacePreview: View {
 
     private func routeSummary(_ route: PlaceRouting.Route) -> String {
         guard let trip = route.trip else { return "Walk directly" }
-        return trip.legs.map { $0.routeIDs.map(RouteBadge.displayID).joined(separator: "/") }.joined(separator: " → ")
+        return trip.legs.map { $0.routeIDs.map { TransitRouteIdentity($0).spokenName }.joined(separator: "/") }.joined(separator: " → ")
+    }
+
+    @ViewBuilder
+    private func routeOptionTitle(_ route: PlaceRouting.Route) -> some View {
+        if let trip = route.trip {
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 4) {
+                    ForEach(Array(trip.legs.enumerated()), id: \.element.id) { index, leg in
+                        if index > 0 {
+                            Image(systemName: "arrow.right")
+                        }
+                        ForEach(leg.routeIDs, id: \.self) { RouteBadge(routeID: $0) }
+                    }
+                }
+                .fixedSize(horizontal: true, vertical: false)
+                VStack(alignment: .leading, spacing: 4) {
+                    ForEach(Array(trip.legs.enumerated()), id: \.element.id) { index, leg in
+                        if index > 0 {
+                            Image(systemName: "arrow.down")
+                        }
+                        RouteBadgeGroup(routes: leg.routeIDs)
+                    }
+                }
+            }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(routeSummary(route))
+        } else {
+            Text("Walk directly").font(.headline)
+        }
     }
 
     private func optionsSection(_ options: [Option], selectedID: String) -> some View {
@@ -667,7 +696,7 @@ struct PlacePreview: View {
                 } label: {
                     VStack(alignment: .leading, spacing: 3) {
                         HStack {
-                            Text(routeSummary(option.route)).font(.headline)
+                            routeOptionTitle(option.route)
                             Spacer()
                             if let estimate = option.estimate {
                                 Text("~\(minutes(estimate.totalSeconds))").monospacedDigit()
