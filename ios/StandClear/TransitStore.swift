@@ -268,10 +268,12 @@ final class TransitStore {
                     throw URLError(.notConnectedToInternet)
                 }
                 let stale = ProcessInfo.processInfo.arguments.contains("--ui-test-stale-alerts") || (recovery && alertRequests == 1)
+                let windowEnd = now.timeIntervalSince1970 + (ProcessInfo.processInfo.arguments.contains("--ui-test-alert-window-absolute") ? 2 * 86400 : 2700)
                 payload = ["available": true, "generatedAt": now.timeIntervalSince1970 * 1000,
                            "feedTimestamp": now.timeIntervalSince1970 - (stale ? 780 : 0), "alerts": ProcessInfo.processInfo.arguments.contains("--ui-test-empty-alerts") ? [] : [
                                ["id": "fixture-wall", "header": "Downtown 4 trains are delayed at Wall St",
                                 "description": "Allow extra travel time at Wall St.", "effect": "SIGNIFICANT_DELAYS", "severity": "severe",
+                                "startTime": now.timeIntervalSince1970 - 3600, "endTime": windowEnd,
                                 "routeIds": ["4"], "stopIds": ["419"], "selectors": [["routeId": "4", "stopId": "419"]]],
                                ["id": "fixture-express", "header": "6 express trains are delayed at Pelham Bay Park",
                                 "description": "Allow extra travel time for express service.", "effect": "SIGNIFICANT_DELAYS", "severity": "warning",

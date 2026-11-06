@@ -230,6 +230,104 @@ final class StandClearUITests: XCTestCase {
     }
 
     @MainActor
+    func testAdvisoryWindowRequiresCurrentReportAcrossLayouts() {
+        let app = launchForMoreMenu(arguments: ["--ui-test-alert-recovery"])
+        defer { XCUIDevice.shared.orientation = .portrait }
+        app.buttons["moreButton"].tap()
+        app.buttons["serviceAlertsButton"].tap()
+        let list = app.collectionViews["systemAlertsList"]
+        let wall = list.buttons["serviceAlert-fixture-wall"]
+        // A native disclosure may combine its caption into the button's accessible label.
+        let window = list.descendants(matching: .any).matching(NSPredicate(
+            format: "identifier == %@ OR (identifier == %@ AND label CONTAINS %@)",
+            "alertWindow-fixture-wall", "serviceAlert-fixture-wall", "Reported alert display window"
+        )).firstMatch
+        let retry = list.buttons["systemAlertsRetry"]
+        XCTAssertTrue(retry.waitForExistence(timeout: 10))
+        revealPlaceElement(wall, in: list)
+        XCTAssertTrue(wall.label.contains("Wall St"))
+        XCTAssertFalse(window.exists, "A retained stale advisory cannot establish a current reported window")
+        revealPlaceElement(retry, in: list, downward: false)
+        retry.tap()
+        let unavailable = list.staticTexts["Service alerts unavailable"]
+        XCTAssertTrue(unavailable.waitForExistence(timeout: 10))
+        revealPlaceElement(wall, in: list)
+        XCTAssertTrue(wall.label.contains("Wall St"), "Failed refresh must retain the reported advisory")
+        XCTAssertFalse(window.exists, "Failed refresh must not revive a previously reported window")
+        revealPlaceElement(retry, in: list, downward: false)
+        retry.tap()
+        XCTAssertTrue(unavailable.waitForNonExistence(timeout: 10))
+        XCTAssertTrue(window.waitForExistence(timeout: 10))
+        revealPlaceElement(window, in: list)
+        XCTAssertTrue(window.label.contains("Reported"))
+        XCTAssertTrue(window.label.contains("New York"), "VoiceOver must identify the time zone of the reported end")
+        XCTAssertTrue(window.label.contains("Not a guaranteed service restoration time"))
+        XCTAssertFalse(list.descendants(matching: .any)["alertWindow-fixture-express"].exists,
+                       "An advisory without a reported end must not acquire a countdown")
+        let compact = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        compact.name = "Current reported advisory window in compact layout"
+        compact.lifetime = .keepAlways
+        add(compact)
+
+        XCUIDevice.shared.orientation = .landscapeLeft
+        waitForLayout(in: app, expanded: true)
+        XCTAssertTrue(list.waitForExistence(timeout: 5))
+        revealPlaceElement(window, in: list)
+        XCTAssertTrue(window.label.contains("New York"))
+        XCTAssertFalse(retry.exists)
+        revealPlaceElement(wall, in: list)
+        wall.tap()
+        let description = list.staticTexts["Allow extra travel time at Wall St."]
+        XCTAssertTrue(description.waitForExistence(timeout: 5), "Timing must preserve access to actual advisory details")
+        revealPlaceElement(description, in: list)
+        let expanded = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        expanded.name = "Expanded reported advisory window and details"
+        expanded.lifetime = .keepAlways
+        add(expanded)
+    }
+
+    @MainActor
+    func testAdvisoryWindowAndDetailsAtLargestAccessibilityText() {
+        let app = launchForMoreMenu(accessibilityText: true, arguments: ["--ui-test-alert-window-absolute"])
+        defer { XCUIDevice.shared.orientation = .portrait }
+        app.buttons["moreButton"].tap()
+        app.buttons["serviceAlertsButton"].tap()
+        let list = app.collectionViews["systemAlertsList"]
+        // A native disclosure may combine its caption into the button's accessible label.
+        let window = list.descendants(matching: .any).matching(NSPredicate(
+            format: "identifier == %@ OR (identifier == %@ AND label CONTAINS %@)",
+            "alertWindow-fixture-wall", "serviceAlert-fixture-wall", "Reported alert display window"
+        )).firstMatch
+        XCTAssertTrue(window.waitForExistence(timeout: 10))
+        let caption = list.staticTexts["alertWindow-fixture-wall"].firstMatch
+        revealPlaceElement(caption.exists ? caption : window, in: list)
+        XCTAssertTrue(window.label.contains("Reported"))
+        XCTAssertTrue(window.label.contains("New York"))
+        XCTAssertTrue(window.label.contains("Not a guaranteed service restoration time"))
+        XCTAssertGreaterThan(window.frame.height, 0)
+        XCTAssertTrue(list.frame.intersects(window.frame), "Reported timing must remain readable in the native scrolling list")
+        let capture = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        capture.name = "Reported advisory window at largest accessibility text"
+        capture.lifetime = .keepAlways
+        add(capture)
+        let wall = list.buttons["serviceAlert-fixture-wall"]
+        XCTAssertTrue(wall.isEnabled)
+        if caption.exists {
+            caption.tap()
+        } else {
+            wall.tap()
+        }
+        let description = list.staticTexts["Allow extra travel time at Wall St."]
+        XCTAssertTrue(description.waitForExistence(timeout: 5))
+        revealPlaceElement(description, in: list)
+        XCTAssertTrue(description.exists, "The native disclosure must retain full advisory details at largest text")
+        let details = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        details.name = "Largest text advisory details after expanding its timing caption"
+        details.lifetime = .keepAlways
+        add(details)
+    }
+
+    @MainActor
     func testStationAdvisorySurvivesFailedRetryAndRecovers() {
         let app = XCUIApplication()
         app.terminate()
@@ -277,6 +375,10 @@ final class StandClearUITests: XCTestCase {
         XCTAssertFalse(list.staticTexts["Alert status unconfirmed"].exists)
         XCTAssertFalse(retry.exists, "A successful current report should replace the failed-request state")
         XCTAssertFalse(list.staticTexts["stationAlertLastReport"].exists)
+        summary.tap()
+        let currentAdvisory = list.staticTexts["alertWindow-fixture-wall"].firstMatch
+        XCTAssertTrue(currentAdvisory.waitForExistence(timeout: 5))
+        XCTAssertTrue(currentAdvisory.label.contains("Reported alert display window"))
     }
 
     @MainActor
@@ -806,6 +908,7 @@ final class StandClearUITests: XCTestCase {
         alerts.tap()
         let warning = stops.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "Downtown 4 trains are delayed at Wall St")).firstMatch
         XCTAssertTrue(warning.waitForExistence(timeout: 5))
+        XCTAssertTrue(warning.label.contains("Reported alert display window"), "Line advisories must share the reported timing context")
         let alertCapture = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         alertCapture.name = "4 line advisory before choosing a station"
         alertCapture.lifetime = .keepAlways
