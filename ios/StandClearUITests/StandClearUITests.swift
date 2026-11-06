@@ -2788,7 +2788,7 @@ final class StandClearUITests: XCTestCase {
         }
         guard staysCleared("Feed refreshes must not restore a cleared route") else { return }
         XCUIDevice.shared.orientation = .portrait
-        waitForLayout(in: app, expanded: false, readyControl: "moreButton")
+        waitForLayout(in: app, expanded: false, readyControl: "originPicker")
         let stayedClear = staysCleared("Narrowing must not restore the cleared itinerary")
         let compact = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         compact.name = "Cleared station route after narrowing"
@@ -3077,7 +3077,11 @@ final class StandClearUITests: XCTestCase {
         add(screenshot)
         app.buttons["showStationRouteOnMap"].tap()
         XCTAssertTrue(app.buttons["moreButton"].waitForExistence(timeout: 5))
-        XCTAssertFalse(app.navigationBars["Trip details"].exists)
+        let restore = app.buttons["restoreRoutePanel"]
+        XCTAssertTrue(restore.waitForExistence(timeout: 5))
+        XCTAssertTrue(restore.isHittable)
+        XCTAssertFalse(app.navigationBars["Trip details"].isHittable)
+        XCTAssertFalse(app.buttons["showStationRouteOnMap"].isHittable)
         let routeMap = XCTAttachment(screenshot: app.screenshot())
         routeMap.name = "Selected itinerary on Apple Maps"
         routeMap.lifetime = .keepAlways
@@ -3132,9 +3136,8 @@ final class StandClearUITests: XCTestCase {
         let map = app.descendants(matching: .any)["appleTransitMap"].firstMatch
         let cleared = NSPredicate { _, _ in MainActor.assumeIsolated {
             guard map.exists else { return false }
-            return !app.buttons["clearMapRoute"].exists && labels.allSatisfy { label in
-                !map.descendants(matching: .any).matching(NSPredicate(format: "label == %@", label)).firstMatch.exists
-            }
+            return !app.buttons["clearMapRoute"].exists &&
+                map.descendants(matching: .any).matching(NSPredicate(format: "label IN %@", labels)).count == 0
         } }
         XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: cleared, object: map)], timeout: 5), .completed,
                        "Clear route must remove the boarding, arrival, and transfer markers", file: file, line: line)
