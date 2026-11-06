@@ -250,15 +250,13 @@ struct MapShell: View {
                             stationEndpoints: activeDestination == nil ? selectedTrip.map { StationTripEndpoints(plan: $0, lines: store.lines) } : nil,
                             placeGeometryRevision: placeGeometryRevision, transferMarker: transferMarker)
             if !showsJourney, panel == nil || coveredWidth > 0 {
-                TimelineView(.periodic(from: .now, by: 5)) { timeline in
-                    NearbyGlancePanel(store: store, location: location, now: timeline.date,
-                                      maximumHeight: maximumGlanceHeight,
-                                      openStation: { showGlanceStation($0, expanded: coveredWidth > 0) },
-                                      openNearby: { showNearby(expanded: coveredWidth > 0) })
-                        .frame(maxWidth: min(typeSize.isAccessibilitySize ? 260 : 220, max(0, statusWidth - 32)))
-                        .padding()
-                        .frame(maxWidth: statusWidth, alignment: .leading)
-                }
+                NearbyGlancePanel(store: store, location: location,
+                                  maximumHeight: maximumGlanceHeight,
+                                  openStation: { showGlanceStation($0, expanded: coveredWidth > 0) },
+                                  openNearby: { showNearby(expanded: coveredWidth > 0) })
+                    .frame(maxWidth: min(typeSize.isAccessibilitySize ? 260 : 220, max(0, statusWidth - 32)))
+                    .padding()
+                    .frame(maxWidth: statusWidth, alignment: .leading)
             }
         }
     }
