@@ -256,6 +256,7 @@ final class PlacePreviewSession {
 }
 
 struct PlacePreview: View {
+    @Environment(\.expandedTransitPanel) private var expandedPanel
     let place: PlaceResult
     let store: TransitStore
     let location: LocationStore
@@ -390,27 +391,32 @@ struct PlacePreview: View {
                 }
                 .accessibilityElement(children: .combine)
             }
+            .listRowBackground(expandedPanel ? Color.clear : nil)
             if let issue = current?.issue, case .sameEndpoints = issue {
                 // Identical coordinates need no station data. Keep this known
                 // result visible while static data loads or needs recovery.
-                issueView(issue)
+                issueView(issue).listRowBackground(expandedPanel ? Color.clear : nil)
                 if store.error != nil {
                     Button("Retry stations") { Task { await store.loadLines() } }
+                        .listRowBackground(expandedPanel ? Color.clear : nil)
                 }
             } else if store.loading {
-                ProgressView("Loading subway stations…")
+                ProgressView("Loading subway stations…").listRowBackground(expandedPanel ? Color.clear : nil)
             } else if store.error != nil {
-                ContentUnavailableView("Stations unavailable", systemImage: "tram")
+                ContentUnavailableView("Stations unavailable", systemImage: "tram").listRowBackground(expandedPanel ? Color.clear : nil)
                 Button("Retry stations") { Task { await store.loadLines() } }
+                    .listRowBackground(expandedPanel ? Color.clear : nil)
             } else if let current {
                 if let issue = current.issue {
-                    issueView(issue)
+                    issueView(issue).listRowBackground(expandedPanel ? Color.clear : nil)
                 } else if let selected = selected(in: current) {
                     optionsSection(current.options, selectedID: selected.id)
+                        .listRowBackground(expandedPanel ? Color.clear : nil)
                     itinerary(selected, current: current)
+                        .listRowBackground(expandedPanel ? Color.clear : nil)
                 }
             } else {
-                ProgressView("Preparing routes…")
+                ProgressView("Preparing routes…").listRowBackground(expandedPanel ? Color.clear : nil)
             }
         }
         .listStyle(.plain)
@@ -788,6 +794,7 @@ struct PlacePreview: View {
 }
 
 private struct PlaceOriginPicker: View {
+    @Environment(\.expandedTransitPanel) private var expandedPanel
     let stations: [Station]
     let choose: (PlacePreviewSession.Origin) -> Void
     @Environment(\.scenePhase) private var scenePhase
@@ -824,6 +831,7 @@ private struct PlaceOriginPicker: View {
         List {
             Button("Current Location", systemImage: "location") { pick(.currentLocation) }
                 .accessibilityIdentifier("placeOriginCurrentLocation")
+                .listRowBackground(expandedPanel ? Color.clear : nil)
             if key.query.count >= 2 {
                 Section("Addresses and places") {
                     if resolved != key.query {
@@ -845,6 +853,7 @@ private struct PlaceOriginPicker: View {
                         }
                     }
                 }
+                .listRowBackground(expandedPanel ? Color.clear : nil)
             }
             Section("Stations") {
                 ForEach(Transit.searchStations(stations, query: key.query)) { station in
@@ -856,7 +865,9 @@ private struct PlaceOriginPicker: View {
                     }.accessibilityIdentifier("stationChoice-\(station.id)")
                 }
             }
+            .listRowBackground(expandedPanel ? Color.clear : nil)
         }
+        .modifier(OriginPickerBackground())
         .searchable(text: $query, isPresented: $searchPresented, placement: .navigationBarDrawer(displayMode: .always), prompt: "Address, place or station")
         .searchFocused($searchFocused)
         .navigationTitle("From").navigationBarTitleDisplayMode(.inline)
@@ -875,6 +886,20 @@ private struct PlaceOriginPicker: View {
                 failed = true
             }
             resolved = key.query
+        }
+    }
+}
+
+/// Reveal the shared map-backed material only in the expanded control region.
+/// A compact sheet keeps its native list and navigation surfaces.
+private struct OriginPickerBackground: ViewModifier {
+    @Environment(\.expandedTransitPanel) private var expandedPanel
+
+    func body(content: Content) -> some View {
+        if expandedPanel {
+            content.scrollContentBackground(.hidden).containerBackground(.clear, for: .navigation)
+        } else {
+            content
         }
     }
 }

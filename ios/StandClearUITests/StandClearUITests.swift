@@ -1240,9 +1240,17 @@ final class StandClearUITests: XCTestCase {
         let origin = app.buttons["placeOriginPicker"]
         XCTAssertTrue(origin.waitForExistence(timeout: 10))
         XCTAssertTrue(origin.label.contains("Current Location"))
+        let endpointsCapture = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        endpointsCapture.name = expanded ? "Expanded route preview initial endpoints" : "Compact route preview initial endpoints"
+        endpointsCapture.lifetime = .keepAlways
+        add(endpointsCapture)
         origin.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
         let picker = app.searchFields[unifiedSearchPrompt]
         XCTAssertTrue(picker.waitForExistence(timeout: 10))
+        let originCapture = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        originCapture.name = expanded ? "Expanded From picker before search" : "Compact From picker before search"
+        originCapture.lifetime = .keepAlways
+        add(originCapture)
         guard focusSearchField(picker, in: app) else { return }
         picker.typeText("Wall\n")
         let chosen = app.buttons["stationChoice-419"]
@@ -1254,6 +1262,10 @@ final class StandClearUITests: XCTestCase {
         if !expanded, (app.buttons["Sheet Grabber"].value as? String) == "Half screen" {
             app.buttons["Sheet Grabber"].doubleTap()
         }
+        let optionsCapture = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        optionsCapture.name = expanded ? "Expanded route options from Wall St" : "Compact route options from Wall St"
+        optionsCapture.lifetime = .keepAlways
+        add(optionsCapture)
         let leg = list.descendants(matching: .any)["placeTripLeg-4:N:419>629"].firstMatch
         revealPlaceElement(leg, in: list)
         XCTAssertTrue(leg.exists)
@@ -2332,6 +2344,10 @@ final class StandClearUITests: XCTestCase {
             XCTAssertTrue(more.isHittable)
             more.tap()
             XCTAssertTrue(app.buttons["directionsButton"].waitForExistence(timeout: 5))
+            let menuCapture = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            menuCapture.name = "Expanded open More menu, visit \(cycle + 1)"
+            menuCapture.lifetime = .keepAlways
+            add(menuCapture)
             app.buttons["directionsButton"].tap()
             XCTAssertTrue(app.navigationBars["Directions"].waitForExistence(timeout: 5))
             more.tap()
@@ -2356,6 +2372,11 @@ final class StandClearUITests: XCTestCase {
                 XCTAssertTrue(more.waitForExistence(timeout: 5))
                 XCTAssertTrue(more.isEnabled)
                 more.tap()
+                XCTAssertTrue(app.buttons["arrivalStatusButton"].waitForExistence(timeout: 5))
+                let compactMenu = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+                compactMenu.name = "Compact open More menu after narrowing"
+                compactMenu.lifetime = .keepAlways
+                add(compactMenu)
                 app.buttons["arrivalStatusButton"].tap()
                 XCTAssertTrue(status.waitForExistence(timeout: 5))
                 status.buttons["OK"].tap()
@@ -2374,6 +2395,10 @@ final class StandClearUITests: XCTestCase {
             XCTAssertTrue(more.isEnabled)
             more.tap()
             XCTAssertTrue(app.buttons[action].waitForExistence(timeout: 5))
+            let menuCapture = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            menuCapture.name = "Largest text open More menu before \(title)"
+            menuCapture.lifetime = .keepAlways
+            add(menuCapture)
             app.buttons[action].tap()
             XCTAssertTrue(app.navigationBars[title].waitForExistence(timeout: 5))
             XCTAssertTrue(app.buttons["Done"].exists, "Accessibility text should retain the native compact sheet")
