@@ -205,9 +205,9 @@ struct MapShell: View {
                 stationSearchFocused = false
             }
         }
-        .onChange(of: activeDestination?.id) { _, id in
+        .onChange(of: activeDestination) { _, destination in
             editingPlaceID = nil
-            if id == nil {
+            if destination == nil {
                 placeRoute = nil
             }
         }
@@ -381,7 +381,7 @@ struct MapShell: View {
     }
 
     private var visiblePlaceRoute: PlaceMapRoute? {
-        guard scenePhase == .active, let placeRoute, placeRoute.place.id == activeDestination?.id,
+        guard scenePhase == .active, let placeRoute, placeRoute.place == activeDestination,
               publishedOrigin == placeSession.origin else { return nil }
         if placeSession.usesCurrentLocation {
             guard let fix = location.availableCoordinate, let start = placeRoute.start,
@@ -423,8 +423,28 @@ struct MapShell: View {
         tripFocusRevision += 1
     }
 
+    private func replacePlace(_ destination: PlaceResult, replacing previous: PlaceResult, expanded: Bool) {
+        guard activeDestination == previous, destination != previous else { return }
+        recentPlaces.record(destination)
+        focus.cancelPending()
+        selectedTrip = nil
+        placeRoute = nil
+        publishedOrigin = nil
+        framedPlaceChoice = nil
+        placeSession.selectedOptionID = nil
+        // Keep the existing session's rider-selected starting point. Opening a
+        // place from Search remains a separate, new current-location trip.
+        if expanded {
+            expandedPanel = .place(destination)
+        } else {
+            panel = .place(destination)
+        }
+        placeGeometryRevision += 1
+        tripFocusRevision += 1
+    }
+
     private func updatePlaceMap(_ route: PlaceMapRoute?, destination: PlaceResult) {
-        guard activeDestination?.id == destination.id else { return }
+        guard activeDestination == destination else { return }
         placeRoute = route
         publishedOrigin = route == nil ? nil : placeSession.origin
         placeGeometryRevision += 1
@@ -464,8 +484,8 @@ struct MapShell: View {
         case let .place(place):
             PlacePreview(place: place, store: store, location: location, session: placeSession,
                          onMapChange: { updatePlaceMap($0, destination: place) },
-                         onEditingOriginChanged: { editing in
-                             guard activeDestination?.id == place.id else { return }
+                         onEditingEndpointChanged: { editing in
+                             guard activeDestination == place else { return }
                              editingPlaceID = editing ? place.id : nil
                              guard !expanded else { return }
                              if editing {
@@ -475,18 +495,19 @@ struct MapShell: View {
                                  sheetDetent = typeSize.isAccessibilitySize ? .large : previous
                                  detentBeforeOriginPicker = nil
                              }
-                         })
-                         .toolbar {
-                             if expanded {
-                                 ToolbarItem(placement: .confirmationAction) { clearRouteButton }
-                             }
-                             ToolbarItem(placement: .navigation) {
-                                 Button("Back to Search", systemImage: "chevron.backward") {
-                                     showSearch(expanded: expanded)
-                                 }
-                                 .accessibilityIdentifier("placeBackToSearch")
-                             }
-                         }
+                         },
+                         onDestinationChange: { replacePlace($0, replacing: place, expanded: expanded) })
+                .toolbar {
+                    if expanded {
+                        ToolbarItem(placement: .confirmationAction) { clearRouteButton }
+                    }
+                    ToolbarItem(placement: .navigation) {
+                        Button("Back to Search", systemImage: "chevron.backward") {
+                            showSearch(expanded: expanded)
+                        }
+                        .accessibilityIdentifier("placeBackToSearch")
+                    }
+                }
         case let .station(id):
             if let station = store.stations.first(where: { $0.id == id }) {
                 StationArrivals(station: station, store: store, favoriteStations: favoriteStations, savedPlaces: savedPlaces, directionsSelection: $directionsSelection,

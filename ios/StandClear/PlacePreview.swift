@@ -262,10 +262,12 @@ struct PlacePreview: View {
     let location: LocationStore
     let session: PlacePreviewSession
     let onMapChange: (PlaceMapRoute?) -> Void
-    var onEditingOriginChanged: (Bool) -> Void = { _ in }
+    var onEditingEndpointChanged: (Bool) -> Void = { _ in }
+    var onDestinationChange: (PlaceResult) -> Void = { _ in }
     @Environment(\.dynamicTypeSize) private var typeSize
     @Environment(\.scenePhase) private var scenePhase
     @State private var editingOrigin = false
+    @State private var editingDestination = false
     @State private var preview: Preview?
     @State private var walks = PlaceWalkMemory()
     @State private var revision = 0
@@ -380,16 +382,21 @@ struct PlacePreview: View {
                         .contentShape(Rectangle())
                 }
                 .accessibilityIdentifier("placeOriginPicker")
-                LabeledContent("To") {
-                    VStack(alignment: .trailing, spacing: 2) {
-                        Text(place.name).foregroundStyle(.primary)
-                        if !place.subtitle.isEmpty {
-                            Text(place.subtitle).font(.caption).foregroundStyle(.secondary)
-                                .lineLimit(typeSize.isAccessibilitySize ? nil : 1)
+                Button { editingDestination = true } label: {
+                    LabeledContent("To") {
+                        VStack(alignment: .trailing, spacing: 2) {
+                            Text(place.name).foregroundStyle(.primary)
+                            if !place.subtitle.isEmpty {
+                                Text(place.subtitle).font(.caption).foregroundStyle(.secondary)
+                                    .lineLimit(typeSize.isAccessibilitySize ? nil : 1)
+                            }
                         }
                     }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
                 }
                 .accessibilityElement(children: .combine)
+                .accessibilityIdentifier("placeDestinationPicker")
             }
             .listRowBackground(expandedPanel ? Color.clear : nil)
             if let issue = current?.issue, case .sameEndpoints = issue {
@@ -423,15 +430,29 @@ struct PlacePreview: View {
         .listSectionSpacing(.compact)
         .accessibilityIdentifier("placePreviewList")
         .navigationDestination(isPresented: $editingOrigin) {
-            PlaceOriginPicker(stations: store.stations) { origin in
+            PlaceEndpointPicker(stations: store.stations) { origin in
                 if origin == .currentLocation, location.availableCoordinate == nil {
                     location.start()
                 }
                 session.choose(origin)
                 editingOrigin = false
             }
-            .onAppear { onEditingOriginChanged(true) }
-            .onDisappear { onEditingOriginChanged(false) }
+            .onAppear { onEditingEndpointChanged(true) }
+            .onDisappear { onEditingEndpointChanged(false) }
+        }
+        .navigationDestination(isPresented: $editingDestination) {
+            PlaceEndpointPicker(stations: [], destination: true) { selection in
+                guard case let .place(destination) = selection else { return }
+                editingDestination = false
+                // Restore the original detent before changing the panel identity;
+                // the old picker's disappearance then belongs to an old place.
+                onEditingEndpointChanged(false)
+                if destination != place {
+                    onDestinationChange(destination)
+                }
+            }
+            .onAppear { onEditingEndpointChanged(true) }
+            .onDisappear { onEditingEndpointChanged(false) }
         }
         .navigationTitle("Route preview")
         .navigationBarTitleDisplayMode(.inline)
@@ -793,9 +814,10 @@ struct PlacePreview: View {
     }
 }
 
-private struct PlaceOriginPicker: View {
+private struct PlaceEndpointPicker: View {
     @Environment(\.expandedTransitPanel) private var expandedPanel
     let stations: [Station]
+    var destination = false
     let choose: (PlacePreviewSession.Origin) -> Void
     @Environment(\.scenePhase) private var scenePhase
     @State private var searchPresented = false
@@ -829,9 +851,11 @@ private struct PlaceOriginPicker: View {
     var body: some View {
         let key = request
         List {
-            Button("Current Location", systemImage: "location") { pick(.currentLocation) }
-                .accessibilityIdentifier("placeOriginCurrentLocation")
-                .listRowBackground(expandedPanel ? Color.clear : nil)
+            if !destination {
+                Button("Current Location", systemImage: "location") { pick(.currentLocation) }
+                    .accessibilityIdentifier("placeOriginCurrentLocation")
+                    .listRowBackground(expandedPanel ? Color.clear : nil)
+            }
             if key.query.count >= 2 {
                 Section("Addresses and places") {
                     if resolved != key.query {
@@ -849,28 +873,30 @@ private struct PlaceOriginPicker: View {
                                     Text(item.subtitle).font(.subheadline).foregroundStyle(.secondary)
                                 }.frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
                             }
-                            .accessibilityIdentifier("placeOriginResult-\(item.id)")
+                            .accessibilityIdentifier("\(destination ? "placeDestinationResult" : "placeOriginResult")-\(item.id)")
                         }
                     }
                 }
                 .listRowBackground(expandedPanel ? Color.clear : nil)
             }
-            Section("Stations") {
-                ForEach(Transit.searchStations(stations, query: key.query)) { station in
-                    Button { pick(.station(station.id)) } label: {
-                        VStack(alignment: .leading) {
-                            Text(station.stop.name)
-                            Text(station.routes.map(RouteBadge.displayID).joined(separator: " · ")).font(.subheadline).foregroundStyle(.secondary)
-                        }.frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
-                    }.accessibilityIdentifier("stationChoice-\(station.id)")
+            if !destination {
+                Section("Stations") {
+                    ForEach(Transit.searchStations(stations, query: key.query)) { station in
+                        Button { pick(.station(station.id)) } label: {
+                            VStack(alignment: .leading) {
+                                Text(station.stop.name)
+                                Text(station.routes.map(RouteBadge.displayID).joined(separator: " · ")).font(.subheadline).foregroundStyle(.secondary)
+                            }.frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
+                        }.accessibilityIdentifier("stationChoice-\(station.id)")
+                    }
                 }
+                .listRowBackground(expandedPanel ? Color.clear : nil)
             }
-            .listRowBackground(expandedPanel ? Color.clear : nil)
         }
         .modifier(OriginPickerBackground())
-        .searchable(text: $query, isPresented: $searchPresented, placement: .navigationBarDrawer(displayMode: .always), prompt: "Address, place or station")
+        .searchable(text: $query, isPresented: $searchPresented, placement: .navigationBarDrawer(displayMode: .always), prompt: destination ? "Address or place" : "Address, place or station")
         .searchFocused($searchFocused)
-        .navigationTitle("From").navigationBarTitleDisplayMode(.inline)
+        .navigationTitle(destination ? "To" : "From").navigationBarTitleDisplayMode(.inline)
         .task(id: key) { [key] in
             guard key.active, key.query.count >= 2 else { return }
             do {
