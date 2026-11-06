@@ -29,6 +29,81 @@ final class TrainMotionTests: XCTestCase {
         Snapshot(generatedAt: (epoch + offset) * 1000, trains: [train], arrivals: arrivals)
     }
 
+    #if DEBUG && targetEnvironment(simulator)
+        func testTemporalFixtureMaintainsJourneyAcrossRefreshesAndStops() throws {
+            var fixture = TemporalMotionFixture()
+            let first = try XCTUnwrap(fixture.sample(at: epoch))
+            for offset in stride(from: 8.0, through: 120.0, by: 8) {
+                let sample = try XCTUnwrap(fixture.sample(at: epoch + offset))
+                XCTAssertEqual(sample.eta, first.eta)
+                XCTAssertEqual(sample.generatedAt, (epoch + offset) * 1000)
+                XCTAssertEqual(sample.reportedAt, epoch + offset)
+                XCTAssertEqual(sample.progress, 0.2 + offset / 120 * 0.8, accuracy: 0.000001)
+            }
+            let stopped = try XCTUnwrap(fixture.sample(at: epoch + 140))
+            XCTAssertEqual(stopped.progress, 1)
+            XCTAssertEqual(stopped.status, "STOPPED_AT")
+            fixture.reset()
+            let restarted = try XCTUnwrap(fixture.sample(at: epoch + 200))
+            XCTAssertEqual(restarted.progress, 0.2)
+            XCTAssertEqual(restarted.eta, epoch + 320)
+            XCTAssertEqual(restarted.status, "IN_TRANSIT_TO")
+        }
+
+        func testTemporalFixtureRejectsInvalidTimesWithoutStartingJourney() throws {
+            var fixture = TemporalMotionFixture()
+            for invalid in [Double.nan, .infinity, -.infinity, -1, .greatestFiniteMagnitude] {
+                XCTAssertNil(fixture.sample(at: invalid))
+            }
+            XCTAssertEqual(try XCTUnwrap(fixture.sample(at: epoch)).eta, epoch + 120)
+        }
+
+        func testTemporalRefreshesAdvanceEngineWhileReducedMotionStaysDiscrete() throws {
+            var fixture = TemporalMotionFixture()
+            var engine = TrainMotion(lines: [line()])
+            var previous: CLLocationCoordinate2D?
+            for offset in stride(from: 0.0, through: 112.0, by: 8) {
+                let sample = try XCTUnwrap(fixture.sample(at: epoch + offset))
+                let snapshot = feed(train(sample.progress, status: sample.status, reported: offset),
+                                    [arrival(sample.eta - epoch)], at: offset)
+                engine.update(snapshot: snapshot, now: date(offset))
+                let start = try XCTUnwrap(engine.markers(at: date(offset)).first).coordinate
+                let next = try XCTUnwrap(engine.markers(at: date(offset + 4)).first).coordinate
+                XCTAssertGreaterThan(next.latitude + next.longitude, start.latitude + start.longitude)
+                if let previous {
+                    XCTAssertGreaterThan(next.latitude + next.longitude, previous.latitude + previous.longitude)
+                }
+                previous = next
+                let discrete = try XCTUnwrap(engine.markers(at: date(offset), reduceMotion: true).first).coordinate
+                let discreteLater = try XCTUnwrap(engine.markers(at: date(offset + 4), reduceMotion: true).first).coordinate
+                XCTAssertEqual(discrete.latitude, discreteLater.latitude)
+                XCTAssertEqual(discrete.longitude, discreteLater.longitude)
+            }
+            let stopped = try XCTUnwrap(fixture.sample(at: epoch + 120))
+            engine.update(snapshot: feed(train(stopped.progress, status: stopped.status, reported: 120), [], at: 120), now: date(120))
+            XCTAssertFalse(engine.hasActiveMotion(at: date(124)))
+            XCTAssertEqual(try XCTUnwrap(engine.markers(at: date(124)).first).coordinate.latitude, 40.751, accuracy: 0.000001)
+        }
+
+        func testTemporalStaleEvidenceExpiresDespiteFurtherRefreshes() throws {
+            var fixture = TemporalMotionFixture()
+            let initial = try XCTUnwrap(fixture.sample(at: epoch, stale: true))
+            let later = try XCTUnwrap(fixture.sample(at: epoch + 64, stale: true))
+            XCTAssertEqual(later.generatedAt, initial.generatedAt)
+            XCTAssertEqual(later.reportedAt, initial.reportedAt)
+            XCTAssertEqual(later.progress, initial.progress)
+            XCTAssertEqual(later.eta, initial.eta)
+            var engine = TrainMotion(lines: [line()])
+            let snapshot = Snapshot(generatedAt: later.generatedAt,
+                                    trains: [train(later.progress)], arrivals: [arrival(later.eta - epoch)])
+            engine.update(snapshot: snapshot, now: date(0))
+            XCTAssertFalse(engine.markers(at: date(59)).isEmpty)
+            engine.update(snapshot: snapshot, now: date(64))
+            XCTAssertTrue(engine.markers(at: date(64)).isEmpty)
+            XCTAssertFalse(engine.hasActiveMotion(at: date(64)))
+        }
+    #endif
+
     func testMovementFollowsTrackAndHoldsNextPlatformAfterETA() throws {
         var engine = TrainMotion(lines: [line()])
         engine.update(snapshot: feed(train(), [arrival(40)]), now: date(0))

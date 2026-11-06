@@ -5,6 +5,95 @@ final class StandClearUITests: XCTestCase {
     private let unifiedSearchPrompt = "Address, place or station"
 
     @MainActor
+    func testTemporalTrainMovesRelativeToReferenceAndResumesAfterBackground() {
+        let app = XCUIApplication()
+        app.terminate()
+        XCUIDevice.shared.orientation = .portrait
+        app.resetAuthorizationStatus(for: .location)
+        app.launchArguments = ["--ui-test-fixture", "--ui-test-temporal-motion"]
+        addUIInterruptionMonitor(withDescription: "Location permission") { alert in
+            guard alert.buttons["Don’t Allow"].exists else { return false }
+            alert.buttons["Don’t Allow"].tap()
+            return true
+        }
+        app.launch()
+        activatePermissionPrompt(in: app)
+        let map = app.descendants(matching: .any)["appleTransitMap"].firstMatch
+        XCTAssertTrue(map.waitForExistence(timeout: 10))
+        map.pinch(withScale: 2, velocity: 1)
+        let train = map.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "Route 1 train. Estimated position.")).firstMatch
+        let reference = map.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "Route 4 train. Estimated position.")).firstMatch
+        XCTAssertTrue(train.waitForExistence(timeout: 10))
+        XCTAssertTrue(reference.waitForExistence(timeout: 10))
+
+        func observeMovement(_ visit: String) {
+            let start = train.frame
+            let fixed = reference.frame
+            XCTAssertGreaterThan(start.width, 0)
+            XCTAssertGreaterThan(fixed.width, 0)
+            let before = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            before.name = "Temporal train before movement — \(visit)"
+            before.lifetime = .keepAlways
+            add(before)
+            let moves = NSPredicate { _, _ in MainActor.assumeIsolated {
+                guard train.exists, reference.exists else { return false }
+                let next = train.frame
+                let stationary = reference.frame
+                return hypot(next.midX - start.midX, next.midY - start.midY) > 1 &&
+                    hypot(stationary.midX - fixed.midX, stationary.midY - fixed.midY) < 0.5
+            } }
+            expectation(for: moves, evaluatedWith: train)
+            waitForExpectations(timeout: 16)
+            let after = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            after.name = "Temporal train advanced against fixed reference — \(visit)"
+            after.lifetime = .keepAlways
+            add(after)
+        }
+
+        observeMovement("initial foreground")
+        XCUIDevice.shared.press(.home)
+        let backgrounded = NSPredicate { _, _ in MainActor.assumeIsolated {
+            app.state == .runningBackground || app.state == .runningBackgroundSuspended
+        } }
+        expectation(for: backgrounded, evaluatedWith: app)
+        waitForExpectations(timeout: 5)
+        app.activate()
+        XCTAssertTrue(train.waitForExistence(timeout: 10))
+        XCTAssertTrue(reference.waitForExistence(timeout: 10))
+        observeMovement("foreground reentry")
+    }
+
+    @MainActor
+    func testTemporalStaleEvidenceRemovesTrainDespiteRepeatedRequests() {
+        let app = XCUIApplication()
+        app.terminate()
+        XCUIDevice.shared.orientation = .portrait
+        app.resetAuthorizationStatus(for: .location)
+        app.launchArguments = ["--ui-test-fixture", "--ui-test-temporal-motion", "--ui-test-temporal-motion-stale"]
+        addUIInterruptionMonitor(withDescription: "Location permission") { alert in
+            guard alert.buttons["Don’t Allow"].exists else { return false }
+            alert.buttons["Don’t Allow"].tap()
+            return true
+        }
+        app.launch()
+        activatePermissionPrompt(in: app)
+        let map = app.descendants(matching: .any)["appleTransitMap"].firstMatch
+        XCTAssertTrue(map.waitForExistence(timeout: 10))
+        let train = map.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "Route 1 train. Estimated position.")).firstMatch
+        let reference = map.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "Route 4 train. Estimated position.")).firstMatch
+        XCTAssertTrue(train.waitForExistence(timeout: 10))
+        XCTAssertTrue(reference.waitForExistence(timeout: 10))
+        expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: train)
+        waitForExpectations(timeout: 65)
+        XCTAssertTrue(map.exists)
+        XCTAssertFalse(reference.exists)
+        let expired = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        expired.name = "Expired temporal source removes train markers despite repeated requests"
+        expired.lifetime = .keepAlways
+        add(expired)
+    }
+
+    @MainActor
     func testNearbyGlanceKeepsMapVisibleForGrantedLocation() {
         let app = XCUIApplication()
         app.terminate()
