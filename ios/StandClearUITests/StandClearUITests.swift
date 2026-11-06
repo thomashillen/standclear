@@ -233,6 +233,85 @@ final class StandClearUITests: XCTestCase {
     }
 
     @MainActor
+    func testAdvisoryRouteBulletsPreserveDisclosureAndText() {
+        checkAdvisoryRouteBullets(accessibilityText: false)
+    }
+
+    @MainActor
+    func testAdvisoryRouteBulletsAtLargestText() {
+        checkAdvisoryRouteBullets(accessibilityText: true)
+    }
+
+    @MainActor
+    private func checkAdvisoryRouteBullets(accessibilityText: Bool) {
+        let app = launchForMoreMenu(accessibilityText: accessibilityText, arguments: ["--ui-test-route-bullets"])
+        defer { XCUIDevice.shared.orientation = .portrait }
+        app.buttons["moreButton"].tap()
+        app.buttons["serviceAlertsButton"].tap()
+        let list = app.collectionViews["systemAlertsList"]
+        XCTAssertTrue(list.waitForExistence(timeout: 10))
+        let advisory = list.buttons["serviceAlert-fixture-wall"]
+        revealPlaceElement(advisory, in: list)
+        XCTAssertTrue(advisory.label.contains("Fixture advisory for Route 2 Route 3, Route F, and Route Franklin Avenue Shuttle"))
+        XCTAssertTrue(advisory.label.contains("UNKNOWN-LONG-ROUTE"))
+        XCTAssertTrue(advisory.label.contains("42 Street Shuttle"))
+        let collapsed = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        collapsed.name = accessibilityText ? "Route bullets at largest text" : "Route bullets and literal unknown route"
+        collapsed.lifetime = .keepAlways
+        add(collapsed)
+        advisory.tap()
+        let body = list.staticTexts.matching(NSPredicate(format: "label == %@", "Take Route 1 or Route 6 Express. Route Franklin Avenue Shuttle, Route 42 Street Shuttle, and Route Rockaway Park Shuttle retain their names. Keep [AX] and [planned] literal.")).firstMatch
+        revealPlaceElement(body, in: list)
+        XCTAssertTrue(body.waitForExistence(timeout: 5))
+        let expanded = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        expanded.name = accessibilityText ? "Inline advisory bullets at largest text" : "Inline advisory bullets in native text"
+        expanded.lifetime = .keepAlways
+        add(expanded)
+        if accessibilityText {
+            let start = list.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.75))
+            start.press(forDuration: 0.08, thenDragTo: start.withOffset(CGVector(dx: 0, dy: -150)),
+                        withVelocity: .slow, thenHoldForDuration: 0.3)
+            let tail = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            tail.name = "Literal advisory text after inline bullets at largest text"
+            tail.lifetime = .keepAlways
+            add(tail)
+        }
+        if !accessibilityText {
+            XCUIDevice.shared.orientation = .landscapeLeft
+            waitForLayout(in: app, expanded: true)
+            // The native disclosure begins closed in its new sidebar presentation.
+            revealPlaceElement(advisory, in: list, downward: false)
+            advisory.tap()
+            revealPlaceElement(body, in: list)
+            XCTAssertTrue(body.waitForExistence(timeout: 5))
+            let wide = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            wide.name = "Expanded native advisory bullets"
+            wide.lifetime = .keepAlways
+            add(wide)
+        }
+        if accessibilityText {
+            revealPlaceElement(advisory, in: list, downward: false)
+            advisory.tap()
+        } else {
+            // XCTest cannot supply an activation point for this partially
+            // scrolled native disclosure after reparenting. Tap its visible
+            // header below the pinned bar, then require the body to close.
+            let bounds = list.frame
+            let top = max(bounds.minY, app.navigationBars["Service alerts"].frame.maxY)
+            let content = CGRect(x: bounds.minX, y: top, width: bounds.width, height: max(0, bounds.maxY - top))
+            let visibleHeader = advisory.frame.intersection(content)
+            guard !visibleHeader.isNull, visibleHeader.width >= 44, visibleHeader.height >= 44 else {
+                XCTFail("The disclosure header must be visible before it can be closed")
+                return
+            }
+            let window = app.windows.firstMatch
+            window.coordinate(withNormalizedOffset: .zero)
+                .withOffset(CGVector(dx: visibleHeader.midX - window.frame.minX, dy: visibleHeader.midY - window.frame.minY)).tap()
+        }
+        XCTAssertTrue(body.waitForNonExistence(timeout: 5), "Native disclosure must still collapse the advisory")
+    }
+
+    @MainActor
     private func arrivalFeedUpdate(in app: XCUIApplication) -> String {
         app.buttons["moreButton"].tap()
         app.buttons["arrivalStatusButton"].tap()

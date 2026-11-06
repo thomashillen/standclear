@@ -171,8 +171,7 @@ struct DirectionStationPicker: View {
                 } label: {
                     VStack(alignment: .leading) {
                         Text(station.stop.name)
-                        Text(station.routes.map(RouteBadge.displayID).joined(separator: " · "))
-                            .font(.subheadline).foregroundStyle(.secondary)
+                        RouteBadgeGroup(routes: station.routes)
                     }
                 }
                 .accessibilityIdentifier("stationChoice-\(station.id)")

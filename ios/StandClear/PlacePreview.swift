@@ -719,8 +719,19 @@ struct PlacePreview: View {
                     let boarding = index == 1 && transfer?.isLexington59 == true ? "Lexington Av/59 St" : stops.first { $0.id == leg.boardStopId }?.name ?? leg.boardStopId
                     let alighting = index == 0 && transfer?.isLexington59 == true ? "Lexington Av/59 St" : stops.first { $0.id == leg.alightStopId }?.name ?? leg.alightStopId
                     VStack(alignment: .leading, spacing: 4) {
-                        Label("\(leg.routeIDs.map(RouteBadge.displayID).joined(separator: "/")) · \(leg.direction == "N" ? "Northbound" : "Southbound")", systemImage: "tram")
-                            .font(.headline)
+                        ViewThatFits(in: .horizontal) {
+                            HStack {
+                                ForEach(leg.routeIDs, id: \.self) { route in RouteBadge(routeID: route) }
+                                Text(leg.direction == "N" ? "Northbound" : "Southbound")
+                            }
+                            VStack(alignment: .leading) {
+                                RouteBadgeGroup(routes: leg.routeIDs)
+                                Text(leg.direction == "N" ? "Northbound" : "Southbound")
+                            }
+                        }
+                        .font(.headline)
+                        .accessibilityElement(children: .ignore)
+                        .accessibilityLabel("\(leg.routeIDs.map { TransitRouteIdentity($0).spokenName }.joined(separator: "/")) · \(leg.direction == "N" ? "Northbound" : "Southbound")")
                         Text("\(boarding) → \(alighting)")
                         Text("\(leg.stopCount) stops").font(.subheadline).foregroundStyle(.secondary)
                     }
@@ -883,7 +894,7 @@ private struct PlaceEndpointPicker: View {
                         Button { pick(.station(station.id)) } label: {
                             VStack(alignment: .leading) {
                                 Text(station.stop.name)
-                                Text(station.routes.map(RouteBadge.displayID).joined(separator: " · ")).font(.subheadline).foregroundStyle(.secondary)
+                                RouteBadgeGroup(routes: station.routes)
                             }.frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
                         }.accessibilityIdentifier("stationChoice-\(station.id)")
                     }
