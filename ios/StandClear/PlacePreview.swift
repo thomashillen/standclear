@@ -823,7 +823,7 @@ private struct PlaceEndpointPicker: View {
     @State private var searchPresented = false
     @FocusState private var searchFocused: Bool
     @State private var query = ""
-    @State private var places: [PlaceResult] = []
+    @State private var places: [PlaceSuggestion] = []
     @State private var resolved = ""
     @State private var failed = false
     @State private var retry = 0
@@ -867,13 +867,11 @@ private struct PlaceEndpointPicker: View {
                     }
                     if resolved == key.query, !failed {
                         ForEach(places) { item in
-                            Button { pick(.place(item)) } label: {
-                                VStack(alignment: .leading) {
-                                    Text(item.name)
-                                    Text(item.subtitle).font(.subheadline).foregroundStyle(.secondary)
-                                }.frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
-                            }
-                            .accessibilityIdentifier("\(destination ? "placeDestinationResult" : "placeOriginResult")-\(item.id)")
+                            PlaceSuggestionRow(item: item, identifier: "\(destination ? "placeDestinationResult" : "placeOriginResult")-\(item.id)", choose: { place in
+                                guard request == key, key.active else { return }
+                                pick(.place(place))
+                            })
+                            .id(key.query + "|" + item.id)
                         }
                     }
                 }
@@ -901,7 +899,7 @@ private struct PlaceEndpointPicker: View {
             guard key.active, key.query.count >= 2 else { return }
             do {
                 try await Task.sleep(for: .milliseconds(350))
-                let results = try await service.search(key.query)
+                let results = try await service.suggestions(key.query)
                 try Task.checkCancellation()
                 guard request == key else { return }
                 places = results

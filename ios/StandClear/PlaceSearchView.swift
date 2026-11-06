@@ -169,13 +169,13 @@ final class RecentPlaces {
 @MainActor @Observable
 final class PlaceSearchMemory {
     private var query: String?
-    private var places: [PlaceResult] = []
+    private var places: [PlaceSuggestion] = []
 
-    func results(for text: String) -> [PlaceResult]? {
+    func results(for text: String) -> [PlaceSuggestion]? {
         query == text ? places : nil
     }
 
-    func remember(_ results: [PlaceResult], for text: String) {
+    func remember(_ results: [PlaceSuggestion], for text: String) {
         query = text
         places = results
     }
@@ -318,7 +318,7 @@ struct PlaceSearchView<StationRow: View>: View {
             guard request.text.count >= 2 else { return }
             do {
                 try await Task.sleep(for: .milliseconds(350))
-                let items = try await service.search(request.text)
+                let items = try await service.suggestions(request.text)
                 try Task.checkCancellation()
                 guard self.request == request else { return }
                 placeSearchMemory.remember(items, for: request.text)
@@ -364,25 +364,19 @@ struct PlaceSearchView<StationRow: View>: View {
         }
     }
 
-    private func placeRow(_ item: PlaceResult) -> some View {
-        HStack {
-            Button {
-                clearFocus()
-                openPlace(item)
-            } label: { resultLabel(item) }
-                .buttonStyle(.plain)
-                .accessibilityIdentifier("placeResult-\(item.id)")
-            Menu {
-                ForEach(SavedPlaces.Anchor.allCases, id: \.self) { anchor in
-                    Button("Set as \(anchor.rawValue)", systemImage: anchor.symbol) {
-                        savedPlaces.set(item, for: anchor)
-                        clearFocus()
-                        query = ""
-                    }
-                }
-            } label: { Image(systemName: "ellipsis").frame(minWidth: 44, minHeight: 44) }
-                .accessibilityLabel("Save \(item.name)")
-        }
+    private func placeRow(_ item: PlaceSuggestion) -> some View {
+        let key = request
+        return PlaceSuggestionRow(item: item, identifier: "placeResult-\(item.id)", choose: { place in
+            guard request == key, key.active else { return }
+            clearFocus()
+            openPlace(place)
+        }, save: { place, anchor in
+            guard request == key, key.active else { return }
+            savedPlaces.set(place, for: anchor)
+            clearFocus()
+            query = ""
+        })
+        .id(key.text + "|" + item.id)
     }
 
     private func recentPlaceRow(_ place: PlaceResult) -> some View {
@@ -409,5 +403,87 @@ struct PlaceSearchView<StationRow: View>: View {
         }
         .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
         .contentShape(Rectangle())
+    }
+}
+
+/// Resolution happens only after an explicit open/save action. The task belongs
+/// to this query's row so changing queries or leaving cancels late navigation.
+struct PlaceSuggestionRow: View {
+    let item: PlaceSuggestion
+    let identifier: String
+    let choose: (PlaceResult) -> Void
+    var save: ((PlaceResult, SavedPlaces.Anchor) -> Void)?
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var action: Action?
+    @State private var failedAction: Action?
+    @State private var error: String?
+
+    private struct Action: Equatable {
+        let id = UUID()
+        let anchor: SavedPlaces.Anchor?
+    }
+
+    var body: some View {
+        HStack {
+            Button { action = Action(anchor: failedAction?.anchor) } label: {
+                VStack(alignment: .leading) {
+                    Text(item.name)
+                    if !item.subtitle.isEmpty {
+                        Text(item.subtitle).font(.subheadline).foregroundStyle(.secondary)
+                    }
+                    if let error {
+                        Text(error).font(.caption).foregroundStyle(.secondary)
+                    }
+                    if action != nil {
+                        ProgressView("Finding place…")
+                    }
+                }
+                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier(identifier)
+            .disabled(action != nil)
+            if save != nil {
+                Menu {
+                    ForEach(SavedPlaces.Anchor.allCases, id: \.self) { anchor in
+                        Button("Set as \(anchor.rawValue)", systemImage: anchor.symbol) { action = Action(anchor: anchor) }
+                    }
+                } label: { Image(systemName: "ellipsis").frame(minWidth: 44, minHeight: 44) }
+                    .accessibilityLabel("Save \(item.name)")
+                    .disabled(action != nil)
+            }
+        }
+        .onDisappear { action = nil }
+        .onChange(of: scenePhase) {
+            _, phase in if phase != .active {
+                action = nil
+            }
+        }
+        .task(id: action) {
+            guard let pending = action else { return }
+            error = nil
+            do {
+                let place = try await item.resolve()
+                guard !Task.isCancelled, action == pending, scenePhase == .active else { return }
+                action = nil
+                failedAction = nil
+                if let anchor = pending.anchor {
+                    save?(place, anchor)
+                } else {
+                    choose(place)
+                }
+            } catch {
+                guard !Task.isCancelled, action == pending, scenePhase == .active else { return }
+                action = nil
+                failedAction = pending
+                if case PlaceServiceError.outsideCoverage = error {
+                    self.error = "Outside NYC coverage. Choose another place."
+                } else {
+                    self.error = pending.anchor.map { "Couldn’t save \($0.rawValue). Tap to retry." }
+                        ?? "Place unavailable. Tap to retry."
+                }
+            }
+        }
     }
 }
