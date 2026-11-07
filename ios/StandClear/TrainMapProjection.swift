@@ -27,7 +27,12 @@ struct TrainMapMarker: Identifiable {
 /// Only known express services may use a base shape when no exact shape exists.
 enum TrainRouteGeometry {
     static func expressBaseID(_ routeID: String) -> String? {
-        ["6X": "6", "7X": "7", "FX": "F"][routeID]
+        switch routeID {
+        case "6X": "6"
+        case "7X": "7"
+        case "FX": "F"
+        default: nil
+        }
     }
 
     static func routeIDs(in lines: [SubwayLine]) -> [String: String] {

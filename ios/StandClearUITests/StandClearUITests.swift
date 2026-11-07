@@ -179,7 +179,12 @@ final class StandClearUITests: XCTestCase {
         XCTAssertTrue(app.buttons["originPicker"].waitForExistence(timeout: 10))
         if fromBrowser {
             app.navigationBars["Directions"].buttons.firstMatch.tap()
-            XCTAssertTrue(app.buttons["directionsHere"].waitForExistence(timeout: 5))
+            let returnedToStation = app.buttons["directionsHere"].waitForExistence(timeout: 5)
+            let failedCheckReturnedAt = returnedToStation ? nil : Date.now.timeIntervalSince1970
+            XCTAssertTrue(returnedToStation)
+            if let failedCheckReturnedAt {
+                captureStationRouteFailure("Directions Back did not reveal station details", result: String(returnedToStation), returnedAt: failedCheckReturnedAt, in: app)
+            }
             XCUIDevice.shared.orientation = .landscapeLeft
             waitForLayout(in: app, expanded: true, readyControl: "directionsHere")
             XCTAssertFalse(app.buttons["originPicker"].isHittable, "Back to station details must not reopen Directions")
@@ -3230,8 +3235,71 @@ final class StandClearUITests: XCTestCase {
             return !app.buttons["clearMapRoute"].exists &&
                 map.descendants(matching: .any).matching(NSPredicate(format: "label IN %@", labels)).count == 0
         } }
-        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: cleared, object: map)], timeout: 5), .completed,
+        let result = XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: cleared, object: map)], timeout: 5)
+        let failedCheckReturnedAt = result == .completed ? nil : Date.now.timeIntervalSince1970
+        XCTAssertEqual(result, .completed,
                        "Clear route must remove the boarding, arrival, and transfer markers", file: file, line: line)
+        if let failedCheckReturnedAt {
+            captureStationRouteFailure("Station endpoint clearance failed", result: String(describing: result), returnedAt: failedCheckReturnedAt, in: app, removedLabels: labels)
+        }
+    }
+
+    /// Post-failure evidence cannot reconstruct values at the original deadline.
+    /// Keep the verdict, predicate order and timeout independent of these reads.
+    @MainActor
+    private func captureStationRouteFailure(_ context: String, result: String, returnedAt: Double, in app: XCUIApplication, removedLabels: [String] = []) {
+        let started = Date.now.timeIntervalSince1970
+        let capture = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        let screenshotCompleted = Date.now.timeIntervalSince1970
+        capture.name = context + " — after failed assertion handling"
+        capture.lifetime = .keepAlways; add(capture)
+        let timing = XCTAttachment(string: "Original result: \(result)\nCheck returned UTC: \(returnedAt)\nCapture started after assertion UTC: \(started)\nScreenshot completed UTC: \(screenshotCompleted)")
+        timing.name = context + " — POST failure timing"
+        timing.lifetime = .keepAlways; add(timing)
+        var observations: [[String: String]] = []
+        func read<T>(_ name: String, _ operation: () -> T) -> T {
+            observations.append(["query": name, "phase": "begin", "utcSeconds": String(Date.now.timeIntervalSince1970)])
+            let value = operation()
+            observations.append(["query": name, "phase": "end", "utcSeconds": String(Date.now.timeIntervalSince1970)])
+            return value
+        }
+        let map = app.descendants(matching: .any)["appleTransitMap"].firstMatch
+        let mapExists = read("map.exists") { map.exists }
+        let clearExists = read("clearMapRoute.exists") { app.buttons["clearMapRoute"].exists }
+        let directionsHere = read("directionsHere.exists") { app.buttons["directionsHere"].exists }
+        let originPicker = read("originPicker.exists") { app.buttons["originPicker"].exists }
+        let mapValue = mapExists ? read("map.value") { String(describing: map.value) } : "unavailable"
+        let endpoints = mapExists && !removedLabels.isEmpty ? read("endpointMatches.elements") {
+            map.descendants(matching: .any).matching(NSPredicate(format: "label IN %@", removedLabels)).allElementsBoundByIndex
+        } : []
+        let matches: [[String: String]] = endpoints.enumerated().map { index, element in
+            let exists = read("endpoint.\(index).exists") { element.exists }
+            return ["exists": String(exists),
+                    "label": exists ? read("endpoint.\(index).label") { element.label } : "unavailable",
+                    "frame": exists ? read("endpoint.\(index).frame") { String(describing: element.frame) } : "unavailable"]
+        }
+        let details: [String: Any] = [
+            "context": context, "originalFailedResult": result,
+            "observationPhase": "after failed assertion; values are not atomic or deadline-time evidence",
+            "originalCheckReturnedUTC": returnedAt, "captureStartedAfterAssertionUTC": started,
+            "screenshotRequestedUTC": started, "screenshotCompletedUTC": screenshotCompleted,
+            "observationsCompletedUTC": Date.now.timeIntervalSince1970,
+            "mapExists": mapExists, "clearButtonExists": clearExists,
+            "directionsHereExists": directionsHere, "originPickerExists": originPicker,
+            "mapValue": mapValue, "expectedRemovedLabels": removedLabels,
+            "endpointQueryPerformed": mapExists && !removedLabels.isEmpty,
+            "matchedEndpointCount": matches.count, "matchedEndpoints": matches, "queryTimes": observations,
+        ]
+        if let data = try? JSONSerialization.data(withJSONObject: details, options: [.prettyPrinted, .sortedKeys]) {
+            let record = XCTAttachment(data: data, uniformTypeIdentifier: "public.json")
+            record.name = context + " — POST failure observations"
+            record.lifetime = .keepAlways; add(record)
+        }
+        let hierarchyStarted = Date.now.timeIntervalSince1970
+        let hierarchy = app.debugDescription
+        let tree = XCTAttachment(string: "Post-failure hierarchy started UTC: \(hierarchyStarted)\nCompleted UTC: \(Date.now.timeIntervalSince1970)\n" + hierarchy)
+        tree.name = context + " — POST failure accessibility hierarchy"
+        tree.lifetime = .keepAlways; add(tree)
     }
 
     @MainActor
