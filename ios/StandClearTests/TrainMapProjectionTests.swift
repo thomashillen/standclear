@@ -98,6 +98,39 @@ final class TrainMapProjectionTests: XCTestCase {
         }
     }
 
+    func testBaseAndShuttleReportsKeepExactGeometryAndNonExpressSpeech() throws {
+        let services = [("1", "1"), ("4", "4"), ("6", "6"), ("7", "7"), ("A", "A"),
+                        ("F", "F"), ("R", "R"), ("GS", "S"), ("FS", "S"), ("H", "S")]
+        for (routeID, spokenName) in services {
+            let exact = route(id: routeID, shape: [[-74, 40], [-74, 41]], color: "#123456")
+            let result = try marker(train(route: routeID), line: exact)
+            XCTAssertEqual(result.routeID, routeID)
+            XCTAssertEqual(result.displayLetter, routeID)
+            XCTAssertEqual(result.spokenRouteName, spokenName)
+            XCTAssertEqual(result.color, "#123456")
+            XCTAssertEqual(result.coordinate.latitude, 40.5, accuracy: 0.0001)
+            XCTAssertEqual(result.coordinate.longitude, -74, accuracy: 0.0001)
+            XCTAssertEqual(result.bearingDegrees ?? -1, 0, accuracy: 0.0001)
+        }
+    }
+
+    func testUnsupportedExpressSpellingsNeverBorrowBaseGeometryOrInventExpressSpeech() throws {
+        let unsupported = [("", "6"), ("X", "6"), ("AX", "A"), ("RX", "R"), ("GSX", "GS"),
+                           ("6x", "6"), ("7x", "7"), ("fx", "F"), ("Fx", "F"),
+                           ("6X ", "6"), (" 7X", "7"), ("FX\n", "F"), ("6XX", "6")]
+        for (reported, base) in unsupported {
+            XCTAssertTrue(project([train(route: reported)], line: route(id: base)).isEmpty,
+                          "Unsupported identity \(reported.debugDescription) must not borrow \(base) geometry")
+            let exact = route(id: reported, shape: [[-74, 40], [-74, 41]], color: "#123456")
+            let result = try marker(train(route: reported), line: exact)
+            XCTAssertEqual(result.routeID, reported)
+            XCTAssertEqual(result.displayLetter, reported)
+            XCTAssertEqual(result.spokenRouteName, reported)
+            XCTAssertEqual(result.coordinate.latitude, 40.5, accuracy: 0.0001)
+            XCTAssertEqual(result.coordinate.longitude, -74, accuracy: 0.0001)
+        }
+    }
+
     func testExpressFallbackDoesNotInventRoutesOrUnsupportedSegments() throws {
         for (reported, available) in [("4X", "4"), ("GSX", "GS"), ("GS", "FS"), ("FS", "H")] {
             XCTAssertTrue(project([train(route: reported)], line: route(id: available)).isEmpty)
