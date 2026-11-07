@@ -106,6 +106,32 @@ describe("planTrips", () => {
     expect(direct.transferComplexId).toBeUndefined();
   });
 
+  it("respects the two separate West 14 Street complexes", () => {
+    const lines = {
+      "1": line({ id: "1", routeId: "1", stops: [
+        stop("131", "18 St", 40.741, -73.998), stop("132", "14 St", 40.738, -74.000),
+      ] }),
+      C: line({ id: "C", routeId: "C", stops: [
+        stop("A30", "23 St", 40.745, -73.999), stop("A31", "14 St", 40.740, -74.002),
+      ] }),
+      F: line({ id: "F", routeId: "F", stops: [
+        stop("D18", "23 St", 40.743, -73.993), stop("D19", "14 St", 40.738, -73.996),
+      ] }),
+      L: line({ id: "L", routeId: "L", stops: [
+        EIGHTH_AV_L, stop("L02", "6 Av", 40.737, -73.997), UNION_SQ_L,
+      ] }),
+    };
+    const index = buildStationIndex(lines);
+    const plans = (from: string, to: string) => planTrips(lines, index, [from], [to]);
+
+    expect.soft(plans("131", "A30")).toEqual([]);
+    const direct = plans("L02", "L01")[0];
+    expect.soft(direct?.legs.map(leg => leg.routeId)).toEqual(["L"]);
+    expect.soft(direct?.totalStops).toBe(1);
+    expect.soft(plans("131", "D18")[0]?.legs.map(leg => leg.boardStopId)).toEqual(["131", "D19"]);
+    expect.soft(plans("A30", "L03")[0]?.legs.map(leg => leg.boardStopId)).toEqual(["A30", "L01"]);
+  });
+
   it("plans a one-transfer trip through a complex (L → Lex at Union Sq)", () => {
     // L01 → 419 requires transferring at Union Sq (L03/635 merged complex)
     // onto the 4 or 5. The path-dedup will collapse L→4 and L→5 into one

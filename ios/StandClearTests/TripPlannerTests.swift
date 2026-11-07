@@ -31,6 +31,28 @@ final class TripPlannerTests: XCTestCase {
         XCTAssertEqual(endpoints.alighting?.id, "L01")
     }
 
+    func testWest14StreetTransfersRespectTheTwoComplexes() throws {
+        let lines = [
+            line("1", [stop("131", 40.741), stop("132", 40.738)]),
+            line("C", [stop("A30", 40.745), stop("A31", 40.740)]),
+            line("F", [stop("D18", 40.743), stop("D19", 40.738)]),
+            line("L", [stop("L01", 40.740), stop("L02", 40.737), stop("L03", 40.735)]),
+        ]
+        let stations = Transit.stations(lines)
+        func plans(_ from: String, _ to: String) throws -> [NativeTripPlan] {
+            try TripPlanner.plans(lines: lines, stations: stations, from: station(from, in: stations), to: station(to, in: stations))
+        }
+
+        // Crossing from Seventh Avenue to Eighth Avenue requires another leg.
+        XCTAssertTrue(try plans("131", "A30").isEmpty)
+        let direct = try plans("L02", "L01").first
+        XCTAssertEqual(direct?.legs.map(\.routeId), ["L"])
+        XCTAssertEqual(direct?.totalStops, 1)
+        // Preserve the connected platforms at each end of that L ride.
+        XCTAssertEqual(try plans("131", "D18").first?.legs.map(\.boardStopId), ["131", "D19"])
+        XCTAssertEqual(try plans("A30", "L03").first?.legs.map(\.boardStopId), ["A30", "L01"])
+    }
+
     func testOneTransferUsesCuratedComplexAcrossDifferentPlatforms() throws {
         let lines = sampleLines(), stations = Transit.stations(lines)
         let plans = try TripPlanner.plans(lines: lines, stations: stations,
