@@ -20,7 +20,7 @@ jobs:
     timeout-minutes: 15
     env:
       SOURCE_COMMIT: '13752724401a670216dc7498671a6bc62237a505'
-      PATCH_SHA256: '31f8849867384bd2c61da23974d444f7af080bda7cae74d4d3e2ffdebe0ca2c2'
+      PATCH_SHA256: '8adf3c4331519ee6992313a4a673ae46f91d567e9bc7e3a57328ebab71c5cecd'
     steps:
       - uses: actions/checkout@v7
         with:

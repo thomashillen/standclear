@@ -1,12 +1,12 @@
 diff --git a/ios/StandClear/MapShell.swift b/ios/StandClear/MapShell.swift
 --- a/ios/StandClear/MapShell.swift
 +++ b/ios/StandClear/MapShell.swift
-@@ -1,3 +1,4 @@
-+import Foundation
+@@ -1,10 +1,12 @@
  import CoreLocation
++import Foundation
  import SwiftUI
  
-@@ -5,6 +6,7 @@
+ struct MapShell: View {
      @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
      @Environment(\.scenePhase) private var scenePhase
      @Environment(\.dynamicTypeSize) private var typeSize
@@ -95,16 +95,21 @@ diff --git a/ios/StandClear/MapShell.swift b/ios/StandClear/MapShell.swift
                  // Done and interactive dismissal end a browser visit. Moving
                  // its sheet into the expanded pane preserves the same path.
                  if selection == nil, !expanded {
-@@ -271,6 +329,8 @@
+@@ -271,7 +329,12 @@
              }
              if phase == .background {
                  focus.cancelPending()
+-            }
 +                traceNavigation("shell.background.export")
 +                NavigationDiagnostic.flush()
-             }
++            }
++        }
++        .onChange(of: selectedTrip?.id) { old, new in
++            traceNavigation("shell.selectedTrip.change", ["old": old ?? "nil", "new": new ?? "nil"])
          }
          .onChange(of: location.availableCoordinate != nil) { _, available in
-@@ -551,7 +611,7 @@
+             if available {
+@@ -551,7 +614,7 @@
          if mode == .lines {
              NavigationStack(path: $linePath) { panelRoot(mode, expanded: expanded) }
          } else if mode == .search {
@@ -113,7 +118,7 @@ diff --git a/ios/StandClear/MapShell.swift b/ios/StandClear/MapShell.swift
          } else if mode == .nearby {
              NavigationStack(path: $nearbyPath) { panelRoot(mode, expanded: expanded) }
          } else {
-@@ -618,8 +678,8 @@
+@@ -618,8 +681,8 @@
                  StationArrivals(station: station, store: store, favoriteStations: favoriteStations, savedPlaces: savedPlaces, directionsSelection: $directionsSelection,
                                  onDirectionsHere: beginDirections, onSelectTrip: selectTrip, onShowTripMap: showTripOnMap, initialTrip: routeCanCollapse && stationStepsVisible ? selectedTrip : nil,
                                  restoreDirections: routeCanCollapse && stationDirectionsVisible,
@@ -124,7 +129,7 @@ diff --git a/ios/StandClear/MapShell.swift b/ios/StandClear/MapShell.swift
              } else {
                  ContentUnavailableView("Station unavailable", systemImage: "tram",
                                         description: Text("This station is no longer in the subway data."))
-@@ -630,11 +690,11 @@
+@@ -630,11 +693,11 @@
                                  directionsSelection: $directionsSelection, onDirectionsHere: beginDirections,
                                  onSelectTrip: selectTrip, onShowTripMap: showTripOnMap, initialTrip: routeCanCollapse && stationStepsVisible ? selectedTrip : nil,
                                  restoreDirections: routeCanCollapse && stationDirectionsVisible,
@@ -139,7 +144,7 @@ diff --git a/ios/StandClear/MapShell.swift b/ios/StandClear/MapShell.swift
          case .alerts:
              SystemAlertsView(store: store, load: $systemAlerts)
          case .nearby, .search:
-@@ -691,6 +751,8 @@
+@@ -691,6 +754,8 @@
      }
  
      private func selectTrip(_ plan: NativeTripPlan?) {
@@ -148,7 +153,7 @@ diff --git a/ios/StandClear/MapShell.swift b/ios/StandClear/MapShell.swift
          focus.cancelPending()
          selectedTrip = plan
          stationStepsVisible = plan != nil
-@@ -704,8 +766,8 @@
+@@ -704,8 +769,8 @@
                         directionsSelection: $directionsSelection, onDirectionsHere: beginDirections,
                         onSelectTrip: selectTrip, onShowTripMap: showTripOnMap, initialTrip: routeCanCollapse && stationStepsVisible ? selectedTrip : nil,
                         restoreDirections: routeCanCollapse && stationDirectionsVisible,
@@ -159,11 +164,19 @@ diff --git a/ios/StandClear/MapShell.swift b/ios/StandClear/MapShell.swift
                         path: search ? $searchPath : $nearbyPath,
                         dismissPanel: expanded ? nil : {
                             if routeCanCollapse {
-@@ -741,3 +803,36 @@
+@@ -716,6 +781,8 @@
+     }
+ 
+     private func focusStation(_ station: Station) {
++        traceNavigation("shell.focusStation.before", ["station": station.id])
++        defer { traceNavigation("shell.focusStation.after", ["station": station.id]) }
+         stationSearchFocused = false
+         selectedTrip = nil
+         focus.focus(on: station.stop.coordinate)
+@@ -741,3 +808,44 @@
  extension EnvironmentValues {
      @Entry var expandedTransitPanel = false
  }
-+
 +
 +@MainActor
 +enum NavigationDiagnostic {
@@ -184,6 +197,15 @@ diff --git a/ios/StandClear/MapShell.swift b/ios/StandClear/MapShell.swift
 +        fields["bindingMode"] = originalBindings ? "original" : "wrapped"
 +        events.append(Event(sequence: events.count, utcSeconds: Date.now.timeIntervalSince1970,
 +                            uptime: ProcessInfo.processInfo.systemUptime, event: event, fields: fields))
++    }
++
++    private static var lastCameraUptime = -Double.infinity
++    static func recordCamera(_ fields: @autoclosure () -> [String: String]) {
++        guard enabled else { return }
++        let now = ProcessInfo.processInfo.systemUptime
++        guard now - lastCameraUptime >= 1 else { return }
++        lastCameraUptime = now
++        record("map.camera.sample", fields())
 +    }
 +
 +    static func flush() {
@@ -357,6 +379,50 @@ diff --git a/ios/StandClear/DirectionsView.swift b/ios/StandClear/DirectionsView
      }
  }
  
+diff --git a/ios/StandClear/AppleTransitMap.swift b/ios/StandClear/AppleTransitMap.swift
+--- a/ios/StandClear/AppleTransitMap.swift
++++ b/ios/StandClear/AppleTransitMap.swift
+@@ -118,9 +118,19 @@
+                 cameraState.update(heading: context.camera.heading,
+                                    zoom: TrainMarkerSizing.zoom(longitudeSpan: context.region.span.longitudeDelta,
+                                                                 viewportWidth: max(1, geometry.size.width - max(0, coveredWidth))))
++                NavigationDiagnostic.recordCamera([
++                    "centerLatitude": String(context.region.center.latitude), "centerLongitude": String(context.region.center.longitude),
++                    "latitudeSpan": String(context.region.span.latitudeDelta), "longitudeSpan": String(context.region.span.longitudeDelta),
++                    "heading": String(context.camera.heading), "focusRevision": String(focusRevision),
++                    "tripFocusRevision": String(tripFocusRevision), "viewport": String(describing: geometry.size),
++                ])
+             }
+             .onChange(of: focusRevision, initial: true) { _, _ in
+                 guard let focusedCoordinate else { return }
++                NavigationDiagnostic.record("map.stationFocus.request", [
++                    "latitude": String(focusedCoordinate.latitude), "longitude": String(focusedCoordinate.longitude),
++                    "focusRevision": String(focusRevision),
++                ])
+                 position = .region(MKCoordinateRegion(
+                     center: focusedCoordinate,
+                     span: MKCoordinateSpan(latitudeDelta: 0.018, longitudeDelta: 0.014)
+@@ -151,6 +161,9 @@
+         .onChange(of: TripGeometryInput(linesRevision: inputs.linesRevision, focus: tripFocusRevision, placeRevision: placeGeometryRevision, ids: tripOverlays.map(\.id)), initial: true) { _, _ in
+             tripGeometry = tripOverlays.compactMap { AppleRoutePolyline(id: $0.id, color: $0.color, coordinates: $0.coordinates, walking: $0.walking) }
+         }
++        .onChange(of: diagnosticRouteInputs, initial: true) { _, value in
++            NavigationDiagnostic.record("map.routeInputs.change", ["inputs": value])
++        }
+         .task(id: inputs) { await render(inputs) }
+         .onChange(of: scenePhase) { _, phase in
+             if phase != .active {
+@@ -158,6 +171,10 @@
+             }
+         }
+         .onDisappear { stopMotion() }
++    }
++
++    private var diagnosticRouteInputs: String {
++        "boarding=\(stationEndpoints?.boarding?.id ?? "nil");alighting=\(stationEndpoints?.alighting?.id ?? "nil");transfer=\(transferMarker?.text ?? "nil");overlays=\(tripOverlays.map(\.id));destination=\(destination?.name ?? "nil");focus=\(focusRevision);tripFocus=\(tripFocusRevision);exposed=\(mapExposed)"
+     }
+ 
+     private struct TripGeometryInput: Equatable {
 diff --git a/ios/StandClearUITests/StandClearUITests.swift b/ios/StandClearUITests/StandClearUITests.swift
 --- a/ios/StandClearUITests/StandClearUITests.swift
 +++ b/ios/StandClearUITests/StandClearUITests.swift
@@ -389,6 +455,108 @@ diff --git a/ios/StandClearUITests/StandClearUITests.swift b/ios/StandClearUITes
          let fromBrowser = fromSearch || fromLines
          if fromLines {
              app.buttons["moreButton"].tap(); app.buttons["linesButton"].tap()
+@@ -3225,12 +3236,97 @@
+                                                file: StaticString = #filePath, line: UInt = #line)
+     {
+         let map = app.descendants(matching: .any)["appleTransitMap"].firstMatch
++        var observations: [[String: String]] = []
++        func note(_ stage: String, _ value: String = "") {
++            observations.append(["stage": stage, "value": value,
++                                 "utcSeconds": String(Date.now.timeIntervalSince1970),
++                                 "uptime": String(ProcessInfo.processInfo.systemUptime)])
++        }
+         let cleared = NSPredicate { _, _ in MainActor.assumeIsolated {
+-            guard map.exists else { return false }
+-            return !app.buttons["clearMapRoute"].exists &&
+-                map.descendants(matching: .any).matching(NSPredicate(format: "label IN %@", labels)).count == 0
++            // Preserve the original query order and short circuit behavior.
++            note("map.exists.begin")
++            let mapExists = map.exists
++            note("map.exists.end", String(mapExists))
++            guard mapExists else {
++                note("clearMapRoute.exists.skipped"); note("endpointMatches.count.skipped"); note("predicate.return", "false")
++                return false
++            }
++            note("clearMapRoute.exists.begin")
++            let clearExists = app.buttons["clearMapRoute"].exists
++            note("clearMapRoute.exists.end", String(clearExists))
++            guard !clearExists else {
++                note("endpointMatches.count.skipped"); note("predicate.return", "false")
++                return false
++            }
++            note("endpointMatches.count.begin")
++            let count = map.descendants(matching: .any).matching(NSPredicate(format: "label IN %@", labels)).count
++            note("endpointMatches.count.end", String(count))
++            note("predicate.return", String(count == 0))
++            return count == 0
+         } }
+-        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: cleared, object: map)], timeout: 5), .completed,
++        note("wait.begin")
++        note("wait.nominalDeadlineUTC", String(Date.now.timeIntervalSince1970 + 5))
++        let result = XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: cleared, object: map)], timeout: 5)
++        note("wait.end", String(describing: result))
++        // Everything below occurs AFTER the original waiter has returned. It
++        // cannot retroactively turn the original failure into success.
++        note("POST.immediateScreenshot.begin")
++        let capture = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
++        note("POST.immediateScreenshot.end")
++        capture.name = "Endpoint clear — immediate after waiter returned"
++        capture.lifetime = .keepAlways; add(capture)
++        if let data = try? JSONSerialization.data(withJSONObject: observations, options: [.prettyPrinted, .sortedKeys]) {
++            let attachment = XCTAttachment(data: data, uniformTypeIdentifier: "public.json")
++            attachment.name = "Endpoint clear — original predicate observations"
++            attachment.lifetime = .keepAlways; add(attachment)
++        }
++        func read<T>(_ stage: String, _ operation: () -> T) -> T {
++            note("POST." + stage + ".begin")
++            let value = operation()
++            note("POST." + stage + ".end")
++            return value
++        }
++        let postStart = Date.now.timeIntervalSince1970
++        let clearButton = app.buttons["clearMapRoute"]
++        let mapExists = read("map.exists") { map.exists }
++        let mapFrame = mapExists ? read("map.frame") { String(describing: map.frame) } : "unavailable"
++        let mapValue = mapExists ? read("map.value") { String(describing: map.value) } : "unavailable"
++        let clearExists = read("clearButton.exists") { clearButton.exists }
++        let clearFrame = clearExists ? read("clearButton.frame") { String(describing: clearButton.frame) } : "unavailable"
++        let elements = mapExists ? read("endpointMatches.elements") {
++            map.descendants(matching: .any).matching(NSPredicate(format: "label IN %@", labels)).allElementsBoundByIndex
++        } : []
++        let matched: [[String: String]] = elements.enumerated().map { index, element in
++            ["label": read("endpoint.\(index).label") { element.label },
++             "identifier": read("endpoint.\(index).identifier") { element.identifier },
++             "frame": read("endpoint.\(index).frame") { String(describing: element.frame) }]
++        }
++        let window = app.windows.firstMatch
++        let windowExists = read("window.exists") { window.exists }
++        let windowFrame = windowExists ? read("window.frame") { String(describing: window.frame) } : "unavailable"
++        let details: [String: Any] = [
++            "postDeadlineStartUTC": postStart,
++            "postDeadlineEndUTC": Date.now.timeIntervalSince1970,
++            "originalWaitResult": String(describing: result),
++            "mapExists": mapExists, "mapFrame": mapFrame, "mapValue": mapValue,
++            "clearButtonExists": clearExists, "clearButtonFrame": clearFrame,
++            "windowFrame": windowFrame, "matchedEndpoints": matched,
++            "expectedRemovedLabels": labels,
++        ]
++        if let data = try? JSONSerialization.data(withJSONObject: details, options: [.prettyPrinted, .sortedKeys]) {
++            let attachment = XCTAttachment(data: data, uniformTypeIdentifier: "public.json")
++            attachment.name = "Endpoint clear — POST deadline native observations"
++            attachment.lifetime = .keepAlways; add(attachment)
++        }
++        let hierarchy = XCTAttachment(string: read("app.debugDescription") { app.debugDescription })
++        hierarchy.name = "Endpoint clear — POST deadline accessibility hierarchy"
++        hierarchy.lifetime = .keepAlways; add(hierarchy)
++        if let data = try? JSONSerialization.data(withJSONObject: observations, options: [.prettyPrinted, .sortedKeys]) {
++            let attachment = XCTAttachment(data: data, uniformTypeIdentifier: "public.json")
++            attachment.name = "Endpoint clear — complete observation timestamps including POST deadline"
++            attachment.lifetime = .keepAlways; add(attachment)
++        }
++        XCTAssertEqual(result, .completed,
+                        "Clear route must remove the boarding, arrival, and transfer markers", file: file, line: line)
+     }
+ 
 diff --git a/ios/StandClear.xcodeproj/project.pbxproj b/ios/StandClear.xcodeproj/project.pbxproj
 --- a/ios/StandClear.xcodeproj/project.pbxproj
 +++ b/ios/StandClear.xcodeproj/project.pbxproj

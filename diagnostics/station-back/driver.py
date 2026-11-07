@@ -30,7 +30,7 @@ TESTS = [
 EXPORTS = ["navigation-diagnostic-original.json", "navigation-diagnostic-wrapped.json"]
 PATCH_PATHS = {
     "ios/StandClear/NavigationDiagnostic.swift", "ios/StandClear/MapShell.swift",
-    "ios/StandClear/StationBrowser.swift", "ios/StandClear/DirectionsView.swift",
+    "ios/StandClear/AppleTransitMap.swift", "ios/StandClear/StationBrowser.swift", "ios/StandClear/DirectionsView.swift",
     "ios/project.yml", "ios/StandClearUITests/StandClearUITests.swift",
     "ios/StandClear.xcodeproj/project.pbxproj",
 }

@@ -40,3 +40,13 @@ The upload step runs `always()` and preserves logs, metadata, errors, exports an
 ## Reading results
 
 Distinguish direct native Binding-set requests from later/coalesced onChange, explicit onAppear restoration, parent callback writes, typed station paths and itinerary-layer pops. Retained per-lifetime IDs must explicitly associate Directions with its StationArrivals owner. A StationArrivals disappearance while Directions is pushed does not prove an outgoing presentation. Wrapped Bindings, additional lifecycle modifiers and logging can affect identity/timing; a wrapped pass alone is not evidence that the original failure is fixed. The original control helps expose this limitation but does not eliminate it.
+
+## Endpoint-clear observation increment
+
+Run42361714550 passed wrapped bindings and failed original bindings only at the later compound endpoint-clear check after both completed Back and station navigation. This new diagnostic head preserves each clause's original short-circuit/order and the original five-second waiter result. A RAM-only test buffer records query start/end, values, skipped clauses, predicate return and nominal versus actual deadline. It performs no extra accessibility query inside the predicate.
+
+Only after the waiter returns, both modes attach an immediate screenshot and the buffer, then separately timed map/clear-button/matching-endpoint/window observations and the full accessibility hierarchy. Postdeadline inspection cannot re-decide the stored assertion and is not evidence of state at the nominal deadline. It delays subsequent Done/background cleanup; compare the preserved clearance result, not total duration or subsequent-action timing.
+
+The temporary app additionally records focusStation before/after, selectedTrip changes and map journey inputs, and samples reported camera regions at most once per second into nonobservable RAM from the existing callback, after its normal update. Sparse samples may miss transient camera movement and do not establish displayed-frame contents. No marker renderer prototype, observable state recovery, custom navigation or camera policy is added. The new hooks still perturb timing/dependencies and are applied identically to both binding modes.
+
+The standalone patch was reapplied to fixed source and its Swift/project files exactly matched the locally compiled source. SwiftFormat lint, Xcode27.2 build-for-testing and analyze passed. The hosted result is separate and remains required; a pass still does not explain the original Back failure or clear PR345.
