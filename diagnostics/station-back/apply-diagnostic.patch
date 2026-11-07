@@ -1,0 +1,424 @@
+diff --git a/ios/StandClear/MapShell.swift b/ios/StandClear/MapShell.swift
+--- a/ios/StandClear/MapShell.swift
++++ b/ios/StandClear/MapShell.swift
+@@ -1,3 +1,4 @@
++import Foundation
+ import CoreLocation
+ import SwiftUI
+ 
+@@ -5,6 +6,7 @@
+     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+     @Environment(\.scenePhase) private var scenePhase
+     @Environment(\.dynamicTypeSize) private var typeSize
++    @State private var diagnosticID = UUID()
+     @State private var store = TransitStore()
+     @State private var location = LocationStore()
+     @State private var linePath: [LineDestination] = []
+@@ -78,6 +80,54 @@
+         case .lines: return .lines(linePath)
+         default: return .panel(mode)
+         }
++    }
++
++    private func traceNavigation(_ event: String, _ extra: [String: String] = [:]) {
++        func code(_ panel: Panel?) -> String {
++            guard let panel else { return "nil" }
++            switch panel {
++            case .search: return "search"
++            case .nearby: return "nearby"
++            case .lines: return "lines"
++            case .directions: return "directions"
++            case .alerts: return "alerts"
++            case let .station(id): return "station:" + id
++            case .place: return "place"
++            }
++        }
++        var fields = ["shell": diagnosticID.uuidString, "wide": String(isWide), "width": String(Double(windowSize.width)),
++                      "height": String(Double(windowSize.height)), "panel": code(panel), "expandedPanel": code(expandedPanel),
++                      "globalDirections": String(stationDirectionsVisible), "globalSteps": String(stationStepsVisible), "stationVisit": String(stationVisit),
++                      "routePanelCollapsed": String(routePanelCollapsed), "effectiveCollapsed": String(routePanelIsCollapsed),
++                      "detent": sheetDetent == .large ? "large" : sheetDetent == .medium ? "medium" : "custom",
++                      "canCollapse": String(routeCanCollapse), "searchPath": String(describing: searchPath),
++                      "selectedTrip": selectedTrip?.id ?? "nil"]
++        fields.merge(extra) { _, new in new }
++        NavigationDiagnostic.record(event, fields)
++    }
++
++    private var diagnosticSearchPath: Binding<[StationBrowserDestination]> {
++        let original = $searchPath
++        if NavigationDiagnostic.originalBindings {
++            return original
++        }
++        return Binding(get: { original.wrappedValue }, set: { value, transaction in
++            traceNavigation("shell.searchPathSet.before", ["requested": String(describing: value)])
++            original.transaction(transaction).wrappedValue = value
++            traceNavigation("shell.searchPathSet.after")
++        })
++    }
++
++    private func traceDirectionsVisibility(_ shown: Bool, origin: String) {
++        traceNavigation("shell.directionCallback.before", ["requested": String(shown), "origin": origin])
++        stationDirectionsVisible = shown
++        traceNavigation("shell.directionCallback.after", ["origin": origin])
++    }
++
++    private func traceItineraryVisibility(_ shown: Bool, origin: String) {
++        traceNavigation("shell.itineraryCallback.before", ["requested": String(shown), "origin": origin])
++        stationStepsVisible = shown
++        traceNavigation("shell.itineraryCallback.after", ["origin": origin])
+     }
+ 
+     var body: some View {
+@@ -150,8 +200,14 @@
+                     }
+                 }
+             }
+-            .onGeometryChange(for: CGSize.self) { $0.size } action: { windowSize = $0 }
+-            .onChange(of: expanded) { _, isExpanded in
++            .onGeometryChange(for: CGSize.self) { $0.size } action: {
++                traceNavigation("shell.geometry.before", ["newWidth": String(Double($0.width)), "newHeight": String(Double($0.height))])
++                windowSize = $0
++                traceNavigation("shell.geometry.after")
++            }
++            .onChange(of: expanded) { old, isExpanded in
++                traceNavigation("shell.layout.before", ["oldExpanded": String(old), "newExpanded": String(isExpanded)])
++                defer { traceNavigation("shell.layout.after") }
+                 // The old searchable navigation region is about to disappear.
+                 // Release its focus so its keyboard cannot cover the new layout.
+                 stationSearchFocused = false
+@@ -191,6 +247,8 @@
+                 }
+             }
+             .onChange(of: panel) { previous, selection in
++                traceNavigation("shell.panel.before")
++                defer { traceNavigation("shell.panel.after") }
+                 // Done and interactive dismissal end a browser visit. Moving
+                 // its sheet into the expanded pane preserves the same path.
+                 if selection == nil, !expanded {
+@@ -271,6 +329,8 @@
+             }
+             if phase == .background {
+                 focus.cancelPending()
++                traceNavigation("shell.background.export")
++                NavigationDiagnostic.flush()
+             }
+         }
+         .onChange(of: location.availableCoordinate != nil) { _, available in
+@@ -551,7 +611,7 @@
+         if mode == .lines {
+             NavigationStack(path: $linePath) { panelRoot(mode, expanded: expanded) }
+         } else if mode == .search {
+-            NavigationStack(path: $searchPath) { panelRoot(mode, expanded: expanded) }
++            NavigationStack(path: diagnosticSearchPath) { panelRoot(mode, expanded: expanded) }
+         } else if mode == .nearby {
+             NavigationStack(path: $nearbyPath) { panelRoot(mode, expanded: expanded) }
+         } else {
+@@ -618,8 +678,8 @@
+                 StationArrivals(station: station, store: store, favoriteStations: favoriteStations, savedPlaces: savedPlaces, directionsSelection: $directionsSelection,
+                                 onDirectionsHere: beginDirections, onSelectTrip: selectTrip, onShowTripMap: showTripOnMap, initialTrip: routeCanCollapse && stationStepsVisible ? selectedTrip : nil,
+                                 restoreDirections: routeCanCollapse && stationDirectionsVisible,
+-                                onDirectionsVisibilityChanged: { stationDirectionsVisible = $0 },
+-                                onItineraryVisibilityChanged: { stationStepsVisible = $0 })
++                                onDirectionsVisibilityChanged: { traceDirectionsVisibility($0, origin: "call0 expanded:\(expanded)") },
++                                onItineraryVisibilityChanged: { traceItineraryVisibility($0, origin: "call0 expanded:\(expanded)") })
+             } else {
+                 ContentUnavailableView("Station unavailable", systemImage: "tram",
+                                        description: Text("This station is no longer in the subway data."))
+@@ -630,11 +690,11 @@
+                                 directionsSelection: $directionsSelection, onDirectionsHere: beginDirections,
+                                 onSelectTrip: selectTrip, onShowTripMap: showTripOnMap, initialTrip: routeCanCollapse && stationStepsVisible ? selectedTrip : nil,
+                                 restoreDirections: routeCanCollapse && stationDirectionsVisible,
+-                                onDirectionsVisibilityChanged: { stationDirectionsVisible = $0 },
+-                                onItineraryVisibilityChanged: { stationStepsVisible = $0 })
++                                onDirectionsVisibilityChanged: { traceDirectionsVisibility($0, origin: "call1 expanded:\(expanded)") },
++                                onItineraryVisibilityChanged: { traceItineraryVisibility($0, origin: "call1 expanded:\(expanded)") })
+             }, select: focusStation, dismissPanel: expanded ? nil : { dismissCurrentPanel() })
+         case .directions:
+-            DirectionsView(store: store, selection: $directionsSelection, onSelect: selectTrip, onShowMap: showTripOnMap, initialPlan: routeCanCollapse && stationStepsVisible ? selectedTrip : nil, onItineraryVisibilityChanged: { stationStepsVisible = $0 })
++            DirectionsView(store: store, selection: $directionsSelection, onSelect: selectTrip, onShowMap: showTripOnMap, initialPlan: routeCanCollapse && stationStepsVisible ? selectedTrip : nil, onItineraryVisibilityChanged: { traceItineraryVisibility($0, origin: "call2 expanded:\(expanded)") })
+         case .alerts:
+             SystemAlertsView(store: store, load: $systemAlerts)
+         case .nearby, .search:
+@@ -691,6 +751,8 @@
+     }
+ 
+     private func selectTrip(_ plan: NativeTripPlan?) {
++        traceNavigation("shell.selectTrip.before", ["requested": plan?.id ?? "nil"])
++        defer { traceNavigation("shell.selectTrip.after") }
+         focus.cancelPending()
+         selectedTrip = plan
+         stationStepsVisible = plan != nil
+@@ -704,8 +766,8 @@
+                        directionsSelection: $directionsSelection, onDirectionsHere: beginDirections,
+                        onSelectTrip: selectTrip, onShowTripMap: showTripOnMap, initialTrip: routeCanCollapse && stationStepsVisible ? selectedTrip : nil,
+                        restoreDirections: routeCanCollapse && stationDirectionsVisible,
+-                       onDirectionsVisibilityChanged: { stationDirectionsVisible = $0 },
+-                       onItineraryVisibilityChanged: { stationStepsVisible = $0 }, select: focusStation,
++                       onDirectionsVisibilityChanged: { traceDirectionsVisibility($0, origin: "call2 expanded:\(expanded)") },
++                       onItineraryVisibilityChanged: { traceItineraryVisibility($0, origin: "call3 expanded:\(expanded)") }, select: focusStation,
+                        path: search ? $searchPath : $nearbyPath,
+                        dismissPanel: expanded ? nil : {
+                            if routeCanCollapse {
+@@ -741,3 +803,36 @@
+ extension EnvironmentValues {
+     @Entry var expandedTransitPanel = false
+ }
++
++
++@MainActor
++enum NavigationDiagnostic {
++    static let enabled = ProcessInfo.processInfo.arguments.contains("--ui-test-navigation-diagnostic") && ProcessInfo.processInfo.arguments.contains("--ui-test-fixture")
++    static let originalBindings = ProcessInfo.processInfo.arguments.contains("--ui-test-navigation-original-bindings")
++    private struct Event: Codable {
++        let sequence: Int
++        let utcSeconds: Double
++        let uptime: Double
++        let event: String
++        let fields: [String: String]
++    }
++
++    private static var events: [Event] = []
++    static func record(_ event: String, _ fields: [String: String]) {
++        guard enabled else { return }
++        var fields = fields
++        fields["bindingMode"] = originalBindings ? "original" : "wrapped"
++        events.append(Event(sequence: events.count, utcSeconds: Date.now.timeIntervalSince1970,
++                            uptime: ProcessInfo.processInfo.systemUptime, event: event, fields: fields))
++    }
++
++    static func flush() {
++        guard enabled else { return }
++        let url = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].appendingPathComponent("navigation-diagnostic-\(originalBindings ? "original" : "wrapped").json")
++        do {
++            let encoder = JSONEncoder()
++            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
++            try encoder.encode(events).write(to: url, options: .atomic)
++        } catch { print("Navigation diagnostic export failed") }
++    }
++}
+diff --git a/ios/StandClear/StationBrowser.swift b/ios/StandClear/StationBrowser.swift
+--- a/ios/StandClear/StationBrowser.swift
++++ b/ios/StandClear/StationBrowser.swift
+@@ -340,12 +340,35 @@
+     let restoreDirections: Bool
+     let onDirectionsVisibilityChanged: (Bool) -> Void
+     let onItineraryVisibilityChanged: (Bool) -> Void
++    @State private var diagnosticID = UUID()
++    @Environment(\.expandedTransitPanel) private var diagnosticExpanded
+     @State private var showingDirections = false
+     @State private var restoredRouteNavigation = false
+     @Environment(\.scenePhase) private var scenePhase
+     @State private var visible = false
+     @State private var alerts = StationAlertsLoad()
+     @State private var alertsRetry = 0
++
++    private func trace(_ event: String, _ extra: [String: String] = [:]) {
++        var fields = ["owner": diagnosticID.uuidString, "station": station.id,
++                      "expanded": String(diagnosticExpanded), "showing": String(showingDirections),
++                      "seeded": String(restoredRouteNavigation), "restoreInput": String(restoreDirections),
++                      "visible": String(visible), "initialTrip": initialTrip?.id ?? "nil"]
++        fields.merge(extra) { _, new in new }
++        NavigationDiagnostic.record(event, fields)
++    }
++
++    private var diagnosticDirectionsBinding: Binding<Bool> {
++        let original = $showingDirections
++        if NavigationDiagnostic.originalBindings {
++            return original
++        }
++        return Binding(get: { original.wrappedValue }, set: { value, transaction in
++            trace("station.nativeSet.before", ["requested": String(value), "disablesAnimations": String(transaction.disablesAnimations)])
++            original.transaction(transaction).wrappedValue = value
++            trace("station.nativeSet.after", ["requested": String(value)])
++        })
++    }
+ 
+     private struct AlertsRequest: Equatable {
+         let stationID: String
+@@ -392,14 +415,24 @@
+             .listSectionSpacing(.compact)
+         }
+         .onAppear {
++            trace("station.appear.before")
+             visible = true
+             if !restoredRouteNavigation {
++                trace("station.restore.before")
+                 restoredRouteNavigation = true
+                 showingDirections = restoreDirections
+-            }
+-        }
+-        .onDisappear { visible = false }
+-        .onChange(of: showingDirections) { _, shown in onDirectionsVisibilityChanged(shown) }
++                trace("station.restore.after")
++            } else {
++                trace("station.restore.skipped")
++            }
++            trace("station.appear.after")
++        }
++        .onDisappear { trace("station.disappear.before"); visible = false; trace("station.disappear.after") }
++        .onChange(of: showingDirections) { old, shown in
++            trace("station.change.beforeCallback", ["old": String(old), "new": String(shown)])
++            onDirectionsVisibilityChanged(shown)
++            trace("station.change.afterCallback", ["old": String(old), "new": String(shown)])
++        }
+         .task(id: alertsRequest) { [alertsRequest] in
+             guard alertsRequest.active else { return }
+             alerts = alerts.scoped(to: alertsRequest.stationID)
+@@ -421,8 +454,10 @@
+                 Button {
+                     // Prefill only on this explicit action, never when navigation
+                     // reappears after a rider edits an endpoint or goes back.
++                    trace("station.explicitDirections.before")
+                     onDirectionsHere(station)
+                     showingDirections = true
++                    trace("station.explicitDirections.after")
+                 } label: {
+                     Label("Directions here", systemImage: "arrow.triangle.turn.up.right.diamond")
+                 }
+@@ -457,9 +492,11 @@
+         .navigationTitle(station.stop.name)
+         .navigationBarTitleDisplayMode(.inline)
+         .containerBackground(.clear, for: .navigation)
+-        .navigationDestination(isPresented: $showingDirections) {
++        .navigationDestination(isPresented: diagnosticDirectionsBinding) {
+             DirectionsView(store: store, selection: $directionsSelection,
+-                           onSelect: onSelectTrip, onShowMap: onShowTripMap, initialPlan: initialTrip, onItineraryVisibilityChanged: onItineraryVisibilityChanged)
++                           onSelect: onSelectTrip, onShowMap: onShowTripMap, initialPlan: initialTrip, onItineraryVisibilityChanged: onItineraryVisibilityChanged, diagnosticParentID: diagnosticID.uuidString)
++                .onAppear { trace("station.directionsDestination.appear") }
++                .onDisappear { trace("station.directionsDestination.disappear") }
+         }
+     }
+ }
+diff --git a/ios/StandClear/DirectionsView.swift b/ios/StandClear/DirectionsView.swift
+--- a/ios/StandClear/DirectionsView.swift
++++ b/ios/StandClear/DirectionsView.swift
+@@ -7,13 +7,16 @@
+     let onSelect: (NativeTripPlan?) -> Void
+     let onShowMap: (NativeTripPlan) -> Void
+     let onItineraryVisibilityChanged: (Bool) -> Void
++    let diagnosticParentID: String?
++    @State private var diagnosticID = UUID()
+     @State private var presentedPlan: NativeTripPlan?
+ 
+     init(store: TransitStore, selection: Binding<DirectionsSelection>, onSelect: @escaping (NativeTripPlan?) -> Void,
+          onShowMap: @escaping (NativeTripPlan) -> Void, initialPlan: NativeTripPlan? = nil,
+-         onItineraryVisibilityChanged: @escaping (Bool) -> Void = { _ in })
++         onItineraryVisibilityChanged: @escaping (Bool) -> Void = { _ in }, diagnosticParentID: String? = nil)
+     {
+         self.store = store
++        self.diagnosticParentID = diagnosticParentID
+         _selection = selection
+         self.onSelect = onSelect
+         self.onShowMap = onShowMap
+@@ -23,10 +26,20 @@
+ 
+     private var showingItinerary: Binding<Bool> {
+         Binding(get: { presentedPlan != nil }, set: { shown in
++            trace("directions.itinerarySet.before", ["requested": String(shown)])
+             if !shown {
+                 presentedPlan = nil
+             }
++            trace("directions.itinerarySet.after", ["requested": String(shown)])
+         })
++    }
++
++    private func trace(_ event: String, _ extra: [String: String] = [:]) {
++        var fields = ["directionsOwner": diagnosticID.uuidString, "stationOwner": diagnosticParentID ?? "standalone", "expanded": String(expandedPanel),
++                      "presentedPlan": presentedPlan?.id ?? "nil", "origin": selection.originID ?? "nil",
++                      "destination": selection.destinationID ?? "nil"]
++        fields.merge(extra) { _, new in new }
++        NavigationDiagnostic.record(event, fields)
+     }
+ 
+     var body: some View {
+@@ -92,8 +105,10 @@
+                         Section {
+                             ForEach(plans) { plan in
+                                 Button {
++                                    trace("directions.explicitPlan.before", ["newPlan": plan.id])
+                                     onSelect(plan)
+                                     presentedPlan = plan
++                                    trace("directions.explicitPlan.after")
+                                 } label: {
+                                     VStack(alignment: .leading) {
+                                         Text(plan.routeChoiceTitle(in: store.lines))
+@@ -142,7 +157,13 @@
+             }
+         }
+         .onChange(of: selection) { _, _ in onSelect(nil) }
+-        .onChange(of: presentedPlan != nil) { _, shown in onItineraryVisibilityChanged(shown) }
++        .onAppear { trace("directions.appear") }
++        .onDisappear { trace("directions.disappear") }
++        .onChange(of: presentedPlan != nil) { old, shown in
++            trace("directions.itineraryChange.beforeCallback", ["old": String(old), "new": String(shown)])
++            onItineraryVisibilityChanged(shown)
++            trace("directions.itineraryChange.afterCallback")
++        }
+     }
+ }
+ 
+diff --git a/ios/StandClearUITests/StandClearUITests.swift b/ios/StandClearUITests/StandClearUITests.swift
+--- a/ios/StandClearUITests/StandClearUITests.swift
++++ b/ios/StandClearUITests/StandClearUITests.swift
+@@ -120,14 +120,25 @@
+     }
+ 
+     @MainActor
++    func testStationRouteBackOriginalBindingsDiagnostic() {
++        checkStationRoutePresentation(fromSearch: true, useOriginalBindings: true)
++    }
++
++    @MainActor
+     func testLineRouteBackThenNewStationClearsOldTrip() {
+         checkStationRoutePresentation(fromSearch: false, fromLines: true)
+     }
+ 
+     @MainActor
+-    private func checkStationRoutePresentation(fromSearch: Bool, fromLines: Bool = false) {
+-        let app = launchForMoreMenu(arguments: ["--ui-test-noguchi"])
+-        defer { XCUIDevice.shared.orientation = .portrait }
++    private func checkStationRoutePresentation(fromSearch: Bool, fromLines: Bool = false, useOriginalBindings: Bool = false) {
++        let arguments = ["--ui-test-noguchi", "--ui-test-navigation-diagnostic"] +
++            (useOriginalBindings ? ["--ui-test-navigation-original-bindings"] : [])
++        let app = launchForMoreMenu(arguments: arguments)
++        defer {
++            XCUIDevice.shared.orientation = .portrait
++            XCUIDevice.shared.press(.home)
++            _ = app.wait(for: .runningBackground, timeout: 5)
++        }
+         let fromBrowser = fromSearch || fromLines
+         if fromLines {
+             app.buttons["moreButton"].tap(); app.buttons["linesButton"].tap()
+diff --git a/ios/StandClear.xcodeproj/project.pbxproj b/ios/StandClear.xcodeproj/project.pbxproj
+--- a/ios/StandClear.xcodeproj/project.pbxproj
++++ b/ios/StandClear.xcodeproj/project.pbxproj
+@@ -418,7 +418,7 @@
+ 					"$(inherited)",
+ 					"@executable_path/Frameworks",
+ 				);
+-				PRODUCT_BUNDLE_IDENTIFIER = app.standclear.native;
++				PRODUCT_BUNDLE_IDENTIFIER = app.standclear.navdiagnostic;
+ 				SDKROOT = iphoneos;
+ 				TARGETED_DEVICE_FAMILY = "1,2";
+ 			};
+@@ -512,7 +512,7 @@
+ 					"$(inherited)",
+ 					"@executable_path/Frameworks",
+ 				);
+-				PRODUCT_BUNDLE_IDENTIFIER = app.standclear.native;
++				PRODUCT_BUNDLE_IDENTIFIER = app.standclear.navdiagnostic;
+ 				SDKROOT = iphoneos;
+ 				TARGETED_DEVICE_FAMILY = "1,2";
+ 			};
+diff --git a/ios/project.yml b/ios/project.yml
+--- a/ios/project.yml
++++ b/ios/project.yml
+@@ -26,7 +26,7 @@
+         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
+     settings:
+       base:
+-        PRODUCT_BUNDLE_IDENTIFIER: app.standclear.native
++        PRODUCT_BUNDLE_IDENTIFIER: app.standclear.navdiagnostic
+         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+         TARGETED_DEVICE_FAMILY: '1,2'
+         GENERATE_INFOPLIST_FILE: NO
