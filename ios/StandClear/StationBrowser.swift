@@ -58,6 +58,10 @@ struct StationBrowser: View {
     let onDirectionsHere: (Station) -> Void
     let onSelectTrip: (NativeTripPlan?) -> Void
     let onShowTripMap: (NativeTripPlan) -> Void
+    let initialTrip: NativeTripPlan?
+    let restoreDirections: Bool
+    let onDirectionsVisibilityChanged: (Bool) -> Void
+    let onItineraryVisibilityChanged: (Bool) -> Void
     let select: (Station) -> Void
     @Binding var path: [StationBrowserDestination]
     let dismissPanel: (() -> Void)?
@@ -72,6 +76,15 @@ struct StationBrowser: View {
 
             } else {
                 nearby
+            }
+        }
+        .onChange(of: path) { previous, current in
+            // A path push is explicit navigation. Reconstructing the same path
+            // during a layout change must neither refocus nor clear its route.
+            if current.count > previous.count, case let .station(id) = current.last,
+               let station = store.stations.first(where: { $0.id == id })
+            {
+                select(station)
             }
         }
         .navigationDestination(for: StationBrowserDestination.self) { destination in
@@ -203,8 +216,8 @@ struct StationBrowser: View {
 
     private func stationDetails(_ station: Station) -> some View {
         StationArrivals(station: station, store: store, favoriteStations: favoriteStations, savedPlaces: savedPlaces, directionsSelection: $directionsSelection,
-                        onDirectionsHere: onDirectionsHere, onSelectTrip: onSelectTrip, onShowTripMap: onShowTripMap)
-            .onAppear { select(station) }
+                        onDirectionsHere: onDirectionsHere, onSelectTrip: onSelectTrip, onShowTripMap: onShowTripMap, initialTrip: initialTrip, restoreDirections: restoreDirections,
+                        onDirectionsVisibilityChanged: onDirectionsVisibilityChanged, onItineraryVisibilityChanged: onItineraryVisibilityChanged)
     }
 
     private func openSearchStation(_ station: Station) {
@@ -323,7 +336,12 @@ struct StationArrivals: View {
     let onDirectionsHere: (Station) -> Void
     let onSelectTrip: (NativeTripPlan?) -> Void
     let onShowTripMap: (NativeTripPlan) -> Void
+    let initialTrip: NativeTripPlan?
+    let restoreDirections: Bool
+    let onDirectionsVisibilityChanged: (Bool) -> Void
+    let onItineraryVisibilityChanged: (Bool) -> Void
     @State private var showingDirections = false
+    @State private var restoredRouteNavigation = false
     @Environment(\.scenePhase) private var scenePhase
     @State private var visible = false
     @State private var alerts = StationAlertsLoad()
@@ -373,8 +391,15 @@ struct StationArrivals: View {
             .scrollContentBackground(.hidden)
             .listSectionSpacing(.compact)
         }
-        .onAppear { visible = true }
+        .onAppear {
+            visible = true
+            if !restoredRouteNavigation {
+                restoredRouteNavigation = true
+                showingDirections = restoreDirections
+            }
+        }
         .onDisappear { visible = false }
+        .onChange(of: showingDirections) { _, shown in onDirectionsVisibilityChanged(shown) }
         .task(id: alertsRequest) { [alertsRequest] in
             guard alertsRequest.active else { return }
             alerts = alerts.scoped(to: alertsRequest.stationID)
@@ -434,7 +459,7 @@ struct StationArrivals: View {
         .containerBackground(.clear, for: .navigation)
         .navigationDestination(isPresented: $showingDirections) {
             DirectionsView(store: store, selection: $directionsSelection,
-                           onSelect: onSelectTrip, onShowMap: onShowTripMap)
+                           onSelect: onSelectTrip, onShowMap: onShowTripMap, initialPlan: initialTrip, onItineraryVisibilityChanged: onItineraryVisibilityChanged)
         }
     }
 }
@@ -577,8 +602,10 @@ enum LineDestination: Hashable {
 /// Browse the static route pattern and reported line advisories; arrivals remain in station details.
 struct LineBrowser<StationDetail: View>: View {
     let store: TransitStore
+    @Binding var path: [LineDestination]
     let stationDetail: (Station) -> StationDetail
     let select: (Station) -> Void
+    let dismissPanel: (() -> Void)?
 
     var body: some View {
         List {
@@ -618,15 +645,29 @@ struct LineBrowser<StationDetail: View>: View {
         .navigationTitle("Lines")
         .navigationBarTitleDisplayMode(.inline)
         .accessibilityIdentifier("lineList")
+        .onChange(of: path) { previous, current in
+            if current.count > previous.count, case let .station(id) = current.last,
+               let station = store.stations.first(where: { $0.id == id })
+            {
+                select(station)
+            }
+        }
         .navigationDestination(for: LineDestination.self) { destination in
-            switch destination {
-            case let .route(id):
-                stops(for: id)
-            case let .station(id):
-                if let station = store.stations.first(where: { $0.id == id }) {
-                    stationDetail(station).onAppear { select(station) }
-                } else {
-                    ContentUnavailableView("Station unavailable", systemImage: "tram")
+            Group {
+                switch destination {
+                case let .route(id):
+                    stops(for: id)
+                case let .station(id):
+                    if let station = store.stations.first(where: { $0.id == id }) {
+                        stationDetail(station)
+                    } else {
+                        ContentUnavailableView("Station unavailable", systemImage: "tram")
+                    }
+                }
+            }
+            .toolbar {
+                if let dismissPanel {
+                    ToolbarItem(placement: .confirmationAction) { Button("Done", action: dismissPanel) }
                 }
             }
         }

@@ -13,6 +13,10 @@ struct MapShell: View {
     @State private var expandedNearbyRequested = false
     @State private var panel: Panel?
     @State private var sheetDetent: PresentationDetent = .medium
+    @State private var routePanelCollapsed = false
+    @State private var stationRouteVisit: StationRouteVisit?
+    @State private var stationDirectionsVisible = false
+    @State private var stationStepsVisible = false
     @State private var windowSize: CGSize = .zero
     @State private var expandedPanel: Panel = .nearby
     @State private var stationVisit = 0
@@ -56,6 +60,23 @@ struct MapShell: View {
 
         var id: Self {
             self
+        }
+    }
+
+    private enum StationRouteVisit: Equatable {
+        case search([StationBrowserDestination])
+        case nearby([StationBrowserDestination])
+        case lines([LineDestination])
+        case panel(Panel)
+    }
+
+    private var currentStationVisit: StationRouteVisit? {
+        guard let mode = isWide ? expandedPanel : panel else { return nil }
+        switch mode {
+        case .search: return .search(searchPath)
+        case .nearby: return .nearby(nearbyPath)
+        case .lines: return .lines(linePath)
+        default: return .panel(mode)
         }
     }
 
@@ -108,12 +129,12 @@ struct MapShell: View {
                     }
                 } else {
                     NavigationStack {
-                        map(statusWidth: statusWidth, coveredWidth: 0, coveredBottom: mediumSheetCoversMap ? geometry.size.height / 2 : 0, maximumGlanceHeight: geometry.size.height * 0.55)
+                        map(statusWidth: statusWidth, coveredWidth: 0, coveredBottom: routePanelIsCollapsed ? collapsedRouteHeight + geometry.safeAreaInsets.bottom : mediumSheetCoversMap ? geometry.size.height / 2 : 0, maximumGlanceHeight: geometry.size.height * 0.55)
                             .navigationTitle("StandClear")
                             .navigationBarTitleDisplayMode(.inline)
                             .toolbar {
                                 ToolbarItem(placement: .topBarTrailing) {
-                                    if selectedTrip != nil {
+                                    if selectedTrip != nil, !routePanelIsCollapsed {
                                         clearRouteButton
                                     }
                                 }
@@ -149,8 +170,12 @@ struct MapShell: View {
                     panel = .nearby
                     expandedNearbyRequested = false
                 } else if !isExpanded, expandedPanel.destination != nil {
-                    sheetDetent = typeSize.isAccessibilitySize ? .large : .medium
+                    sheetDetent = routePanelCollapsed ? .custom(CollapsedRouteDetent.self) : typeSize.isAccessibilitySize ? .large : .medium
                     panel = expandedPanel
+                    expandedPanel = .nearby
+                } else if !isExpanded, expandedPanel == .directions {
+                    sheetDetent = .large
+                    panel = .directions
                     expandedPanel = .nearby
                 } else if !isExpanded, expandedPanel == .lines || expandedPanel == .alerts {
                     sheetDetent = .large
@@ -160,6 +185,9 @@ struct MapShell: View {
                     sheetDetent = .large
                     panel = expandedPanel
                     expandedPanel = .nearby
+                }
+                if !isExpanded, routePanelCollapsed, selectedTrip != nil, currentStationVisit == stationRouteVisit {
+                    sheetDetent = .custom(CollapsedRouteDetent.self)
                 }
             }
             .onChange(of: panel) { previous, selection in
@@ -176,7 +204,9 @@ struct MapShell: View {
                 if selection != .search {
                     stationSearchFocused = false
                 }
-                if selection == .search || typeSize.isAccessibilitySize {
+                if routePanelCollapsed, routeCanCollapse {
+                    sheetDetent = .custom(CollapsedRouteDetent.self)
+                } else if selection == .search || typeSize.isAccessibilitySize {
                     sheetDetent = .large
                 }
                 if selection == .search || selection == .directions || (selection == nil && !expanded) {
@@ -185,11 +215,22 @@ struct MapShell: View {
             }
             .sheet(item: $panel) { panel in
                 panelNavigation(panel, expanded: false)
+                    // Keep the navigation tree and its route tasks alive at the
+                    // small detent. Removing PlacePreview would clear its route.
+                    .opacity(routePanelIsCollapsed ? 0 : 1)
+                    .accessibilityHidden(routePanelIsCollapsed)
+                    .allowsHitTesting(!routePanelIsCollapsed)
+                    .overlay(alignment: .top) {
+                        if routePanelIsCollapsed {
+                            collapsedRouteControls
+                        }
+                    }
                     // Search starts with room for its keyboard instead of promoting a medium sheet during focus.
-                    .presentationDetents(panel == .search || typeSize.isAccessibilitySize ? [.large] : [.medium, .large], selection: $sheetDetent)
+                    .presentationDetents(routeCanCollapse ? [.custom(CollapsedRouteDetent.self), .medium, .large] : panel == .search || typeSize.isAccessibilitySize ? [.large] : [.medium, .large], selection: $sheetDetent)
                     .presentationDragIndicator(.visible)
+                    .interactiveDismissDisabled(routeCanCollapse)
                     // A place card and the exposed map form one interactive view, including between detents.
-                    .presentationBackgroundInteraction(panel.destination != nil ? .enabled : .automatic)
+                    .presentationBackgroundInteraction(routeCanCollapse ? .enabled : .automatic)
             }
         }
         .alert("Arrival status", isPresented: $showingArrivalStatus) {
@@ -212,8 +253,15 @@ struct MapShell: View {
             }
         }
         .onChange(of: typeSize, initial: true) { _, _ in
-            if typeSize.isAccessibilitySize {
+            if routePanelCollapsed, routeCanCollapse {
+                sheetDetent = .custom(CollapsedRouteDetent.self)
+            } else if typeSize.isAccessibilitySize {
                 sheetDetent = .large
+            }
+        }
+        .onChange(of: sheetDetent) { _, detent in
+            if routeCanCollapse {
+                routePanelCollapsed = detent == .custom(CollapsedRouteDetent.self)
             }
         }
         .onChange(of: scenePhase) { _, phase in
@@ -365,6 +413,49 @@ struct MapShell: View {
         panel != nil && panel != .search && sheetDetent == .medium
     }
 
+    private var collapsedRouteHeight: CGFloat {
+        typeSize.isAccessibilitySize ? 180 : 96
+    }
+
+    private var routeCanCollapse: Bool {
+        let mode = isWide ? expandedPanel : panel
+        return mode?.destination != nil || (selectedTrip != nil && stationRouteVisit != nil && currentStationVisit == stationRouteVisit)
+    }
+
+    private var routePanelIsCollapsed: Bool {
+        !isWide && routeCanCollapse && sheetDetent == .custom(CollapsedRouteDetent.self)
+    }
+
+    private var collapsedRouteControls: some View {
+        HStack {
+            Button {
+                sheetDetent = typeSize.isAccessibilitySize ? .large : .medium
+            } label: {
+                ViewThatFits(in: .horizontal) {
+                    Text("Directions").fixedSize(horizontal: true, vertical: false)
+                    Text("Steps").fixedSize(horizontal: true, vertical: false)
+                }
+                .frame(minHeight: 44)
+            }
+            .frame(maxWidth: .infinity, minHeight: 44)
+            .accessibilityLabel(activeDestination.map { "Show directions to \($0.name)" } ?? "Show directions")
+            .accessibilityHint("Restore the route steps. You can also drag the panel up.")
+            .accessibilityIdentifier("restoreRoutePanel")
+            clearRouteButton.labelStyle(.iconOnly).fixedSize(horizontal: true, vertical: false).frame(minWidth: 44, minHeight: 44)
+        }
+        .buttonStyle(.bordered)
+        .controlSize(.large)
+        .padding(.horizontal)
+        .padding(.top, 20)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("collapsedRouteControls")
+    }
+
+    private func collapseRoutePanel() {
+        stationSearchFocused = false
+        sheetDetent = .custom(CollapsedRouteDetent.self)
+    }
+
     private var isWide: Bool {
         windowSize.width >= 640 && !typeSize.isAccessibilitySize
     }
@@ -412,6 +503,7 @@ struct MapShell: View {
         detentBeforeOriginPicker = nil
         framedPlaceChoice = nil
         placeSession = PlacePreviewSession()
+        routePanelCollapsed = false
         if expanded {
             expandedPanel = .place(place)
         } else {
@@ -472,7 +564,22 @@ struct MapShell: View {
             panelContent(mode, expanded: true).containerBackground(.clear, for: .navigation)
         } else {
             panelContent(mode).toolbar {
-                ToolbarItem(placement: .confirmationAction) { Button("Done") { panel = nil } }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") {
+                        if routeCanCollapse {
+                            clearRoute()
+                        }
+                        panel = nil
+                    }
+                }
+                if routeCanCollapse {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button("Hide directions", systemImage: "arrow.down.right.and.arrow.up.left", action: collapseRoutePanel)
+                            .labelStyle(.iconOnly)
+                            .accessibilityHint("Show more of the map while keeping this route.")
+                            .accessibilityIdentifier("collapseRoutePanel")
+                    }
+                }
             }
         }
     }
@@ -509,19 +616,25 @@ struct MapShell: View {
         case let .station(id):
             if let station = store.stations.first(where: { $0.id == id }) {
                 StationArrivals(station: station, store: store, favoriteStations: favoriteStations, savedPlaces: savedPlaces, directionsSelection: $directionsSelection,
-                                onDirectionsHere: beginDirections, onSelectTrip: selectTrip, onShowTripMap: showTripOnMap)
+                                onDirectionsHere: beginDirections, onSelectTrip: selectTrip, onShowTripMap: showTripOnMap, initialTrip: routeCanCollapse && stationStepsVisible ? selectedTrip : nil,
+                                restoreDirections: routeCanCollapse && stationDirectionsVisible,
+                                onDirectionsVisibilityChanged: { stationDirectionsVisible = $0 },
+                                onItineraryVisibilityChanged: { stationStepsVisible = $0 })
             } else {
                 ContentUnavailableView("Station unavailable", systemImage: "tram",
                                        description: Text("This station is no longer in the subway data."))
             }
         case .lines:
-            LineBrowser(store: store, stationDetail: { station in
+            LineBrowser<StationArrivals>(store: store, path: $linePath, stationDetail: { station in
                 StationArrivals(station: station, store: store, favoriteStations: favoriteStations, savedPlaces: savedPlaces,
                                 directionsSelection: $directionsSelection, onDirectionsHere: beginDirections,
-                                onSelectTrip: selectTrip, onShowTripMap: showTripOnMap)
-            }, select: focusStation)
+                                onSelectTrip: selectTrip, onShowTripMap: showTripOnMap, initialTrip: routeCanCollapse && stationStepsVisible ? selectedTrip : nil,
+                                restoreDirections: routeCanCollapse && stationDirectionsVisible,
+                                onDirectionsVisibilityChanged: { stationDirectionsVisible = $0 },
+                                onItineraryVisibilityChanged: { stationStepsVisible = $0 })
+            }, select: focusStation, dismissPanel: expanded ? nil : { dismissCurrentPanel() })
         case .directions:
-            DirectionsView(store: store, selection: $directionsSelection, onSelect: selectTrip, onShowMap: showTripOnMap)
+            DirectionsView(store: store, selection: $directionsSelection, onSelect: selectTrip, onShowMap: showTripOnMap, initialPlan: routeCanCollapse && stationStepsVisible ? selectedTrip : nil, onItineraryVisibilityChanged: { stationStepsVisible = $0 })
         case .alerts:
             SystemAlertsView(store: store, load: $systemAlerts)
         case .nearby, .search:
@@ -530,25 +643,44 @@ struct MapShell: View {
     }
 
     private var clearRouteButton: some View {
-        Button("Clear route", systemImage: "xmark") {
-            if activeDestination != nil {
-                placeRoute = nil
-                if isWide {
-                    expandedPanel = .nearby
-                } else {
-                    panel = nil
-                }
-            } else {
-                selectTrip(nil)
-            }
+        Button(action: clearRoute) {
+            Label("Clear route", systemImage: "xmark")
+                .frame(minWidth: 44, minHeight: 44)
         }
         .accessibilityIdentifier("clearMapRoute")
         .accessibilityHint(activeDestination == nil ? "Remove the highlighted route. Your From and To stations are kept." : "Close directions to this place and clear its route.")
     }
 
-    private func showTripOnMap(_ plan: NativeTripPlan) {
+    private func dismissCurrentPanel() {
+        if routeCanCollapse {
+            clearRoute()
+        }
         panel = nil
+    }
+
+    private func clearRoute() {
+        let dismissCollapsedRoute = routePanelIsCollapsed
+        routePanelCollapsed = false
+        if activeDestination != nil {
+            placeRoute = nil
+            if isWide {
+                expandedPanel = .nearby
+            } else {
+                panel = nil
+            }
+        } else {
+            selectTrip(nil)
+            if dismissCollapsedRoute {
+                panel = nil
+            }
+        }
+    }
+
+    private func showTripOnMap(_ plan: NativeTripPlan) {
         selectTrip(plan)
+        if !isWide {
+            collapseRoutePanel()
+        }
     }
 
     private func beginDirections(to station: Station) {
@@ -561,6 +693,8 @@ struct MapShell: View {
     private func selectTrip(_ plan: NativeTripPlan?) {
         focus.cancelPending()
         selectedTrip = plan
+        stationStepsVisible = plan != nil
+        stationRouteVisit = plan == nil ? nil : currentStationVisit
         guard plan != nil else { return }
         tripFocusRevision += 1
     }
@@ -568,15 +702,31 @@ struct MapShell: View {
     private func stationBrowser(search: Bool, expanded: Bool) -> some View {
         StationBrowser(store: store, location: location, search: search, placeSearchMemory: placeSearchMemory, savedPlaces: savedPlaces, recentStations: recentStations, recentPlaces: recentPlaces, favoriteStations: favoriteStations, openPlace: { openPlace($0, expanded: expanded) }, query: $searchQuery, searchFocus: $stationSearchFocused,
                        directionsSelection: $directionsSelection, onDirectionsHere: beginDirections,
-                       onSelectTrip: selectTrip, onShowTripMap: showTripOnMap, select: focusStation,
+                       onSelectTrip: selectTrip, onShowTripMap: showTripOnMap, initialTrip: routeCanCollapse && stationStepsVisible ? selectedTrip : nil,
+                       restoreDirections: routeCanCollapse && stationDirectionsVisible,
+                       onDirectionsVisibilityChanged: { stationDirectionsVisible = $0 },
+                       onItineraryVisibilityChanged: { stationStepsVisible = $0 }, select: focusStation,
                        path: search ? $searchPath : $nearbyPath,
-                       dismissPanel: expanded ? nil : { panel = nil })
+                       dismissPanel: expanded ? nil : {
+                           if routeCanCollapse {
+                               clearRoute()
+                           }
+                           panel = nil
+                       })
     }
 
     private func focusStation(_ station: Station) {
         stationSearchFocused = false
         selectedTrip = nil
         focus.focus(on: station.stop.coordinate)
+    }
+}
+
+/// System sheet detents keep dragging, safe areas, and motion under UIKit's
+/// control. Accessibility text gets enough space for the same two actions.
+private struct CollapsedRouteDetent: CustomPresentationDetent {
+    static func height(in context: Context) -> CGFloat? {
+        min(context.maxDetentValue, context.dynamicTypeSize.isAccessibilitySize ? 180 : 96)
     }
 }
 

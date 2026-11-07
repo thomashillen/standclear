@@ -307,7 +307,7 @@ private struct ServiceAlertSection: View {
                     ForEach(matches) { alert in
                         DisclosureGroup {
                             if !alert.description.isEmpty, alert.description != alert.header {
-                                Text(alert.description)
+                                AdvisoryText(source: alert.description)
                             } else {
                                 Text("No additional details reported.").foregroundStyle(.secondary)
                             }
@@ -318,11 +318,10 @@ private struct ServiceAlertSection: View {
                                     .font(.subheadline)
                                 let routes = Array(Set(alert.routeIds + (alert.selectors ?? []).compactMap(\.routeId))).sorted()
                                 if !routes.isEmpty {
-                                    Text("Routes: \(routes.map { TransitRouteIdentity($0).spokenName }.joined(separator: ", "))")
-                                        .font(.subheadline).foregroundStyle(.secondary)
+                                    RouteBadgeGroup(routes: routes)
                                 }
-                                Text(alert.header.isEmpty ? alert.effect.replacingOccurrences(of: "_", with: " ").capitalized : alert.header)
-                                    .font(.headline)
+                                AdvisoryText(source: alert.header.isEmpty ? alert.effect.replacingOccurrences(of: "_", with: " ").capitalized : alert.header,
+                                             style: .headline)
                                 AlertWindowLabel(alert: alert, now: now, evidence: evidence)
                             }
                             .fixedSize(horizontal: false, vertical: true)
@@ -336,11 +335,11 @@ private struct ServiceAlertSection: View {
                                 Label(alert.severity == "severe" ? "Severe" : alert.severity == "warning" ? "Warning" : "Information",
                                       systemImage: alert.severity == "info" ? "info.circle" : "exclamationmark.triangle")
                                     .font(.subheadline)
-                                Text(alert.header.isEmpty ? alert.effect.replacingOccurrences(of: "_", with: " ").capitalized : alert.header)
-                                    .font(.headline)
+                                AdvisoryText(source: alert.header.isEmpty ? alert.effect.replacingOccurrences(of: "_", with: " ").capitalized : alert.header,
+                                             style: .headline)
                                 AlertWindowLabel(alert: alert, now: now, evidence: evidence)
                                 if !alert.description.isEmpty, alert.description != alert.header {
-                                    Text(alert.description)
+                                    AdvisoryText(source: alert.description)
                                 }
                             }
                             .accessibilityElement(children: .combine)

@@ -297,12 +297,13 @@ final class TransitStore {
                 }
                 let stale = ProcessInfo.processInfo.arguments.contains("--ui-test-stale-alerts") || (recovery && alertRequests == 1)
                 let windowEnd = now.timeIntervalSince1970 + (ProcessInfo.processInfo.arguments.contains("--ui-test-alert-window-absolute") ? 2 * 86400 : 2700)
+                let bullets = ProcessInfo.processInfo.arguments.contains("--ui-test-route-bullets")
                 payload = ["available": true, "generatedAt": now.timeIntervalSince1970 * 1000,
                            "feedTimestamp": now.timeIntervalSince1970 - (stale ? 780 : 0), "alerts": ProcessInfo.processInfo.arguments.contains("--ui-test-empty-alerts") ? [] : [
-                               ["id": "fixture-wall", "header": "Downtown 4 trains are delayed at Wall St",
-                                "description": "Allow extra travel time at Wall St.", "effect": "SIGNIFICANT_DELAYS", "severity": "severe",
+                               ["id": "fixture-wall", "header": bullets ? "Fixture advisory for [2][3], [F], and [FS]" : "Downtown 4 trains are delayed at Wall St",
+                                "description": bullets ? "Take [1] or [6X]. [FS], [GS], and [H] retain their names. Keep [AX] and [planned] literal." : "Allow extra travel time at Wall St.", "effect": "SIGNIFICANT_DELAYS", "severity": "severe",
                                 "startTime": now.timeIntervalSince1970 - 3600, "endTime": windowEnd,
-                                "routeIds": ["4"], "stopIds": ["419"], "selectors": [["routeId": "4", "stopId": "419"]]],
+                                "routeIds": bullets ? ["1", "2", "3", "6X", "7X", "FX", "GS", "FS", "H", "N", "Q", "UNKNOWN-LONG-ROUTE"] : ["4"], "stopIds": ["419"], "selectors": [["routeId": "4", "stopId": "419"]]],
                                ["id": "fixture-express", "header": "6 express trains are delayed at Pelham Bay Park",
                                 "description": "Allow extra travel time for express service.", "effect": "SIGNIFICANT_DELAYS", "severity": "warning",
                                 "routeIds": ["6X"], "stopIds": ["601"], "selectors": [["routeId": "6X", "stopId": "601"]]],

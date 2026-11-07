@@ -13,13 +13,39 @@ struct PlaceResult: Identifiable, Hashable, Codable, Sendable {
     }
 }
 
+/// A suggestion is not a routable place until its selected completion resolves.
+@MainActor
+struct PlaceSuggestion: Identifiable {
+    let id, name, subtitle: String
+    private let resolvePlace: @MainActor () async throws -> PlaceResult
+
+    init(id: String, name: String, subtitle: String, resolve: @escaping @MainActor () async throws -> PlaceResult) {
+        self.id = id; self.name = name; self.subtitle = subtitle
+        resolvePlace = resolve
+    }
+
+    init(place: PlaceResult) {
+        self.init(id: place.id, name: place.name, subtitle: place.subtitle) { place }
+    }
+
+    func resolve() async throws -> PlaceResult {
+        try Task.checkCancellation()
+        let place = try await resolvePlace()
+        try Task.checkCancellation()
+        guard PlaceServiceArea.contains(place.coordinate), !place.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw PlaceServiceError.outsideCoverage
+        }
+        return place
+    }
+}
+
 struct WalkingConnection: Sendable {
     let coordinates: [CLLocationCoordinate2D]
     let seconds: Double
     let meters: Double
 }
 
-enum PlaceServiceError: Error { case unavailable, noWalkingRoute }
+enum PlaceServiceError: Error { case unavailable, noWalkingRoute, outsideCoverage }
 
 /// A coarse search/routing envelope, not a municipal boundary. Include the
 /// southern Staten Island stations already present in StandClear's dataset.
@@ -82,6 +108,19 @@ struct PlaceService: Sendable {
         }.prefix(10))
     }
 
+    @MainActor func suggestions(_ query: String) async throws -> [PlaceSuggestion] {
+        let query = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        try Task.checkCancellation()
+        guard query.count >= 2 else { return [] }
+        #if DEBUG && targetEnvironment(simulator)
+            if ProcessInfo.processInfo.arguments.contains("--ui-test-fixture") {
+                return try await search(query).map { PlaceSuggestion(place: $0) }
+            }
+        #endif
+        let request = PlaceCompletionRequest()
+        return try await request.search(query)
+    }
+
     func walk(from: CLLocationCoordinate2D, to: CLLocationCoordinate2D) async throws -> WalkingConnection {
         try Task.checkCancellation()
         guard PlaceServiceArea.contains(from), PlaceServiceArea.contains(to) else { throw PlaceServiceError.noWalkingRoute }
@@ -109,6 +148,19 @@ struct PlaceService: Sendable {
         request.resultTypes = [.address, .pointOfInterest]
         request.region = PlaceServiceArea.searchRegion
         request.regionPriority = .required
+        return try await mapItems(request)
+    }
+
+    @MainActor fileprivate static func resolveCompletion(_ completion: MKLocalSearchCompletion) async throws -> PlaceResult {
+        let request = MKLocalSearch.Request(completion: completion)
+        request.region = PlaceServiceArea.searchRegion
+        request.regionPriority = .required
+        let places = try await mapItems(request)
+        guard let place = places.first else { throw PlaceServiceError.unavailable }
+        return place
+    }
+
+    @MainActor private static func mapItems(_ request: MKLocalSearch.Request) async throws -> [PlaceResult] {
         let search = MKLocalSearch(request: request)
         return try await MapRequest<[PlaceResult]>().run(cancel: { search.cancel() }) { finish in
             search.start { response, error in
@@ -262,3 +314,36 @@ private final class MapRequest<Value: Sendable> {
         }
     }
 #endif
+
+/// One completer per debounced query keeps delegate replies scoped to that query.
+@MainActor private final class PlaceCompletionRequest: NSObject, @preconcurrency MKLocalSearchCompleterDelegate {
+    private let completer = MKLocalSearchCompleter()
+    private var finish: ((Result<[PlaceSuggestion], Error>) -> Void)?
+
+    func search(_ query: String) async throws -> [PlaceSuggestion] {
+        completer.delegate = self
+        completer.region = PlaceServiceArea.searchRegion
+        completer.resultTypes = [.address, .pointOfInterest]
+        return try await MapRequest<[PlaceSuggestion]>().run(cancel: { self.completer.cancel() }) { finish in
+            self.finish = finish
+            self.completer.queryFragment = query
+        }
+    }
+
+    func completerDidUpdateResults(_ completer: MKLocalSearchCompleter) {
+        var seen = Set<String>()
+        let suggestions = completer.results.compactMap { completion -> PlaceSuggestion? in
+            let id = completion.title + "|" + completion.subtitle
+            guard !completion.title.isEmpty, seen.insert(id).inserted else { return nil }
+            return PlaceSuggestion(id: id, name: completion.title, subtitle: completion.subtitle) {
+                try await PlaceService.resolveCompletion(completion)
+            }
+        }
+        finish?(.success(Array(suggestions.prefix(10))))
+        finish = nil
+    }
+
+    func completer(_: MKLocalSearchCompleter, didFailWithError error: Error) {
+        finish?(.failure(error)); finish = nil
+    }
+}
