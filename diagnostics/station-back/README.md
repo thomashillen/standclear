@@ -21,7 +21,7 @@ The test backgrounds the app only in its cleanup defer, after the original inter
 
 The patch SHA256 is pinned in the workflow and checked before execution. It was applied cleanly to a fresh archive of the fixed source and compiled locally with Xcode 27.2. That toolchain differs from the intended hosted Xcode 26.6.
 
-The workflow has a narrowly filtered `pull_request: opened` trigger so opening the reviewed draft schedules one run. It intentionally does not retry on synchronize/reopened events. `workflow_dispatch` is also declared, but do not rely on manual dispatch of a newly added workflow until GitHub exposes it for that repository/ref. Any additional run needs a deliberate decision; no automatic retry or `continue-on-error` exists.
+The workflow has a narrowly filtered `pull_request: opened/synchronize` trigger. Each published diagnostic head can schedule one run; it does not retry an unchanged head or run on reopened events. A first workflow-only head was rejected by GitHub before a runner started because runner.temp was used in job-level env; the corrected head uses RUNNER_TEMP in shell steps and runner.temp in the artifact step. `workflow_dispatch` is also declared, but do not rely on manual dispatch of a newly added workflow until GitHub exposes it for that repository/ref. Any additional run needs a deliberate decision; no automatic retry or `continue-on-error` exists.
 
 ## Guarded execution
 
