@@ -18,10 +18,11 @@ jobs:
   simulator:
     name: Build, analyze, and test iOS
     runs-on: macos-26
-    # Run 42131736186 attempt 2 passed 39/40 UI tests before the 60-minute
-    # job limit interrupted the final test. Keep every test and its deadlines;
-    # reserve time for the full serial suite, build, startup, and result cleanup.
-    timeout-minutes: 75
+    # Run 42368855930 hit 75 minutes after 162 unit and 45/56 UI passes.
+    # One passing case took ~17 minutes, including sixteen 60s notification waits.
+    # Keep every test and assertion deadline; allow the complete serial suite,
+    # build, startup, and result finalization to finish (tracked in #348).
+    timeout-minutes: 100
     steps:
       - uses: actions/checkout@v7
       - name: Select an installed iPhone simulator
