@@ -31,7 +31,7 @@ A free Mapbox token is enough for development. The MTA GTFS-Realtime feeds are p
 
 - **Issues labeled `good first issue`** are sized for a first PR.
 - **`bug` and `feedback` labels** are real user reports — fixing one is high-leverage.
-- **Anything in the `pro` label** is in [the Pricing page roadmap](https://standclear.app/pricing) (push alerts, leave-at-X reminders, cross-device sync). These need design discussion first — open an issue with your approach.
+- **Feature expansions** need design discussion first — open an issue with your approach.
 
 If you've got an idea that isn't on the issue tracker, open an issue describing it before you code so we can confirm fit.
 
