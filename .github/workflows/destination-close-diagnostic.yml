@@ -19,7 +19,7 @@ jobs:
     timeout-minutes: 15
     env:
       SOURCE_COMMIT: 'e874c7f9cd1c5bc1bb2e6e6e185e806408a0493f'
-      PATCH_SHA256: '237982248d6f9d426436ecef020559ad86edc0c3373fd7c3eceda881128bfaed'
+      PATCH_SHA256: 'a8da6ba24f6925b76d52892dfe20603e1806e2fedc20c66d60dc12f9aa773f66'
     steps:
       - name: Start bounded diagnostic clock
         timeout-minutes: 1

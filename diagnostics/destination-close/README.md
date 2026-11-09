@@ -33,6 +33,17 @@ changed presented to false with an empty query. Back and all later assertions
 passed. No local reactivation was observed. This does not reproduce the hosted
 failure, establish flakiness or identify a fix.
 
+The first exact-toolchain hosted attempt,
+[42583914898](https://github.com/thomashillen/standclear/actions/runs/42583914898),
+passed source/tool preflight but failed to type-check the instrumented view body
+before any test executed. It was not a timeout. Compiler output and the raw
+empty trace survived; collection correctly reported that no usable trace existed.
+The successor diagnostic moves logging formatting into a typed helper and types
+the two observer parameters explicitly, without changing bindings or observer
+placement. This correction passed local lint and build-for-testing. The earlier
+local UI pass belongs to the inline-logging version; no new local UI rerun is
+claimed for the helper correction.
+
 ## Hosted scope and evidence
 
 The workflow requires Xcode 26.6 (17F113) and iOS 26.4.1 (23E254a), with no
