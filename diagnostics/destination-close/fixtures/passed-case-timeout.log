@@ -1,0 +1,7 @@
+** BUILD SUCCEEDED **
+** ANALYZE SUCCEEDED **
+Test Case '-[StandClearUITests.StandClearUITests testPlaceDestinationEditingExpanded]' started.
+Test Case '-[StandClearUITests.StandClearUITests testPlaceDestinationEditingExpanded]' passed (237.489 seconds).
+                     <DVTOperationGroup: 0x8b5cd9800; state = AReF!c, blocking { Blocking finish to clean up test session. }>
+         <_IDETestingFinalizeLogsOperation: 0x8b5eec780; name = 'Finalize test log', state = aref!c, blocking { waiting for test log to finish recording }>
+** TEST INTERRUPTED **

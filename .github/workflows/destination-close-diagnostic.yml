@@ -19,7 +19,7 @@ jobs:
     timeout-minutes: 15
     env:
       SOURCE_COMMIT: 'e874c7f9cd1c5bc1bb2e6e6e185e806408a0493f'
-      PATCH_SHA256: 'a8da6ba24f6925b76d52892dfe20603e1806e2fedc20c66d60dc12f9aa773f66'
+      PATCH_SHA256: '1fd076b38335fae9125536736a1c11ec8a8f40bbb7386b3cee129ea732315d1b'
     steps:
       - name: Start bounded diagnostic clock
         timeout-minutes: 1
@@ -46,9 +46,9 @@ jobs:
         run: |
           python3 diagnostics/destination-close/driver.py prepare \
             --output "$RUNNER_TEMP/destination-close-diagnostic" \
-            --patch diagnostics/destination-close/apply-diagnostic.patch \
-            --patch-sha256 "$PATCH_SHA256"
-      - name: Run the unchanged expanded destination test once
+            --patch diagnostics/destination-close/correlated-candidate.patch \
+            --patch-sha256 "$PATCH_SHA256" --correlated
+      - name: Qualify correlated markers in the expanded destination case once
         timeout-minutes: 11
         run: python3 diagnostics/destination-close/driver.py run --output "$RUNNER_TEMP/destination-close-diagnostic"
       - name: Preserve state trace and shut down only the owned simulator
@@ -64,6 +64,8 @@ jobs:
           path: |
             ${{ runner.temp }}/destination-close-diagnostic/*.json
             ${{ runner.temp }}/destination-close-diagnostic/*.log
+            ${{ runner.temp }}/destination-close-diagnostic/*.patch
+            ${{ runner.temp }}/destination-close-diagnostic/baseline
             ${{ runner.temp }}/destination-close-diagnostic/DestinationClose.xcresult
           if-no-files-found: error
           retention-days: 7
