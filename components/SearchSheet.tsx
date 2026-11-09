@@ -682,7 +682,12 @@ export default function SearchSheet({
       { lat: fromLat, lng: fromLng },
       { lat: toLat, lng: toLng },
     );
-    return { meters, min: walkMinutes(meters) };
+    return {
+      from: { lng: fromLng, lat: fromLat },
+      to: { lng: toLng, lat: toLat },
+      meters,
+      min: walkMinutes(meters),
+    };
   }, [mode, tripFrom, tripTo]);
 
   // Fastest subway plan total time (minutes), using the same
@@ -723,30 +728,34 @@ export default function SearchSheet({
   // recommendation. Fetched eagerly when walking wins so the dashed
   // line shows up on the map at the same time as the card — no
   // tap-to-expand required. Reset on endpoint change.
-  const [walkOnlyRoute, setWalkOnlyRoute] = useState<WalkingRoute | null>(null);
+  const [walkOnlyResult, setWalkOnlyResult] = useState<{
+    endpoints: NonNullable<typeof directWalk>;
+    route: WalkingRoute | null;
+  } | null>(null);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- clearing the resolved walk route when endpoints change keeps stale geometry off the map until the new fetch lands.
-    setWalkOnlyRoute(null);
-  }, [tripFrom, tripTo]);
-
-  useEffect(() => {
-    if (!walkIsBest || !tripFrom || !tripTo) return;
-    if (walkOnlyRoute) return;
+    setWalkOnlyResult(null);
+    if (!open || !walkIsBest || !directWalk) return;
     const ctrl = new AbortController();
     fetchWalkingRoute(
-      { lng: tripFrom.lng, lat: tripFrom.lat },
-      { lng: tripTo.lng, lat: tripTo.lat },
+      directWalk.from,
+      directWalk.to,
       { signal: ctrl.signal },
     )
       .then((r) => {
         if (ctrl.signal.aborted) return;
-        setWalkOnlyRoute(r);
+        setWalkOnlyResult({ endpoints: directWalk, route: r });
       })
       .catch(() => {});
     return () => ctrl.abort();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [walkIsBest, tripFrom, tripTo]);
+  }, [open, walkIsBest, directWalk]);
+
+  // Effects run after render: an old response must never be paired with
+  // newly edited endpoints, even before the request effect clears it.
+  const walkOnlyRoute = walkOnlyResult?.endpoints === directWalk
+    ? walkOnlyResult?.route
+    : null;
 
   // Push the walking-faster overlay up to the parent so MapView can
   // render the pedestrian line. Use the resolved street geometry when
@@ -756,10 +765,10 @@ export default function SearchSheet({
   // sheet leaves directions mode).
   useEffect(() => {
     if (!onWalkOnlyChange) return;
-    if (walkIsBest && tripFrom && tripTo) {
+    if (open && walkIsBest && directWalk) {
       onWalkOnlyChange({
-        from: { lng: tripFrom.lng, lat: tripFrom.lat },
-        to: { lng: tripTo.lng, lat: tripTo.lat },
+        from: directWalk.from,
+        to: directWalk.to,
         coords: walkOnlyRoute?.coordinates,
       });
     } else {
@@ -768,7 +777,7 @@ export default function SearchSheet({
     return () => {
       onWalkOnlyChange(null);
     };
-  }, [walkIsBest, tripFrom, tripTo, walkOnlyRoute, onWalkOnlyChange]);
+  }, [open, walkIsBest, directWalk, walkOnlyRoute, onWalkOnlyChange]);
 
   // Mirror the expandedPlan flag up to the parent so MapView can
   // pad its trip-fit camera differently based on which detent the
