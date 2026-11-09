@@ -36,6 +36,7 @@ struct DirectionsView: View {
                     DirectionStationPicker(stations: store.stations, title: "From station") { station in
                         selection.originID = station.id
                     }
+                    .modifier(ExpandedTransitToolbarModifier())
                 } label: {
                     LabeledContent("From", value: selection.origin(in: store.stations)?.stop.name ?? "Choose station")
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -53,6 +54,7 @@ struct DirectionsView: View {
                     DirectionStationPicker(stations: store.stations, title: "To station") { station in
                         selection.destinationID = station.id
                     }
+                    .modifier(ExpandedTransitToolbarModifier())
                 } label: {
                     LabeledContent("To", value: selection.destination(in: store.stations)?.stop.name ?? "Choose station")
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -127,6 +129,7 @@ struct DirectionsView: View {
         .navigationDestination(isPresented: showingItinerary) {
             if let presentedPlan {
                 TripItineraryView(plan: presentedPlan, store: store, onShowMap: onShowMap)
+                    .modifier(ExpandedTransitToolbarModifier())
             }
         }
         .accessibilityIdentifier("directionsList")

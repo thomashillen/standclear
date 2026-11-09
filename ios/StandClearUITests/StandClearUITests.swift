@@ -2554,6 +2554,65 @@ final class StandClearUITests: XCTestCase {
     }
 
     @MainActor
+    func testExpandedInspectorToolbarSurvivesStationNavigationAndAdaptation() {
+        let app = launchForMoreMenu()
+        defer { XCUIDevice.shared.orientation = .portrait }
+        XCUIDevice.shared.orientation = .landscapeLeft
+        waitForLayout(in: app, expanded: true)
+        app.buttons["searchButton"].tap()
+        let field = app.searchFields[unifiedSearchPrompt]
+        guard focusSearchField(field, in: app) else { return }
+        field.typeText("Wall\n")
+        selectSearchResult("419", query: "Wall", in: app)
+        XCTAssertTrue(app.navigationBars["Wall St"].waitForExistence(timeout: 5))
+
+        XCTAssertTrue(app.buttons["directionsHere"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.navigationBars["Wall St"].exists)
+        XCTAssertFalse(app.buttons["Done"].exists, "The expanded inspector must not become a modal sheet")
+        let bounds = app.windows.firstMatch.frame
+        for identifier in ["searchButton", "nearbyButton", "moreButton"] {
+            let controls = app.buttons.matching(identifier: identifier)
+            XCTAssertEqual(controls.count, 1, "Adaptation must expose only one \(identifier)")
+            let control = controls.firstMatch
+            XCTAssertTrue(control.isHittable, "Inspector controls must remain usable after pushing station details")
+            XCTAssertGreaterThan(control.frame.midX, bounds.midX, "Inspector controls belong in the trailing region")
+            XCTAssertTrue(bounds.contains(control.frame), "Native toolbar controls must stay inside the window")
+        }
+        let expanded = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        expanded.name = "Native inspector toolbar with pushed station details"
+        expanded.lifetime = .keepAlways
+        add(expanded)
+
+        app.buttons["moreButton"].tap()
+        let arrivalStatus = app.buttons["arrivalStatusButton"]
+        XCTAssertTrue(arrivalStatus.waitForExistence(timeout: 5))
+        arrivalStatus.tap()
+        let status = app.alerts["Arrival status"]
+        XCTAssertTrue(status.waitForExistence(timeout: 5))
+        status.buttons["OK"].tap()
+        XCTAssertTrue(app.navigationBars["Wall St"].exists)
+        app.buttons["nearbyButton"].tap()
+        XCTAssertTrue(app.navigationBars["Nearby arrivals"].waitForExistence(timeout: 5))
+        app.buttons["searchButton"].tap()
+        XCTAssertTrue(app.navigationBars["Wall St"].waitForExistence(timeout: 5), "Search must restore its pushed station visit")
+
+        XCUIDevice.shared.orientation = .portrait
+        waitForLayout(in: app, expanded: false, readyControl: "directionsHere")
+        XCTAssertTrue(app.navigationBars["Wall St"].exists)
+        XCTAssertTrue(app.buttons["Done"].isHittable, "The same visit must use a native sheet when narrow")
+        let compact = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        compact.name = "Native compact sheet preserving the inspector station visit"
+        compact.lifetime = .keepAlways
+        add(compact)
+
+        XCUIDevice.shared.orientation = .landscapeLeft
+        waitForLayout(in: app, expanded: true, readyControl: "moreButton")
+        XCTAssertTrue(app.navigationBars["Wall St"].exists)
+        XCTAssertTrue(app.buttons["searchButton"].isHittable)
+        XCTAssertTrue(app.buttons["nearbyButton"].isHittable)
+    }
+
+    @MainActor
     func testStationBrowsersPreserveIndependentPathsAcrossLayouts() {
         let app = XCUIApplication()
         app.terminate()
@@ -2853,12 +2912,27 @@ final class StandClearUITests: XCTestCase {
         let plan = app.buttons["tripPlan-4:N:419>629|N:N:R11>R05"]
         func selectPlan() {
             let list = app.collectionViews["directionsList"]
-            for _ in 0 ..< 4 where !plan.isHittable {
+            func hasUnobscuredCenter() -> Bool {
+                guard plan.exists, plan.isHittable else { return false }
+                let frame = plan.frame
+                let center = CGPoint(x: frame.midX, y: frame.midY)
+                let toolbarTop = ["searchButton", "nearbyButton", "moreButton"]
+                    .map { app.buttons[$0] }.filter(\.exists).map(\.frame.minY).min() ?? list.frame.maxY
+                return list.frame.contains(center) && app.windows.firstMatch.frame.contains(center) && center.y < toolbarTop
+            }
+            // A native floating toolbar can cover the center of a partially
+            // hittable row. Scroll the actual tap point clear before activating.
+            for _ in 0 ..< 4 where !hasUnobscuredCenter() {
                 list.swipeUp()
             }
             XCTAssertTrue(plan.waitForExistence(timeout: 10))
             XCTAssertTrue(plan.isHittable)
-            plan.tap()
+            XCTAssertTrue(hasUnobscuredCenter(), "The route's activation point must be above the native toolbar")
+            let beforeTap = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            beforeTap.name = "Route choice scrolled above native inspector toolbar"
+            beforeTap.lifetime = .keepAlways
+            add(beforeTap)
+            plan.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
         }
         selectPlan()
         let map = app.descendants(matching: .any)["appleTransitMap"].firstMatch

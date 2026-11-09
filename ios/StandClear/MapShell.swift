@@ -2,7 +2,7 @@ import CoreLocation
 import SwiftUI
 
 struct MapShell: View {
-    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.dynamicTypeSize) private var typeSize
     @State private var store = TransitStore()
@@ -85,51 +85,29 @@ struct MapShell: View {
             // Window geometry, not a device identifier, selects the control region.
             let expanded = geometry.size.width >= 640 && !typeSize.isAccessibilitySize
             let controlWidth = min(geometry.size.width * 0.4, 380)
-            let statusWidth = expanded ? geometry.size.width - controlWidth : geometry.size.width
             Group {
                 if expanded {
-                    ZStack(alignment: .trailing) {
-                        map(statusWidth: statusWidth, coveredWidth: geometry.size.width - statusWidth, coveredBottom: 0, maximumGlanceHeight: geometry.size.height * 0.55)
-                        VStack(spacing: 0) {
-                            panelNavigation(expandedPanel, expanded: true)
-                                .environment(\.expandedTransitPanel, true)
-                                .id(expandedPanel)
-                                .id(stationVisit)
-                            if selectedTrip != nil {
-                                clearRouteButton
-                                    .buttonStyle(.bordered)
-                                    .padding(.horizontal)
-                            }
-                            HStack {
-                                ControlGroup {
-                                    Button("Search", systemImage: "magnifyingglass") { showSearch(expanded: true) }
-                                        .accessibilityIdentifier("searchButton")
-                                    Button("Nearby", systemImage: "location") {
-                                        showNearby(expanded: true)
-                                    }
-                                    .accessibilityIdentifier("nearbyButton")
-                                }
-                                // Automatic ControlGroup styling disables a
-                                // nested Menu in this expanded layout. Keep the
-                                // menu as a separate native control.
-                                moreMenu.buttonStyle(.bordered)
-                            }
-                            .labelStyle(.iconOnly)
-                            .controlSize(.large)
-                            .padding()
-                        }
-                        .frame(width: controlWidth)
-                        .background {
-                            if reduceTransparency {
-                                Color(uiColor: .systemBackground)
-                            } else {
-                                Rectangle().fill(.regularMaterial)
-                            }
-                        }
+                    GeometryReader { mapGeometry in
+                        map(statusWidth: mapGeometry.size.width, coveredWidth: 0, coveredBottom: 0,
+                            maximumGlanceHeight: mapGeometry.size.height * 0.55)
                     }
+                    .inspector(isPresented: .constant(true)) {
+                        panelNavigation(expandedPanel, expanded: true)
+                            .interactiveDismissDisabled()
+                            .environment(\.expandedTransitPanel, true)
+                            .environment(\.expandedTransitToolbar, expandedToolbar)
+                            .environment(\.horizontalSizeClass, horizontalSizeClass)
+                            .id(expandedPanel)
+                            .id(stationVisit)
+                            .inspectorColumnWidth(controlWidth)
+                    }
+                    // A wide phone window can still report compact width.
+                    // Scope the regular presentation trait to this host; the
+                    // inspector's content retains the system's actual trait.
+                    .environment(\.horizontalSizeClass, .regular)
                 } else {
                     NavigationStack {
-                        map(statusWidth: statusWidth, coveredWidth: 0, coveredBottom: routePanelIsCollapsed ? collapsedRouteHeight + geometry.safeAreaInsets.bottom : mediumSheetCoversMap ? geometry.size.height / 2 : 0, maximumGlanceHeight: geometry.size.height * 0.55)
+                        map(statusWidth: geometry.size.width, coveredWidth: 0, coveredBottom: routePanelIsCollapsed ? collapsedRouteHeight + geometry.safeAreaInsets.bottom : mediumSheetCoversMap ? geometry.size.height / 2 : 0, maximumGlanceHeight: geometry.size.height * 0.55)
                             .navigationTitle("StandClear")
                             .navigationBarTitleDisplayMode(.inline)
                             .toolbar {
@@ -297,11 +275,11 @@ struct MapShell: View {
                             destination: activeDestination, placeRoute: visiblePlaceRoute,
                             stationEndpoints: activeDestination == nil ? selectedTrip.map { StationTripEndpoints(plan: $0, lines: store.lines) } : nil,
                             placeGeometryRevision: placeGeometryRevision, transferMarker: transferMarker)
-            if !showsJourney, panel == nil || coveredWidth > 0 {
+            if !showsJourney, panel == nil || isWide {
                 NearbyGlancePanel(store: store, location: location,
                                   maximumHeight: maximumGlanceHeight,
-                                  openStation: { showGlanceStation($0, expanded: coveredWidth > 0) },
-                                  openNearby: { showNearby(expanded: coveredWidth > 0) })
+                                  openStation: { showGlanceStation($0, expanded: isWide) },
+                                  openNearby: { showNearby(expanded: isWide) })
                     .frame(maxWidth: min(typeSize.isAccessibilitySize ? 260 : 220, max(0, statusWidth - 32)))
                     .padding()
                     .frame(maxWidth: statusWidth, alignment: .leading)
@@ -559,9 +537,15 @@ struct MapShell: View {
         }
     }
 
+    private var expandedToolbar: ExpandedTransitToolbar {
+        ExpandedTransitToolbar(search: { showSearch(expanded: true) }, nearby: { showNearby(expanded: true) },
+                               menu: AnyView(moreMenu), clearRoute: selectedTrip == nil ? nil : AnyView(clearRouteButton))
+    }
+
     @ViewBuilder private func panelRoot(_ mode: Panel, expanded: Bool) -> some View {
         if expanded {
-            panelContent(mode, expanded: true).containerBackground(.clear, for: .navigation)
+            panelContent(mode, expanded: true)
+                .modifier(ExpandedTransitToolbarModifier())
         } else {
             panelContent(mode).toolbar {
                 ToolbarItem(placement: .confirmationAction) {
@@ -740,4 +724,45 @@ func transitColor(_ hex: String) -> UIColor {
 /// Pushed route screens inherit the same map-backed presentation as their root.
 extension EnvironmentValues {
     @Entry var expandedTransitPanel = false
+}
+
+/// Each screen owns its native toolbar. Navigation pushes replace toolbar
+/// content, so destinations opt in to the same controls through the environment.
+struct ExpandedTransitToolbar: ToolbarContent {
+    let search: () -> Void
+    let nearby: () -> Void
+    let menu: AnyView
+    let clearRoute: AnyView?
+
+    var body: some ToolbarContent {
+        ToolbarItemGroup(placement: .bottomBar) {
+            Button("Search", systemImage: "magnifyingglass", action: search)
+                .accessibilityIdentifier("searchButton")
+            Spacer()
+            Button("Nearby", systemImage: "location", action: nearby)
+                .accessibilityIdentifier("nearbyButton")
+            menu
+        }
+        ToolbarItem(placement: .topBarTrailing) {
+            if let clearRoute {
+                clearRoute
+            }
+        }
+    }
+}
+
+struct ExpandedTransitToolbarModifier: ViewModifier {
+    @Environment(\.expandedTransitToolbar) private var expandedToolbar
+
+    func body(content: Content) -> some View {
+        content.toolbar {
+            if let expandedToolbar {
+                expandedToolbar
+            }
+        }
+    }
+}
+
+extension EnvironmentValues {
+    @Entry var expandedTransitToolbar: ExpandedTransitToolbar? = nil
 }

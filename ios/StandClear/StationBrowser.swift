@@ -99,6 +99,7 @@ struct StationBrowser: View {
                     }
                 }
             }
+            .modifier(ExpandedTransitToolbarModifier())
             .toolbar {
                 if let dismissPanel {
                     ToolbarItem(placement: .confirmationAction) {
@@ -460,6 +461,7 @@ struct StationArrivals: View {
         .navigationDestination(isPresented: $showingDirections) {
             DirectionsView(store: store, selection: $directionsSelection,
                            onSelect: onSelectTrip, onShowMap: onShowTripMap, initialPlan: initialTrip, onItineraryVisibilityChanged: onItineraryVisibilityChanged)
+                .modifier(ExpandedTransitToolbarModifier())
         }
     }
 }
@@ -665,6 +667,7 @@ struct LineBrowser<StationDetail: View>: View {
                     }
                 }
             }
+            .modifier(ExpandedTransitToolbarModifier())
             .toolbar {
                 if let dismissPanel {
                     ToolbarItem(placement: .confirmationAction) { Button("Done", action: dismissPanel) }
