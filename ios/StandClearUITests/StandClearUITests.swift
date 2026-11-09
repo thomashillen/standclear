@@ -2160,14 +2160,26 @@ final class StandClearUITests: XCTestCase {
         XCTAssertGreaterThan(header.frame.height, 0)
         XCTAssertGreaterThan(sheetHeader.frame.height, 0)
         let labels = ["The Noguchi Museum", "Wall St", "Change to N/W at Lexington Av/59 St"]
+        var framingObservations: [String] = []
         let fitted = NSPredicate { _, _ in MainActor.assumeIsolated {
-            labels.allSatisfy { label in
+            // Read shared bounds once per evaluation, not four times for each
+            // pin. Repeated AX round trips can consume the entire fit deadline
+            // before the third pin is observed on the hosted simulator.
+            let headerFrame = header.frame
+            let sheetFrame = sheetHeader.frame
+            let mapFrame = map.frame
+            framingObservations.append("\(Date().ISO8601Format()) header=\(headerFrame) sheet=\(sheetFrame) map=\(mapFrame)")
+            return labels.allSatisfy { label in
                 let pin = map.descendants(matching: .any).matching(NSPredicate(format: "label == %@", label)).firstMatch
-                guard pin.exists else { return false }
+                guard pin.exists else {
+                    framingObservations.append("\(label): absent")
+                    return false
+                }
                 let frame = pin.frame
+                framingObservations.append("\(label): \(frame)")
                 return frame.width > 0 && frame.height > 0 &&
-                    frame.minY > header.frame.maxY && frame.maxY < sheetHeader.frame.minY &&
-                    frame.minX >= map.frame.minX && frame.maxX <= map.frame.maxX
+                    frame.minY > headerFrame.maxY && frame.maxY < sheetFrame.minY &&
+                    frame.minX >= mapFrame.minX && frame.maxX <= mapFrame.maxX
             }
         } }
         // Allow native sheet dismissal and camera framing to settle. The old
@@ -2182,6 +2194,10 @@ final class StandClearUITests: XCTestCase {
         tree.name = "Compact itinerary accessibility geometry"
         tree.lifetime = .keepAlways
         add(tree)
+        let observations = XCTAttachment(string: framingObservations.joined(separator: "\n"))
+        observations.name = "Compact itinerary in-wait framing observations"
+        observations.lifetime = .keepAlways
+        add(observations)
         XCTAssertEqual(result, .completed, "Boarding, transfer, and destination pins must fit between the header and route sheet")
         XCTAssertFalse(map.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "Board at Wall St")).firstMatch.exists,
                        "Place journeys must retain their existing platform marker rather than duplicate station-only endpoints")
@@ -2400,7 +2416,7 @@ final class StandClearUITests: XCTestCase {
     }
 
     @MainActor
-    private func placeToolbarFrames(in app: XCUIApplication) -> [CGRect] {
+    private func placeToolbarFrames(in app: XCUIApplication, intersecting bounds: CGRect? = nil, below top: CGFloat? = nil) -> [CGRect] {
         let identifiers = ["searchButton", "nearbyButton", "moreButton"]
         let visible = identifiers.map { app.buttons[$0] }.filter { $0.exists && $0.isHittable }
         guard !visible.isEmpty else { return [] }
@@ -2410,8 +2426,20 @@ final class StandClearUITests: XCTestCase {
         let containers = app.otherElements.containing(.button, identifier: "searchButton")
             .containing(.button, identifier: "nearbyButton")
             .containing(.button, identifier: "moreButton")
-        for container in containers.allElementsBoundByIndex where !container.collectionViews.firstMatch.exists {
-            frames.append(container.frame)
+        for container in containers.allElementsBoundByAccessibilityElement {
+            let frame = container.frame
+            // Reject full-window/navigation ancestors before traversing their
+            // collection views. These frames are already excluded by the
+            // reveal helper's geometry rules; querying every ancestor's
+            // descendants on every drag adds hundreds of AX round trips.
+            if let bounds, let top,
+               !frame.intersects(bounds) || frame.minY <= top || frame.height >= bounds.height
+            {
+                continue
+            }
+            if !container.collectionViews.firstMatch.exists {
+                frames.append(frame)
+            }
         }
         return frames
     }
@@ -2476,7 +2504,7 @@ final class StandClearUITests: XCTestCase {
             let bounds = list.frame
             let top = nav.exists ? max(bounds.minY, nav.frame.maxY) : bounds.minY
             var bottom = bounds.maxY
-            for frame in placeToolbarFrames(in: app) where frame.intersects(bounds) && frame.minY > top && frame.height < bounds.height {
+            for frame in placeToolbarFrames(in: app, intersecting: bounds, below: top) where frame.intersects(bounds) && frame.minY > top && frame.height < bounds.height {
                 bottom = min(bottom, frame.minY)
             }
             let keyboard = app.keyboards.firstMatch
