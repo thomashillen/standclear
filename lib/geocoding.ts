@@ -235,6 +235,10 @@ export async function retrievePlace(
  * Debounced wrapper around `suggestPlaces`. Holds a single pending
  * request internally; subsequent calls within the debounce window
  * cancel and replace the in-flight request.
+ * Returns a cleanup function scoped to that call, so clearing the
+ * query, changing modes, or unmounting can also cancel pending work.
+ * Canceled requests never deliver results or errors, even if their
+ * transport has already completed or ignores the abort signal.
  *
  * Errors (other than AbortError) surface to the caller two ways:
  *   • `onResult([])` is still called so the UI can clear stale rows.
@@ -253,18 +257,19 @@ export function makeDebouncedSuggester(
   options: Parameters<typeof suggestPlaces>[1] | undefined,
   onResult: (results: Suggestion[]) => void,
   onError?: () => void,
-) => void {
-  let timer: ReturnType<typeof setTimeout> | null = null;
-  let abort: AbortController | null = null;
+) => () => void {
+  let cancelPrevious: (() => void) | undefined;
   return (query, options, onResult, onError) => {
-    if (timer) clearTimeout(timer);
-    if (abort) abort.abort();
-    timer = setTimeout(() => {
-      abort = new AbortController();
+    cancelPrevious?.();
+    const abort = new AbortController();
+    const timer = setTimeout(() => {
       const opts = { ...(options ?? {}), signal: abort.signal };
       suggestPlaces(query, opts)
-        .then(onResult)
+        .then((results) => {
+          if (!abort.signal.aborted) onResult(results);
+        })
         .catch((err: unknown) => {
+          if (abort.signal.aborted) return;
           if (
             err &&
             typeof err === "object" &&
@@ -285,5 +290,11 @@ export function makeDebouncedSuggester(
           onError?.();
         });
     }, delayMs);
+    const cancel = () => {
+      clearTimeout(timer);
+      abort.abort();
+    };
+    cancelPrevious = cancel;
+    return cancel;
   };
 }

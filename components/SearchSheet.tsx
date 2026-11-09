@@ -857,7 +857,7 @@ export default function SearchSheet({
   // is a textbook effect; the synchronous reset clears stale results
   // when the rider switches modes / clears the field.
   useEffect(() => {
-    if (mode !== "directions") {
+    if (!open || mode !== "directions") {
       /* eslint-disable react-hooks/set-state-in-effect */
       setPlannerPlaceResults([]);
       setPlannerPlaceError(false);
@@ -870,7 +870,7 @@ export default function SearchSheet({
       setPlannerPlaceResults([]);
       return;
     }
-    debouncedSuggester(
+    return debouncedSuggester(
       q,
       geo.lat != null && geo.lng != null
         ? { proximity: { lng: geo.lng, lat: geo.lat }, limit: 10 }
@@ -878,7 +878,7 @@ export default function SearchSheet({
       setPlannerPlaceResults,
       () => setPlannerPlaceError(true),
     );
-  }, [mode, plannerQuery, debouncedSuggester, geo.lat, geo.lng]);
+  }, [open, mode, plannerQuery, debouncedSuggester, geo.lat, geo.lng]);
 
   // Same idea for Search mode: as the rider types into the top-level
   // search bar, fire the debounced geocoder so addresses, neighborhoods,
@@ -886,7 +886,7 @@ export default function SearchSheet({
   // instance — the debounce window means consecutive keystrokes
   // collapse into a single API call.
   useEffect(() => {
-    if (mode !== "search") {
+    if (!open || mode !== "search") {
       /* eslint-disable react-hooks/set-state-in-effect */
       setSearchPlaceResults([]);
       setSearchPlaceError(false);
@@ -899,7 +899,7 @@ export default function SearchSheet({
       setSearchPlaceResults([]);
       return;
     }
-    debouncedSuggester(
+    return debouncedSuggester(
       q,
       geo.lat != null && geo.lng != null
         ? { proximity: { lng: geo.lng, lat: geo.lat }, limit: 10 }
@@ -907,7 +907,7 @@ export default function SearchSheet({
       setSearchPlaceResults,
       () => setSearchPlaceError(true),
     );
-  }, [mode, query, debouncedSuggester, geo.lat, geo.lng]);
+  }, [open, mode, query, debouncedSuggester, geo.lat, geo.lng]);
 
   // Resolve a Suggestion to a Place + nearest station. Called on tap
   // (not on every keystroke) — `/retrieve` is what fills in the
