@@ -40,5 +40,5 @@ jobs:
       - name: Build
         env:
           NEXT_PUBLIC_MAPBOX_TOKEN: pk.ci_placeholder_token
-          NEXT_PUBLIC_SITE_URL: https://standclear.app
+          NEXT_PUBLIC_SITE_URL: https://standclear.vercel.app
         run: npm run build

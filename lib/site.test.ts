@@ -19,10 +19,9 @@ import path from "node:path";
 //      links in lockstep — they all share the same base.
 //
 //   3. `SITE_URL` honors the `NEXT_PUBLIC_SITE_URL` env override and
-//      falls back to the brand URL when unset. The OG image, sitemap,
-//      and structured-data resolve against this — the env-override
-//      path is what makes Vercel preview deploys yield non-404 OG
-//      cards before the brand domain is provisioned.
+//      falls back to the public deployment when unset. The OG image,
+//      sitemap, and structured data resolve against this. Explicit
+//      custom-domain and preview overrides must remain supported.
 //
 // Tests are written as fresh imports so the env-override case can
 // flip `NEXT_PUBLIC_SITE_URL` before module-eval-time captures it.
@@ -115,10 +114,10 @@ describe("SITE_URL env override", () => {
     else process.env.NEXT_PUBLIC_SITE_URL = original;
   });
 
-  it("defaults to https://standclear.app when NEXT_PUBLIC_SITE_URL is unset", async () => {
+  it("defaults to the public deployment when NEXT_PUBLIC_SITE_URL is unset", async () => {
     delete process.env.NEXT_PUBLIC_SITE_URL;
     const { SITE_URL } = await loadFresh();
-    expect(SITE_URL).toBe("https://standclear.app");
+    expect(SITE_URL).toBe("https://standclear.vercel.app");
   });
 
   it("honors NEXT_PUBLIC_SITE_URL when set — the Vercel-preview-deploy escape hatch", async () => {
@@ -147,16 +146,14 @@ describe("SITE_HOST derivation", () => {
     else process.env.NEXT_PUBLIC_SITE_URL = original;
   });
 
-  it("defaults to the bare brand host (no scheme) when unset", async () => {
+  it("defaults to the public deployment host (no scheme) when unset", async () => {
     delete process.env.NEXT_PUBLIC_SITE_URL;
     const { SITE_HOST } = await loadFresh();
-    expect(SITE_HOST).toBe("standclear.app");
+    expect(SITE_HOST).toBe("standclear.vercel.app");
   });
 
   it("strips the scheme from a Vercel-preview override — the footer must name where the card is actually served", async () => {
-    // The whole reason SITE_URL is env-overridable is so a preview
-    // deploy's OG card doesn't advertise the not-yet-provisioned
-    // brand domain. The footer host has to track the override too.
+    // The footer host has to track an explicit preview override too.
     process.env.NEXT_PUBLIC_SITE_URL =
       "https://standclear-git-claude-keen.vercel.app";
     const { SITE_HOST } = await loadFresh();
@@ -200,7 +197,7 @@ describe("SITE_HOST derivation", () => {
 
 describe("brand-string sanity", () => {
   beforeEach(() => {
-    // Lock SITE_URL to the brand default so the snapshot below is
+    // Lock SITE_URL to the deployment default so the snapshot below is
     // deterministic against env state in the runner.
     delete process.env.NEXT_PUBLIC_SITE_URL;
   });

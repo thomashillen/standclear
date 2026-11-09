@@ -22,9 +22,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 //
 //   3. `sitemap` + `host` resolve against `SITE_URL`, which honors the
 //      `NEXT_PUBLIC_SITE_URL` override. This is the same correctness
-//      class as the OG-card footer fix (PR #157): a preview deploy
-//      whose robots pointed crawlers at the not-yet-provisioned brand
-//      domain's sitemap would orphan the crawl pointer. Tested as
+//      class as the OG-card footer fix (PR #157): a preview deploy's
+//      robots and OG cards must follow its configured origin. Tested as
 //      fresh imports so the override can flip before module-eval-time
 //      captures `SITE_URL`.
 //
@@ -120,20 +119,17 @@ describe("robots()", () => {
     expect(robots().host).toBe(SITE_URL);
   });
 
-  it("defaults sitemap + host to the brand URL when the env override is unset", async () => {
+  it("defaults sitemap + host to the public deployment when the env override is unset", async () => {
     delete process.env.NEXT_PUBLIC_SITE_URL;
     const { robots } = await loadFresh();
     const r = robots();
-    expect(r.host).toBe("https://standclear.app");
-    expect(r.sitemap).toBe("https://standclear.app/sitemap.xml");
+    expect(r.host).toBe("https://standclear.vercel.app");
+    expect(r.sitemap).toBe("https://standclear.vercel.app/sitemap.xml");
   });
 
-  it("tracks the NEXT_PUBLIC_SITE_URL override so a preview deploy's robots point at the preview, not the brand domain", async () => {
-    // The PR #157 correctness class: before the brand domain is
-    // provisioned, NEXT_PUBLIC_SITE_URL is the Vercel preview URL.
-    // Both the sitemap pointer and the declared host must follow it,
-    // or crawlers reaching the preview get sent to a 404 sitemap on a
-    // domain that isn't pointed at this app yet.
+  it("tracks the NEXT_PUBLIC_SITE_URL override so a preview deploy's robots point at the preview", async () => {
+    // Both the sitemap pointer and the declared host must follow an
+    // explicit preview override rather than the default deployment.
     process.env.NEXT_PUBLIC_SITE_URL =
       "https://standclear-git-claude-keen.vercel.app";
     const { robots } = await loadFresh();
