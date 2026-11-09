@@ -85,49 +85,49 @@ struct MapShell: View {
             // Window geometry, not a device identifier, selects the control region.
             let expanded = geometry.size.width >= 640 && !typeSize.isAccessibilitySize
             let controlWidth = min(geometry.size.width * 0.4, 380)
-            Group {
-                if expanded {
-                    GeometryReader { mapGeometry in
-                        map(statusWidth: mapGeometry.size.width, coveredWidth: 0, coveredBottom: 0,
-                            maximumGlanceHeight: mapGeometry.size.height * 0.55)
-                    }
-                    .inspector(isPresented: .constant(true)) {
-                        panelNavigation(expandedPanel, expanded: true)
-                            .interactiveDismissDisabled()
-                            .environment(\.expandedTransitPanel, true)
-                            .environment(\.expandedTransitToolbar, expandedToolbar)
-                            .environment(\.horizontalSizeClass, horizontalSizeClass)
-                            .id(expandedPanel)
-                            .id(stationVisit)
-                            .inspectorColumnWidth(controlWidth)
-                    }
-                    // A wide phone window can still report compact width.
-                    // Scope the regular presentation trait to this host; the
-                    // inspector's content retains the system's actual trait.
-                    .environment(\.horizontalSizeClass, .regular)
-                } else {
-                    NavigationStack {
-                        map(statusWidth: geometry.size.width, coveredWidth: 0, coveredBottom: routePanelIsCollapsed ? collapsedRouteHeight + geometry.safeAreaInsets.bottom : mediumSheetCoversMap ? geometry.size.height / 2 : 0, maximumGlanceHeight: geometry.size.height * 0.55)
-                            .navigationTitle("StandClear")
-                            .navigationBarTitleDisplayMode(.inline)
-                            .toolbar {
-                                ToolbarItem(placement: .topBarTrailing) {
-                                    if selectedTrip != nil, !routePanelIsCollapsed {
-                                        clearRouteButton
-                                    }
-                                }
-                                ToolbarItemGroup(placement: .bottomBar) {
-                                    Button("Search", systemImage: "magnifyingglass") { showSearch(expanded: false) }
-                                        .accessibilityIdentifier("searchButton")
-                                    Spacer()
-                                    Button("Nearby", systemImage: "location") { showNearby(expanded: false) }
-                                        .accessibilityIdentifier("nearbyButton")
-                                    moreMenu
-                                }
+            NavigationStack {
+                GeometryReader { mapGeometry in
+                    map(statusWidth: mapGeometry.size.width, coveredWidth: 0,
+                        coveredBottom: expanded ? 0 : routePanelIsCollapsed ? collapsedRouteHeight + geometry.safeAreaInsets.bottom : mediumSheetCoversMap ? geometry.size.height / 2 : 0,
+                        maximumGlanceHeight: mapGeometry.size.height * 0.55)
+                }
+                .navigationTitle("StandClear")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar(expanded ? .hidden : .automatic, for: .navigationBar)
+                .toolbar {
+                    if !expanded {
+                        ToolbarItem(placement: .topBarTrailing) {
+                            if selectedTrip != nil, !routePanelIsCollapsed {
+                                clearRouteButton
                             }
+                        }
+                        ToolbarItemGroup(placement: .bottomBar) {
+                            Button("Search", systemImage: "magnifyingglass") { showSearch(expanded: false) }
+                                .accessibilityIdentifier("searchButton")
+                            Spacer()
+                            Button("Nearby", systemImage: "location") { showNearby(expanded: false) }
+                                .accessibilityIdentifier("nearbyButton")
+                            moreMenu
+                        }
                     }
                 }
             }
+            // Keep this presenter mounted while its column closes. Removing a
+            // permanently-presented inspector also removes its dismissal owner.
+            .environment(\.horizontalSizeClass, horizontalSizeClass)
+            .inspector(isPresented: Binding(get: { expanded }, set: { _ in })) {
+                panelNavigation(expandedPanel, expanded: true)
+                    .interactiveDismissDisabled()
+                    .environment(\.expandedTransitPanel, true)
+                    .environment(\.expandedTransitToolbar, expandedToolbar)
+                    .environment(\.horizontalSizeClass, horizontalSizeClass)
+                    .id(expandedPanel)
+                    .id(stationVisit)
+                    .inspectorColumnWidth(controlWidth)
+            }
+            // Scope column presentation to its host; map and inspector content
+            // retain the actual system trait. Compact sheets remain separate.
+            .environment(\.horizontalSizeClass, .regular)
             .onGeometryChange(for: CGSize.self) { $0.size } action: { windowSize = $0 }
             .onChange(of: expanded) { _, isExpanded in
                 // The old searchable navigation region is about to disappear.
@@ -193,6 +193,7 @@ struct MapShell: View {
             }
             .sheet(item: $panel) { panel in
                 panelNavigation(panel, expanded: false)
+                    .environment(\.horizontalSizeClass, horizontalSizeClass)
                     // Keep the navigation tree and its route tasks alive at the
                     // small detent. Removing PlacePreview would clear its route.
                     .opacity(routePanelIsCollapsed ? 0 : 1)
