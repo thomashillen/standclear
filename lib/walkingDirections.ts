@@ -46,7 +46,13 @@ export interface WalkingRoute {
   steps: WalkingStep[];
 }
 
-const cache = new Map<string, Promise<WalkingRoute | null>>();
+interface CachedWalkingRoute {
+  promise: Promise<WalkingRoute | null>;
+  // Only pending requests belong to a caller's cancellation lifetime.
+  signal?: AbortSignal;
+}
+
+const cache = new Map<string, CachedWalkingRoute>();
 
 function cacheKey(
   from: { lng: number; lat: number },
@@ -138,9 +144,13 @@ export async function fetchWalkingRoute(
   to: { lng: number; lat: number },
   options: { signal?: AbortSignal } = {},
 ): Promise<WalkingRoute | null> {
+  if (options.signal?.aborted) return null;
+
   const key = cacheKey(from, to);
   const hit = cache.get(key);
-  if (hit) return hit;
+  // An abort is synchronous, but fetch rejects later. Never let a new
+  // caller join the cancelled request during that gap.
+  if (hit && !hit.signal?.aborted) return hit.promise;
 
   // Short hops don't deviate enough from a straight line to justify a
   // Directions API call (and the round-trip frequently dwarfs the walk
@@ -148,7 +158,7 @@ export async function fetchWalkingRoute(
   // under the same key the streetwise call would use.
   if (crowFliesMeters(from, to) < SHORT_WALK_METERS) {
     const synthetic = Promise.resolve(syntheticShortWalk(from, to));
-    cache.set(key, synthetic);
+    cache.set(key, { promise: synthetic });
     return synthetic;
   }
 
@@ -157,18 +167,23 @@ export async function fetchWalkingRoute(
   params.set("from", `${from.lng},${from.lat}`);
   params.set("to", `${to.lng},${to.lat}`);
 
+  const evict = () => {
+    // Explicit retries or an immediate post-abort call may already own
+    // this key. An older completion must not evict their cache entry.
+    if (cache.get(key) === entry) cache.delete(key);
+  };
   const promise = fetch(`/api/walk?${params}`, { signal: options.signal })
     .then(async (res): Promise<WalkingRoute | null> => {
-      if (!res.ok) {
-        // HTTP error — drop the cache so a retry from the UI can hit
+      if (options.signal?.aborted || !res.ok) {
+        // Cancellation or HTTP error — let a retry from the UI hit
         // the network instead of silently returning the cached null.
-        cache.delete(key);
+        evict();
         return null;
       }
       const data = (await res.json()) as MapboxDirectionsResponse;
       const route = data.routes?.[0];
-      if (!route) {
-        cache.delete(key);
+      if (options.signal?.aborted || !route) {
+        evict();
         return null;
       }
       const steps: WalkingStep[] = [];
@@ -198,7 +213,7 @@ export async function fetchWalkingRoute(
     .catch((err: unknown) => {
       // Drop the cache on any failure — abort, network, or otherwise.
       // A cached `null` would shadow a healthy retry; better to refetch.
-      cache.delete(key);
+      evict();
       if (
         err &&
         typeof err === "object" &&
@@ -215,9 +230,14 @@ export async function fetchWalkingRoute(
         error: err instanceof Error ? err.message : String(err),
       });
       return null;
+    })
+    .finally(() => {
+      // A completed route remains reusable after its caller leaves.
+      entry.signal = undefined;
     });
 
-  cache.set(key, promise);
+  const entry: CachedWalkingRoute = { promise, signal: options.signal };
+  cache.set(key, entry);
   return promise;
 }
 

@@ -300,6 +300,181 @@ describe("fetchWalkingRoute — caching, abort, and error reporting", () => {
   });
 });
 
+describe("fetchWalkingRoute — in-flight cache ownership", () => {
+  const from = { lng: -73.99, lat: 40.75 };
+  const to = { lng: -73.985, lat: 40.748 };
+
+  function deferredResponse() {
+    let resolve!: (value: Response) => void;
+    let reject!: (reason: unknown) => void;
+    const promise = new Promise<Response>((res, rej) => {
+      resolve = res;
+      reject = rej;
+    });
+    return { promise, resolve, reject };
+  }
+
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("starts a fresh request immediately after the cached request is aborted", async () => {
+    const { fetchWalkingRoute } = await freshImport();
+    const oldFetch = deferredResponse();
+    const fetchSpy = vi.spyOn(globalThis, "fetch")
+      .mockReturnValueOnce(oldFetch.promise)
+      .mockResolvedValueOnce(okRouteResponse(600));
+    const firstController = new AbortController();
+    const retryController = new AbortController();
+
+    const first = fetchWalkingRoute(from, to, { signal: firstController.signal });
+    firstController.abort();
+    // Retry in the same turn, before fetch reports its abort rejection.
+    const retry = fetchWalkingRoute(from, to, { signal: retryController.signal });
+    oldFetch.reject(new DOMException("aborted", "AbortError"));
+
+    expect(await first).toBeNull();
+    expect(await retry).toMatchObject({ distance: 600 });
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    expect(captureWarningMock).not.toHaveBeenCalled();
+  });
+
+  it("keeps a replacement pending request cached when the older abort rejects", async () => {
+    const { fetchWalkingRoute } = await freshImport();
+    const oldFetch = deferredResponse();
+    const newFetch = deferredResponse();
+    const fetchSpy = vi.spyOn(globalThis, "fetch")
+      .mockReturnValueOnce(oldFetch.promise)
+      .mockReturnValueOnce(newFetch.promise);
+    const controller = new AbortController();
+
+    const old = fetchWalkingRoute(from, to, { signal: controller.signal });
+    controller.abort();
+    const replacement = fetchWalkingRoute(from, to);
+    oldFetch.reject(new DOMException("aborted", "AbortError"));
+    expect(await old).toBeNull();
+    const joined = fetchWalkingRoute(from, to);
+
+    newFetch.resolve(okRouteResponse(600));
+    expect(await replacement).toMatchObject({ distance: 600 });
+    expect(await joined).toMatchObject({ distance: 600 });
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it("shares a live in-flight request between callers without duplicating fetch", async () => {
+    const { fetchWalkingRoute } = await freshImport();
+    const pending = deferredResponse();
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockReturnValueOnce(pending.promise);
+    const controller = new AbortController();
+    const first = fetchWalkingRoute(from, to, { signal: controller.signal });
+    const second = fetchWalkingRoute(from, to);
+    const third = fetchWalkingRoute(from, to, { signal: new AbortController().signal });
+
+    pending.resolve(okRouteResponse());
+    const result = await first;
+    expect(await second).toBe(result);
+    expect(await third).toBe(result);
+    expect(fetchSpy).toHaveBeenCalledExactlyOnceWith(expect.any(String), {
+      signal: controller.signal,
+    });
+  });
+
+  it("does not let a pre-aborted caller start or disturb a healthy request", async () => {
+    const { fetchWalkingRoute } = await freshImport();
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(okRouteResponse());
+    const controller = new AbortController();
+    controller.abort();
+
+    expect(await fetchWalkingRoute(from, to, { signal: controller.signal })).toBeNull();
+    expect(fetchSpy).not.toHaveBeenCalled();
+    const healthy = fetchWalkingRoute(from, to);
+    expect(await fetchWalkingRoute(from, to, { signal: controller.signal })).toBeNull();
+    const result = await healthy;
+    expect(await fetchWalkingRoute(from, to)).toBe(result);
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("retains a completed route when its original caller later aborts", async () => {
+    const { fetchWalkingRoute } = await freshImport();
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(okRouteResponse());
+    const controller = new AbortController();
+    const result = await fetchWalkingRoute(from, to, { signal: controller.signal });
+    controller.abort();
+
+    expect(await fetchWalkingRoute(from, to)).toBe(result);
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(["headers", "body"])(
+    "ignores a cancelled request whose %s still arrive after the replacement completes",
+    async (phase) => {
+      const { fetchWalkingRoute } = await freshImport();
+      const oldFetch = deferredResponse();
+      const response = okRouteResponse(400);
+      const data = await response.clone().json();
+      let resolveBody!: (value: unknown) => void;
+      const body = new Promise((resolve) => { resolveBody = resolve; });
+      const jsonSpy = vi.spyOn(response, "json").mockReturnValue(body);
+      const fetchSpy = vi.spyOn(globalThis, "fetch")
+        .mockReturnValueOnce(oldFetch.promise)
+        .mockResolvedValueOnce(okRouteResponse(600));
+      const controller = new AbortController();
+      const old = fetchWalkingRoute(from, to, { signal: controller.signal });
+      if (phase === "body") {
+        oldFetch.resolve(response);
+        await Promise.resolve();
+        expect(jsonSpy).toHaveBeenCalledTimes(1);
+      }
+
+      controller.abort();
+      const replacement = await fetchWalkingRoute(from, to);
+      oldFetch.resolve(response);
+      resolveBody(data);
+
+      expect(await old).toBeNull();
+      expect(replacement).toMatchObject({ distance: 600 });
+      expect(await fetchWalkingRoute(from, to)).toBe(replacement);
+      expect(fetchSpy).toHaveBeenCalledTimes(2);
+      expect(captureWarningMock).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(["abort", "network", "http", "empty", "malformed", "success"])(
+    "keeps an explicitly replaced route cached after the older request's %s completion",
+    async (outcome) => {
+      const { fetchWalkingRoute, clearWalkingRouteCache } = await freshImport();
+      const oldFetch = deferredResponse();
+      const fetchSpy = vi.spyOn(globalThis, "fetch")
+        .mockReturnValueOnce(oldFetch.promise)
+        .mockResolvedValueOnce(okRouteResponse(600));
+      const old = fetchWalkingRoute(from, to);
+      clearWalkingRouteCache(from, to);
+      const replacement = await fetchWalkingRoute(from, to);
+
+      if (outcome === "abort") {
+        oldFetch.reject(new DOMException("aborted", "AbortError"));
+      } else if (outcome === "network") {
+        oldFetch.reject(new TypeError("Failed to fetch"));
+      } else if (outcome === "http") {
+        oldFetch.resolve(new Response("failed", { status: 500 }));
+      } else if (outcome === "empty") {
+        oldFetch.resolve(new Response(JSON.stringify({ routes: [] })));
+      } else if (outcome === "malformed") {
+        oldFetch.resolve(new Response("invalid json"));
+      } else {
+        oldFetch.resolve(okRouteResponse(400));
+      }
+
+      expect(await old).toEqual(outcome === "success"
+        ? expect.objectContaining({ distance: 400 })
+        : null);
+      expect(await fetchWalkingRoute(from, to)).toBe(replacement);
+      expect(replacement).toMatchObject({ distance: 600 });
+      expect(fetchSpy).toHaveBeenCalledTimes(2);
+    },
+  );
+});
+
 describe("fetchWalkingRoute — step instruction synthesis", () => {
   beforeEach(() => {
     vi.unstubAllEnvs();
