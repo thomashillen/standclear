@@ -1,0 +1,21 @@
+--- a/ios/StandClear/PlacePreview.swift
++++ b/ios/StandClear/PlacePreview.swift
+@@ -934,6 +934,18 @@
+         .modifier(OriginPickerBackground())
+         .searchable(text: $query, isPresented: $searchPresented, placement: .navigationBarDrawer(displayMode: .always), prompt: destination ? "Address or place" : "Address, place or station")
+         .searchFocused($searchFocused)
++        .onChange(of: searchPresented, initial: true) { old, new in
++            NSLog("[SCSearchTrace] presented %@ -> %@; destination=%@ focused=%@ query=%@ uptime=%.6f", String(old), String(new), String(destination), String(searchFocused), query, ProcessInfo.processInfo.systemUptime)
++        }
++        .onChange(of: searchFocused, initial: true) { old, new in
++            NSLog("[SCSearchTrace] focused %@ -> %@; destination=%@ presented=%@ query=%@ uptime=%.6f", String(old), String(new), String(destination), String(searchPresented), query, ProcessInfo.processInfo.systemUptime)
++        }
++        .onAppear {
++            NSLog("[SCSearchTrace] appear; destination=%@ presented=%@ focused=%@ query=%@ uptime=%.6f", String(destination), String(searchPresented), String(searchFocused), query, ProcessInfo.processInfo.systemUptime)
++        }
++        .onDisappear {
++            NSLog("[SCSearchTrace] disappear; destination=%@ presented=%@ focused=%@ query=%@ uptime=%.6f", String(destination), String(searchPresented), String(searchFocused), query, ProcessInfo.processInfo.systemUptime)
++        }
+         .navigationTitle(destination ? "To" : "From").navigationBarTitleDisplayMode(.inline)
+         .task(id: key) { [key] in
+             guard key.active, key.query.count >= 2 else { return }

@@ -1,0 +1,69 @@
+name: Destination Close diagnostic
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+    paths: ['diagnostics/destination-close/**', '.github/workflows/destination-close-diagnostic.yml']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: destination-close-diagnostic-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  diagnostic:
+    name: Observe expanded search dismissal (diagnostic only)
+    runs-on: macos-26
+    timeout-minutes: 15
+    env:
+      SOURCE_COMMIT: 'e874c7f9cd1c5bc1bb2e6e6e185e806408a0493f'
+      PATCH_SHA256: '237982248d6f9d426436ecef020559ad86edc0c3373fd7c3eceda881128bfaed'
+    steps:
+      - name: Start bounded diagnostic clock
+        timeout-minutes: 1
+        run: |
+          python3 - <<'PY'
+          import json, os, pathlib, time
+          out = pathlib.Path(os.environ['RUNNER_TEMP']) / 'destination-close-diagnostic'
+          out.mkdir()
+          (out / 'job-budget.json').write_text(json.dumps({'startedMonotonic': time.monotonic()}))
+          PY
+      - uses: actions/checkout@v7
+        timeout-minutes: 1
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Validate diagnostic safeguards
+        timeout-minutes: 1
+        run: python3 -m unittest discover -s diagnostics/destination-close -p 'test_*.py' -v
+      - name: Fetch fixed public source
+        timeout-minutes: 1
+        run: git fetch --no-tags --depth=1 origin "$SOURCE_COMMIT"
+      - name: Guard exact tools and prepare isolated source and simulator
+        timeout-minutes: 3
+        run: |
+          python3 diagnostics/destination-close/driver.py prepare \
+            --output "$RUNNER_TEMP/destination-close-diagnostic" \
+            --patch diagnostics/destination-close/apply-diagnostic.patch \
+            --patch-sha256 "$PATCH_SHA256"
+      - name: Run the unchanged expanded destination test once
+        timeout-minutes: 11
+        run: python3 diagnostics/destination-close/driver.py run --output "$RUNNER_TEMP/destination-close-diagnostic"
+      - name: Preserve state trace and shut down only the owned simulator
+        if: always()
+        timeout-minutes: 1
+        run: python3 diagnostics/destination-close/driver.py collect --output "$RUNNER_TEMP/destination-close-diagnostic"
+      - name: Upload evidence on either outcome
+        if: always()
+        timeout-minutes: 2
+        uses: actions/upload-artifact@v6
+        with:
+          name: destination-close-diagnostic-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/destination-close-diagnostic/*.json
+            ${{ runner.temp }}/destination-close-diagnostic/*.log
+            ${{ runner.temp }}/destination-close-diagnostic/DestinationClose.xcresult
+          if-no-files-found: error
+          retention-days: 7
