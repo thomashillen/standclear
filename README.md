@@ -126,9 +126,9 @@ Store the token as the `GTFS_PR_TOKEN` repository secret. It is used only to cre
 
 ### Canonical URL
 
-Set `NEXT_PUBLIC_SITE_URL` to the actual production URL so Open Graph/Twitter cards, the sitemap, and `robots.txt` resolve correctly.
+The canonical URL defaults to the current public deployment, `https://standclear.vercel.app`, so Open Graph/Twitter cards, the sitemap, and `robots.txt` identify this app without additional configuration.
 
-The codebase uses `https://standclear.app` as the brand-target canonical URL, but the current public deployment is `https://standclear.vercel.app`. Until a custom domain is registered and connected, production configuration should point at the live deployment rather than a domain that does not resolve.
+For a connected custom domain or a preview that needs its own metadata origin, set `NEXT_PUBLIC_SITE_URL` to that deployment's absolute URL without a trailing slash. This is a build-time value: changing an existing override requires a new deployment. An explicit override takes precedence over the code default, so changing the fallback alone will not repair a stale production setting. `https://standclear.app` currently serves a different product and must not be used as this app's canonical URL.
 
 ### Mapbox tokens
 

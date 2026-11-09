@@ -15,24 +15,19 @@ export const SITE_SHORT_DESCRIPTION =
 export const SITE_DESCRIPTION =
   "Real-time NYC subway tracking — every train on every line, animated live on a Mapbox dark map with arrivals, nearby stations, address-to-address routing, and service alerts. Streaming straight from the MTA's public GTFS-Realtime feeds.";
 
-// Canonical site URL. The `standclear.app` default is the brand
-// target — if/when the domain is provisioned this is the URL OG
-// cards, sitemap, robots.txt, and structured data resolve against.
-// Until then, set NEXT_PUBLIC_SITE_URL to the actual deployment
-// URL (the Vercel preview URL works) so social previews and the
-// sitemap don't 404 against a domain that isn't pointed at this
-// app yet. Override per environment via NEXT_PUBLIC_SITE_URL.
+// Canonical site URL. Default to the live public deployment so OG
+// cards, sitemap, robots.txt, and structured data identify this app.
+// Override at build time via NEXT_PUBLIC_SITE_URL for a connected
+// custom domain or a preview that needs its own metadata origin.
 export const SITE_URL =
-  process.env.NEXT_PUBLIC_SITE_URL ?? "https://standclear.app";
+  process.env.NEXT_PUBLIC_SITE_URL ?? "https://standclear.vercel.app";
 
 // Display host derived from SITE_URL (scheme + path + trailing slash
 // stripped). The OG card footers print this, so a deploy that points
 // NEXT_PUBLIC_SITE_URL at a Vercel preview URL gets a social card
-// whose footer matches where the card is actually served instead of
-// advertising the not-yet-provisioned brand domain — the exact reason
-// SITE_URL is env-overridable in the first place (see the block
-// above). Without this the footer was the one surface that ignored
-// the override and kept lying about the host.
+// whose footer matches the configured deployment rather than the
+// default host. Keep it derived so every metadata surface follows
+// the same override.
 //
 // The try/catch is load-bearing, not defensive boilerplate: this
 // module is imported by every route and by the build-time OG image
