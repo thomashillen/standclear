@@ -257,9 +257,9 @@ struct MapShell: View {
                 focus.receiveLocation(location.availableCoordinate)
             }
         }
-        .task(id: placeRenewalFix) { [timestamp = placeRenewalFix] in
+        .task(id: visibleLocationRenewalFix) { [timestamp = visibleLocationRenewalFix] in
             guard let timestamp else { return }
-            await location.renewForPlace(timestamp) { placeRenewalFix == timestamp }
+            await location.renewForVisibleLocation(timestamp) { visibleLocationRenewalFix == timestamp }
         }
         .task(id: scenePhase) {
             guard scenePhase == .active else { location.stop(); store.stop(); return }
@@ -276,7 +276,7 @@ struct MapShell: View {
                             destination: activeDestination, placeRoute: visiblePlaceRoute,
                             stationEndpoints: activeDestination == nil ? selectedTrip.map { StationTripEndpoints(plan: $0, lines: store.lines) } : nil,
                             placeGeometryRevision: placeGeometryRevision, transferMarker: transferMarker)
-            if !showsJourney, panel == nil || isWide {
+            if showsNearbyGlance {
                 NearbyGlancePanel(store: store, location: location,
                                   maximumHeight: maximumGlanceHeight,
                                   openStation: { showGlanceStation($0, expanded: isWide) },
@@ -443,8 +443,16 @@ struct MapShell: View {
         (isWide ? expandedPanel : panel)?.destination
     }
 
-    private var placeRenewalFix: Date? {
-        guard scenePhase == .active, activeDestination != nil, placeSession.usesCurrentLocation, editingPlaceID != activeDestination?.id else { return nil }
+    private var showsNearbyGlance: Bool {
+        !showsJourney && (panel == nil || isWide)
+    }
+
+    private var visibleLocationRenewalFix: Date? {
+        guard scenePhase == .active else { return nil }
+        let visiblePanel = isWide ? expandedPanel : panel
+        let showsNearbyRoot = visiblePanel == .nearby && nearbyPath.isEmpty
+        let showsCurrentLocationPlace = activeDestination != nil && placeSession.usesCurrentLocation && editingPlaceID != activeDestination?.id
+        guard showsNearbyGlance || showsNearbyRoot || showsCurrentLocationPlace else { return nil }
         return location.usableFixTimestamp
     }
 
