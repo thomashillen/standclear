@@ -40,7 +40,7 @@ describe("public metadata origin", () => {
 
     // Next resolves the relative canonical and Open Graph URLs against
     // metadataBase, so they must all name the same verified deployment.
-    expect(metadata.metadataBase?.href).toBe(`${expectedUrl}/`);
+    expect(metadata.metadataBase?.toString()).toBe(`${expectedUrl}/`);
     expect(metadata.alternates?.canonical).toBe("/");
     expect(metadata.openGraph?.url).toBe("/");
     expect(SITE_HOST).toBe(new URL(expectedUrl).host);
