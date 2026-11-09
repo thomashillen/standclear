@@ -1747,8 +1747,13 @@ final class StandClearUITests: XCTestCase {
         picker.typeText("Wall\n")
         let chosen = app.buttons["stationChoice-419"]
         revealPlaceElement(chosen, in: app.collectionViews.firstMatch)
-        chosen.tap()
-        XCTAssertTrue(origin.waitForExistence(timeout: 10))
+        recordPlaceTap(chosen, in: app.collectionViews.firstMatch, context: "Place origin station choice")
+        chosen.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+        let originReturned = origin.waitForExistence(timeout: 10)
+        XCTAssertTrue(originReturned)
+        if !originReturned {
+            recordPlaceSelectionFailure(context: "Origin did not return after the original ten-second wait", target: origin)
+        }
         XCTAssertTrue(origin.label.contains("Wall St"))
         let list = app.collectionViews["placePreviewList"]
         if !expanded, (app.buttons["Sheet Grabber"].value as? String) == "Half screen" {
@@ -2270,9 +2275,14 @@ final class StandClearUITests: XCTestCase {
         let legID = "N:N:R16>\(target)"
         let alternative = list.buttons["placeRouteOption-127>\(target):\(legID)"]
         revealPlaceElement(alternative, in: list)
-        alternative.tap()
+        recordPlaceTap(alternative, in: list, context: "Museum alternative route choice")
+        alternative.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
         expectation(for: NSPredicate(format: "value == %@", "Selected"), evaluatedWith: alternative)
+        let failuresBeforeSelectionWait = testRun?.failureCount ?? 0
         waitForExpectations(timeout: 8)
+        if (testRun?.failureCount ?? 0) > failuresBeforeSelectionWait {
+            recordPlaceSelectionFailure(context: "Original eight-second selection wait recorded a failure", target: alternative)
+        }
         let changed = NSPredicate { _, _ in MainActor.assumeIsolated {
             guard let summary = map.value as? String else { return false }
             return summary.contains("Noguchi") && summary.contains("N/W") && summary != firstSummary
@@ -2390,6 +2400,68 @@ final class StandClearUITests: XCTestCase {
     }
 
     @MainActor
+    private func placeToolbarFrames(in app: XCUIApplication) -> [CGRect] {
+        let identifiers = ["searchButton", "nearbyButton", "moreButton"]
+        let visible = identifiers.map { app.buttons[$0] }.filter { $0.exists && $0.isHittable }
+        guard !visible.isEmpty else { return [] }
+        var frames = visible.map(\.frame)
+        // SwiftUI's floating bar can expose an Other container rather than a
+        // Toolbar. Exclude its full backing/gesture region, not just its pills.
+        let containers = app.otherElements.containing(.button, identifier: "searchButton")
+            .containing(.button, identifier: "nearbyButton")
+            .containing(.button, identifier: "moreButton")
+        for container in containers.allElementsBoundByIndex where !container.collectionViews.firstMatch.exists {
+            frames.append(container.frame)
+        }
+        return frames
+    }
+
+    @MainActor
+    private func recordPlaceTap(_ target: XCUIElement, in list: XCUIElement, context: String) {
+        let app = XCUIApplication()
+        var frames = ["UTC: \(Date().ISO8601Format())", "Target: \(target.frame)", "List: \(list.frame)"]
+        for identifier in ["searchButton", "nearbyButton", "moreButton"] {
+            let control = app.buttons[identifier]
+            frames.append("\(identifier): \(control.exists ? String(describing: control.frame) : "absent")")
+        }
+        frames.append("Native toolbar containers: \(placeToolbarFrames(in: app))")
+        let keyboard = app.keyboards.firstMatch
+        frames.append("Keyboard: \(keyboard.exists ? String(describing: keyboard.frame) : "absent")")
+        let geometry = XCTAttachment(string: frames.joined(separator: "\n"))
+        geometry.name = context + " — pre-tap geometry"
+        geometry.lifetime = .keepAlways
+        add(geometry)
+        let capture = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        capture.name = context + " — exposed target before one tap"
+        capture.lifetime = .keepAlways
+        add(capture)
+    }
+
+    @MainActor
+    private func recordPlaceSelectionFailure(context: String, target: XCUIElement) {
+        let app = XCUIApplication()
+        // These post-failure observations are independent of the original
+        // failed wait. Later recovery never changes that verdict.
+        let capture = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        capture.name = context
+        capture.lifetime = .keepAlways
+        add(capture)
+        let exists = target.exists
+        var observations = ["UTC: \(Date().ISO8601Format())", context,
+                            "Target exists after failure: \(exists)"]
+        if exists {
+            observations.append("Target value after failure: \(String(describing: target.value))")
+        }
+        observations.append("Root list after failure: \(app.collectionViews["placePreviewList"].exists)")
+        observations.append("Navigation titles after failure: \(app.navigationBars.allElementsBoundByIndex.map(\.identifier))")
+        observations.append("Query after failure: \(String(describing: app.searchFields.firstMatch.exists ? app.searchFields.firstMatch.value : nil))")
+        let detail = XCTAttachment(string: observations.joined(separator: "\n"))
+        detail.name = context + " — independent post-failure observations"
+        detail.lifetime = .keepAlways
+        add(detail)
+    }
+
+    @MainActor
     private func revealPlaceElement(_ element: XCUIElement, in list: XCUIElement, downward: Bool = true,
                                     file: StaticString = #filePath, line: UInt = #line)
     {
@@ -2403,10 +2475,19 @@ final class StandClearUITests: XCTestCase {
         for _ in 0 ..< 18 {
             let bounds = list.frame
             let top = nav.exists ? max(bounds.minY, nav.frame.maxY) : bounds.minY
+            var bottom = bounds.maxY
+            for frame in placeToolbarFrames(in: app) where frame.intersects(bounds) && frame.minY > top && frame.height < bounds.height {
+                bottom = min(bottom, frame.minY)
+            }
+            let keyboard = app.keyboards.firstMatch
+            if keyboard.exists, keyboard.frame.intersects(bounds) {
+                bottom = min(bottom, keyboard.frame.minY)
+            }
             if element.exists {
                 let frame = element.frame
                 if !frame.isNull, !frame.isInfinite, frame.width > 0, frame.height > 0 {
-                    if frame.midY > top, frame.midY < bounds.maxY, bounds.contains(CGPoint(x: frame.midX, y: frame.midY)),
+                    if frame.midY > top, frame.midY < bottom, bounds.contains(CGPoint(x: frame.midX, y: frame.midY)),
+                       app.windows.firstMatch.frame.contains(CGPoint(x: frame.midX, y: frame.midY)),
                        // Read-only rows do not need activation points. XCTest
                        // can expose their text even when there is no tap target.
                        element.elementType != .button || element.isHittable
@@ -2418,8 +2499,15 @@ final class StandClearUITests: XCTestCase {
             }
             // End the drag at rest. A default flick can leap over the entire
             // route list in the short landscape control region.
-            let start = list.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: towardBottom ? 0.78 : 0.48))
-            let distance = min(bounds.height * 0.3, 150)
+            let exposedHeight = bottom - top
+            guard exposedHeight > 0 else {
+                XCTFail("No list content is exposed between native controls", file: file, line: line)
+                return
+            }
+            let startY = top + exposedHeight * (towardBottom ? 0.78 : 0.48)
+            let start = list.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0))
+                .withOffset(CGVector(dx: 0, dy: startY - bounds.minY))
+            let distance = min(exposedHeight * 0.3, 150)
             start.press(forDuration: 0.08, thenDragTo: start.withOffset(CGVector(dx: 0, dy: towardBottom ? -distance : distance)),
                         withVelocity: .slow, thenHoldForDuration: 0.3)
         }
