@@ -11,7 +11,7 @@ StandClear is a small open-source project. The expectation is simple: treat ever
 
 ## Reporting
 
-If someone is making the project unsafe or unwelcoming for you or others, email the maintainer (see [About](https://standclear.app/about)) or open an issue. Reports stay confidential.
+If someone is making the project unsafe or unwelcoming for you or others, email the maintainer (see [About](https://standclear.vercel.app/about)) or open an issue. Reports stay confidential.
 
 Maintainers may, at their discretion, edit or remove comments, close PRs, or ban contributors who repeatedly violate these expectations. The bar is "is this person making the project worse to be in for everyone else." If yes, they leave.
 

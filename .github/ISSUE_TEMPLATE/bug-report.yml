@@ -22,7 +22,7 @@ body:
       label: Steps to reproduce
       description: Minimal repro. The first list item should be "open StandClear at <url>" if the bug needs a fresh page.
       placeholder: |
-        1. Open https://standclear.app
+        1. Open https://standclear.vercel.app/
         2. Tap the [F] route in the line picker
         3. Wait ~10 seconds
         4. Tap a station marker
