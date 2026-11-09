@@ -874,11 +874,11 @@ export default function SearchSheet({
       return;
     }
     const q = plannerQuery.trim();
+    // Completed results belong to the previous query too. Remove them
+    // before the next debounce/request so they cannot be selected.
+    setPlannerPlaceResults([]);
     setPlannerPlaceError(false);
-    if (q.length < 2) {
-      setPlannerPlaceResults([]);
-      return;
-    }
+    if (q.length < 2) return;
     return debouncedSuggester(
       q,
       geo.lat != null && geo.lng != null
@@ -903,11 +903,9 @@ export default function SearchSheet({
       return;
     }
     const q = query.trim();
+    setSearchPlaceResults([]);
     setSearchPlaceError(false);
-    if (q.length < 2) {
-      setSearchPlaceResults([]);
-      return;
-    }
+    if (q.length < 2) return;
     return debouncedSuggester(
       q,
       geo.lat != null && geo.lng != null
