@@ -132,7 +132,8 @@ struct TrainMotion {
     /// Reconcile two observed positions, never invent a next destination. The
     /// short bounded transition is presentation uncertainty, not live tracking.
     private func transition(from old: Row, to row: Row, at time: Double) -> Transition? {
-        guard old.base.routeID == row.base.routeID, old.train.direction == row.train.direction,
+        guard old.train.lastReportedAt != nil, row.train.lastReportedAt != nil,
+              old.base.routeID == row.base.routeID, old.train.direction == row.train.direction,
               ["N", "S"].contains(row.train.direction), row.reported >= old.reported,
               ["STOPPED_AT", "IN_TRANSIT_TO", "INCOMING_AT"].contains(old.train.status),
               ["STOPPED_AT", "IN_TRANSIT_TO", "INCOMING_AT"].contains(row.train.status),

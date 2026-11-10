@@ -148,6 +148,22 @@ struct AppleTransitMap: View {
             .accessibilityValue([transferMarker?.text, placeRoute?.accessibilitySummary ?? destination?.name].compactMap(\.self).joined(separator: ", "))
             .accessibilityHint("Use Search or Nearby for accessible station arrivals.")
         }
+        #if DEBUG && targetEnvironment(simulator)
+        .overlay(alignment: .trailing) {
+            if let clock = StationMotionFixtureClock.enabled {
+                Button("Advance motion fixture", systemImage: "forward.frame") {
+                    clock.advance()
+                    Task { await store.refresh() }
+                }
+                .buttonStyle(.borderedProminent)
+                .labelStyle(.iconOnly)
+                .padding()
+                .accessibilityIdentifier("advanceMotionFixture")
+                .accessibilityValue(String(clock.sampledStage))
+                .disabled(clock.finished || clock.sampledStage != clock.stage)
+            }
+        }
+        #endif
         .onChange(of: TripGeometryInput(linesRevision: inputs.linesRevision, focus: tripFocusRevision, placeRevision: placeGeometryRevision, ids: tripOverlays.map(\.id)), initial: true) { _, _ in
             tripGeometry = tripOverlays.compactMap { AppleRoutePolyline(id: $0.id, color: $0.color, coordinates: $0.coordinates, walking: $0.walking) }
         }
@@ -177,11 +193,16 @@ struct AppleTransitMap: View {
         let feedRevision: UUID?
         let active: Bool
         let reduceMotion: Bool
+        let fixtureTime: Date?
     }
 
     private var motionInputs: MotionInputs {
-        MotionInputs(linesRevision: store.linesRevision, feedRevision: store.feedError ? nil : store.motionSnapshotRevision,
-                     active: scenePhase == .active && !showsJourney, reduceMotion: reduceMotion || !mapExposed)
+        var fixtureTime: Date?
+        #if DEBUG && targetEnvironment(simulator)
+            fixtureTime = StationMotionFixtureClock.enabled?.now
+        #endif
+        return MotionInputs(linesRevision: store.linesRevision, feedRevision: store.feedError ? nil : store.motionSnapshotRevision,
+                            active: scenePhase == .active && !showsJourney, reduceMotion: reduceMotion || !mapExposed, fixtureTime: fixtureTime)
     }
 
     private func stopMotion() {
@@ -221,14 +242,17 @@ struct AppleTransitMap: View {
             self.entryGeneration = nil
         }
         if appliedFeedRevision != revision {
-            motion.update(snapshot: snapshot, now: .now, feedUnavailable: false)
+            motion.update(snapshot: snapshot, now: store.motionDate, feedUnavailable: false)
             appliedFeedRevision = revision
         }
         let discrete = inputs.reduceMotion || entryGeneration != nil
         while !Task.isCancelled, inputs == motionInputs {
-            let now = Date()
+            let now = store.motionDate
             markers = motion.markers(at: now, reduceMotion: discrete)
-            guard snapshot.isFresh(at: now) else { return }
+            #if DEBUG && targetEnvironment(simulator)
+                StationMotionFixtureClock.enabled?.didSample(at: now, generatedAt: snapshot.generatedAt)
+            #endif
+            guard snapshot.isFresh(at: now), inputs.fixtureTime == nil else { return }
             // Wake exactly at feed expiry even when coarse sampling. Other
             // input/lifecycle changes cancel this sleep and resample immediately.
             let interval = !discrete && motion.hasActiveMotion(at: now) ? 0.25 : 5.0
@@ -315,7 +339,9 @@ private struct AppleTrainAnnotation: View {
                     .padding(.horizontal, 5)
                     .padding(.vertical, 2)
                     .background(.regularMaterial, in: Capsule())
-                    .offset(y: 22)
+                    // Keep the caption below the glyph even when Dynamic Type
+                    // makes it taller; it must not change the map anchor.
+                    .alignmentGuide(.bottom) { $0[.top] - 6 }
                     .accessibilityHidden(true)
             }
         }

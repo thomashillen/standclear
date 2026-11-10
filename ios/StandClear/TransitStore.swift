@@ -37,10 +37,21 @@ final class TransitStore {
         self.pollingSleep = pollingSleep
     }
 
+    /// The opt-in simulator fixture shares its held time with feed validation and
+    /// the real map sampler. All other builds and sessions use the system clock.
+    var motionDate: Date {
+        #if DEBUG && targetEnvironment(simulator)
+            if let clock = StationMotionFixtureClock.enabled {
+                return clock.now
+            }
+        #endif
+        return .now
+    }
+
     private func fetch<T: Decodable>(_ path: String) async throws -> T {
         #if DEBUG && targetEnvironment(simulator)
             if ProcessInfo.processInfo.arguments.contains("--ui-test-fixture") {
-                let data = try NativeUITestFixture.data(for: path, now: .now)
+                let data = try NativeUITestFixture.data(for: path, now: motionDate)
                 return try JSONDecoder().decode(T.self, from: data)
             }
         #endif
@@ -113,7 +124,7 @@ final class TransitStore {
         do {
             let data = try await task.value
             guard active, current == generation else { return }
-            let now = Date.now
+            let now = motionDate
             guard data.hasValidTimestamp(at: now) else { throw URLError(.badServerResponse) }
             // A clock change or an invalid cached timestamp must not block recovery.
             if data.generatedAt >= (snapshot?.generatedAt ?? 0) || snapshot?.hasValidTimestamp(at: now) == false {
@@ -161,6 +172,48 @@ final class TransitStore {
 }
 
 #if DEBUG && targetEnvironment(simulator)
+    /// No production/physical/Release clock override. Held stages let XCTest
+    /// inspect actual native annotations without racing a four-second window.
+    @MainActor @Observable
+    final class StationMotionFixtureClock {
+        static let shared = StationMotionFixtureClock()
+        static var enabled: StationMotionFixtureClock? {
+            let arguments = ProcessInfo.processInfo.arguments
+            return ["--ui-test-fixture", "--ui-test-station-motion", "--ui-test-motion-clock"].allSatisfy(arguments.contains) ? shared : nil
+        }
+
+        private let epoch = Date.now
+        private(set) var stage = 0
+        private(set) var sampledStage = -1
+        private let offsets: [TimeInterval] = [0, 8, 16, 17, 18.5, 20]
+        var offset: TimeInterval {
+            offsets[stage]
+        }
+
+        var now: Date {
+            epoch.addingTimeInterval(offset)
+        }
+
+        /// Sampling advances while the last accepted vehicle report stays fixed.
+        var reportDate: Date {
+            epoch.addingTimeInterval(min(offset, 16))
+        }
+
+        var finished: Bool {
+            stage == offsets.count - 1
+        }
+
+        func advance() {
+            guard sampledStage == stage else { return }
+            stage = min(stage + 1, offsets.count - 1)
+        }
+
+        func didSample(at date: Date, generatedAt: Double) {
+            guard date == now, generatedAt == reportDate.timeIntervalSince1970 * 1000 else { return }
+            sampledStage = stage
+        }
+    }
+
     /// Fixed journey anchors for opt-in motion QA; excluded from physical builds.
     struct TemporalMotionFixture {
         private var start: Double?
@@ -310,10 +363,11 @@ final class TransitStore {
                                 "routeIds": ["6X"], "stopIds": ["601"], "selectors": [["routeId": "6X", "stopId": "601"]]],
                            ]]
             case "api/trains":
-                let timestamp = now.timeIntervalSince1970
+                let timestamp = StationMotionFixtureClock.enabled?.reportDate.timeIntervalSince1970 ?? now.timeIntervalSince1970
                 if ProcessInfo.processInfo.arguments.contains("--ui-test-station-motion") {
                     stationMotionRequests += 1
-                    let stop = stationMotionRequests < 3 ? "128" : "127"
+                    let oldStation = StationMotionFixtureClock.enabled.map { $0.offset < 16 } ?? (stationMotionRequests < 3)
+                    let stop = oldStation ? "128" : "127"
                     let vehicle = train(id: "ui-fixture-station-motion", route: "1", direction: "N", previous: stop, next: stop, timestamp: timestamp)
                         .merging(["progress": 1, "status": "STOPPED_AT"]) { _, updated in updated }
                     return try JSONSerialization.data(withJSONObject: ["generatedAt": timestamp * 1000, "trains": [vehicle], "arrivals": []], options: [.sortedKeys])

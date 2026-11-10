@@ -30,6 +30,26 @@ final class TrainMotionTests: XCTestCase {
     }
 
     #if DEBUG && targetEnvironment(simulator)
+        @MainActor
+        func testStationFixtureClockRequiresMatchingFeedAndSampleBeforeAdvance() {
+            let clock = StationMotionFixtureClock()
+            let start = clock.now
+            clock.advance()
+            XCTAssertEqual(clock.stage, 0)
+            clock.didSample(at: start, generatedAt: 0)
+            XCTAssertEqual(clock.sampledStage, -1)
+            for (stage, offset) in [0.0, 8, 16, 17, 18.5, 20].enumerated() {
+                XCTAssertEqual(clock.stage, stage)
+                XCTAssertEqual(clock.now.timeIntervalSince(start), offset)
+                XCTAssertEqual(clock.reportDate.timeIntervalSince(start), min(offset, 16))
+                clock.didSample(at: clock.now, generatedAt: clock.reportDate.timeIntervalSince1970 * 1000)
+                XCTAssertEqual(clock.sampledStage, stage)
+                clock.advance()
+            }
+            XCTAssertTrue(clock.finished)
+            XCTAssertEqual(clock.stage, 5)
+        }
+
         func testTemporalFixtureMaintainsJourneyAcrossRefreshesAndStops() throws {
             var fixture = TemporalMotionFixture()
             let first = try XCTUnwrap(fixture.sample(at: epoch))
@@ -215,6 +235,38 @@ final class TrainMotionTests: XCTestCase {
         XCTAssertEqual(after.coordinate.longitude, before.coordinate.longitude)
         XCTAssertTrue(after.reconciling)
         XCTAssertGreaterThan(try XCTUnwrap(engine.markers(at: date(5)).first).coordinate.latitude, after.coordinate.latitude)
+    }
+
+    func testDistantAndUnlinkedStationReportsStayDiscrete() throws {
+        let points = [Stop(id: "a", name: "A", lat: 40.75, lng: -74, shapeIdx: 0),
+                      Stop(id: "b", name: "B", lat: 40.751, lng: -74, shapeIdx: 1),
+                      Stop(id: "c", name: "C", lat: 40.752, lng: -74, shapeIdx: 2)]
+        let distant = [points[0], Stop(id: "c", name: "C", lat: 40.78, lng: -74, shapeIdx: 1)]
+        for stops in [points, distant] {
+            let route = SubwayLine(id: "R", routeId: "R", color: "FCCC0A", stops: stops,
+                                   shape: stops.map { [$0.lng, $0.lat] })
+            var engine = TrainMotion(lines: [route])
+            let old = Train(id: "t", routeId: "R", direction: "N", progress: 1,
+                            prevStopId: "a", nextStopId: "a", status: "STOPPED_AT", lastReportedAt: epoch)
+            let next = Train(id: "t", routeId: "R", direction: "N", progress: 1,
+                             prevStopId: "c", nextStopId: "c", status: "STOPPED_AT", lastReportedAt: epoch + 8)
+            engine.update(snapshot: feed(old, []), now: date(0))
+            engine.update(snapshot: feed(next, [], at: 8), now: date(8))
+            let marker = try XCTUnwrap(engine.markers(at: date(9)).first)
+            XCTAssertFalse(marker.reconciling)
+            XCTAssertEqual(marker.coordinate.latitude, stops.last?.lat)
+            XCTAssertFalse(engine.hasActiveMotion(at: date(9)))
+        }
+    }
+
+    func testMissingVehicleTimestampCannotAuthorizeReconciliation() {
+        for (oldTime, newTime): (Double?, Double?) in [(nil, 8), (0, nil), (nil, nil)] {
+            var engine = TrainMotion(lines: [line()])
+            engine.update(snapshot: feed(train(reported: oldTime), []), now: date(0))
+            engine.update(snapshot: feed(train(1, status: "STOPPED_AT", reported: newTime), [], at: 8), now: date(8))
+            XCTAssertFalse(engine.markers(at: date(9)).contains { $0.reconciling })
+            XCTAssertFalse(engine.hasActiveMotion(at: date(9)))
+        }
     }
 
     func testUnrelatedOrStaleObservationsNeverReconcile() {

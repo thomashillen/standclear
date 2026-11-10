@@ -6,32 +6,83 @@ final class StandClearUITests: XCTestCase {
 
     @MainActor
     func testStationObservationReconciliationOnNativeMap() {
+        checkStationObservationReconciliation(expanded: false, largeText: false)
+    }
+
+    @MainActor
+    func testStationObservationReconciliationExpanded() {
+        checkStationObservationReconciliation(expanded: true, largeText: false)
+    }
+
+    @MainActor
+    func testStationObservationReconciliationAtLargestText() {
+        checkStationObservationReconciliation(expanded: false, largeText: true)
+    }
+
+    @MainActor
+    private func checkStationObservationReconciliation(expanded: Bool, largeText: Bool) {
         let app = XCUIApplication()
         app.terminate()
         XCUIDevice.shared.orientation = .portrait
-        app.launchArguments = ["--ui-test-fixture", "--ui-test-station-motion"]
+        app.launchArguments = ["--ui-test-fixture", "--ui-test-station-motion", "--ui-test-motion-clock"]
+        if largeText {
+            app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
+        }
         app.launch()
         XCTAssertTrue(app.buttons["moreButton"].waitForExistence(timeout: 15))
         activatePermissionPrompt(in: app)
+        if expanded {
+            XCUIDevice.shared.orientation = .landscapeLeft
+            waitForLayout(in: app, expanded: true)
+        }
         let train = app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "Route 1 train. Estimated position.")).firstMatch
         XCTAssertTrue(train.waitForExistence(timeout: 10))
+        if largeText {
+            // Keep the actual train visible below the large permission card.
+            // Drag the unobscured map edge, away from the fixture control.
+            let map = nativeMap(in: app)
+            map.coordinate(withNormalizedOffset: CGVector(dx: 0.85, dy: 0.68))
+                .press(forDuration: 0.05, thenDragTo: map.coordinate(withNormalizedOffset: CGVector(dx: 0.85, dy: 0.88)))
+        }
         func capture(_ name: String) {
-            let attachment = XCTAttachment(screenshot: app.screenshot())
+            let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
             attachment.name = name
             attachment.lifetime = .keepAlways
             add(attachment)
         }
         capture("Station observation before update")
+        let advance = app.buttons["advanceMotionFixture"]
+        let ready = NSPredicate(format: "value == %@ AND enabled == true", "0")
+        expectation(for: ready, evaluatedWith: advance)
+        waitForExpectations(timeout: 8)
+        func step(to stage: Int) {
+            advance.tap()
+            let held = NSPredicate(format: "value == %@", String(stage))
+            expectation(for: held, evaluatedWith: advance)
+            waitForExpectations(timeout: 8)
+        }
+        step(to: 1) // New generation anchors entry; station remains unchanged.
+        step(to: 2) // Adjacent station report starts the production transition.
         let uncertain = NSPredicate(format: "value CONTAINS %@", "Current position is uncertain")
         expectation(for: uncertain, evaluatedWith: train)
         waitForExpectations(timeout: 25)
         XCTAssertEqual(train.value as? String, "Current position is uncertain")
+        step(to: 3)
         let start = train.frame
         capture("Estimated position caption at reconciliation start")
-        RunLoop.current.run(until: Date().addingTimeInterval(1.5))
+        step(to: 4)
+        let moved = NSPredicate { _, _ in
+            MainActor.assumeIsolated {
+                let frame = train.frame
+                return hypot(frame.midX - start.midX, frame.midY - start.midY) > 0.5
+            }
+        }
+        expectation(for: moved, evaluatedWith: train)
+        waitForExpectations(timeout: 8)
         let middle = train.frame
         capture("Estimated position caption during route reconciliation")
         XCTAssertGreaterThan(hypot(middle.midX - start.midX, middle.midY - start.midY), 0.5)
+        step(to: 5)
         let settled = NSPredicate(format: "NOT (value CONTAINS %@)", "Current position is uncertain")
         expectation(for: settled, evaluatedWith: train)
         waitForExpectations(timeout: 8)
