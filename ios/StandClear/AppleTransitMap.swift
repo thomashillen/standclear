@@ -331,7 +331,7 @@ private struct AppleTrainAnnotation: View {
         .opacity(marker.opacity)
         // Overlay content does not contribute to the fixed marker layout or
         // move the glyph's map anchor when the uncertainty caption changes.
-        .overlay(alignment: .bottom) {
+        .overlay(alignment: .top) {
             if let caption = TrainMarkerPresentation.uncertaintyCaption(marker) {
                 Text(caption)
                     .font(.caption2)
@@ -341,7 +341,7 @@ private struct AppleTrainAnnotation: View {
                     .background(.regularMaterial, in: Capsule())
                     // Keep the caption below the glyph even when Dynamic Type
                     // makes it taller; it must not change the map anchor.
-                    .alignmentGuide(.bottom) { $0[.top] - 6 }
+                    .offset(y: 24 * scale + 6)
                     .accessibilityHidden(true)
             }
         }
