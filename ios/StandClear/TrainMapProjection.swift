@@ -24,6 +24,28 @@ struct TrainMapMarker: Identifiable {
     }
 }
 
+/// Shared marker wording stays truthful when reconciliation freezes at the
+/// vehicle freshness cap or its target comes from an arrival prediction.
+enum TrainMarkerPresentation {
+    static func uncertaintyCaption(_ marker: TrainMapMarker) -> String? {
+        marker.reconciling ? "Estimated position" : nil
+    }
+
+    static func accessibilityValue(_ marker: TrainMapMarker) -> String {
+        var details: [String] = []
+        if marker.bearingDegrees == nil {
+            details.append("Travel direction is unavailable")
+        }
+        if marker.reconciling {
+            details.append("Current position is uncertain")
+        }
+        if marker.stale {
+            details.append("Position report is over 90 seconds old")
+        }
+        return details.joined(separator: ". ")
+    }
+}
+
 /// Geometry aliases do not change reported service identity or boarding rules.
 /// Only known express services may use a base shape when no exact shape exists.
 enum TrainRouteGeometry {

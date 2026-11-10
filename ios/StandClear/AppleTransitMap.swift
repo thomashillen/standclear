@@ -305,9 +305,11 @@ private struct AppleTrainAnnotation: View {
         .scaleEffect(scale)
         .frame(width: 46 * scale, height: 24 * scale)
         .opacity(marker.opacity)
+        // Overlay content does not contribute to the fixed marker layout or
+        // move the glyph's map anchor when the uncertainty caption changes.
         .overlay(alignment: .bottom) {
-            if marker.reconciling {
-                Text("Estimated movement")
+            if let caption = TrainMarkerPresentation.uncertaintyCaption(marker) {
+                Text(caption)
                     .font(.caption2)
                     .fixedSize()
                     .padding(.horizontal, 5)
@@ -319,20 +321,6 @@ private struct AppleTrainAnnotation: View {
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Route \(marker.spokenRouteName) train. Estimated position.")
-        .accessibilityValue(accessibilityValue(marker))
-    }
-
-    private func accessibilityValue(_ marker: TrainMapMarker) -> String {
-        var details: [String] = []
-        if marker.bearingDegrees == nil {
-            details.append("Travel direction is unavailable")
-        }
-        if marker.reconciling {
-            details.append("Animating between reported positions. Current position is uncertain")
-        }
-        if marker.stale {
-            details.append("Position report is over 90 seconds old")
-        }
-        return details.joined(separator: ". ")
+        .accessibilityValue(TrainMarkerPresentation.accessibilityValue(marker))
     }
 }

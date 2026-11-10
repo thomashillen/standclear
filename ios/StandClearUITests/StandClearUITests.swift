@@ -25,11 +25,12 @@ final class StandClearUITests: XCTestCase {
         let uncertain = NSPredicate(format: "value CONTAINS %@", "Current position is uncertain")
         expectation(for: uncertain, evaluatedWith: train)
         waitForExpectations(timeout: 25)
+        XCTAssertEqual(train.value as? String, "Current position is uncertain")
         let start = train.frame
-        capture("Uncertain route reconciliation start")
+        capture("Estimated position caption at reconciliation start")
         RunLoop.current.run(until: Date().addingTimeInterval(1.5))
         let middle = train.frame
-        capture("Uncertain route reconciliation middle")
+        capture("Estimated position caption during route reconciliation")
         XCTAssertGreaterThan(hypot(middle.midX - start.midX, middle.midY - start.midY), 0.5)
         let settled = NSPredicate(format: "NOT (value CONTAINS %@)", "Current position is uncertain")
         expectation(for: settled, evaluatedWith: train)
