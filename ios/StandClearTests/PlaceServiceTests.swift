@@ -8,6 +8,77 @@ final class PlaceServiceTests: XCTestCase {
     private let start = CLLocationCoordinate2D(latitude: 40.75, longitude: -73.98)
     private let end = CLLocationCoordinate2D(latitude: 40.7501, longitude: -73.9802)
 
+    func testSuggestionKeepsIdentityAndResolvesOnlyWhenChosen() async throws {
+        var requests = 0
+        let destination = place("resolved-map-item")
+        let suggestion = PlaceSuggestion(id: "completion", name: "Suggested place", subtitle: "NYC") {
+            requests += 1
+            return destination
+        }
+        XCTAssertEqual(suggestion.id, "completion")
+        XCTAssertEqual(requests, 0, "Showing suggestions must not issue a search per result")
+        let resolved = try await suggestion.resolve()
+        XCTAssertEqual(resolved, destination, "Use the selected completion's resolved coordinates and identity")
+        XCTAssertEqual(requests, 1)
+        let fixture = PlaceSuggestion(place: destination)
+        XCTAssertEqual(fixture.id, destination.id)
+        let fixtureResult = try await fixture.resolve()
+        XCTAssertEqual(fixtureResult, destination)
+    }
+
+    func testSuggestionResolutionRejectsOutOfCoverageAndInvalidCoordinates() async throws {
+        for invalid in [place("outside", latitude: 42), place("invalid", latitude: .nan),
+                        PlaceResult(id: "empty", name: " ", subtitle: "", latitude: 40.75, longitude: -73.98)]
+        {
+            let suggestion = PlaceSuggestion(place: invalid)
+            do {
+                _ = try await suggestion.resolve()
+                XCTFail("A region-biased completion must not bypass coverage validation")
+            } catch PlaceServiceError.outsideCoverage {}
+        }
+    }
+
+    func testCancelledSuggestionResolutionCannotDeliverLatePlace() async throws {
+        let started = AsyncStream<Void>.makeStream()
+        var pending: CheckedContinuation<PlaceResult, Never>?
+        let suggestion = PlaceSuggestion(id: "delayed", name: "Delayed", subtitle: "") {
+            await withCheckedContinuation {
+                pending = $0
+                started.continuation.yield(())
+            }
+        }
+        let task = Task { try await suggestion.resolve() }
+        var iterator = started.stream.makeAsyncIterator()
+        _ = await iterator.next()
+        task.cancel()
+        try XCTUnwrap(pending).resume(returning: place("late"))
+        do {
+            _ = try await task.value
+            XCTFail("Cancelled completion resolution must not navigate or save a place")
+        } catch is CancellationError {}
+    }
+
+    func testSuggestionResolutionFailureCanBeRetriedWithoutChangingSuggestion() async throws {
+        var attempts = 0
+        let destination = place("recovered")
+        let suggestion = PlaceSuggestion(id: "retry", name: "Retry", subtitle: "") {
+            attempts += 1
+            if attempts == 1 {
+                throw URLError(.notConnectedToInternet)
+            }
+            return destination
+        }
+        do {
+            _ = try await suggestion.resolve()
+            XCTFail("Failed resolution must not be presented as a selected place")
+        } catch let error as URLError {
+            XCTAssertEqual(error.code, .notConnectedToInternet)
+        }
+        let recovered = try await suggestion.resolve()
+        XCTAssertEqual(recovered, destination)
+        XCTAssertEqual(attempts, 2)
+    }
+
     func testSearchPreservesRankingAndSelectedCoordinatesWithinNYCBounds() async throws {
         let a = place("a")
         let other = place("other", latitude: 40.76)

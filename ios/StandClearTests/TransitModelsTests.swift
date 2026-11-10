@@ -5,6 +5,118 @@ import XCTest
 final class TransitModelsTests: XCTestCase {
     private let now = Date(timeIntervalSince1970: 1_800_000_000)
 
+    func testAdvisoryRouteTokensPreserveSourceAndRecognizeOnlyExactFlatKnownIDs() {
+        let source = "[2][3] trains; Downtown [1] skips.\n[FS] and [6X] resume; [AX] [planned] [1,2] [ f ] [6x]."
+        let content = AdvisoryTextContent(source)
+        XCTAssertEqual(content.segments.map(\.source).joined(), source)
+        let routes = content.segments.compactMap { segment -> String? in
+            if case let .route(id) = segment {
+                return id
+            }; return nil
+        }
+        XCTAssertEqual(routes, ["2", "3", "1", "FS", "6X"])
+        XCTAssertEqual(content.spokenText,
+                       "Route 2 Route 3 trains; Downtown Route 1 skips.\nRoute Franklin Avenue Shuttle and Route 6 Express resume; [AX] [planned] [1,2] [ f ] [6x].")
+    }
+
+    func testAdvisoryNestedMalformedAndUnknownBracketsRemainLiteral() {
+        for source in ["[[1]]", "[foo[1]bar]", "[foo[1]", "[1", "1]", "[]", "[AX]", "  [planned]\n", ""] {
+            let content = AdvisoryTextContent(source)
+            XCTAssertEqual(content.segments.map(\.source).joined(), source)
+            XCTAssertEqual(content.spokenText, source)
+            XCTAssertFalse(content.segments.contains {
+                if case .route = $0 {
+                    true
+                } else {
+                    false
+                }
+            })
+        }
+        let mixed = AdvisoryTextContent("[[1]] then [F]; [foo[1]bar] then [GS]")
+        XCTAssertEqual(mixed.segments.map(\.source).joined(), "[[1]] then [F]; [foo[1]bar] then [GS]")
+        XCTAssertEqual(mixed.spokenText, "[[1]] then Route F; [foo[1]bar] then Route 42 Street Shuttle")
+    }
+
+    func testAdvisoryImageFailureRestoresExactOriginalTokenWithoutLosingWords() {
+        let source = "[2][3] trains\nvia [FS], not [AX]."
+        let content = AdvisoryTextContent(source)
+        let failed: [String] = content.segments.map { segment in
+            segment.rendered(literal: { $0 }, route: { _ in nil })
+        }
+        XCTAssertEqual(failed.joined(), source)
+        let partial: [String] = content.segments.map { segment in
+            segment.rendered(literal: { $0 }, route: { $0 == "2" ? "<2 bullet>" : nil })
+        }
+        XCTAssertEqual(partial.joined(), "<2 bullet>[3] trains\nvia [FS], not [AX].")
+    }
+
+    func testSharedRouteIdentityPreservesKnownIDsAndDoesNotInventExpressServices() {
+        for (reported, base) in [("6X", "6"), ("7X", "7"), ("FX", "F")] {
+            let identity = TransitRouteIdentity(reported)
+            XCTAssertTrue(identity.isExpress)
+            XCTAssertEqual(identity.baseID, base)
+            XCTAssertEqual(identity.spokenName, "\(base) Express")
+        }
+        for unknown in ["AX", "4X", "GSX", "BUSX", "6x", ""] {
+            let identity = TransitRouteIdentity(unknown)
+            XCTAssertFalse(identity.isExpress)
+            XCTAssertEqual(identity.baseID, unknown)
+            XCTAssertEqual(identity.bullet, unknown)
+            XCTAssertEqual(identity.spokenName, unknown)
+        }
+        for (route, name) in ["GS": "42 Street Shuttle", "FS": "Franklin Avenue Shuttle", "H": "Rockaway Park Shuttle",
+                              "S": "Shuttle", "SI": "Staten Island Railway"]
+        {
+            let identity = TransitRouteIdentity(route)
+            XCTAssertEqual(identity.baseID, route, "Shuttle identities must not merge for routing")
+            XCTAssertEqual(identity.spokenName, name)
+            XCTAssertEqual(TransitBulletStyle(routeID: route).spokenName, identity.spokenName)
+        }
+    }
+
+    func testCanonicalBulletFamiliesAndForegrounds() {
+        let families = [
+            "D82233": ["1", "2", "3"], "009952": ["4", "5", "6", "6X"],
+            "9A38A1": ["7", "7X"], "0062CF": ["A", "C", "E"],
+            "EB6800": ["B", "D", "F", "FX", "M"], "799534": ["G"],
+            "8E5C33": ["J", "Z"], "7C858C": ["L", "S", "GS", "FS", "H"],
+            "F6BC26": ["N", "Q", "R", "W"], "08179C": ["SI"],
+        ]
+        for (hex, routes) in families {
+            for route in routes {
+                let style = TransitBulletStyle(routeID: route)
+                XCTAssertEqual(style.colorHex, hex, route)
+                XCTAssertEqual(style.usesBlackLetter, hex == "F6BC26", route)
+            }
+        }
+    }
+
+    func testBulletExpressIdentityDoesNotGuessUnknownSuffixes() {
+        for route in ["6X", "7X", "FX"] {
+            let style = TransitBulletStyle(routeID: route)
+            XCTAssertTrue(style.isExpress)
+            XCTAssertEqual(style.bullet, String(route.dropLast()))
+            XCTAssertTrue(style.spokenName.hasSuffix(" Express"))
+        }
+        for route in ["AX", "BUSX", "unknown", "", "6x"] {
+            let style = TransitBulletStyle(routeID: route)
+            XCTAssertNil(style.colorHex)
+            XCTAssertFalse(style.isExpress)
+            XCTAssertEqual(style.bullet, route)
+            XCTAssertEqual(style.spokenName, route)
+        }
+    }
+
+    func testShuttleBulletsRetainDistinctAccessibleIdentities() {
+        let names = ["GS": "42 Street Shuttle", "FS": "Franklin Avenue Shuttle", "H": "Rockaway Park Shuttle"]
+        for (route, name) in names {
+            let style = TransitBulletStyle(routeID: route)
+            XCTAssertEqual(style.bullet, "S")
+            XCTAssertEqual(style.spokenName, name)
+        }
+        XCTAssertEqual(TransitBulletStyle(routeID: "SI").spokenName, "Staten Island Railway")
+    }
+
     func testStationNameSearchRanksPrefixesAndMatchesReorderedAbbreviations() {
         let names = ["14 St-Union Sq", "Times Sq-42 St", "Union Square", "Squire Road", "Cortelyou Rd"]
         let stations = names.map { name in

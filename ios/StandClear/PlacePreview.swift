@@ -256,15 +256,18 @@ final class PlacePreviewSession {
 }
 
 struct PlacePreview: View {
+    @Environment(\.expandedTransitPanel) private var expandedPanel
     let place: PlaceResult
     let store: TransitStore
     let location: LocationStore
     let session: PlacePreviewSession
     let onMapChange: (PlaceMapRoute?) -> Void
-    var onEditingOriginChanged: (Bool) -> Void = { _ in }
+    var onEditingEndpointChanged: (Bool) -> Void = { _ in }
+    var onDestinationChange: (PlaceResult) -> Void = { _ in }
     @Environment(\.dynamicTypeSize) private var typeSize
     @Environment(\.scenePhase) private var scenePhase
     @State private var editingOrigin = false
+    @State private var editingDestination = false
     @State private var preview: Preview?
     @State private var walks = PlaceWalkMemory()
     @State private var revision = 0
@@ -379,53 +382,77 @@ struct PlacePreview: View {
                         .contentShape(Rectangle())
                 }
                 .accessibilityIdentifier("placeOriginPicker")
-                LabeledContent("To") {
-                    VStack(alignment: .trailing, spacing: 2) {
-                        Text(place.name).foregroundStyle(.primary)
-                        if !place.subtitle.isEmpty {
-                            Text(place.subtitle).font(.caption).foregroundStyle(.secondary)
-                                .lineLimit(typeSize.isAccessibilitySize ? nil : 1)
+                Button { editingDestination = true } label: {
+                    LabeledContent("To") {
+                        VStack(alignment: .trailing, spacing: 2) {
+                            Text(place.name).foregroundStyle(.primary)
+                            if !place.subtitle.isEmpty {
+                                Text(place.subtitle).font(.caption).foregroundStyle(.secondary)
+                                    .lineLimit(typeSize.isAccessibilitySize ? nil : 1)
+                            }
                         }
                     }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
                 }
                 .accessibilityElement(children: .combine)
+                .accessibilityIdentifier("placeDestinationPicker")
             }
+            .listRowBackground(expandedPanel ? Color.clear : nil)
             if let issue = current?.issue, case .sameEndpoints = issue {
                 // Identical coordinates need no station data. Keep this known
                 // result visible while static data loads or needs recovery.
-                issueView(issue)
+                issueView(issue).listRowBackground(expandedPanel ? Color.clear : nil)
                 if store.error != nil {
                     Button("Retry stations") { Task { await store.loadLines() } }
+                        .listRowBackground(expandedPanel ? Color.clear : nil)
                 }
             } else if store.loading {
-                ProgressView("Loading subway stations…")
+                ProgressView("Loading subway stations…").listRowBackground(expandedPanel ? Color.clear : nil)
             } else if store.error != nil {
-                ContentUnavailableView("Stations unavailable", systemImage: "tram")
+                ContentUnavailableView("Stations unavailable", systemImage: "tram").listRowBackground(expandedPanel ? Color.clear : nil)
                 Button("Retry stations") { Task { await store.loadLines() } }
+                    .listRowBackground(expandedPanel ? Color.clear : nil)
             } else if let current {
                 if let issue = current.issue {
-                    issueView(issue)
+                    issueView(issue).listRowBackground(expandedPanel ? Color.clear : nil)
                 } else if let selected = selected(in: current) {
                     optionsSection(current.options, selectedID: selected.id)
+                        .listRowBackground(expandedPanel ? Color.clear : nil)
                     itinerary(selected, current: current)
+                        .listRowBackground(expandedPanel ? Color.clear : nil)
                 }
             } else {
-                ProgressView("Preparing routes…")
+                ProgressView("Preparing routes…").listRowBackground(expandedPanel ? Color.clear : nil)
             }
         }
         .listStyle(.plain)
         .listSectionSpacing(.compact)
         .accessibilityIdentifier("placePreviewList")
         .navigationDestination(isPresented: $editingOrigin) {
-            PlaceOriginPicker(stations: store.stations) { origin in
+            PlaceEndpointPicker(stations: store.stations) { origin in
                 if origin == .currentLocation, location.availableCoordinate == nil {
                     location.start()
                 }
                 session.choose(origin)
                 editingOrigin = false
             }
-            .onAppear { onEditingOriginChanged(true) }
-            .onDisappear { onEditingOriginChanged(false) }
+            .onAppear { onEditingEndpointChanged(true) }
+            .onDisappear { onEditingEndpointChanged(false) }
+        }
+        .navigationDestination(isPresented: $editingDestination) {
+            PlaceEndpointPicker(stations: [], destination: true) { selection in
+                guard case let .place(destination) = selection else { return }
+                editingDestination = false
+                // Restore the original detent before changing the panel identity;
+                // the old picker's disappearance then belongs to an old place.
+                onEditingEndpointChanged(false)
+                if destination != place {
+                    onDestinationChange(destination)
+                }
+            }
+            .onAppear { onEditingEndpointChanged(true) }
+            .onDisappear { onEditingEndpointChanged(false) }
         }
         .navigationTitle("Route preview")
         .navigationBarTitleDisplayMode(.inline)
@@ -629,7 +656,36 @@ struct PlacePreview: View {
 
     private func routeSummary(_ route: PlaceRouting.Route) -> String {
         guard let trip = route.trip else { return "Walk directly" }
-        return trip.legs.map { $0.routeIDs.map(RouteBadge.displayID).joined(separator: "/") }.joined(separator: " → ")
+        return trip.legs.map { $0.routeIDs.map { TransitRouteIdentity($0).spokenName }.joined(separator: "/") }.joined(separator: " → ")
+    }
+
+    @ViewBuilder
+    private func routeOptionTitle(_ route: PlaceRouting.Route) -> some View {
+        if let trip = route.trip {
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 4) {
+                    ForEach(Array(trip.legs.enumerated()), id: \.element.id) { index, leg in
+                        if index > 0 {
+                            Image(systemName: "arrow.right")
+                        }
+                        ForEach(leg.routeIDs, id: \.self) { RouteBadge(routeID: $0) }
+                    }
+                }
+                .fixedSize(horizontal: true, vertical: false)
+                VStack(alignment: .leading, spacing: 4) {
+                    ForEach(Array(trip.legs.enumerated()), id: \.element.id) { index, leg in
+                        if index > 0 {
+                            Image(systemName: "arrow.down")
+                        }
+                        RouteBadgeGroup(routes: leg.routeIDs)
+                    }
+                }
+            }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(routeSummary(route))
+        } else {
+            Text("Walk directly").font(.headline)
+        }
     }
 
     private func optionsSection(_ options: [Option], selectedID: String) -> some View {
@@ -640,7 +696,7 @@ struct PlacePreview: View {
                 } label: {
                     VStack(alignment: .leading, spacing: 3) {
                         HStack {
-                            Text(routeSummary(option.route)).font(.headline)
+                            routeOptionTitle(option.route)
                             Spacer()
                             if let estimate = option.estimate {
                                 Text("~\(minutes(estimate.totalSeconds))").monospacedDigit()
@@ -692,8 +748,19 @@ struct PlacePreview: View {
                     let boarding = index == 1 && transfer?.isLexington59 == true ? "Lexington Av/59 St" : stops.first { $0.id == leg.boardStopId }?.name ?? leg.boardStopId
                     let alighting = index == 0 && transfer?.isLexington59 == true ? "Lexington Av/59 St" : stops.first { $0.id == leg.alightStopId }?.name ?? leg.alightStopId
                     VStack(alignment: .leading, spacing: 4) {
-                        Label("\(leg.routeIDs.map(RouteBadge.displayID).joined(separator: "/")) · \(leg.direction == "N" ? "Northbound" : "Southbound")", systemImage: "tram")
-                            .font(.headline)
+                        ViewThatFits(in: .horizontal) {
+                            HStack {
+                                ForEach(leg.routeIDs, id: \.self) { route in RouteBadge(routeID: route) }
+                                Text(leg.direction == "N" ? "Northbound" : "Southbound")
+                            }
+                            VStack(alignment: .leading) {
+                                RouteBadgeGroup(routes: leg.routeIDs)
+                                Text(leg.direction == "N" ? "Northbound" : "Southbound")
+                            }
+                        }
+                        .font(.headline)
+                        .accessibilityElement(children: .ignore)
+                        .accessibilityLabel("\(leg.routeIDs.map { TransitRouteIdentity($0).spokenName }.joined(separator: "/")) · \(leg.direction == "N" ? "Northbound" : "Southbound")")
                         Text("\(boarding) → \(alighting)")
                         Text("\(leg.stopCount) stops").font(.subheadline).foregroundStyle(.secondary)
                     }
@@ -787,14 +854,16 @@ struct PlacePreview: View {
     }
 }
 
-private struct PlaceOriginPicker: View {
+private struct PlaceEndpointPicker: View {
+    @Environment(\.expandedTransitPanel) private var expandedPanel
     let stations: [Station]
+    var destination = false
     let choose: (PlacePreviewSession.Origin) -> Void
     @Environment(\.scenePhase) private var scenePhase
     @State private var searchPresented = false
     @FocusState private var searchFocused: Bool
     @State private var query = ""
-    @State private var places: [PlaceResult] = []
+    @State private var places: [PlaceSuggestion] = []
     @State private var resolved = ""
     @State private var failed = false
     @State private var retry = 0
@@ -822,8 +891,11 @@ private struct PlaceOriginPicker: View {
     var body: some View {
         let key = request
         List {
-            Button("Current Location", systemImage: "location") { pick(.currentLocation) }
-                .accessibilityIdentifier("placeOriginCurrentLocation")
+            if !destination {
+                Button("Current Location", systemImage: "location") { pick(.currentLocation) }
+                    .accessibilityIdentifier("placeOriginCurrentLocation")
+                    .listRowBackground(expandedPanel ? Color.clear : nil)
+            }
             if key.query.count >= 2 {
                 Section("Addresses and places") {
                     if resolved != key.query {
@@ -835,36 +907,39 @@ private struct PlaceOriginPicker: View {
                     }
                     if resolved == key.query, !failed {
                         ForEach(places) { item in
-                            Button { pick(.place(item)) } label: {
-                                VStack(alignment: .leading) {
-                                    Text(item.name)
-                                    Text(item.subtitle).font(.subheadline).foregroundStyle(.secondary)
-                                }.frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
-                            }
-                            .accessibilityIdentifier("placeOriginResult-\(item.id)")
+                            PlaceSuggestionRow(item: item, identifier: "\(destination ? "placeDestinationResult" : "placeOriginResult")-\(item.id)", choose: { place in
+                                guard request == key, key.active else { return }
+                                pick(.place(place))
+                            })
+                            .id(key.query + "|" + item.id)
                         }
                     }
                 }
+                .listRowBackground(expandedPanel ? Color.clear : nil)
             }
-            Section("Stations") {
-                ForEach(Transit.searchStations(stations, query: key.query)) { station in
-                    Button { pick(.station(station.id)) } label: {
-                        VStack(alignment: .leading) {
-                            Text(station.stop.name)
-                            Text(station.routes.map(RouteBadge.displayID).joined(separator: " · ")).font(.subheadline).foregroundStyle(.secondary)
-                        }.frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
-                    }.accessibilityIdentifier("stationChoice-\(station.id)")
+            if !destination {
+                Section("Stations") {
+                    ForEach(Transit.searchStations(stations, query: key.query)) { station in
+                        Button { pick(.station(station.id)) } label: {
+                            VStack(alignment: .leading) {
+                                Text(station.stop.name)
+                                RouteBadgeGroup(routes: station.routes)
+                            }.frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
+                        }.accessibilityIdentifier("stationChoice-\(station.id)")
+                    }
                 }
+                .listRowBackground(expandedPanel ? Color.clear : nil)
             }
         }
-        .searchable(text: $query, isPresented: $searchPresented, placement: .navigationBarDrawer(displayMode: .always), prompt: "Address, place or station")
+        .modifier(OriginPickerBackground())
+        .searchable(text: $query, isPresented: $searchPresented, placement: .navigationBarDrawer(displayMode: .always), prompt: destination ? "Address or place" : "Address, place or station")
         .searchFocused($searchFocused)
-        .navigationTitle("From").navigationBarTitleDisplayMode(.inline)
+        .navigationTitle(destination ? "To" : "From").navigationBarTitleDisplayMode(.inline)
         .task(id: key) { [key] in
             guard key.active, key.query.count >= 2 else { return }
             do {
                 try await Task.sleep(for: .milliseconds(350))
-                let results = try await service.search(key.query)
+                let results = try await service.suggestions(key.query)
                 try Task.checkCancellation()
                 guard request == key else { return }
                 places = results
@@ -875,6 +950,20 @@ private struct PlaceOriginPicker: View {
                 failed = true
             }
             resolved = key.query
+        }
+    }
+}
+
+/// Reveal the shared map-backed material only in the expanded control region.
+/// A compact sheet keeps its native list and navigation surfaces.
+private struct OriginPickerBackground: ViewModifier {
+    @Environment(\.expandedTransitPanel) private var expandedPanel
+
+    func body(content: Content) -> some View {
+        if expandedPanel {
+            content.scrollContentBackground(.hidden).containerBackground(.clear, for: .navigation)
+        } else {
+            content
         }
     }
 }

@@ -6,6 +6,14 @@ final class NearbyGlanceProjectionTests: XCTestCase {
     private let now = Date(timeIntervalSince1970: 1_800_000_000)
     private let coordinate = CLLocationCoordinate2D(latitude: 40.75, longitude: -73.99)
 
+    func testUnknownExpressSuffixCannotBorrowBaseServicePrediction() throws {
+        let predictions = [arrival("unsupported", route: "AX", seconds: 30), arrival("valid", route: "A", seconds: 90)]
+        let row = try XCTUnwrap(project([station("one", routes: ["A"])], lines: [line("A")], arrivals: predictions).first)
+        XCTAssertEqual(row.north?.tripId, "valid")
+        let exact = try XCTUnwrap(project([station("one", routes: ["AX"])], lines: [line("AX")], arrivals: predictions).first)
+        XCTAssertEqual(exact.north?.tripId, "unsupported", "An exact unknown identity remains available without an invented alias")
+    }
+
     func testGroupsSameColorServicesWithinStationWithoutMergingUnrelatedSameNames() {
         let stations = [station("one", routes: ["1", "2", "R"]), station("two", routes: ["1"], offset: 0.001)]
         let rows = project(stations, lines: [line("1", "#ee352e"), line("2", "EE352E"), line("R", "FCCC0A")])
@@ -29,7 +37,7 @@ final class NearbyGlanceProjectionTests: XCTestCase {
         XCTAssertTrue(service.isExpress)
         XCTAssertFalse(TransitRouteIdentity("6").isExpress)
         XCTAssertEqual(TransitRouteIdentity("X").baseID, "X")
-        XCTAssertEqual(TransitRouteIdentity("GS").spokenName, "S")
+        XCTAssertEqual(TransitRouteIdentity("GS").spokenName, "42 Street Shuttle")
         XCTAssertEqual(row.south?.tripId, "south")
         let boundary = try XCTUnwrap(project([station("one")], arrivals: [arrival("limit", seconds: 2700)]).first)
         XCTAssertEqual(boundary.north?.tripId, "limit")

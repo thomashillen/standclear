@@ -682,7 +682,12 @@ export default function SearchSheet({
       { lat: fromLat, lng: fromLng },
       { lat: toLat, lng: toLng },
     );
-    return { meters, min: walkMinutes(meters) };
+    return {
+      from: { lng: fromLng, lat: fromLat },
+      to: { lng: toLng, lat: toLat },
+      meters,
+      min: walkMinutes(meters),
+    };
   }, [mode, tripFrom, tripTo]);
 
   // Fastest subway plan total time (minutes), using the same
@@ -723,30 +728,34 @@ export default function SearchSheet({
   // recommendation. Fetched eagerly when walking wins so the dashed
   // line shows up on the map at the same time as the card — no
   // tap-to-expand required. Reset on endpoint change.
-  const [walkOnlyRoute, setWalkOnlyRoute] = useState<WalkingRoute | null>(null);
+  const [walkOnlyResult, setWalkOnlyResult] = useState<{
+    endpoints: NonNullable<typeof directWalk>;
+    route: WalkingRoute | null;
+  } | null>(null);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- clearing the resolved walk route when endpoints change keeps stale geometry off the map until the new fetch lands.
-    setWalkOnlyRoute(null);
-  }, [tripFrom, tripTo]);
-
-  useEffect(() => {
-    if (!walkIsBest || !tripFrom || !tripTo) return;
-    if (walkOnlyRoute) return;
+    setWalkOnlyResult(null);
+    if (!open || !walkIsBest || !directWalk) return;
     const ctrl = new AbortController();
     fetchWalkingRoute(
-      { lng: tripFrom.lng, lat: tripFrom.lat },
-      { lng: tripTo.lng, lat: tripTo.lat },
+      directWalk.from,
+      directWalk.to,
       { signal: ctrl.signal },
     )
       .then((r) => {
         if (ctrl.signal.aborted) return;
-        setWalkOnlyRoute(r);
+        setWalkOnlyResult({ endpoints: directWalk, route: r });
       })
       .catch(() => {});
     return () => ctrl.abort();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [walkIsBest, tripFrom, tripTo]);
+  }, [open, walkIsBest, directWalk]);
+
+  // Effects run after render: an old response must never be paired with
+  // newly edited endpoints, even before the request effect clears it.
+  const walkOnlyRoute = walkOnlyResult?.endpoints === directWalk
+    ? walkOnlyResult?.route
+    : null;
 
   // Push the walking-faster overlay up to the parent so MapView can
   // render the pedestrian line. Use the resolved street geometry when
@@ -756,10 +765,10 @@ export default function SearchSheet({
   // sheet leaves directions mode).
   useEffect(() => {
     if (!onWalkOnlyChange) return;
-    if (walkIsBest && tripFrom && tripTo) {
+    if (open && walkIsBest && directWalk) {
       onWalkOnlyChange({
-        from: { lng: tripFrom.lng, lat: tripFrom.lat },
-        to: { lng: tripTo.lng, lat: tripTo.lat },
+        from: directWalk.from,
+        to: directWalk.to,
         coords: walkOnlyRoute?.coordinates,
       });
     } else {
@@ -768,7 +777,7 @@ export default function SearchSheet({
     return () => {
       onWalkOnlyChange(null);
     };
-  }, [walkIsBest, tripFrom, tripTo, walkOnlyRoute, onWalkOnlyChange]);
+  }, [open, walkIsBest, directWalk, walkOnlyRoute, onWalkOnlyChange]);
 
   // Mirror the expandedPlan flag up to the parent so MapView can
   // pad its trip-fit camera differently based on which detent the
@@ -780,14 +789,25 @@ export default function SearchSheet({
     };
   }, [expandedPlan, onExpandedPlanChange]);
 
+  // A map selection includes walking anchors as well as the subway plan.
+  // Replacing either endpoint invalidates it even if the plan key is unchanged.
+  // Compare endpoint state only so prediction reranking preserves a rider's pick.
+  const selectedEndpoints = useRef({ from: tripFrom, to: tripTo });
+  useEffect(() => {
+    if (selectedEndpoints.current.from === tripFrom && selectedEndpoints.current.to === tripTo) return;
+    selectedEndpoints.current = { from: tripFrom, to: tripTo };
+    onTripSelect?.(null);
+    setExpandedPlan(null);
+  }, [tripFrom, tripTo, onTripSelect]);
+
   // Auto-select the fastest plan whenever a fresh ranked list arrives
   // and nothing is currently selected. The rider almost always wants
   // to see the top result on the map without an extra tap, and the
   // ranked plans are sorted by total time — so tripPlans[0] is the
   // pick. We deliberately don't override a selection the rider has
   // already made (e.g. tapped the second-fastest); that selection
-  // sticks until the trip pair changes (which clears tripPlans and
-  // brings us back through this effect with no selection).
+  // sticks until the trip pair changes and clears the map selection.
+  // The next render then selects from the new pair's ranked plans.
   //
   // Gate on `open` because closing the sheet clears the parent's
   // `selectedTripSelection` (so `selectedTripKey` flips to null) while
@@ -846,7 +866,7 @@ export default function SearchSheet({
   // is a textbook effect; the synchronous reset clears stale results
   // when the rider switches modes / clears the field.
   useEffect(() => {
-    if (mode !== "directions") {
+    if (!open || mode !== "directions") {
       /* eslint-disable react-hooks/set-state-in-effect */
       setPlannerPlaceResults([]);
       setPlannerPlaceError(false);
@@ -854,12 +874,12 @@ export default function SearchSheet({
       return;
     }
     const q = plannerQuery.trim();
+    // Completed results belong to the previous query too. Remove them
+    // before the next debounce/request so they cannot be selected.
+    setPlannerPlaceResults([]);
     setPlannerPlaceError(false);
-    if (q.length < 2) {
-      setPlannerPlaceResults([]);
-      return;
-    }
-    debouncedSuggester(
+    if (q.length < 2) return;
+    return debouncedSuggester(
       q,
       geo.lat != null && geo.lng != null
         ? { proximity: { lng: geo.lng, lat: geo.lat }, limit: 10 }
@@ -867,7 +887,7 @@ export default function SearchSheet({
       setPlannerPlaceResults,
       () => setPlannerPlaceError(true),
     );
-  }, [mode, plannerQuery, debouncedSuggester, geo.lat, geo.lng]);
+  }, [open, mode, plannerQuery, debouncedSuggester, geo.lat, geo.lng]);
 
   // Same idea for Search mode: as the rider types into the top-level
   // search bar, fire the debounced geocoder so addresses, neighborhoods,
@@ -875,7 +895,7 @@ export default function SearchSheet({
   // instance — the debounce window means consecutive keystrokes
   // collapse into a single API call.
   useEffect(() => {
-    if (mode !== "search") {
+    if (!open || mode !== "search") {
       /* eslint-disable react-hooks/set-state-in-effect */
       setSearchPlaceResults([]);
       setSearchPlaceError(false);
@@ -883,12 +903,10 @@ export default function SearchSheet({
       return;
     }
     const q = query.trim();
+    setSearchPlaceResults([]);
     setSearchPlaceError(false);
-    if (q.length < 2) {
-      setSearchPlaceResults([]);
-      return;
-    }
-    debouncedSuggester(
+    if (q.length < 2) return;
+    return debouncedSuggester(
       q,
       geo.lat != null && geo.lng != null
         ? { proximity: { lng: geo.lng, lat: geo.lat }, limit: 10 }
@@ -896,7 +914,7 @@ export default function SearchSheet({
       setSearchPlaceResults,
       () => setSearchPlaceError(true),
     );
-  }, [mode, query, debouncedSuggester, geo.lat, geo.lng]);
+  }, [open, mode, query, debouncedSuggester, geo.lat, geo.lng]);
 
   // Resolve a Suggestion to a Place + nearest station. Called on tap
   // (not on every keystroke) — `/retrieve` is what fills in the

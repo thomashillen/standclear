@@ -161,10 +161,38 @@ final class TransitStore {
 }
 
 #if DEBUG && targetEnvironment(simulator)
-    /// Explicit simulator-only UI data. Refresh still decodes payloads through
-    /// TransitStore and uses its normal polling, cancellation, and freshness gates.
-    /// Stable trips keep interaction tests independent of live prediction churn.
+    /// Fixed journey anchors for opt-in motion QA; excluded from physical builds.
+    struct TemporalMotionFixture {
+        private var start: Double?
+
+        struct Sample {
+            let generatedAt, reportedAt, eta, progress: Double
+            let status: String
+        }
+
+        mutating func reset() {
+            start = nil
+        }
+
+        mutating func sample(at now: Double, stale: Bool = false) -> Sample? {
+            guard now.isFinite, now >= 0, (now * 1000).isFinite else { return nil }
+            if start == nil {
+                start = now
+            }
+            guard let start else { return nil }
+            let source = stale ? start : now
+            let eta = start + 120
+            guard eta.isFinite else { return nil }
+            let progress = min(1, 0.2 + max(0, source - start) / 120 * 0.8)
+            return Sample(generatedAt: source * 1000, reportedAt: source, eta: eta,
+                          progress: progress, status: source >= eta ? "STOPPED_AT" : "IN_TRANSIT_TO")
+        }
+    }
+
+    /// Explicit simulator-only UI data. Refresh still uses the normal decoding,
+    /// polling, cancellation and freshness gates. Default trips remain stable.
     private enum NativeUITestFixture {
+        @MainActor private static var temporalMotion = TemporalMotionFixture()
         @MainActor private static var alertRequests = 0
 
         @MainActor static func data(for path: String, now: Date) throws -> Data {
@@ -269,18 +297,34 @@ final class TransitStore {
                 }
                 let stale = ProcessInfo.processInfo.arguments.contains("--ui-test-stale-alerts") || (recovery && alertRequests == 1)
                 let windowEnd = now.timeIntervalSince1970 + (ProcessInfo.processInfo.arguments.contains("--ui-test-alert-window-absolute") ? 2 * 86400 : 2700)
+                let bullets = ProcessInfo.processInfo.arguments.contains("--ui-test-route-bullets")
                 payload = ["available": true, "generatedAt": now.timeIntervalSince1970 * 1000,
                            "feedTimestamp": now.timeIntervalSince1970 - (stale ? 780 : 0), "alerts": ProcessInfo.processInfo.arguments.contains("--ui-test-empty-alerts") ? [] : [
-                               ["id": "fixture-wall", "header": "Downtown 4 trains are delayed at Wall St",
-                                "description": "Allow extra travel time at Wall St.", "effect": "SIGNIFICANT_DELAYS", "severity": "severe",
+                               ["id": "fixture-wall", "header": bullets ? "Fixture advisory for [2][3], [F], and [FS]" : "Downtown 4 trains are delayed at Wall St",
+                                "description": bullets ? "Take [1] or [6X]. [FS], [GS], and [H] retain their names. Keep [AX] and [planned] literal." : "Allow extra travel time at Wall St.", "effect": "SIGNIFICANT_DELAYS", "severity": "severe",
                                 "startTime": now.timeIntervalSince1970 - 3600, "endTime": windowEnd,
-                                "routeIds": ["4"], "stopIds": ["419"], "selectors": [["routeId": "4", "stopId": "419"]]],
+                                "routeIds": bullets ? ["1", "2", "3", "6X", "7X", "FX", "GS", "FS", "H", "N", "Q", "UNKNOWN-LONG-ROUTE"] : ["4"], "stopIds": ["419"], "selectors": [["routeId": "4", "stopId": "419"]]],
                                ["id": "fixture-express", "header": "6 express trains are delayed at Pelham Bay Park",
                                 "description": "Allow extra travel time for express service.", "effect": "SIGNIFICANT_DELAYS", "severity": "warning",
                                 "routeIds": ["6X"], "stopIds": ["601"], "selectors": [["routeId": "6X", "stopId": "601"]]],
                            ]]
             case "api/trains":
                 let timestamp = now.timeIntervalSince1970
+                if ProcessInfo.processInfo.arguments.contains("--ui-test-temporal-motion") {
+                    guard let sample = temporalMotion.sample(at: timestamp, stale: ProcessInfo.processInfo.arguments.contains("--ui-test-temporal-motion-stale")) else {
+                        throw URLError(.badServerResponse)
+                    }
+                    let vehicle = train(id: "ui-fixture-1-n", route: "1", direction: "N", previous: "128", next: "127", timestamp: sample.reportedAt)
+                        .merging(["progress": sample.progress, "status": sample.status]) { _, updated in updated }
+                    let reference = train(id: "ui-fixture-reference-4", route: "4", direction: "N", previous: "631", next: "629", timestamp: sample.reportedAt)
+                        .merging(["status": "STOPPED_AT"]) { _, updated in updated }
+                    return try JSONSerialization.data(withJSONObject: [
+                        "generatedAt": sample.generatedAt, "trains": [vehicle, reference],
+                        "arrivals": sample.status == "STOPPED_AT" ? [] : [
+                            arrival(id: "ui-fixture-1-n", route: "1", stop: "127", direction: "N", destination: "126", eta: sample.eta),
+                        ],
+                    ], options: [.sortedKeys])
+                }
                 payload = [
                     "generatedAt": timestamp * 1000,
                     "trains": [

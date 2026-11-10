@@ -4,7 +4,6 @@ import SwiftUI
 struct NearbyGlancePanel: View {
     let store: TransitStore
     let location: LocationStore
-    let now: Date
     let maximumHeight: CGFloat
     let openStation: (String) -> Void
     let openNearby: () -> Void
@@ -12,23 +11,25 @@ struct NearbyGlancePanel: View {
     @State private var contentHeight: CGFloat = 1
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
-    private var rows: [NearbyGlanceRow] {
-        NearbyGlanceProjection.rows(stations: store.stations, lines: store.lines,
-                                    snapshot: store.snapshot, coordinate: location.availableCoordinate,
-                                    now: now, feedUnavailable: store.feedError)
-    }
-
     var body: some View {
-        ScrollView {
-            content.onGeometryChange(for: CGFloat.self) { $0.size.height } action: { contentHeight = $0 }
+        TimelineView(.periodic(from: .now, by: 5)) { _ in
+            // Read the clock where feed-driven changes invalidate the content,
+            // rather than inheriting the parent's previous scheduled tick.
+            let now = Date.now
+            ScrollView {
+                content(at: now).onGeometryChange(for: CGFloat.self) { $0.size.height } action: { contentHeight = $0 }
+            }
+            .scrollBounceBehavior(.basedOnSize)
+            .frame(height: min(contentHeight, maximumHeight), alignment: .top)
+            .modifier(GlanceSurface(opaque: reduceTransparency))
         }
-        .scrollBounceBehavior(.basedOnSize)
-        .frame(height: min(contentHeight, maximumHeight), alignment: .top)
-        .modifier(GlanceSurface(opaque: reduceTransparency))
     }
 
-    private var content: some View {
-        VStack(alignment: .leading, spacing: 0) {
+    private func content(at now: Date) -> some View {
+        let rows = NearbyGlanceProjection.rows(stations: store.stations, lines: store.lines,
+                                               snapshot: store.snapshot, coordinate: location.availableCoordinate,
+                                               now: now, feedUnavailable: store.feedError)
+        return VStack(alignment: .leading, spacing: 0) {
             if location.availableCoordinate == nil {
                 locationState
             } else if store.loading {
@@ -55,13 +56,13 @@ struct NearbyGlancePanel: View {
                                 .fixedSize(horizontal: false, vertical: true)
                             ViewThatFits(in: .horizontal) {
                                 HStack {
-                                    prediction(row.north, routes: row.routes, color: row.color, direction: "Northbound", symbol: "arrow.up")
+                                    prediction(row.north, routes: row.routes, color: row.color, direction: "Northbound", symbol: "arrow.up", now: now)
                                     Spacer(minLength: 8)
-                                    prediction(row.south, routes: row.routes, color: row.color, direction: "Southbound", symbol: "arrow.down")
+                                    prediction(row.south, routes: row.routes, color: row.color, direction: "Southbound", symbol: "arrow.down", now: now)
                                 }
                                 VStack(alignment: .leading, spacing: 4) {
-                                    prediction(row.north, routes: row.routes, color: row.color, direction: "Northbound", symbol: "arrow.up")
-                                    prediction(row.south, routes: row.routes, color: row.color, direction: "Southbound", symbol: "arrow.down")
+                                    prediction(row.north, routes: row.routes, color: row.color, direction: "Northbound", symbol: "arrow.up", now: now)
+                                    prediction(row.south, routes: row.routes, color: row.color, direction: "Southbound", symbol: "arrow.down", now: now)
                                 }
                             }
                             .font(.caption)
@@ -93,7 +94,7 @@ struct NearbyGlancePanel: View {
         }
     }
 
-    private func prediction(_ arrival: Arrival?, routes: [String], color: String, direction: String, symbol: String) -> some View {
+    private func prediction(_ arrival: Arrival?, routes: [String], color: String, direction: String, symbol: String, now: Date) -> some View {
         HStack(spacing: 3) {
             if let arrival {
                 RouteBadge(routeID: arrival.routeId, color: color)

@@ -46,4 +46,4 @@ If you're running your own instance:
 
 ## Recognition
 
-We don't run a paid bug bounty today. If your report leads to a fix and you'd like attribution, we'll credit you in the [changelog](https://standclear.app/changelog) (or keep you anonymous, your call).
+We don't run a paid bug bounty today. If your report leads to a fix and you'd like attribution, we'll credit you in the [changelog](https://standclear.vercel.app/changelog) (or keep you anonymous, your call).

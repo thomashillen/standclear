@@ -43,7 +43,7 @@ struct TransitRouteIdentity {
     let isExpress: Bool
 
     init(_ id: String) {
-        isExpress = id.count > 1 && id.hasSuffix("X")
+        isExpress = ["6X", "7X", "FX"].contains(id)
         baseID = isExpress ? String(id.dropLast()) : id
     }
 
@@ -52,7 +52,14 @@ struct TransitRouteIdentity {
     }
 
     var spokenName: String {
-        isExpress ? "\(bullet) Express" : bullet
+        switch baseID {
+        case "GS": "42 Street Shuttle"
+        case "FS": "Franklin Avenue Shuttle"
+        case "H": "Rockaway Park Shuttle"
+        case "SI": "Staten Island Railway"
+        case "S": "Shuttle"
+        default: isExpress ? "\(baseID) Express" : baseID
+        }
     }
 }
 

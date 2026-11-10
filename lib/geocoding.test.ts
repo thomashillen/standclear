@@ -1,5 +1,10 @@
 // @vitest-environment node
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+
+afterEach(() => {
+  vi.clearAllTimers();
+  vi.useRealTimers();
+});
 
 async function freshImport() {
   vi.resetModules();
@@ -146,5 +151,120 @@ describe("makeDebouncedSuggester — error reporting", () => {
     await vi.runAllTimersAsync();
     await vi.waitFor(() => expect(onResult).toHaveBeenCalledWith([]));
     expect(onError).not.toHaveBeenCalled();
+  });
+});
+
+describe("makeDebouncedSuggester — cancellation", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  it("cancels scheduled work before it starts", async () => {
+    const { makeDebouncedSuggester } = await freshImport();
+    const fetchSpy = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValue(mockSuggestResponse("Unused place"));
+    const onResult = vi.fn();
+    const cancel = makeDebouncedSuggester()("madison", undefined, onResult);
+    cancel();
+    cancel();
+    await vi.runAllTimersAsync();
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(onResult).not.toHaveBeenCalled();
+  });
+
+  it("ignores an older success even when its transport completes after abort", async () => {
+    const { makeDebouncedSuggester } = await freshImport();
+    let finishOld!: (response: Response) => void;
+    const fetchSpy = vi.spyOn(globalThis, "fetch")
+      .mockImplementationOnce(() => new Promise(resolve => { finishOld = resolve; }))
+      .mockResolvedValueOnce(mockSuggestResponse("New place", "new-place"));
+    const debounced = makeDebouncedSuggester();
+    const oldResult = vi.fn();
+    const newResult = vi.fn();
+    debounced("old query", undefined, oldResult);
+    await vi.advanceTimersByTimeAsync(250);
+    debounced("new query", undefined, newResult);
+    expect(fetchSpy.mock.calls[0][1]?.signal?.aborted).toBe(true);
+    await vi.advanceTimersByTimeAsync(250);
+    expect(newResult).toHaveBeenCalledTimes(1);
+    finishOld(mockSuggestResponse("Old place", "old-place"));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(oldResult).not.toHaveBeenCalled();
+    expect(newResult).toHaveBeenCalledTimes(1);
+  });
+
+  it("ignores a superseded non-AbortError while the replacement is still debouncing", async () => {
+    const { makeDebouncedSuggester } = await freshImport();
+    let failOld!: (error: Error) => void;
+    vi.spyOn(globalThis, "fetch")
+      .mockImplementationOnce(() => new Promise((_resolve, reject) => { failOld = reject; }))
+      .mockResolvedValueOnce(mockSuggestResponse("New place"));
+    const debounced = makeDebouncedSuggester();
+    const oldResult = vi.fn();
+    const oldError = vi.fn();
+    const newResult = vi.fn();
+    debounced("old query", undefined, oldResult, oldError);
+    await vi.advanceTimersByTimeAsync(250);
+    debounced("new query", undefined, newResult);
+    failOld(new Error("Late network failure"));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(oldResult).not.toHaveBeenCalled();
+    expect(oldError).not.toHaveBeenCalled();
+    expect(newResult).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(250);
+    expect(newResult).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps cleanup scoped to its own request when a newer search has started", async () => {
+    const { makeDebouncedSuggester } = await freshImport();
+    const fetchSpy = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValue(mockSuggestResponse("New place"));
+    const debounced = makeDebouncedSuggester();
+    const oldResult = vi.fn();
+    const newResult = vi.fn();
+    const cancelOld = debounced("old query", undefined, oldResult);
+    debounced("new query", undefined, newResult);
+    cancelOld();
+    await vi.runAllTimersAsync();
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(fetchSpy.mock.calls[0][1]?.signal?.aborted).toBe(false);
+    expect(oldResult).not.toHaveBeenCalled();
+    expect(newResult).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not deliver a cached result after cancellation in the same turn", async () => {
+    const { suggestPlaces, makeDebouncedSuggester } = await freshImport();
+    const fetchSpy = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValue(mockSuggestResponse("Cached place"));
+    await suggestPlaces("cached query");
+    const onResult = vi.fn();
+    const cancel = makeDebouncedSuggester()("cached query", undefined, onResult);
+    // A synchronous timer advance starts the cache hit without flushing
+    // its promise callback. Cancellation must also guard that callback.
+    vi.advanceTimersByTime(250);
+    cancel();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(onResult).not.toHaveBeenCalled();
+  });
+
+  it("coalesces rapid edits into one request and delivers its result", async () => {
+    const { makeDebouncedSuggester } = await freshImport();
+    const fetchSpy = vi.spyOn(globalThis, "fetch")
+      .mockResolvedValue(mockSuggestResponse("Madison"));
+    const debounced = makeDebouncedSuggester();
+    const oldResult = vi.fn();
+    const newResult = vi.fn();
+    debounced("ma", undefined, oldResult);
+    await vi.advanceTimersByTimeAsync(100);
+    debounced("mad", undefined, oldResult);
+    await vi.advanceTimersByTimeAsync(100);
+    debounced("madison", undefined, newResult);
+    await vi.advanceTimersByTimeAsync(250);
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(new URL(String(fetchSpy.mock.calls[0][0]), "http://localhost").searchParams.get("q")).toBe("madison");
+    expect(oldResult).not.toHaveBeenCalled();
+    expect(newResult).toHaveBeenCalledTimes(1);
+    expect(newResult.mock.calls[0][0][0].name).toBe("Madison");
   });
 });

@@ -1,11 +1,25 @@
 import SwiftUI
 
 struct DirectionsView: View {
+    @Environment(\.expandedTransitPanel) private var expandedPanel
     let store: TransitStore
     @Binding var selection: DirectionsSelection
     let onSelect: (NativeTripPlan?) -> Void
     let onShowMap: (NativeTripPlan) -> Void
+    let onItineraryVisibilityChanged: (Bool) -> Void
     @State private var presentedPlan: NativeTripPlan?
+
+    init(store: TransitStore, selection: Binding<DirectionsSelection>, onSelect: @escaping (NativeTripPlan?) -> Void,
+         onShowMap: @escaping (NativeTripPlan) -> Void, initialPlan: NativeTripPlan? = nil,
+         onItineraryVisibilityChanged: @escaping (Bool) -> Void = { _ in })
+    {
+        self.store = store
+        _selection = selection
+        self.onSelect = onSelect
+        self.onShowMap = onShowMap
+        self.onItineraryVisibilityChanged = onItineraryVisibilityChanged
+        _presentedPlan = State(initialValue: initialPlan)
+    }
 
     private var showingItinerary: Binding<Bool> {
         Binding(get: { presentedPlan != nil }, set: { shown in
@@ -50,25 +64,30 @@ struct DirectionsView: View {
                     .disabled(selection.originID == nil && selection.destinationID == nil)
                     .accessibilityIdentifier("swapStations")
             }
+            .listRowBackground(expandedPanel ? Color.clear : nil)
             if store.loading {
                 ProgressView("Loading stations…")
+                    .listRowBackground(expandedPanel ? Color.clear : nil)
             } else if let error = store.error {
                 Section {
                     Label("Subway data unavailable", systemImage: "wifi.exclamationmark")
                     Text(error).foregroundStyle(.secondary)
                     Button("Retry stations") { Task { await store.loadLines() } }
                 }
+                .listRowBackground(expandedPanel ? Color.clear : nil)
             } else if let origin = selection.origin(in: store.stations),
                       let destination = selection.destination(in: store.stations)
             {
                 if origin.id == destination.id {
                     ContentUnavailableView("Same station", systemImage: "mappin.and.ellipse",
                                            description: Text("Choose a different destination to plan a subway trip."))
+                        .listRowBackground(expandedPanel ? Color.clear : nil)
                 } else {
                     let plans = TripPlanner.plans(lines: store.lines, stations: store.stations, from: origin, to: destination)
                     if plans.isEmpty {
                         ContentUnavailableView("No route found", systemImage: "tram",
                                                description: Text("No direct or one-transfer route connects these stations in the available data. This does not mean there is no service."))
+                            .listRowBackground(expandedPanel ? Color.clear : nil)
                     } else {
                         Section {
                             ForEach(plans) { plan in
@@ -96,11 +115,13 @@ struct DirectionsView: View {
                         } footer: {
                             Text("Based on the regular route network. Service changes may affect these routes. Walking, station access, and total journey time are not included.")
                         }
+                        .listRowBackground(expandedPanel ? Color.clear : nil)
                     }
                 }
             } else {
                 ContentUnavailableView("Choose two stations", systemImage: "point.topleft.down.to.point.bottomright.curvepath",
                                        description: Text("Plan a direct subway trip or a route with one transfer."))
+                    .listRowBackground(expandedPanel ? Color.clear : nil)
             }
         }
         .navigationDestination(isPresented: showingItinerary) {
@@ -121,10 +142,12 @@ struct DirectionsView: View {
             }
         }
         .onChange(of: selection) { _, _ in onSelect(nil) }
+        .onChange(of: presentedPlan != nil) { _, shown in onItineraryVisibilityChanged(shown) }
     }
 }
 
 struct DirectionStationPicker: View {
+    @Environment(\.expandedTransitPanel) private var expandedPanel
     let stations: [Station]
     let title: String
     let choose: (Station) -> Void
@@ -139,6 +162,7 @@ struct DirectionStationPicker: View {
         List {
             if matches.isEmpty {
                 ContentUnavailableView.search(text: query)
+                    .listRowBackground(expandedPanel ? Color.clear : nil)
             }
             ForEach(matches) { station in
                 Button {
@@ -147,12 +171,12 @@ struct DirectionStationPicker: View {
                 } label: {
                     VStack(alignment: .leading) {
                         Text(station.stop.name)
-                        Text(station.routes.map(RouteBadge.displayID).joined(separator: " · "))
-                            .font(.subheadline).foregroundStyle(.secondary)
+                        RouteBadgeGroup(routes: station.routes)
                     }
                 }
                 .accessibilityIdentifier("stationChoice-\(station.id)")
             }
+            .listRowBackground(expandedPanel ? Color.clear : nil)
         }
         .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search subway stations")
         .navigationTitle(title)
@@ -163,6 +187,7 @@ struct DirectionStationPicker: View {
 }
 
 private struct TripItineraryView: View {
+    @Environment(\.expandedTransitPanel) private var expandedPanel
     let plan: NativeTripPlan
     let store: TransitStore
     let onShowMap: (NativeTripPlan) -> Void
@@ -174,6 +199,7 @@ private struct TripItineraryView: View {
             } footer: {
                 Text("Regular route network only. Check service changes before travel; walking and station access are not included.")
             }
+            .listRowBackground(expandedPanel ? Color.clear : nil)
             ForEach(Array(plan.legs.enumerated()), id: \.element.id) { index, leg in
                 Section(index == 0 ? "Board" : "Transfer") {
                     if index == 1, let transfer = plan.transfer(in: store.lines) {
@@ -188,11 +214,13 @@ private struct TripItineraryView: View {
                     DeparturePredictionView(leg: leg, store: store, isTransfer: index > 0)
                         .accessibilityIdentifier("legPrediction-\(leg.id)")
                 }
+                .listRowBackground(expandedPanel ? Color.clear : nil)
             }
             if let last = plan.legs.last {
                 Section("Arrive") {
                     Label(stopName(last.alightStopId), systemImage: "mappin.and.ellipse")
                 }
+                .listRowBackground(expandedPanel ? Color.clear : nil)
             }
         }
         .navigationTitle("Trip details")
