@@ -428,8 +428,14 @@ final class TransitStore {
                     stationMotionRequests += 1
                     let oldStation = StationMotionFixtureClock.enabled.map { $0.offset < 16 } ?? (stationMotionRequests < 3)
                     let stop = oldStation ? "128" : "127"
-                    let vehicle = train(id: "ui-fixture-station-motion", route: "1", direction: "N", previous: stop, next: stop, timestamp: timestamp)
-                        .merging(["progress": 1, "status": "STOPPED_AT"]) { _, updated in updated }
+                    // Explicit close-up QA can establish heading from the
+                    // preceding moving report at the same initial coordinate.
+                    // The stopped target has no new direction evidence or ETA.
+                    let directedApproach = oldStation && StationMotionFixtureClock.enabled != nil
+                        && ProcessInfo.processInfo.arguments.contains("--ui-test-motion-heading")
+                    let vehicle = train(id: "ui-fixture-station-motion", route: "1", direction: "N",
+                                        previous: directedApproach ? "128" : stop, next: directedApproach ? "127" : stop, timestamp: timestamp)
+                        .merging(["progress": directedApproach ? 0 : 1, "status": directedApproach ? "IN_TRANSIT_TO" : "STOPPED_AT"]) { _, updated in updated }
                     return try JSONSerialization.data(withJSONObject: ["generatedAt": timestamp * 1000, "trains": [vehicle], "arrivals": []], options: [.sortedKeys])
                 }
                 if ProcessInfo.processInfo.arguments.contains("--ui-test-temporal-motion") {

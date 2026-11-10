@@ -120,7 +120,7 @@ final class StandClearUITests: XCTestCase {
         app.resetAuthorizationStatus(for: .location)
         app.launchArguments = ["--ui-test-fixture", "--ui-test-station-motion", "--ui-test-motion-clock"]
         if !expanded, !largeText {
-            app.launchArguments += ["--ui-test-motion-close-zoom"]
+            app.launchArguments += ["--ui-test-motion-close-zoom", "--ui-test-motion-heading"]
         }
         if largeText {
             app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
@@ -169,7 +169,8 @@ final class StandClearUITests: XCTestCase {
         let uncertain = NSPredicate(format: "value CONTAINS %@", "Current position is uncertain")
         expectation(for: uncertain, evaluatedWith: train)
         waitForExpectations(timeout: 25)
-        XCTAssertEqual(train.value as? String, "Current position is uncertain")
+        XCTAssertEqual(train.value as? String, !expanded && !largeText ? "Current position is uncertain"
+            : "Travel direction is unavailable. Current position is uncertain")
         step(to: 3)
         let start = train.frame
         capture("Estimated position caption at reconciliation start")

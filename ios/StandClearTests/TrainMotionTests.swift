@@ -124,6 +124,93 @@ final class TrainMotionTests: XCTestCase {
         }
     #endif
 
+    func testBackwardCorrectionPreservesServiceHeadingWithAndWithoutETA() throws {
+        let a = Stop(id: "a", name: "A", lat: 40.75, lng: -74, shapeIdx: 0)
+        let b = Stop(id: "b", name: "B", lat: 40.76, lng: -74, shapeIdx: 1)
+        let route = SubwayLine(id: "R", routeId: "R", color: "FCCC0A", stops: [a, b],
+                               shape: [[-74, 40.75], [-74, 40.76]])
+        for reverse in [false, true] {
+            for predicted in [false, true] {
+                var engine = TrainMotion(lines: [route])
+                let direction = reverse ? "S" : "N", stop = reverse ? "a" : "b"
+                engine.update(snapshot: feed(train(0.8, reverse: reverse), predicted ? [arrival(80, direction: direction, stop: stop)] : []), now: date(0))
+                let shown = try XCTUnwrap(engine.markers(at: date(8)).first)
+                engine.update(snapshot: feed(train(0.2, reverse: reverse, reported: 8), predicted ? [arrival(120, direction: direction, stop: stop)] : [], at: 8), now: date(8))
+                let start = try XCTUnwrap(engine.markers(at: date(8)).first)
+                XCTAssertTrue(start.reconciling)
+                XCTAssertEqual(start.coordinate.latitude, shown.coordinate.latitude, accuracy: 0.000001)
+                for offset in [8.0, 9, 10, 11.99, 12, 13] {
+                    let marker = try XCTUnwrap(engine.markers(at: date(offset)).first)
+                    XCTAssertEqual(try XCTUnwrap(marker.bearingDegrees), reverse ? 180 : 0, accuracy: 0.001)
+                }
+                let middle = try XCTUnwrap(engine.markers(at: date(10)).first)
+                if reverse {
+                    XCTAssertGreaterThan(middle.coordinate.latitude, start.coordinate.latitude)
+                } else {
+                    XCTAssertLessThan(middle.coordinate.latitude, start.coordinate.latitude)
+                }
+                let reduced = try XCTUnwrap(engine.markers(at: date(10), reduceMotion: true).first)
+                XCTAssertFalse(reduced.reconciling)
+                XCTAssertEqual(try XCTUnwrap(reduced.bearingDegrees), reverse ? 180 : 0, accuracy: 0.001)
+            }
+        }
+    }
+
+    func testStationReconciliationWithoutDirectionEvidenceKeepsNeutralHeading() throws {
+        var engine = TrainMotion(lines: [line()])
+        let start = Train(id: "t", routeId: "R", direction: "N", progress: 1,
+                          prevStopId: "a", nextStopId: "a", status: "STOPPED_AT", lastReportedAt: epoch)
+        engine.update(snapshot: feed(start, []), now: date(0))
+        engine.update(snapshot: feed(train(1, status: "STOPPED_AT", reported: 8), [], at: 8), now: date(8))
+        for offset in [8.0, 10, 11.99, 12] {
+            let marker = try XCTUnwrap(engine.markers(at: date(offset)).first)
+            XCTAssertNil(marker.bearingDegrees, "Position displacement does not establish service heading")
+        }
+    }
+
+    func testBackwardReconciliationUsesTravelTangentsAcrossCorners() throws {
+        for reverse in [false, true] {
+            var engine = TrainMotion(lines: [line()])
+            engine.update(snapshot: feed(train(0.9, reverse: reverse), []), now: date(0))
+            engine.update(snapshot: feed(train(0.1, reverse: reverse, reported: 8), [], at: 8), now: date(8))
+            let start = try XCTUnwrap(engine.markers(at: date(8)).first)
+            XCTAssertTrue(start.reconciling)
+            XCTAssertEqual(try XCTUnwrap(start.bearingDegrees), reverse ? 270 : 0, accuracy: 0.001)
+            let afterCorner = try XCTUnwrap(engine.markers(at: date(11)).first)
+            XCTAssertEqual(try XCTUnwrap(afterCorner.bearingDegrees), reverse ? 180 : 90, accuracy: 0.001)
+            let identical = feed(train(0.1, reverse: reverse, reported: 8), [], at: 10)
+            engine.update(snapshot: identical, now: date(11))
+            XCTAssertEqual(try XCTUnwrap(engine.markers(at: date(11)).first).bearingDegrees, afterCorner.bearingDegrees)
+        }
+    }
+
+    func testStoppedCorrectionDoesNotRenewBorrowedDirectionEvidence() throws {
+        var engine = TrainMotion(lines: [line()])
+        engine.update(snapshot: feed(train(0.2), []), now: date(0))
+        engine.update(snapshot: feed(train(1, status: "STOPPED_AT", reported: 8), [], at: 8), now: date(8))
+        XCTAssertNotNil(try XCTUnwrap(engine.markers(at: date(9)).first).bearingDegrees)
+        let returned = Train(id: "t", routeId: "R", direction: "N", progress: 1,
+                             prevStopId: "a", nextStopId: "a", status: "STOPPED_AT", lastReportedAt: epoch + 9)
+        engine.update(snapshot: feed(returned, [], at: 9), now: date(9))
+        let interrupted = try XCTUnwrap(engine.markers(at: date(9)).first)
+        XCTAssertTrue(interrupted.reconciling)
+        XCTAssertNil(interrupted.bearingDegrees, "An interrupted stopped correction cannot renew an inherited heading")
+        engine.update(snapshot: feed(returned, [], at: 10), now: date(10))
+        XCTAssertNil(try XCTUnwrap(engine.markers(at: date(11)).first).bearingDegrees)
+
+        // Explicit current future-arrival evidence can establish stopped
+        // service direction independently of a backward correction.
+        let a = Stop(id: "a", name: "A", lat: 40.75, lng: -74, shapeIdx: 0)
+        let b = Stop(id: "b", name: "B", lat: 40.751, lng: -74, shapeIdx: 1)
+        let c = Stop(id: "c", name: "C", lat: 40.752, lng: -74, shapeIdx: 2)
+        let route = SubwayLine(id: "R", routeId: "R", color: "FCCC0A", stops: [a, b, c],
+                               shape: [[-74, 40.75], [-74, 40.751], [-74, 40.752]])
+        engine = TrainMotion(lines: [route])
+        engine.update(snapshot: feed(train(1, status: "STOPPED_AT"), [arrival(40, stop: "c")]), now: date(0))
+        engine.update(snapshot: feed(returned, [arrival(40, stop: "c")], at: 9), now: date(9))
+        XCTAssertEqual(try XCTUnwrap(engine.markers(at: date(10)).first?.bearingDegrees), 0, accuracy: 0.001)
+    }
+
     func testObservedStationAdvanceReconcilesAlongTrackWithoutETA() throws {
         var engine = TrainMotion(lines: [line()])
         let start = Train(id: "t", routeId: "R", direction: "N", progress: 1,

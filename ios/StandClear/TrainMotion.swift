@@ -39,6 +39,7 @@ struct TrainMotion {
         let generated = next.generatedAt / 1000
         let time = now.timeIntervalSince1970
         let trains = Dictionary(uniqueKeysWithValues: next.uniqueTrains.map { ($0.id, $0) })
+        let arrivalsByTrip = Dictionary(grouping: next.arrivals, by: \.tripId)
         var arrivals: [String: Double] = [:]
         for arrival in next.arrivals {
             guard let train = trains[arrival.tripId], arrival.routeId == train.routeId,
@@ -52,6 +53,7 @@ struct TrainMotion {
             var row = Row(base: base, reported: train.lastReportedAt ?? generated, train: train, eta: eta)
             if let geometryID = geometryIDs[train.routeId], let track = tracks[geometryID] {
                 row.baseArc = track.reportedArc(train)
+                row.travelForward = track.travelForward(train, arrivals: arrivalsByTrip[train.id] ?? [], generated: generated)
             }
             // Repeated reports must not restart a transition or an ETA leg,
             // even when the snapshot generation advances. Rebuild the roster
@@ -117,10 +119,12 @@ struct TrainMotion {
             if !reduceMotion, row.leg != nil || reconciling, let arc = row.arc(at: sampledTime),
                let geometryID = geometryIDs[base.routeID], let track = tracks[geometryID]
             {
-                let forward = reconciling ? row.transition!.end >= row.transition!.start : row.leg?.forward ?? true
-                let position = track.position(at: arc, forward: forward)
+                // A correction can move backward without reversing service.
+                // Unknown direction must remain neutral, even while moving.
+                let forward = reconciling ? row.transition?.forward : row.leg?.forward
+                let position = track.position(at: arc, forward: forward ?? true)
                 coordinate = position.0
-                bearing = position.1
+                bearing = forward == nil ? nil : position.1
             }
             return TrainMapMarker(id: base.id, coordinate: coordinate, bearingDegrees: bearing, routeID: base.routeID,
                                   displayLetter: base.displayLetter, color: base.color, textColor: base.textColor,
@@ -158,11 +162,15 @@ struct TrainMotion {
         let duration = 4.0
         let end = row.leg?.arc(at: time + duration) ?? target
         guard abs(end - start) <= 2000 else { return nil }
-        return Transition(start: start, end: end, received: time, endTime: time + duration)
+        // Borrow only the preceding report's own direction evidence. Do not
+        // renew an inherited heading through a chain of stopped corrections.
+        return Transition(start: start, end: end, received: time, endTime: time + duration,
+                          forward: row.travelForward ?? old.travelForward)
     }
 
     private struct Transition {
         let start, end, received, endTime: Double
+        let forward: Bool?
 
         func arc(at time: Double) -> Double {
             start + min(1, max(0, (time - received) / (endTime - received))) * (end - start)
@@ -177,6 +185,7 @@ struct TrainMotion {
         var leg: Leg?
         var transition: Transition?
         var baseArc: Double?
+        var travelForward: Bool?
 
         func arc(at time: Double) -> Double? {
             if let transition, time < transition.endTime {
@@ -248,6 +257,23 @@ struct TrainMotion {
 
         func adjacent(_ a: Double, _ b: Double) -> Bool {
             a != b && !stops.values.contains { $0 > min(a, b) && $0 < max(a, b) }
+        }
+
+        func travelForward(_ train: Train, arrivals: [Arrival], generated: Double) -> Bool? {
+            guard let to = stops[train.nextStopId] else { return nil }
+            if ["IN_TRANSIT_TO", "INCOMING_AT"].contains(train.status),
+               let from = stops[train.prevStopId], from != to
+            {
+                return to > from
+            }
+            guard train.status == "STOPPED_AT" else { return nil }
+            // As in discrete projection, N/S alone is not shape order. A
+            // parked train needs its own future arrival at another platform.
+            let future = arrivals.filter {
+                $0.routeId == train.routeId && $0.direction == train.direction && $0.eta.isFinite && $0.eta > generated
+            }.sorted { $0.eta < $1.eta }
+            guard let destination = future.compactMap({ stops[$0.stopId] }).first(where: { $0 != to }) else { return nil }
+            return destination > to
         }
 
         func reportedArc(_ train: Train) -> Double? {
