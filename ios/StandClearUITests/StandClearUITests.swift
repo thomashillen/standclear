@@ -41,7 +41,7 @@ final class StandClearUITests: XCTestCase {
         picker.typeText("Wall\n")
         let station = app.buttons["stationChoice-419"]
         revealPlaceElement(station, in: app.collectionViews.firstMatch); station.tap()
-        let map = app.descendants(matching: .any)["appleTransitMap"].firstMatch
+        let map = nativeMap(in: app)
         expectation(for: NSPredicate(format: "value CONTAINS %@ AND value CONTAINS %@", "550 Madison Avenue", "Wall St"), evaluatedWith: map)
         waitForExpectations(timeout: 15)
         let route = map.value as? String
@@ -161,7 +161,7 @@ final class StandClearUITests: XCTestCase {
         app.buttons["showStationRouteOnMap"].tap()
         let restore = app.buttons["restoreRoutePanel"]
         XCTAssertTrue(restore.waitForExistence(timeout: 5))
-        let map = app.descendants(matching: .any)["appleTransitMap"].firstMatch
+        let map = nativeMap(in: app)
         let interchange = "Change to N/W at Lexington Av/59 St"
         XCTAssertTrue((map.value as? String ?? "").contains(interchange))
         let collapsed = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
@@ -421,7 +421,7 @@ final class StandClearUITests: XCTestCase {
         }
         app.launch()
         activatePermissionPrompt(in: app)
-        let map = app.descendants(matching: .any)["appleTransitMap"].firstMatch
+        let map = nativeMap(in: app)
         XCTAssertTrue(map.waitForExistence(timeout: 10))
         map.pinch(withScale: 2, velocity: 1)
         let train = map.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "Route 1 train. Estimated position.")).firstMatch
@@ -480,7 +480,7 @@ final class StandClearUITests: XCTestCase {
         }
         app.launch()
         activatePermissionPrompt(in: app)
-        let map = app.descendants(matching: .any)["appleTransitMap"].firstMatch
+        let map = nativeMap(in: app)
         XCTAssertTrue(map.waitForExistence(timeout: 10))
         let train = map.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "Route 1 train. Estimated position.")).firstMatch
         let reference = map.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "Route 4 train. Estimated position.")).firstMatch
@@ -1619,7 +1619,7 @@ final class StandClearUITests: XCTestCase {
         }
 
         guard chooseOrigin("Wall", resultID: "stationChoice-419") else { return }
-        let map = app.descendants(matching: .any)["appleTransitMap"].firstMatch
+        let map = nativeMap(in: app)
         expectation(for: NSPredicate(format: "value CONTAINS %@", "N/W"), evaluatedWith: map)
         waitForExpectations(timeout: 15)
         guard chooseOrigin("Noguchi", resultID: "placeOriginResult-fixture-noguchi") else { return }
@@ -1747,8 +1747,13 @@ final class StandClearUITests: XCTestCase {
         picker.typeText("Wall\n")
         let chosen = app.buttons["stationChoice-419"]
         revealPlaceElement(chosen, in: app.collectionViews.firstMatch)
-        chosen.tap()
-        XCTAssertTrue(origin.waitForExistence(timeout: 10))
+        recordPlaceTap(chosen, in: app.collectionViews.firstMatch, context: "Place origin station choice")
+        chosen.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+        let originReturned = origin.waitForExistence(timeout: 10)
+        XCTAssertTrue(originReturned)
+        if !originReturned {
+            recordPlaceSelectionFailure(context: "Origin did not return after the original ten-second wait", target: origin)
+        }
         XCTAssertTrue(origin.label.contains("Wall St"))
         let list = app.collectionViews["placePreviewList"]
         if !expanded, (app.buttons["Sheet Grabber"].value as? String) == "Half screen" {
@@ -1846,7 +1851,7 @@ final class StandClearUITests: XCTestCase {
         let from = app.buttons["placeOriginResult-fixture-55-wall-street"]
         XCTAssertTrue(from.waitForExistence(timeout: 10))
         from.tap()
-        let map = app.descendants(matching: .any)["appleTransitMap"].firstMatch
+        let map = nativeMap(in: app)
         expectation(for: NSPredicate(format: "value CONTAINS %@ AND value CONTAINS %@", "Noguchi", "Wall St"), evaluatedWith: map)
         waitForExpectations(timeout: 15)
         let previousRoute = map.value as? String
@@ -1981,7 +1986,7 @@ final class StandClearUITests: XCTestCase {
         routeOptions.lifetime = .keepAlways
         add(routeOptions)
         choice.tap()
-        let map = app.descendants(matching: .any)["appleTransitMap"].firstMatch
+        let map = nativeMap(in: app)
         let interchange = "Change to N/W at Lexington Av/59 St"
         expectation(for: NSPredicate(format: "value CONTAINS %@ AND value CONTAINS %@ AND value CONTAINS %@", interchange, "Wall St", "Broadway"), evaluatedWith: map)
         waitForExpectations(timeout: 10)
@@ -2101,7 +2106,7 @@ final class StandClearUITests: XCTestCase {
         mapAction.lifetime = .keepAlways
         add(mapAction)
         showMap.tap()
-        let map = app.descendants(matching: .any)["appleTransitMap"].firstMatch
+        let map = nativeMap(in: app)
         expectation(for: NSPredicate(format: "value CONTAINS %@", instruction), evaluatedWith: map)
         waitForExpectations(timeout: 10)
         let endpoints = ["Board at Wall St", "Arrive at Astoria Blvd"]
@@ -2145,7 +2150,7 @@ final class StandClearUITests: XCTestCase {
         station.tap()
         XCTAssertTrue(origin.waitForExistence(timeout: 10))
         XCTAssertTrue(origin.label.contains("Wall St"))
-        let map = app.descendants(matching: .any)["appleTransitMap"].firstMatch
+        let map = nativeMap(in: app)
         expectation(for: NSPredicate(format: "value CONTAINS %@ AND value CONTAINS %@", "Noguchi", "Wall St"), evaluatedWith: map)
         waitForExpectations(timeout: 15)
         let header = app.navigationBars["StandClear"]
@@ -2155,14 +2160,21 @@ final class StandClearUITests: XCTestCase {
         XCTAssertGreaterThan(header.frame.height, 0)
         XCTAssertGreaterThan(sheetHeader.frame.height, 0)
         let labels = ["The Noguchi Museum", "Wall St", "Change to N/W at Lexington Av/59 St"]
+        var framingObservations: [String] = []
         let fitted = NSPredicate { _, _ in MainActor.assumeIsolated {
-            labels.allSatisfy { label in
+            // Read shared bounds once per evaluation, not four times for each
+            // pin. Repeated AX round trips can consume the entire fit deadline
+            // before the third pin is observed on the hosted simulator.
+            let headerFrame = self.geometryRead("header.frame", observations: &framingObservations) { header.frame }
+            let sheetFrame = self.geometryRead("sheet.frame", observations: &framingObservations) { sheetHeader.frame }
+            let mapFrame = self.geometryRead("map.frame", observations: &framingObservations) { map.frame }
+            return labels.allSatisfy { label in
                 let pin = map.descendants(matching: .any).matching(NSPredicate(format: "label == %@", label)).firstMatch
-                guard pin.exists else { return false }
-                let frame = pin.frame
+                guard self.geometryRead("\(label).exists", observations: &framingObservations, { pin.exists }) else { return false }
+                let frame = self.geometryRead("\(label).frame", observations: &framingObservations) { pin.frame }
                 return frame.width > 0 && frame.height > 0 &&
-                    frame.minY > header.frame.maxY && frame.maxY < sheetHeader.frame.minY &&
-                    frame.minX >= map.frame.minX && frame.maxX <= map.frame.maxX
+                    frame.minY > headerFrame.maxY && frame.maxY < sheetFrame.minY &&
+                    frame.minX >= mapFrame.minX && frame.maxX <= mapFrame.maxX
             }
         } }
         // Allow native sheet dismissal and camera framing to settle. The old
@@ -2177,6 +2189,10 @@ final class StandClearUITests: XCTestCase {
         tree.name = "Compact itinerary accessibility geometry"
         tree.lifetime = .keepAlways
         add(tree)
+        let observations = XCTAttachment(string: framingObservations.joined(separator: "\n"))
+        observations.name = "Compact itinerary in-wait framing observations"
+        observations.lifetime = .keepAlways
+        add(observations)
         XCTAssertEqual(result, .completed, "Boarding, transfer, and destination pins must fit between the header and route sheet")
         XCTAssertFalse(map.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "Board at Wall St")).firstMatch.exists,
                        "Place journeys must retain their existing platform marker rather than duplicate station-only endpoints")
@@ -2234,7 +2250,7 @@ final class StandClearUITests: XCTestCase {
         let origin = app.buttons["placeOriginPicker"]
         XCTAssertTrue(origin.waitForExistence(timeout: 10))
         XCTAssertTrue(origin.label.contains("Current Location"))
-        let map = app.descendants(matching: .any)["appleTransitMap"].firstMatch
+        let map = nativeMap(in: app)
         let mapped = NSPredicate(format: "value CONTAINS %@ AND value CONTAINS %@", "Noguchi", "N/W")
         expectation(for: mapped, evaluatedWith: map)
         waitForExpectations(timeout: 15)
@@ -2270,9 +2286,14 @@ final class StandClearUITests: XCTestCase {
         let legID = "N:N:R16>\(target)"
         let alternative = list.buttons["placeRouteOption-127>\(target):\(legID)"]
         revealPlaceElement(alternative, in: list)
-        alternative.tap()
+        recordPlaceTap(alternative, in: list, context: "Museum alternative route choice")
+        alternative.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
         expectation(for: NSPredicate(format: "value == %@", "Selected"), evaluatedWith: alternative)
+        let failuresBeforeSelectionWait = testRun?.failureCount ?? 0
         waitForExpectations(timeout: 8)
+        if (testRun?.failureCount ?? 0) > failuresBeforeSelectionWait {
+            recordPlaceSelectionFailure(context: "Original eight-second selection wait recorded a failure", target: alternative)
+        }
         let changed = NSPredicate { _, _ in MainActor.assumeIsolated {
             guard let summary = map.value as? String else { return false }
             return summary.contains("Noguchi") && summary.contains("N/W") && summary != firstSummary
@@ -2390,6 +2411,80 @@ final class StandClearUITests: XCTestCase {
     }
 
     @MainActor
+    private func placeToolbarFrames(in app: XCUIApplication, intersecting bounds: CGRect? = nil, below top: CGFloat? = nil) -> [CGRect] {
+        let identifiers = ["searchButton", "nearbyButton", "moreButton"]
+        let visible = identifiers.map { app.buttons[$0] }.filter { $0.exists && $0.isHittable }
+        guard !visible.isEmpty else { return [] }
+        var frames = visible.map(\.frame)
+        // SwiftUI's floating bar can expose an Other container rather than a
+        // Toolbar. Exclude its full backing/gesture region, not just its pills.
+        let containers = app.otherElements.containing(.button, identifier: "searchButton")
+            .containing(.button, identifier: "nearbyButton")
+            .containing(.button, identifier: "moreButton")
+        for container in containers.allElementsBoundByAccessibilityElement {
+            let frame = container.frame
+            // Reject full-window/navigation ancestors before traversing their
+            // collection views. These frames are already excluded by the
+            // reveal helper's geometry rules; querying every ancestor's
+            // descendants on every drag adds hundreds of AX round trips.
+            if let bounds, let top,
+               !frame.intersects(bounds) || frame.minY <= top || frame.height >= bounds.height
+            {
+                continue
+            }
+            if !container.collectionViews.firstMatch.exists {
+                frames.append(frame)
+            }
+        }
+        return frames
+    }
+
+    @MainActor
+    private func recordPlaceTap(_ target: XCUIElement, in list: XCUIElement, context: String) {
+        let app = XCUIApplication()
+        var frames = ["UTC: \(Date().ISO8601Format())", "Target: \(target.frame)", "List: \(list.frame)"]
+        for identifier in ["searchButton", "nearbyButton", "moreButton"] {
+            let control = app.buttons[identifier]
+            frames.append("\(identifier): \(control.exists ? String(describing: control.frame) : "absent")")
+        }
+        frames.append("Native toolbar containers: \(placeToolbarFrames(in: app))")
+        let keyboard = app.keyboards.firstMatch
+        frames.append("Keyboard: \(keyboard.exists ? String(describing: keyboard.frame) : "absent")")
+        let geometry = XCTAttachment(string: frames.joined(separator: "\n"))
+        geometry.name = context + " — pre-tap geometry"
+        geometry.lifetime = .keepAlways
+        add(geometry)
+        let capture = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        capture.name = context + " — exposed target before one tap"
+        capture.lifetime = .keepAlways
+        add(capture)
+    }
+
+    @MainActor
+    private func recordPlaceSelectionFailure(context: String, target: XCUIElement) {
+        let app = XCUIApplication()
+        // These post-failure observations are independent of the original
+        // failed wait. Later recovery never changes that verdict.
+        let capture = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        capture.name = context
+        capture.lifetime = .keepAlways
+        add(capture)
+        let exists = target.exists
+        var observations = ["UTC: \(Date().ISO8601Format())", context,
+                            "Target exists after failure: \(exists)"]
+        if exists {
+            observations.append("Target value after failure: \(String(describing: target.value))")
+        }
+        observations.append("Root list after failure: \(app.collectionViews["placePreviewList"].exists)")
+        observations.append("Navigation titles after failure: \(app.navigationBars.allElementsBoundByIndex.map(\.identifier))")
+        observations.append("Query after failure: \(String(describing: app.searchFields.firstMatch.exists ? app.searchFields.firstMatch.value : nil))")
+        let detail = XCTAttachment(string: observations.joined(separator: "\n"))
+        detail.name = context + " — independent post-failure observations"
+        detail.lifetime = .keepAlways
+        add(detail)
+    }
+
+    @MainActor
     private func revealPlaceElement(_ element: XCUIElement, in list: XCUIElement, downward: Bool = true,
                                     file: StaticString = #filePath, line: UInt = #line)
     {
@@ -2403,10 +2498,22 @@ final class StandClearUITests: XCTestCase {
         for _ in 0 ..< 18 {
             let bounds = list.frame
             let top = nav.exists ? max(bounds.minY, nav.frame.maxY) : bounds.minY
+            var bottom = bounds.maxY
+            for frame in placeToolbarFrames(in: app, intersecting: bounds, below: top) where frame.intersects(bounds) && frame.minY > top && frame.height < bounds.height {
+                bottom = min(bottom, frame.minY)
+            }
+            let keyboard = app.keyboards.firstMatch
+            if keyboard.exists {
+                let keyboardFrame = keyboard.frame
+                if keyboardFrame.intersects(bounds) {
+                    bottom = min(bottom, keyboardFrame.minY)
+                }
+            }
             if element.exists {
                 let frame = element.frame
                 if !frame.isNull, !frame.isInfinite, frame.width > 0, frame.height > 0 {
-                    if frame.midY > top, frame.midY < bounds.maxY, bounds.contains(CGPoint(x: frame.midX, y: frame.midY)),
+                    if frame.midY > top, frame.midY < bottom, bounds.contains(CGPoint(x: frame.midX, y: frame.midY)),
+                       app.windows.firstMatch.frame.contains(CGPoint(x: frame.midX, y: frame.midY)),
                        // Read-only rows do not need activation points. XCTest
                        // can expose their text even when there is no tap target.
                        element.elementType != .button || element.isHittable
@@ -2418,8 +2525,15 @@ final class StandClearUITests: XCTestCase {
             }
             // End the drag at rest. A default flick can leap over the entire
             // route list in the short landscape control region.
-            let start = list.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: towardBottom ? 0.78 : 0.48))
-            let distance = min(bounds.height * 0.3, 150)
+            let exposedHeight = bottom - top
+            guard exposedHeight > 0 else {
+                XCTFail("No list content is exposed between native controls", file: file, line: line)
+                return
+            }
+            let startY = top + exposedHeight * (towardBottom ? 0.78 : 0.48)
+            let start = list.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0))
+                .withOffset(CGVector(dx: 0, dy: startY - bounds.minY))
+            let distance = min(exposedHeight * 0.3, 150)
             start.press(forDuration: 0.08, thenDragTo: start.withOffset(CGVector(dx: 0, dy: towardBottom ? -distance : distance)),
                         withVelocity: .slow, thenHoldForDuration: 0.3)
         }
@@ -2551,6 +2665,65 @@ final class StandClearUITests: XCTestCase {
         waitForExpectations(timeout: 5)
         XCTAssertTrue(app.navigationBars["Nearby arrivals"].exists)
         XCTAssertFalse(app.navigationBars["Search"].exists)
+    }
+
+    @MainActor
+    func testExpandedInspectorToolbarSurvivesStationNavigationAndAdaptation() {
+        let app = launchForMoreMenu()
+        defer { XCUIDevice.shared.orientation = .portrait }
+        XCUIDevice.shared.orientation = .landscapeLeft
+        waitForLayout(in: app, expanded: true)
+        app.buttons["searchButton"].tap()
+        let field = app.searchFields[unifiedSearchPrompt]
+        guard focusSearchField(field, in: app) else { return }
+        field.typeText("Wall\n")
+        selectSearchResult("419", query: "Wall", in: app)
+        XCTAssertTrue(app.navigationBars["Wall St"].waitForExistence(timeout: 5))
+
+        XCTAssertTrue(app.buttons["directionsHere"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.navigationBars["Wall St"].exists)
+        XCTAssertFalse(app.buttons["Done"].exists, "The expanded inspector must not become a modal sheet")
+        let bounds = app.windows.firstMatch.frame
+        for identifier in ["searchButton", "nearbyButton", "moreButton"] {
+            let controls = app.buttons.matching(identifier: identifier)
+            XCTAssertEqual(controls.count, 1, "Adaptation must expose only one \(identifier)")
+            let control = controls.firstMatch
+            XCTAssertTrue(control.isHittable, "Inspector controls must remain usable after pushing station details")
+            XCTAssertGreaterThan(control.frame.midX, bounds.midX, "Inspector controls belong in the trailing region")
+            XCTAssertTrue(bounds.contains(control.frame), "Native toolbar controls must stay inside the window")
+        }
+        let expanded = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        expanded.name = "Native inspector toolbar with pushed station details"
+        expanded.lifetime = .keepAlways
+        add(expanded)
+
+        app.buttons["moreButton"].tap()
+        let arrivalStatus = app.buttons["arrivalStatusButton"]
+        XCTAssertTrue(arrivalStatus.waitForExistence(timeout: 5))
+        arrivalStatus.tap()
+        let status = app.alerts["Arrival status"]
+        XCTAssertTrue(status.waitForExistence(timeout: 5))
+        status.buttons["OK"].tap()
+        XCTAssertTrue(app.navigationBars["Wall St"].exists)
+        app.buttons["nearbyButton"].tap()
+        XCTAssertTrue(app.navigationBars["Nearby arrivals"].waitForExistence(timeout: 5))
+        app.buttons["searchButton"].tap()
+        XCTAssertTrue(app.navigationBars["Wall St"].waitForExistence(timeout: 5), "Search must restore its pushed station visit")
+
+        XCUIDevice.shared.orientation = .portrait
+        waitForLayout(in: app, expanded: false, readyControl: "directionsHere")
+        XCTAssertTrue(app.navigationBars["Wall St"].exists)
+        XCTAssertTrue(app.buttons["Done"].isHittable, "The same visit must use a native sheet when narrow")
+        let compact = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        compact.name = "Native compact sheet preserving the inspector station visit"
+        compact.lifetime = .keepAlways
+        add(compact)
+
+        XCUIDevice.shared.orientation = .landscapeLeft
+        waitForLayout(in: app, expanded: true, readyControl: "moreButton")
+        XCTAssertTrue(app.navigationBars["Wall St"].exists)
+        XCTAssertTrue(app.buttons["searchButton"].isHittable)
+        XCTAssertTrue(app.buttons["nearbyButton"].isHittable)
     }
 
     @MainActor
@@ -2853,15 +3026,30 @@ final class StandClearUITests: XCTestCase {
         let plan = app.buttons["tripPlan-4:N:419>629|N:N:R11>R05"]
         func selectPlan() {
             let list = app.collectionViews["directionsList"]
-            for _ in 0 ..< 4 where !plan.isHittable {
+            func hasUnobscuredCenter() -> Bool {
+                guard plan.exists, plan.isHittable else { return false }
+                let frame = plan.frame
+                let center = CGPoint(x: frame.midX, y: frame.midY)
+                let toolbarTop = ["searchButton", "nearbyButton", "moreButton"]
+                    .map { app.buttons[$0] }.filter(\.exists).map(\.frame.minY).min() ?? list.frame.maxY
+                return list.frame.contains(center) && app.windows.firstMatch.frame.contains(center) && center.y < toolbarTop
+            }
+            // A native floating toolbar can cover the center of a partially
+            // hittable row. Scroll the actual tap point clear before activating.
+            for _ in 0 ..< 4 where !hasUnobscuredCenter() {
                 list.swipeUp()
             }
             XCTAssertTrue(plan.waitForExistence(timeout: 10))
             XCTAssertTrue(plan.isHittable)
-            plan.tap()
+            XCTAssertTrue(hasUnobscuredCenter(), "The route's activation point must be above the native toolbar")
+            let beforeTap = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            beforeTap.name = "Route choice scrolled above native inspector toolbar"
+            beforeTap.lifetime = .keepAlways
+            add(beforeTap)
+            plan.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
         }
         selectPlan()
-        let map = app.descendants(matching: .any)["appleTransitMap"].firstMatch
+        let map = nativeMap(in: app)
         let interchange = "Change to N/W at Lexington Av/59 St"
         let labels = ["Board at Wall St", interchange, "Arrive at Broadway"]
         expectation(for: NSPredicate(format: "value CONTAINS %@", interchange), evaluatedWith: map)
@@ -2949,7 +3137,7 @@ final class StandClearUITests: XCTestCase {
         XCTAssertTrue(showMap.waitForExistence(timeout: 5))
         XCTAssertTrue(showMap.isHittable, "The native map toolbar action must remain reachable beside the transfer prediction")
         showMap.tap()
-        let map = app.descendants(matching: .any)["appleTransitMap"].firstMatch
+        let map = nativeMap(in: app)
         expectation(for: NSPredicate(format: "value CONTAINS %@", interchange), evaluatedWith: map)
         waitForExpectations(timeout: 10)
         let capture = XCTAttachment(screenshot: app.screenshot())
@@ -3193,45 +3381,96 @@ final class StandClearUITests: XCTestCase {
     }
 
     @MainActor
+    private func nativeMap(in app: XCUIApplication) -> XCUIElement {
+        // The retained iOS 26/27 hierarchies expose MapKit's identified map as
+        // Other. Avoid a whole-tree query over every accessibility role.
+        app.otherElements.matching(identifier: "appleTransitMap").firstMatch
+    }
+
+    @MainActor
+    private func geometryRead<Value>(_ name: String, observations: inout [String], _ read: () -> Value) -> Value {
+        let start = ProcessInfo.processInfo.systemUptime
+        observations.append("\(name): start=\(start)")
+        let value = read()
+        let end = ProcessInfo.processInfo.systemUptime
+        observations.append("\(name): start=\(start), end=\(end), elapsed=\(end - start), value=\(value)")
+        return value
+    }
+
+    @MainActor
+    private func recordGeometryObservations(_ observations: [String], context: String) {
+        let attachment = XCTAttachment(string: observations.joined(separator: "\n"))
+        attachment.name = context + " — in-wait query observations"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+    }
+
+    @MainActor
+    private func recordGeometryFailure(in app: XCUIApplication, context: String) {
+        // Called only after recording the original wait's failed verdict.
+        // These independent late observations cannot turn it into a pass.
+        let state = XCTAttachment(string: "UTC: \(Date().ISO8601Format())\nApplication state: \(app.state.rawValue)\n\(app.debugDescription)")
+        state.name = context + " — independent post-failure hierarchy"
+        state.lifetime = .keepAlways
+        add(state)
+    }
+
+    @MainActor
     private func assertStationEndpoints(_ labels: [String], in app: XCUIApplication, expanded: Bool = false,
                                         file: StaticString = #filePath, line: UInt = #line)
     {
-        let map = app.descendants(matching: .any)["appleTransitMap"].firstMatch
+        let map = nativeMap(in: app)
+        var observations: [String] = []
         let fitted = NSPredicate { _, _ in MainActor.assumeIsolated {
-            guard map.exists else { return false }
+            guard self.geometryRead("map.exists", observations: &observations, { map.exists }) else { return false }
+            let mapFrame = self.geometryRead("map.frame", observations: &observations) { map.frame }
             let header = app.navigationBars["StandClear"]
             let panel = app.navigationBars["Trip details"]
-            let top = header.exists ? max(map.frame.minY, header.frame.maxY) : map.frame.minY
-            let right = expanded && panel.exists ? min(map.frame.maxX, panel.frame.minX) : map.frame.maxX
+            let hasHeader = self.geometryRead("header.exists", observations: &observations) { header.exists }
+            let top = hasHeader ? max(mapFrame.minY, self.geometryRead("header.frame", observations: &observations) { header.frame }.maxY) : mapFrame.minY
+            let hasPanel = expanded && self.geometryRead("panel.exists", observations: &observations) { panel.exists }
+            let right = hasPanel ? min(mapFrame.maxX, self.geometryRead("panel.frame", observations: &observations) { panel.frame }.minX) : mapFrame.maxX
             return labels.allSatisfy { label in
                 let marker = map.descendants(matching: .any).matching(NSPredicate(format: "label == %@", label)).firstMatch
-                guard marker.exists else { return false }
-                let frame = marker.frame
-                return frame.width > 0 && frame.height > 0 && frame.minY > top && frame.maxY < map.frame.maxY &&
-                    frame.minX >= map.frame.minX && frame.maxX <= right
+                guard self.geometryRead("\(label).exists", observations: &observations, { marker.exists }) else { return false }
+                let frame = self.geometryRead("\(label).frame", observations: &observations) { marker.frame }
+                return frame.width > 0 && frame.height > 0 && frame.minY > top && frame.maxY < mapFrame.maxY &&
+                    frame.minX >= mapFrame.minX && frame.maxX <= right
             }
         } }
         let ready = XCTNSPredicateExpectation(predicate: fitted, object: map)
         let result = XCTWaiter.wait(for: [ready], timeout: 10)
+        XCTAssertEqual(result, .completed, "Named boarding and arrival markers must fit in the exposed map", file: file, line: line)
+        recordGeometryObservations(observations, context: "Station itinerary endpoints — expanded \(expanded)")
         let capture = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         capture.name = "Station itinerary endpoints — expanded \(expanded)"
         capture.lifetime = .keepAlways
         add(capture)
-        XCTAssertEqual(result, .completed, "Named boarding and arrival markers must fit in the exposed map", file: file, line: line)
+        if result != .completed {
+            recordGeometryFailure(in: app, context: "Station itinerary endpoints — expanded \(expanded)")
+        }
     }
 
     @MainActor
     private func assertStationEndpointsCleared(_ labels: [String], in app: XCUIApplication,
                                                file: StaticString = #filePath, line: UInt = #line)
     {
-        let map = app.descendants(matching: .any)["appleTransitMap"].firstMatch
+        let map = nativeMap(in: app)
+        var observations: [String] = []
         let cleared = NSPredicate { _, _ in MainActor.assumeIsolated {
-            guard map.exists else { return false }
-            return !app.buttons["clearMapRoute"].exists &&
-                map.descendants(matching: .any).matching(NSPredicate(format: "label IN %@", labels)).count == 0
+            guard self.geometryRead("map.exists", observations: &observations, { map.exists }) else { return false }
+            return !self.geometryRead("clear button.exists", observations: &observations) { app.buttons["clearMapRoute"].exists } &&
+                self.geometryRead("remaining marker count", observations: &observations) {
+                    map.descendants(matching: .any).matching(NSPredicate(format: "label IN %@", labels)).count
+                } == 0
         } }
-        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: cleared, object: map)], timeout: 5), .completed,
+        let result = XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: cleared, object: map)], timeout: 5)
+        XCTAssertEqual(result, .completed,
                        "Clear route must remove the boarding, arrival, and transfer markers", file: file, line: line)
+        recordGeometryObservations(observations, context: "Cleared station itinerary")
+        if result != .completed {
+            recordGeometryFailure(in: app, context: "Cleared station itinerary")
+        }
     }
 
     @MainActor

@@ -2,7 +2,7 @@ import CoreLocation
 import SwiftUI
 
 struct MapShell: View {
-    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.dynamicTypeSize) private var typeSize
     @State private var store = TransitStore()
@@ -85,71 +85,49 @@ struct MapShell: View {
             // Window geometry, not a device identifier, selects the control region.
             let expanded = geometry.size.width >= 640 && !typeSize.isAccessibilitySize
             let controlWidth = min(geometry.size.width * 0.4, 380)
-            let statusWidth = expanded ? geometry.size.width - controlWidth : geometry.size.width
-            Group {
-                if expanded {
-                    ZStack(alignment: .trailing) {
-                        map(statusWidth: statusWidth, coveredWidth: geometry.size.width - statusWidth, coveredBottom: 0, maximumGlanceHeight: geometry.size.height * 0.55)
-                        VStack(spacing: 0) {
-                            panelNavigation(expandedPanel, expanded: true)
-                                .environment(\.expandedTransitPanel, true)
-                                .id(expandedPanel)
-                                .id(stationVisit)
-                            if selectedTrip != nil {
+            NavigationStack {
+                GeometryReader { mapGeometry in
+                    map(statusWidth: mapGeometry.size.width, coveredWidth: 0,
+                        coveredBottom: expanded ? 0 : routePanelIsCollapsed ? collapsedRouteHeight + geometry.safeAreaInsets.bottom : mediumSheetCoversMap ? geometry.size.height / 2 : 0,
+                        maximumGlanceHeight: mapGeometry.size.height * 0.55)
+                }
+                .navigationTitle("StandClear")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar(expanded ? .hidden : .automatic, for: .navigationBar)
+                .toolbar {
+                    if !expanded {
+                        ToolbarItem(placement: .topBarTrailing) {
+                            if selectedTrip != nil, !routePanelIsCollapsed {
                                 clearRouteButton
-                                    .buttonStyle(.bordered)
-                                    .padding(.horizontal)
-                            }
-                            HStack {
-                                ControlGroup {
-                                    Button("Search", systemImage: "magnifyingglass") { showSearch(expanded: true) }
-                                        .accessibilityIdentifier("searchButton")
-                                    Button("Nearby", systemImage: "location") {
-                                        showNearby(expanded: true)
-                                    }
-                                    .accessibilityIdentifier("nearbyButton")
-                                }
-                                // Automatic ControlGroup styling disables a
-                                // nested Menu in this expanded layout. Keep the
-                                // menu as a separate native control.
-                                moreMenu.buttonStyle(.bordered)
-                            }
-                            .labelStyle(.iconOnly)
-                            .controlSize(.large)
-                            .padding()
-                        }
-                        .frame(width: controlWidth)
-                        .background {
-                            if reduceTransparency {
-                                Color(uiColor: .systemBackground)
-                            } else {
-                                Rectangle().fill(.regularMaterial)
                             }
                         }
-                    }
-                } else {
-                    NavigationStack {
-                        map(statusWidth: statusWidth, coveredWidth: 0, coveredBottom: routePanelIsCollapsed ? collapsedRouteHeight + geometry.safeAreaInsets.bottom : mediumSheetCoversMap ? geometry.size.height / 2 : 0, maximumGlanceHeight: geometry.size.height * 0.55)
-                            .navigationTitle("StandClear")
-                            .navigationBarTitleDisplayMode(.inline)
-                            .toolbar {
-                                ToolbarItem(placement: .topBarTrailing) {
-                                    if selectedTrip != nil, !routePanelIsCollapsed {
-                                        clearRouteButton
-                                    }
-                                }
-                                ToolbarItemGroup(placement: .bottomBar) {
-                                    Button("Search", systemImage: "magnifyingglass") { showSearch(expanded: false) }
-                                        .accessibilityIdentifier("searchButton")
-                                    Spacer()
-                                    Button("Nearby", systemImage: "location") { showNearby(expanded: false) }
-                                        .accessibilityIdentifier("nearbyButton")
-                                    moreMenu
-                                }
-                            }
+                        ToolbarItemGroup(placement: .bottomBar) {
+                            Button("Search", systemImage: "magnifyingglass") { showSearch(expanded: false) }
+                                .accessibilityIdentifier("searchButton")
+                            Spacer()
+                            Button("Nearby", systemImage: "location") { showNearby(expanded: false) }
+                                .accessibilityIdentifier("nearbyButton")
+                            moreMenu
+                        }
                     }
                 }
             }
+            // Keep this presenter mounted while its column closes. Removing a
+            // permanently-presented inspector also removes its dismissal owner.
+            .environment(\.horizontalSizeClass, horizontalSizeClass)
+            .inspector(isPresented: Binding(get: { expanded }, set: { _ in })) {
+                panelNavigation(expandedPanel, expanded: true)
+                    .interactiveDismissDisabled()
+                    .environment(\.expandedTransitPanel, true)
+                    .environment(\.expandedTransitToolbar, expandedToolbar)
+                    .environment(\.horizontalSizeClass, horizontalSizeClass)
+                    .id(expandedPanel)
+                    .id(stationVisit)
+                    .inspectorColumnWidth(controlWidth)
+            }
+            // Scope column presentation to its host; map and inspector content
+            // retain the actual system trait. Compact sheets remain separate.
+            .environment(\.horizontalSizeClass, .regular)
             .onGeometryChange(for: CGSize.self) { $0.size } action: { windowSize = $0 }
             .onChange(of: expanded) { _, isExpanded in
                 // The old searchable navigation region is about to disappear.
@@ -215,6 +193,7 @@ struct MapShell: View {
             }
             .sheet(item: $panel) { panel in
                 panelNavigation(panel, expanded: false)
+                    .environment(\.horizontalSizeClass, horizontalSizeClass)
                     // Keep the navigation tree and its route tasks alive at the
                     // small detent. Removing PlacePreview would clear its route.
                     .opacity(routePanelIsCollapsed ? 0 : 1)
@@ -278,9 +257,9 @@ struct MapShell: View {
                 focus.receiveLocation(location.availableCoordinate)
             }
         }
-        .task(id: placeRenewalFix) { [timestamp = placeRenewalFix] in
+        .task(id: visibleLocationRenewalFix) { [timestamp = visibleLocationRenewalFix] in
             guard let timestamp else { return }
-            await location.renewForPlace(timestamp) { placeRenewalFix == timestamp }
+            await location.renewForVisibleLocation(timestamp) { visibleLocationRenewalFix == timestamp }
         }
         .task(id: scenePhase) {
             guard scenePhase == .active else { location.stop(); store.stop(); return }
@@ -297,11 +276,11 @@ struct MapShell: View {
                             destination: activeDestination, placeRoute: visiblePlaceRoute,
                             stationEndpoints: activeDestination == nil ? selectedTrip.map { StationTripEndpoints(plan: $0, lines: store.lines) } : nil,
                             placeGeometryRevision: placeGeometryRevision, transferMarker: transferMarker)
-            if !showsJourney, panel == nil || coveredWidth > 0 {
+            if showsNearbyGlance {
                 NearbyGlancePanel(store: store, location: location,
                                   maximumHeight: maximumGlanceHeight,
-                                  openStation: { showGlanceStation($0, expanded: coveredWidth > 0) },
-                                  openNearby: { showNearby(expanded: coveredWidth > 0) })
+                                  openStation: { showGlanceStation($0, expanded: isWide) },
+                                  openNearby: { showNearby(expanded: isWide) })
                     .frame(maxWidth: min(typeSize.isAccessibilitySize ? 260 : 220, max(0, statusWidth - 32)))
                     .padding()
                     .frame(maxWidth: statusWidth, alignment: .leading)
@@ -464,8 +443,16 @@ struct MapShell: View {
         (isWide ? expandedPanel : panel)?.destination
     }
 
-    private var placeRenewalFix: Date? {
-        guard scenePhase == .active, activeDestination != nil, placeSession.usesCurrentLocation, editingPlaceID != activeDestination?.id else { return nil }
+    private var showsNearbyGlance: Bool {
+        !showsJourney && (panel == nil || isWide)
+    }
+
+    private var visibleLocationRenewalFix: Date? {
+        guard scenePhase == .active else { return nil }
+        let visiblePanel = isWide ? expandedPanel : panel
+        let showsNearbyRoot = visiblePanel == .nearby && nearbyPath.isEmpty
+        let showsCurrentLocationPlace = activeDestination != nil && placeSession.usesCurrentLocation && editingPlaceID != activeDestination?.id
+        guard showsNearbyGlance || showsNearbyRoot || showsCurrentLocationPlace else { return nil }
         return location.usableFixTimestamp
     }
 
@@ -559,9 +546,15 @@ struct MapShell: View {
         }
     }
 
+    private var expandedToolbar: ExpandedTransitToolbar {
+        ExpandedTransitToolbar(search: { showSearch(expanded: true) }, nearby: { showNearby(expanded: true) },
+                               menu: AnyView(moreMenu), clearRoute: selectedTrip == nil ? nil : AnyView(clearRouteButton))
+    }
+
     @ViewBuilder private func panelRoot(_ mode: Panel, expanded: Bool) -> some View {
         if expanded {
-            panelContent(mode, expanded: true).containerBackground(.clear, for: .navigation)
+            panelContent(mode, expanded: true)
+                .modifier(ExpandedTransitToolbarModifier())
         } else {
             panelContent(mode).toolbar {
                 ToolbarItem(placement: .confirmationAction) {
@@ -740,4 +733,45 @@ func transitColor(_ hex: String) -> UIColor {
 /// Pushed route screens inherit the same map-backed presentation as their root.
 extension EnvironmentValues {
     @Entry var expandedTransitPanel = false
+}
+
+/// Each screen owns its native toolbar. Navigation pushes replace toolbar
+/// content, so destinations opt in to the same controls through the environment.
+struct ExpandedTransitToolbar: ToolbarContent {
+    let search: () -> Void
+    let nearby: () -> Void
+    let menu: AnyView
+    let clearRoute: AnyView?
+
+    var body: some ToolbarContent {
+        ToolbarItemGroup(placement: .bottomBar) {
+            Button("Search", systemImage: "magnifyingglass", action: search)
+                .accessibilityIdentifier("searchButton")
+            Spacer()
+            Button("Nearby", systemImage: "location", action: nearby)
+                .accessibilityIdentifier("nearbyButton")
+            menu
+        }
+        ToolbarItem(placement: .topBarTrailing) {
+            if let clearRoute {
+                clearRoute
+            }
+        }
+    }
+}
+
+struct ExpandedTransitToolbarModifier: ViewModifier {
+    @Environment(\.expandedTransitToolbar) private var expandedToolbar
+
+    func body(content: Content) -> some View {
+        content.toolbar {
+            if let expandedToolbar {
+                expandedToolbar
+            }
+        }
+    }
+}
+
+extension EnvironmentValues {
+    @Entry var expandedTransitToolbar: ExpandedTransitToolbar? = nil
 }
