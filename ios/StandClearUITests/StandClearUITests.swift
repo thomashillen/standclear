@@ -392,11 +392,23 @@ final class StandClearUITests: XCTestCase {
             }
             expectation(for: NSPredicate(format: "NOT value CONTAINS %@", interchange), evaluatedWith: map)
             waitForExpectations(timeout: 10)
-            assertStationEndpointsCleared(["Board at Wall St", interchange, "Arrive at Broadway"], in: app)
             let stationCapture = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
             stationCapture.name = fromLines ? "New Lines station with native Done control" : "New Search station with native Done control"
             stationCapture.lifetime = .keepAlways; add(stationCapture)
-            app.buttons["Done"].tap()
+            // Done can clear a selected route. Dismiss interactively instead,
+            // exposing the map without invoking that potentially mutating action.
+            let grabber = app.buttons["Sheet Grabber"]
+            XCTAssertTrue(grabber.waitForExistence(timeout: 5))
+            let start = grabber.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+            let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.97))
+            start.press(forDuration: 0.1, thenDragTo: end, withVelocity: .fast, thenHoldForDuration: 0)
+            guard grabber.waitForNonExistence(timeout: 5) else {
+                XCTFail("Native station sheet must dismiss before checking the exposed map")
+                return
+            }
+            expectation(for: NSPredicate(format: "NOT value CONTAINS %@", interchange), evaluatedWith: map)
+            waitForExpectations(timeout: 10)
+            assertStationEndpointsCleared(["Board at Wall St", interchange, "Arrive at Broadway"], in: app)
             let focused = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
             focused.name = fromLines ? "Explicit new Lines station clears trip and focuses Queensboro Plaza" : "Explicit new Search station clears trip and focuses Wall St"
             focused.lifetime = .keepAlways; add(focused)
@@ -3608,27 +3620,81 @@ final class StandClearUITests: XCTestCase {
     }
 
     @MainActor
+    private func snapshotElements(_ root: any XCUIElementSnapshot) -> [any XCUIElementSnapshot] {
+        var elements: [any XCUIElementSnapshot] = []
+        var pending = [root]
+        while let element = pending.popLast() {
+            elements.append(element)
+            pending.append(contentsOf: element.children.reversed())
+        }
+        return elements
+    }
+
+    @MainActor
+    private func geometrySnapshot(in app: XCUIApplication, observations: inout [String])
+        -> (elements: [any XCUIElementSnapshot], map: any XCUIElementSnapshot, descendants: [any XCUIElementSnapshot])?
+    {
+        let start = ProcessInfo.processInfo.systemUptime
+        observations.append("app.snapshot: start=\(start)")
+        do {
+            // One fresh public XCTest snapshot per poll. Reading the returned
+            // attributes makes no additional remote accessibility queries.
+            let root = try app.snapshot()
+            let elements = snapshotElements(root)
+            let maps = elements.filter { $0.elementType == .other && $0.identifier == "appleTransitMap" }
+            guard root.elementType == .application, maps.count == 1, let map = maps.first else {
+                observations.append("app.snapshot: invalid root or ambiguous/missing map; maps=\(maps.count)")
+                return nil
+            }
+            let frame = map.frame
+            let descendants = map.children.flatMap(snapshotElements)
+            // Missing native map coverage must not become a zero-marker pass.
+            guard frame.minX.isFinite, frame.minY.isFinite, frame.width.isFinite, frame.height.isFinite,
+                  frame.width > 0, frame.height > 0, descendants.contains(where: { $0.elementType == .map })
+            else {
+                observations.append("app.snapshot: invalid map bounds or missing native Map subtree")
+                return nil
+            }
+            observations.append("app.snapshot: start=\(start), end=\(ProcessInfo.processInfo.systemUptime), elements=\(elements.count), map.frame=\(frame), map.descendants=\(descendants.count)")
+            return (elements, map, descendants)
+        } catch {
+            observations.append("app.snapshot: error=\(error), end=\(ProcessInfo.processInfo.systemUptime)")
+            return nil
+        }
+    }
+
+    @MainActor
     private func assertStationEndpoints(_ labels: [String], in app: XCUIApplication, expanded: Bool = false,
                                         file: StaticString = #filePath, line: UInt = #line)
     {
         let map = nativeMap(in: app)
         var observations: [String] = []
+        let deadline = ProcessInfo.processInfo.systemUptime + 10
         let fitted = NSPredicate { _, _ in MainActor.assumeIsolated {
-            guard self.geometryRead("map.exists", observations: &observations, { map.exists }) else { return false }
-            let mapFrame = self.geometryRead("map.frame", observations: &observations) { map.frame }
-            let header = app.navigationBars["StandClear"]
-            let panel = app.navigationBars["Trip details"]
-            let hasHeader = self.geometryRead("header.exists", observations: &observations) { header.exists }
-            let top = hasHeader ? max(mapFrame.minY, self.geometryRead("header.frame", observations: &observations) { header.frame }.maxY) : mapFrame.minY
-            let hasPanel = expanded && self.geometryRead("panel.exists", observations: &observations) { panel.exists }
-            let right = hasPanel ? min(mapFrame.maxX, self.geometryRead("panel.frame", observations: &observations) { panel.frame }.minX) : mapFrame.maxX
-            return labels.allSatisfy { label in
-                let marker = map.descendants(matching: .any).matching(NSPredicate(format: "label == %@", label)).firstMatch
-                guard self.geometryRead("\(label).exists", observations: &observations, { marker.exists }) else { return false }
-                let frame = self.geometryRead("\(label).frame", observations: &observations) { marker.frame }
-                return frame.width > 0 && frame.height > 0 && frame.minY > top && frame.maxY < mapFrame.maxY &&
-                    frame.minX >= mapFrame.minX && frame.maxX <= right
+            guard let snapshot = self.geometrySnapshot(in: app, observations: &observations) else { return false }
+            let mapFrame = snapshot.map.frame
+            let headers = snapshot.elements.filter { $0.elementType == .navigationBar && ($0.identifier == "StandClear" || $0.label == "StandClear") }
+            let panels = expanded ? snapshot.elements.filter { $0.elementType == .navigationBar && ($0.identifier == "Trip details" || $0.label == "Trip details") } : []
+            guard headers.count <= 1, panels.count <= 1 else { return false }
+            let top = headers.first.map { max(mapFrame.minY, $0.frame.maxY) } ?? mapFrame.minY
+            let right = panels.first.map { min(mapFrame.maxX, $0.frame.minX) } ?? mapFrame.maxX
+            let fits = labels.allSatisfy { label in
+                let markers = snapshot.descendants.filter { $0.label == label }
+                observations.append("\(label): frames=\(markers.map(\.frame)), top=\(top), right=\(right)")
+                observations.append("\(label): identities=\(markers.map { "\($0.elementType.rawValue):\($0.identifier)" })")
+                guard !markers.isEmpty else { return false }
+                // At large text sizes MapKit's point-feature hit target may
+                // share the annotation label with a different valid frame.
+                // Every matching pose must satisfy the original fit bounds.
+                return markers.allSatisfy { marker in
+                    let frame = marker.frame
+                    return frame.width > 0 && frame.height > 0 && frame.minY > top && frame.maxY < mapFrame.maxY &&
+                        frame.minX >= mapFrame.minX && frame.maxX <= right
+                }
             }
+            let end = ProcessInfo.processInfo.systemUptime
+            observations.append("fit verdict=\(fits), end=\(end), deadline=\(deadline)")
+            return fits && end <= deadline
         } }
         let ready = XCTNSPredicateExpectation(predicate: fitted, object: map)
         let result = XCTWaiter.wait(for: [ready], timeout: 10)
@@ -3649,12 +3715,15 @@ final class StandClearUITests: XCTestCase {
     {
         let map = nativeMap(in: app)
         var observations: [String] = []
+        let deadline = ProcessInfo.processInfo.systemUptime + 5
         let cleared = NSPredicate { _, _ in MainActor.assumeIsolated {
-            guard self.geometryRead("map.exists", observations: &observations, { map.exists }) else { return false }
-            return !self.geometryRead("clear button.exists", observations: &observations) { app.buttons["clearMapRoute"].exists } &&
-                self.geometryRead("remaining marker count", observations: &observations) {
-                    map.descendants(matching: .any).matching(NSPredicate(format: "label IN %@", labels)).count
-                } == 0
+            guard let snapshot = self.geometrySnapshot(in: app, observations: &observations) else { return false }
+            let buttons = snapshot.elements.filter { $0.elementType == .button && $0.identifier == "clearMapRoute" }.count
+            // Retain all accessibility roles, including native annotation aliases.
+            let markers = snapshot.descendants.filter { labels.contains($0.label) }.count
+            let end = ProcessInfo.processInfo.systemUptime
+            observations.append("clear buttons=\(buttons), remaining markers=\(markers), end=\(end), deadline=\(deadline)")
+            return buttons == 0 && markers == 0 && end <= deadline
         } }
         let result = XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: cleared, object: map)], timeout: 5)
         XCTAssertEqual(result, .completed,
