@@ -26,6 +26,9 @@ final class StandClearUITests: XCTestCase {
         XCUIDevice.shared.orientation = .portrait
         app.resetAuthorizationStatus(for: .location)
         app.launchArguments = ["--ui-test-fixture", "--ui-test-station-motion", "--ui-test-motion-clock"]
+        if !expanded, !largeText {
+            app.launchArguments += ["--ui-test-motion-close-zoom"]
+        }
         if largeText {
             app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
         }
@@ -3161,13 +3164,22 @@ final class StandClearUITests: XCTestCase {
         guard staysCleared("Feed refreshes must not restore a cleared route") else { return }
         XCUIDevice.shared.orientation = .portrait
         waitForLayout(in: app, expanded: false, readyControl: "originPicker")
-        let stayedClear = staysCleared("Narrowing must not restore the cleared itinerary")
+        XCTAssertTrue(app.buttons["originPicker"].label.contains("Wall St"))
+        XCTAssertTrue(app.buttons["destinationPicker"].label.contains("Broadway"))
         let compact = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         compact.name = "Cleared station route after narrowing"
         compact.lifetime = .keepAlways
         add(compact)
-        guard stayedClear else { return }
+        // Without a selected route, Directions intentionally uses a modal large
+        // sheet. Expose the real map before asserting its accessible contents.
+        app.buttons["Done"].tap()
         assertStationEndpointsCleared(labels, in: app)
+        guard staysCleared("Narrowing must not restore the cleared itinerary") else { return }
+        app.buttons["moreButton"].tap()
+        app.buttons["directionsButton"].tap()
+        XCTAssertTrue(app.buttons["originPicker"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.buttons["originPicker"].label.contains("Wall St"))
+        XCTAssertTrue(app.buttons["destinationPicker"].label.contains("Broadway"))
         XCUIDevice.shared.orientation = .landscapeLeft
         waitForLayout(in: app, expanded: true, readyControl: "originPicker")
         guard staysCleared("Expanding must not restore the cleared itinerary") else { return }

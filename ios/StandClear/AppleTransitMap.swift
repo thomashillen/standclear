@@ -30,10 +30,24 @@ struct AppleTransitMap: View {
     @State private var markers: [TrainMapMarker] = []
     @State private var entryGeneration: Double?
     @State private var needsEntryAnchor = true
-    @State private var position = MapCameraPosition.region(MKCoordinateRegion(
-        center: CLLocationCoordinate2D(latitude: 40.754, longitude: -73.984),
-        span: MKCoordinateSpan(latitudeDelta: 0.14, longitudeDelta: 0.11)
-    ))
+    @State private var position = initialPosition
+
+    private static var initialPosition: MapCameraPosition {
+        #if DEBUG && targetEnvironment(simulator)
+            let arguments = ProcessInfo.processInfo.arguments
+            if ["--ui-test-fixture", "--ui-test-station-motion", "--ui-test-motion-clock", "--ui-test-motion-close-zoom"].allSatisfy(arguments.contains) {
+                return .region(MKCoordinateRegion(
+                    center: CLLocationCoordinate2D(latitude: 40.7528, longitude: -73.9893),
+                    span: MKCoordinateSpan(latitudeDelta: 0.012, longitudeDelta: 0.009)
+                ))
+            }
+        #endif
+        return .region(MKCoordinateRegion(
+            center: CLLocationCoordinate2D(latitude: 40.754, longitude: -73.984),
+            span: MKCoordinateSpan(latitudeDelta: 0.14, longitudeDelta: 0.11)
+        ))
+    }
+
     @State private var cameraState = AppleTransitCameraState()
 
     private var showsJourney: Bool {
@@ -339,9 +353,9 @@ private struct AppleTrainAnnotation: View {
                     .padding(.horizontal, 5)
                     .padding(.vertical, 2)
                     .background(.regularMaterial, in: Capsule())
-                    // Keep the caption below the glyph even when Dynamic Type
-                    // makes it taller; it must not change the map anchor.
-                    .offset(y: 24 * scale + 6)
+                    // The 46x20 artwork rotates beyond its 46x24 layout frame.
+                    // Clear its full canvas radius without moving the map anchor.
+                    .offset(y: (24 / 2 + hypot(46, 20) / 2) * scale + 6)
                     .accessibilityHidden(true)
             }
         }
