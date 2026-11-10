@@ -157,6 +157,11 @@ struct AppleTransitMap: View {
                 stopMotion()
             }
         }
+        .onChange(of: inputs.reduceMotion) { _, _ in
+            // Showing a discrete pose while hidden or with Reduce Motion must
+            // not replay an earlier transition when animation becomes eligible.
+            stopMotion()
+        }
         .onDisappear { stopMotion() }
     }
 
@@ -286,6 +291,10 @@ private struct AppleTrainAnnotation: View {
                     .overlay { Circle().strokeBorder(.white, lineWidth: 1.5) }
                     .frame(width: 24, height: 24)
             }
+            if marker.reconciling {
+                Capsule().stroke(.white, style: StrokeStyle(lineWidth: 1.5, dash: [3, 2]))
+                    .frame(width: 48, height: 27)
+            }
             Text(marker.displayLetter)
                 .font(.system(size: 12, weight: .bold))
                 .foregroundStyle(marker.textColor == "black" ? Color.black : Color.white)
@@ -296,6 +305,18 @@ private struct AppleTrainAnnotation: View {
         .scaleEffect(scale)
         .frame(width: 46 * scale, height: 24 * scale)
         .opacity(marker.opacity)
+        .overlay(alignment: .bottom) {
+            if marker.reconciling {
+                Text("Estimated movement")
+                    .font(.caption2)
+                    .fixedSize()
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 2)
+                    .background(.regularMaterial, in: Capsule())
+                    .offset(y: 22)
+                    .accessibilityHidden(true)
+            }
+        }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Route \(marker.spokenRouteName) train. Estimated position.")
         .accessibilityValue(accessibilityValue(marker))
@@ -305,6 +326,9 @@ private struct AppleTrainAnnotation: View {
         var details: [String] = []
         if marker.bearingDegrees == nil {
             details.append("Travel direction is unavailable")
+        }
+        if marker.reconciling {
+            details.append("Animating between reported positions. Current position is uncertain")
         }
         if marker.stale {
             details.append("Position report is over 90 seconds old")

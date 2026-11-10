@@ -194,6 +194,7 @@ final class TransitStore {
     private enum NativeUITestFixture {
         @MainActor private static var temporalMotion = TemporalMotionFixture()
         @MainActor private static var alertRequests = 0
+        @MainActor private static var stationMotionRequests = 0
 
         @MainActor static func data(for path: String, now: Date) throws -> Data {
             let includeExpress = ProcessInfo.processInfo.arguments.contains("--ui-test-express-arrivals")
@@ -310,6 +311,13 @@ final class TransitStore {
                            ]]
             case "api/trains":
                 let timestamp = now.timeIntervalSince1970
+                if ProcessInfo.processInfo.arguments.contains("--ui-test-station-motion") {
+                    stationMotionRequests += 1
+                    let stop = stationMotionRequests < 3 ? "128" : "127"
+                    let vehicle = train(id: "ui-fixture-station-motion", route: "1", direction: "N", previous: stop, next: stop, timestamp: timestamp)
+                        .merging(["progress": 1, "status": "STOPPED_AT"]) { _, updated in updated }
+                    return try JSONSerialization.data(withJSONObject: ["generatedAt": timestamp * 1000, "trains": [vehicle], "arrivals": []], options: [.sortedKeys])
+                }
                 if ProcessInfo.processInfo.arguments.contains("--ui-test-temporal-motion") {
                     guard let sample = temporalMotion.sample(at: timestamp, stale: ProcessInfo.processInfo.arguments.contains("--ui-test-temporal-motion-stale")) else {
                         throw URLError(.badServerResponse)

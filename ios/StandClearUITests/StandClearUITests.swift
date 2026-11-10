@@ -5,6 +5,40 @@ final class StandClearUITests: XCTestCase {
     private let unifiedSearchPrompt = "Address, place or station"
 
     @MainActor
+    func testStationObservationReconciliationOnNativeMap() {
+        let app = XCUIApplication()
+        app.terminate()
+        XCUIDevice.shared.orientation = .portrait
+        app.launchArguments = ["--ui-test-fixture", "--ui-test-station-motion"]
+        app.launch()
+        XCTAssertTrue(app.buttons["moreButton"].waitForExistence(timeout: 15))
+        activatePermissionPrompt(in: app)
+        let train = app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "Route 1 train. Estimated position.")).firstMatch
+        XCTAssertTrue(train.waitForExistence(timeout: 10))
+        func capture(_ name: String) {
+            let attachment = XCTAttachment(screenshot: app.screenshot())
+            attachment.name = name
+            attachment.lifetime = .keepAlways
+            add(attachment)
+        }
+        capture("Station observation before update")
+        let uncertain = NSPredicate(format: "value CONTAINS %@", "Current position is uncertain")
+        expectation(for: uncertain, evaluatedWith: train)
+        waitForExpectations(timeout: 25)
+        let start = train.frame
+        capture("Uncertain route reconciliation start")
+        RunLoop.current.run(until: Date().addingTimeInterval(1.5))
+        let middle = train.frame
+        capture("Uncertain route reconciliation middle")
+        XCTAssertGreaterThan(hypot(middle.midX - start.midX, middle.midY - start.midY), 0.5)
+        let settled = NSPredicate(format: "NOT (value CONTAINS %@)", "Current position is uncertain")
+        expectation(for: settled, evaluatedWith: train)
+        waitForExpectations(timeout: 8)
+        capture("Observed station reconciliation settled")
+        XCTAssertTrue((train.value as? String ?? "").contains("Travel direction is unavailable"))
+    }
+
+    @MainActor
     func testPlaceRouteCanCollapseRestoreAndClear() {
         checkPlaceRouteCollapse(accessibilityText: false)
     }

@@ -11,6 +11,7 @@ struct TrainMapMarker: Identifiable {
     let color: String
     let textColor: String
     let opacity: Double
+    var reconciling: Bool = false
     var stale: Bool {
         opacity < 1
     }
