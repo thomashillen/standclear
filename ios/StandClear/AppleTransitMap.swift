@@ -317,6 +317,7 @@ private struct AppleTrainAnnotation: View {
         let baseScale = TrainMarkerSizing.scale(zoom: cameraState.zoom)
         let scale = differentiateWithoutColor ? max(0.85, baseScale) : baseScale
         let labelOpacity = differentiateWithoutColor ? 1 : TrainMarkerSizing.labelOpacity(zoom: cameraState.zoom)
+        let captionTopOffset = (12.0 + hypot(23.0, 10.0)) * scale + 6.0
         ZStack {
             if let bearing = marker.bearingDegrees {
                 TrainCarArtwork(color: marker.color)
@@ -355,7 +356,7 @@ private struct AppleTrainAnnotation: View {
                     .background(.regularMaterial, in: Capsule())
                     // The 46x20 artwork rotates beyond its 46x24 layout frame.
                     // Clear its full canvas radius without moving the map anchor.
-                    .offset(y: (24 / 2 + hypot(46, 20) / 2) * scale + 6)
+                    .offset(y: captionTopOffset)
                     .accessibilityHidden(true)
             }
         }
