@@ -3845,16 +3845,43 @@ final class StandClearUITests: XCTestCase {
     @MainActor
     private func selectStationResult(_ stationID: String, query: String, in app: XCUIApplication) {
         // Text injection can return before SwiftUI exposes the filtered list.
-        // Wait for the exact result; do not retry input or substitute a station.
-        let result = app.buttons["stationChoice-\(stationID)"]
+        // Observe exact identities in one fresh snapshot, without retrying input.
+        let identifier = "stationChoice-\(stationID)"
+        let result = app.buttons[identifier]
+        let prompt = "Search subway stations"
+        var observations: [String] = []
+        let deadline = ProcessInfo.processInfo.systemUptime + 10
         let ready = NSPredicate { _, _ in
             MainActor.assumeIsolated {
-                let search = app.searchFields.firstMatch
-                return search.exists && (search.value as? String) == query && result.exists
+                let start = ProcessInfo.processInfo.systemUptime
+                do {
+                    let root = try app.snapshot()
+                    guard root.elementType == .application else { return false }
+                    let elements = self.snapshotElements(root)
+                    let fields = elements.filter { $0.elementType == .searchField && ($0.identifier == prompt || $0.label == prompt || $0.placeholderValue == prompt) }
+                    let rows = elements.filter { $0.elementType == .button && $0.identifier == identifier }
+                    let value = fields.first?.value as? String
+                    let eligible = fields.count == 1 && value == query && rows.count == 1
+                    let end = ProcessInfo.processInfo.systemUptime
+                    observations.append("start=\(start), end=\(end), deadline=\(deadline), fields=\(fields.count), values=\(fields.map { String(describing: $0.value) }), fieldFrames=\(fields.map(\.frame)), rows=\(rows.count), frames=\(rows.map(\.frame)), eligible=\(eligible)")
+                    return eligible && end <= deadline
+                } catch {
+                    observations.append("snapshot error=\(error), start=\(start), end=\(ProcessInfo.processInfo.systemUptime)")
+                    return false
+                }
             }
         }
         expectation(for: ready, evaluatedWith: result)
+        let failuresBefore = testRun?.failureCount ?? 0
         waitForExpectations(timeout: 10)
+        recordGeometryObservations(observations, context: "Station picker \(stationID) query \(query)")
+        if (testRun?.failureCount ?? 0) > failuresBefore {
+            recordGeometryFailure(in: app, context: "Station picker readiness")
+            let capture = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            capture.name = "Station picker after failed readiness verdict"
+            capture.lifetime = .keepAlways
+            add(capture)
+        }
         if query == "Wall" {
             XCTAssertFalse(app.buttons["placeResult-fixture-55-wall-street"].exists,
                            "The transit endpoint picker should offer stations only")
