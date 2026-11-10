@@ -1,8 +1,101 @@
 import CoreLocation
+import notify
 import XCTest
 
 final class StandClearUITests: XCTestCase {
     private let unifiedSearchPrompt = "Address, place or station"
+
+    /// A per-launch observation channel; the runner never writes a lifecycle state.
+    @MainActor
+    private final class LifecycleProbe {
+        let session: UUID
+        private let token: Int32
+        private var closed = false
+
+        init?() {
+            let session = UUID()
+            var registered: Int32 = -1
+            let name = "app.standclear.native.ui-test.lifecycle." + session.uuidString
+            let status = notify_register_check(name, &registered)
+            guard status == UInt32(NOTIFY_STATUS_OK) else {
+                XCTFail("Lifecycle observation registration failed: \(status)")
+                return nil
+            }
+            self.session = session
+            token = registered
+        }
+
+        func read() -> (status: UInt32, sequence: UInt64, phase: UInt64) {
+            var state: UInt64 = 0
+            let status = notify_get_state(token, &state)
+            return (status, state >> 8, state & 255)
+        }
+
+        func close() {
+            guard !closed else { return }
+            closed = true
+            XCTAssertEqual(notify_cancel(token), UInt32(NOTIFY_STATUS_OK), "Lifecycle observation must release its token")
+        }
+    }
+
+    @MainActor
+    private func lifecycleProbe(for app: XCUIApplication) -> LifecycleProbe? {
+        guard let probe = LifecycleProbe() else { return nil }
+        app.launchArguments += ["--ui-test-lifecycle"]
+        app.launchEnvironment["STANDCLEAR_UI_LIFECYCLE_SESSION"] = probe.session.uuidString
+        return probe
+    }
+
+    @MainActor
+    private func enterBackground(in app: XCUIApplication, probe: LifecycleProbe,
+                                 file: StaticString = #filePath, line: UInt = #line)
+    {
+        let active = probe.read()
+        XCTAssertEqual(active.status, UInt32(NOTIFY_STATUS_OK), file: file, line: line)
+        XCTAssertEqual(active.phase, 1, "The app must report its actual active scene before Home", file: file, line: line)
+        XCTAssertGreaterThan(active.sequence, 0, file: file, line: line)
+        guard active.status == UInt32(NOTIFY_STATUS_OK), active.phase == 1, active.sequence > 0 else { return }
+        // The first SpringBoard Icon can be a zero-size layout placeholder.
+        // Safari is an installed, visible system Dock icon in these simulators.
+        let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        let home = springboard.icons["Safari"]
+        var observations: [String] = []
+        XCUIDevice.shared.press(.home)
+        let deadline = ProcessInfo.processInfo.systemUptime + 5
+        let backgrounded = NSPredicate { _, _ in MainActor.assumeIsolated {
+            let start = ProcessInfo.processInfo.systemUptime
+            let scene = probe.read()
+            let freshBackground = scene.status == UInt32(NOTIFY_STATUS_OK) && scene.phase == 3 && scene.sequence > active.sequence
+            let exists = freshBackground && home.exists
+            let hittable = exists && home.isHittable
+            let frame = hittable ? home.frame : .zero
+            let visibleFrame = frame.width.isFinite && frame.height.isFinite && frame.width > 0 && frame.height > 0
+            let end = ProcessInfo.processInfo.systemUptime
+            observations.append("deadline=\(deadline), start=\(start), end=\(end), status=\(scene.status), sequence=\(scene.sequence), phase=\(scene.phase), homeExists=\(exists), homeHittable=\(hittable), homeFrame=\(frame)")
+            return freshBackground && hittable && visibleFrame && end <= deadline
+        } }
+        let result = XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: backgrounded, object: app)], timeout: 5)
+        XCTAssertEqual(result, .completed, "A fresh real scene-background transition after cleanup and hittable Home must occur within five seconds", file: file, line: line)
+        // XCTest's tracked application enum is diagnostic, never an alternative
+        // pass condition. It can disagree with visible Home (tracked in #340).
+        observations.append("post-verdict trackedAppState=\(app.state.rawValue), time=\(ProcessInfo.processInfo.systemUptime)")
+        let record = observations.joined(separator: "\n")
+        print("Lifecycle background observation: \(record)")
+        let attachment = XCTAttachment(string: record)
+        attachment.name = "Real scene background and SpringBoard observations"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+        let screen = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        screen.name = "Home immediately after lifecycle verdict"
+        screen.lifetime = .keepAlways
+        add(screen)
+        if result != .completed {
+            let hierarchy = XCTAttachment(string: springboard.debugDescription)
+            hierarchy.name = "SpringBoard after failed lifecycle verdict"
+            hierarchy.lifetime = .keepAlways
+            add(hierarchy)
+        }
+    }
 
     @MainActor
     func testStationObservationReconciliationOnNativeMap() {
@@ -510,6 +603,8 @@ final class StandClearUITests: XCTestCase {
         XCUIDevice.shared.orientation = .portrait
         app.resetAuthorizationStatus(for: .location)
         app.launchArguments = ["--ui-test-fixture", "--ui-test-temporal-motion"]
+        guard let lifecycle = lifecycleProbe(for: app) else { return }
+        defer { lifecycle.close() }
         addUIInterruptionMonitor(withDescription: "Location permission") { alert in
             guard alert.buttons["Don’t Allow"].exists else { return false }
             alert.buttons["Don’t Allow"].tap()
@@ -550,12 +645,7 @@ final class StandClearUITests: XCTestCase {
         }
 
         observeMovement("initial foreground")
-        XCUIDevice.shared.press(.home)
-        let backgrounded = NSPredicate { _, _ in MainActor.assumeIsolated {
-            app.state == .runningBackground || app.state == .runningBackgroundSuspended
-        } }
-        expectation(for: backgrounded, evaluatedWith: app)
-        waitForExpectations(timeout: 5)
+        enterBackground(in: app, probe: lifecycle)
         app.activate()
         XCTAssertTrue(train.waitForExistence(timeout: 10))
         XCTAssertTrue(reference.waitForExistence(timeout: 10))
@@ -1918,6 +2008,8 @@ final class StandClearUITests: XCTestCase {
         if largeType {
             app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
         }
+        guard let lifecycle = lifecycleProbe(for: app) else { return }
+        defer { lifecycle.close() }
         addUIInterruptionMonitor(withDescription: "Location permission") { alert in
             guard alert.buttons["Don’t Allow"].exists else { return false }
             alert.buttons["Don’t Allow"].tap()
@@ -2006,12 +2098,7 @@ final class StandClearUITests: XCTestCase {
         // Choosing the existing destination is also a no-op for route selection.
         guard chooseDestination("Madison", id: "fixture-550-madison") else { return }
         XCTAssertEqual(map.value as? String, updatedRoute)
-        XCUIDevice.shared.press(.home)
-        let backgrounded = NSPredicate { _, _ in MainActor.assumeIsolated {
-            app.state == .runningBackground || app.state == .runningBackgroundSuspended
-        } }
-        expectation(for: backgrounded, evaluatedWith: app)
-        waitForExpectations(timeout: 5)
+        enterBackground(in: app, probe: lifecycle)
         app.activate()
         XCTAssertTrue(destination.waitForExistence(timeout: 10))
         XCTAssertTrue(origin.label.contains("55 Wall Street"))
@@ -2937,6 +3024,11 @@ final class StandClearUITests: XCTestCase {
         }
         defer { XCUIDevice.shared.location = nil }
         app.launchArguments = ["--ui-test-fixture"]
+        let lifecycle = locationGranted ? lifecycleProbe(for: app) : nil
+        if locationGranted, lifecycle == nil {
+            return
+        }
+        defer { lifecycle?.close() }
         addUIInterruptionMonitor(withDescription: "Location permission") { alert in
             let deny = alert.buttons[locationGranted ? "Allow While Using App" : "Don’t Allow"]
             if deny.exists {
@@ -2993,13 +3085,8 @@ final class StandClearUITests: XCTestCase {
         if locationGranted {
             // Search may outlast the real 30-second fix lifetime on a hosted
             // simulator. Deliver a fresh measurement on foreground entry.
-            XCUIDevice.shared.press(.home)
-            let backgrounded = NSPredicate { _, _ in MainActor.assumeIsolated {
-                let state = app.state
-                return state == .runningBackground || state == .runningBackgroundSuspended
-            } }
-            expectation(for: backgrounded, evaluatedWith: app)
-            waitForExpectations(timeout: 5)
+            guard let lifecycle else { XCTFail("Lifecycle observation is required"); return }
+            enterBackground(in: app, probe: lifecycle)
             XCUIDevice.shared.location = XCUILocation(location: CLLocation(latitude: 40.7553, longitude: -73.987))
             app.activate()
             XCTAssertTrue(app.wait(for: .runningForeground, timeout: 5))

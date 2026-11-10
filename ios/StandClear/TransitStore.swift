@@ -1,6 +1,9 @@
 import CoreLocation
 import Foundation
 import Observation
+#if DEBUG && targetEnvironment(simulator)
+    import notify
+#endif
 
 @MainActor @Observable
 final class TransitStore {
@@ -172,6 +175,63 @@ final class TransitStore {
 }
 
 #if DEBUG && targetEnvironment(simulator)
+    /// Public Darwin notification state is a test-only cross-process observation,
+    /// never a command to change lifecycle. Only the real scene handler publishes.
+    @MainActor
+    enum NativeUITestLifecycle {
+        private static var token: Int32?
+        private static var owner: UUID?
+        private static var competingOwner = false
+        private static var sequence: UInt64 = 0
+
+        private static var name: String? {
+            let process = ProcessInfo.processInfo
+            guard process.arguments.contains("--ui-test-fixture"),
+                  process.arguments.contains("--ui-test-lifecycle"),
+                  let value = process.environment["STANDCLEAR_UI_LIFECYCLE_SESSION"],
+                  let session = UUID(uuidString: value) else { return nil }
+            return "app.standclear.native.ui-test.lifecycle." + session.uuidString
+        }
+
+        /// 1 active; 2 inactive; 3 background after cleanup; 254 cleanup missing;
+        /// 255 multiple reporting owners. Upper bits identify a fresh transition.
+        static func record(owner candidate: UUID, phase: UInt64, cleanupComplete: Bool) {
+            guard let name else { return }
+            if let owner, owner != candidate {
+                competingOwner = true
+            }
+            if owner == nil {
+                owner = candidate
+            }
+            if token == nil {
+                var registered: Int32 = -1
+                let status = notify_register_check(name, &registered)
+                guard status == UInt32(NOTIFY_STATUS_OK) else {
+                    print("UI lifecycle registration failed: \(status)")
+                    return
+                }
+                token = registered
+            }
+            guard let token, sequence < UInt64.max >> 8 else { return }
+            sequence += 1
+            let code: UInt64 = competingOwner ? 255 : phase == 3 && !cleanupComplete ? 254 : phase
+            let status = notify_set_state(token, sequence << 8 | code)
+            guard status == UInt32(NOTIFY_STATUS_OK) else {
+                print("UI lifecycle state publication failed: \(status)")
+                return
+            }
+        }
+
+        static func release(owner candidate: UUID) {
+            guard owner == candidate, let token else { return }
+            let status = notify_cancel(token)
+            self.token = nil
+            if status != UInt32(NOTIFY_STATUS_OK) {
+                print("UI lifecycle cancellation failed: \(status)")
+            }
+        }
+    }
+
     /// No production/physical/Release clock override. Held stages let XCTest
     /// inspect actual native annotations without racing a four-second window.
     @MainActor @Observable

@@ -5,6 +5,9 @@ struct MapShell: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.dynamicTypeSize) private var typeSize
+    #if DEBUG && targetEnvironment(simulator)
+        @State private var uiLifecycleOwner = UUID()
+    #endif
     @State private var store = TransitStore()
     @State private var location = LocationStore()
     @State private var linePath: [LineDestination] = []
@@ -69,6 +72,14 @@ struct MapShell: View {
         case lines([LineDestination])
         case panel(Panel)
     }
+
+    #if DEBUG && targetEnvironment(simulator)
+        private func recordUITestLifecycle(_ phase: ScenePhase) {
+            let code: UInt64 = phase == .active ? 1 : phase == .background ? 3 : 2
+            NativeUITestLifecycle.record(owner: uiLifecycleOwner, phase: code,
+                                         cleanupComplete: store.motionSnapshotRevision == nil && location.coordinate == nil)
+        }
+    #endif
 
     private var currentStationVisit: StationRouteVisit? {
         guard let mode = isWide ? expandedPanel : panel else { return nil }
@@ -243,6 +254,10 @@ struct MapShell: View {
                 routePanelCollapsed = detent == .custom(CollapsedRouteDetent.self)
             }
         }
+        #if DEBUG && targetEnvironment(simulator)
+        .onAppear { recordUITestLifecycle(scenePhase) }
+        .onDisappear { NativeUITestLifecycle.release(owner: uiLifecycleOwner) }
+        #endif
         .onChange(of: scenePhase) { _, phase in
             if phase != .active {
                 placeRoute = nil
@@ -251,6 +266,9 @@ struct MapShell: View {
             if phase == .background {
                 focus.cancelPending()
             }
+            #if DEBUG && targetEnvironment(simulator)
+                recordUITestLifecycle(phase)
+            #endif
         }
         .onChange(of: location.availableCoordinate != nil) { _, available in
             if available {
