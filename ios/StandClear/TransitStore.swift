@@ -580,9 +580,9 @@ final class LocationStore: NSObject, @preconcurrency CLLocationManagerDelegate {
         availableCoordinate == nil ? nil : schedule.timestamp
     }
 
-    /// The place card owns this cancellable wait. The ordinary expiry task
-    /// remains armed until a newer measurement actually arrives.
-    func renewForPlace(_ timestamp: Date, stillNeeded: () -> Bool) async {
+    /// A visible location consumer owns this cancellable wait. The ordinary
+    /// expiry task remains armed until a newer measurement actually arrives.
+    func renewForVisibleLocation(_ timestamp: Date, stillNeeded: () -> Bool) async {
         let delay = LocationFixSchedule.renewalDate(for: timestamp).timeIntervalSinceNow
         if delay > 0 {
             do { try await Task.sleep(for: .seconds(delay)) } catch { return }

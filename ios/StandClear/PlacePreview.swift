@@ -437,6 +437,7 @@ struct PlacePreview: View {
                 session.choose(origin)
                 editingOrigin = false
             }
+            .modifier(ExpandedTransitToolbarModifier())
             .onAppear { onEditingEndpointChanged(true) }
             .onDisappear { onEditingEndpointChanged(false) }
         }
@@ -451,6 +452,7 @@ struct PlacePreview: View {
                     onDestinationChange(destination)
                 }
             }
+            .modifier(ExpandedTransitToolbarModifier())
             .onAppear { onEditingEndpointChanged(true) }
             .onDisappear { onEditingEndpointChanged(false) }
         }
