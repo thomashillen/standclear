@@ -24,9 +24,16 @@ final class StandClearUITests: XCTestCase {
         let app = XCUIApplication()
         app.terminate()
         XCUIDevice.shared.orientation = .portrait
+        app.resetAuthorizationStatus(for: .location)
         app.launchArguments = ["--ui-test-fixture", "--ui-test-station-motion", "--ui-test-motion-clock"]
         if largeText {
             app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
+        }
+        addUIInterruptionMonitor(withDescription: "Location permission") { alert in
+            let deny = alert.buttons["Don’t Allow"]
+            guard deny.exists else { return false }
+            deny.tap()
+            return true
         }
         app.launch()
         XCTAssertTrue(app.buttons["moreButton"].waitForExistence(timeout: 15))
