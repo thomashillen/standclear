@@ -41,7 +41,7 @@ final class StandClearUITests: XCTestCase {
         picker.typeText("Wall\n")
         let station = app.buttons["stationChoice-419"]
         revealPlaceElement(station, in: app.collectionViews.firstMatch); station.tap()
-        let map = app.descendants(matching: .any)["appleTransitMap"].firstMatch
+        let map = nativeMap(in: app)
         expectation(for: NSPredicate(format: "value CONTAINS %@ AND value CONTAINS %@", "550 Madison Avenue", "Wall St"), evaluatedWith: map)
         waitForExpectations(timeout: 15)
         let route = map.value as? String
@@ -161,7 +161,7 @@ final class StandClearUITests: XCTestCase {
         app.buttons["showStationRouteOnMap"].tap()
         let restore = app.buttons["restoreRoutePanel"]
         XCTAssertTrue(restore.waitForExistence(timeout: 5))
-        let map = app.descendants(matching: .any)["appleTransitMap"].firstMatch
+        let map = nativeMap(in: app)
         let interchange = "Change to N/W at Lexington Av/59 St"
         XCTAssertTrue((map.value as? String ?? "").contains(interchange))
         let collapsed = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
@@ -421,7 +421,7 @@ final class StandClearUITests: XCTestCase {
         }
         app.launch()
         activatePermissionPrompt(in: app)
-        let map = app.descendants(matching: .any)["appleTransitMap"].firstMatch
+        let map = nativeMap(in: app)
         XCTAssertTrue(map.waitForExistence(timeout: 10))
         map.pinch(withScale: 2, velocity: 1)
         let train = map.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "Route 1 train. Estimated position.")).firstMatch
@@ -480,7 +480,7 @@ final class StandClearUITests: XCTestCase {
         }
         app.launch()
         activatePermissionPrompt(in: app)
-        let map = app.descendants(matching: .any)["appleTransitMap"].firstMatch
+        let map = nativeMap(in: app)
         XCTAssertTrue(map.waitForExistence(timeout: 10))
         let train = map.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "Route 1 train. Estimated position.")).firstMatch
         let reference = map.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "Route 4 train. Estimated position.")).firstMatch
@@ -1619,7 +1619,7 @@ final class StandClearUITests: XCTestCase {
         }
 
         guard chooseOrigin("Wall", resultID: "stationChoice-419") else { return }
-        let map = app.descendants(matching: .any)["appleTransitMap"].firstMatch
+        let map = nativeMap(in: app)
         expectation(for: NSPredicate(format: "value CONTAINS %@", "N/W"), evaluatedWith: map)
         waitForExpectations(timeout: 15)
         guard chooseOrigin("Noguchi", resultID: "placeOriginResult-fixture-noguchi") else { return }
@@ -1851,7 +1851,7 @@ final class StandClearUITests: XCTestCase {
         let from = app.buttons["placeOriginResult-fixture-55-wall-street"]
         XCTAssertTrue(from.waitForExistence(timeout: 10))
         from.tap()
-        let map = app.descendants(matching: .any)["appleTransitMap"].firstMatch
+        let map = nativeMap(in: app)
         expectation(for: NSPredicate(format: "value CONTAINS %@ AND value CONTAINS %@", "Noguchi", "Wall St"), evaluatedWith: map)
         waitForExpectations(timeout: 15)
         let previousRoute = map.value as? String
@@ -1986,7 +1986,7 @@ final class StandClearUITests: XCTestCase {
         routeOptions.lifetime = .keepAlways
         add(routeOptions)
         choice.tap()
-        let map = app.descendants(matching: .any)["appleTransitMap"].firstMatch
+        let map = nativeMap(in: app)
         let interchange = "Change to N/W at Lexington Av/59 St"
         expectation(for: NSPredicate(format: "value CONTAINS %@ AND value CONTAINS %@ AND value CONTAINS %@", interchange, "Wall St", "Broadway"), evaluatedWith: map)
         waitForExpectations(timeout: 10)
@@ -2106,7 +2106,7 @@ final class StandClearUITests: XCTestCase {
         mapAction.lifetime = .keepAlways
         add(mapAction)
         showMap.tap()
-        let map = app.descendants(matching: .any)["appleTransitMap"].firstMatch
+        let map = nativeMap(in: app)
         expectation(for: NSPredicate(format: "value CONTAINS %@", instruction), evaluatedWith: map)
         waitForExpectations(timeout: 10)
         let endpoints = ["Board at Wall St", "Arrive at Astoria Blvd"]
@@ -2150,7 +2150,7 @@ final class StandClearUITests: XCTestCase {
         station.tap()
         XCTAssertTrue(origin.waitForExistence(timeout: 10))
         XCTAssertTrue(origin.label.contains("Wall St"))
-        let map = app.descendants(matching: .any)["appleTransitMap"].firstMatch
+        let map = nativeMap(in: app)
         expectation(for: NSPredicate(format: "value CONTAINS %@ AND value CONTAINS %@", "Noguchi", "Wall St"), evaluatedWith: map)
         waitForExpectations(timeout: 15)
         let header = app.navigationBars["StandClear"]
@@ -2165,18 +2165,13 @@ final class StandClearUITests: XCTestCase {
             // Read shared bounds once per evaluation, not four times for each
             // pin. Repeated AX round trips can consume the entire fit deadline
             // before the third pin is observed on the hosted simulator.
-            let headerFrame = header.frame
-            let sheetFrame = sheetHeader.frame
-            let mapFrame = map.frame
-            framingObservations.append("\(Date().ISO8601Format()) header=\(headerFrame) sheet=\(sheetFrame) map=\(mapFrame)")
+            let headerFrame = self.geometryRead("header.frame", observations: &framingObservations) { header.frame }
+            let sheetFrame = self.geometryRead("sheet.frame", observations: &framingObservations) { sheetHeader.frame }
+            let mapFrame = self.geometryRead("map.frame", observations: &framingObservations) { map.frame }
             return labels.allSatisfy { label in
                 let pin = map.descendants(matching: .any).matching(NSPredicate(format: "label == %@", label)).firstMatch
-                guard pin.exists else {
-                    framingObservations.append("\(label): absent")
-                    return false
-                }
-                let frame = pin.frame
-                framingObservations.append("\(label): \(frame)")
+                guard self.geometryRead("\(label).exists", observations: &framingObservations, { pin.exists }) else { return false }
+                let frame = self.geometryRead("\(label).frame", observations: &framingObservations) { pin.frame }
                 return frame.width > 0 && frame.height > 0 &&
                     frame.minY > headerFrame.maxY && frame.maxY < sheetFrame.minY &&
                     frame.minX >= mapFrame.minX && frame.maxX <= mapFrame.maxX
@@ -2255,7 +2250,7 @@ final class StandClearUITests: XCTestCase {
         let origin = app.buttons["placeOriginPicker"]
         XCTAssertTrue(origin.waitForExistence(timeout: 10))
         XCTAssertTrue(origin.label.contains("Current Location"))
-        let map = app.descendants(matching: .any)["appleTransitMap"].firstMatch
+        let map = nativeMap(in: app)
         let mapped = NSPredicate(format: "value CONTAINS %@ AND value CONTAINS %@", "Noguchi", "N/W")
         expectation(for: mapped, evaluatedWith: map)
         waitForExpectations(timeout: 15)
@@ -2508,8 +2503,11 @@ final class StandClearUITests: XCTestCase {
                 bottom = min(bottom, frame.minY)
             }
             let keyboard = app.keyboards.firstMatch
-            if keyboard.exists, keyboard.frame.intersects(bounds) {
-                bottom = min(bottom, keyboard.frame.minY)
+            if keyboard.exists {
+                let keyboardFrame = keyboard.frame
+                if keyboardFrame.intersects(bounds) {
+                    bottom = min(bottom, keyboardFrame.minY)
+                }
             }
             if element.exists {
                 let frame = element.frame
@@ -3051,7 +3049,7 @@ final class StandClearUITests: XCTestCase {
             plan.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
         }
         selectPlan()
-        let map = app.descendants(matching: .any)["appleTransitMap"].firstMatch
+        let map = nativeMap(in: app)
         let interchange = "Change to N/W at Lexington Av/59 St"
         let labels = ["Board at Wall St", interchange, "Arrive at Broadway"]
         expectation(for: NSPredicate(format: "value CONTAINS %@", interchange), evaluatedWith: map)
@@ -3139,7 +3137,7 @@ final class StandClearUITests: XCTestCase {
         XCTAssertTrue(showMap.waitForExistence(timeout: 5))
         XCTAssertTrue(showMap.isHittable, "The native map toolbar action must remain reachable beside the transfer prediction")
         showMap.tap()
-        let map = app.descendants(matching: .any)["appleTransitMap"].firstMatch
+        let map = nativeMap(in: app)
         expectation(for: NSPredicate(format: "value CONTAINS %@", interchange), evaluatedWith: map)
         waitForExpectations(timeout: 10)
         let capture = XCTAttachment(screenshot: app.screenshot())
@@ -3383,45 +3381,96 @@ final class StandClearUITests: XCTestCase {
     }
 
     @MainActor
+    private func nativeMap(in app: XCUIApplication) -> XCUIElement {
+        // The retained iOS 26/27 hierarchies expose MapKit's identified map as
+        // Other. Avoid a whole-tree query over every accessibility role.
+        app.otherElements.matching(identifier: "appleTransitMap").firstMatch
+    }
+
+    @MainActor
+    private func geometryRead<Value>(_ name: String, observations: inout [String], _ read: () -> Value) -> Value {
+        let start = ProcessInfo.processInfo.systemUptime
+        observations.append("\(name): start=\(start)")
+        let value = read()
+        let end = ProcessInfo.processInfo.systemUptime
+        observations.append("\(name): start=\(start), end=\(end), elapsed=\(end - start), value=\(value)")
+        return value
+    }
+
+    @MainActor
+    private func recordGeometryObservations(_ observations: [String], context: String) {
+        let attachment = XCTAttachment(string: observations.joined(separator: "\n"))
+        attachment.name = context + " — in-wait query observations"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+    }
+
+    @MainActor
+    private func recordGeometryFailure(in app: XCUIApplication, context: String) {
+        // Called only after recording the original wait's failed verdict.
+        // These independent late observations cannot turn it into a pass.
+        let state = XCTAttachment(string: "UTC: \(Date().ISO8601Format())\nApplication state: \(app.state.rawValue)\n\(app.debugDescription)")
+        state.name = context + " — independent post-failure hierarchy"
+        state.lifetime = .keepAlways
+        add(state)
+    }
+
+    @MainActor
     private func assertStationEndpoints(_ labels: [String], in app: XCUIApplication, expanded: Bool = false,
                                         file: StaticString = #filePath, line: UInt = #line)
     {
-        let map = app.descendants(matching: .any)["appleTransitMap"].firstMatch
+        let map = nativeMap(in: app)
+        var observations: [String] = []
         let fitted = NSPredicate { _, _ in MainActor.assumeIsolated {
-            guard map.exists else { return false }
+            guard self.geometryRead("map.exists", observations: &observations, { map.exists }) else { return false }
+            let mapFrame = self.geometryRead("map.frame", observations: &observations) { map.frame }
             let header = app.navigationBars["StandClear"]
             let panel = app.navigationBars["Trip details"]
-            let top = header.exists ? max(map.frame.minY, header.frame.maxY) : map.frame.minY
-            let right = expanded && panel.exists ? min(map.frame.maxX, panel.frame.minX) : map.frame.maxX
+            let hasHeader = self.geometryRead("header.exists", observations: &observations) { header.exists }
+            let top = hasHeader ? max(mapFrame.minY, self.geometryRead("header.frame", observations: &observations) { header.frame }.maxY) : mapFrame.minY
+            let hasPanel = expanded && self.geometryRead("panel.exists", observations: &observations) { panel.exists }
+            let right = hasPanel ? min(mapFrame.maxX, self.geometryRead("panel.frame", observations: &observations) { panel.frame }.minX) : mapFrame.maxX
             return labels.allSatisfy { label in
                 let marker = map.descendants(matching: .any).matching(NSPredicate(format: "label == %@", label)).firstMatch
-                guard marker.exists else { return false }
-                let frame = marker.frame
-                return frame.width > 0 && frame.height > 0 && frame.minY > top && frame.maxY < map.frame.maxY &&
-                    frame.minX >= map.frame.minX && frame.maxX <= right
+                guard self.geometryRead("\(label).exists", observations: &observations, { marker.exists }) else { return false }
+                let frame = self.geometryRead("\(label).frame", observations: &observations) { marker.frame }
+                return frame.width > 0 && frame.height > 0 && frame.minY > top && frame.maxY < mapFrame.maxY &&
+                    frame.minX >= mapFrame.minX && frame.maxX <= right
             }
         } }
         let ready = XCTNSPredicateExpectation(predicate: fitted, object: map)
         let result = XCTWaiter.wait(for: [ready], timeout: 10)
+        XCTAssertEqual(result, .completed, "Named boarding and arrival markers must fit in the exposed map", file: file, line: line)
+        recordGeometryObservations(observations, context: "Station itinerary endpoints — expanded \(expanded)")
         let capture = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         capture.name = "Station itinerary endpoints — expanded \(expanded)"
         capture.lifetime = .keepAlways
         add(capture)
-        XCTAssertEqual(result, .completed, "Named boarding and arrival markers must fit in the exposed map", file: file, line: line)
+        if result != .completed {
+            recordGeometryFailure(in: app, context: "Station itinerary endpoints — expanded \(expanded)")
+        }
     }
 
     @MainActor
     private func assertStationEndpointsCleared(_ labels: [String], in app: XCUIApplication,
                                                file: StaticString = #filePath, line: UInt = #line)
     {
-        let map = app.descendants(matching: .any)["appleTransitMap"].firstMatch
+        let map = nativeMap(in: app)
+        var observations: [String] = []
         let cleared = NSPredicate { _, _ in MainActor.assumeIsolated {
-            guard map.exists else { return false }
-            return !app.buttons["clearMapRoute"].exists &&
-                map.descendants(matching: .any).matching(NSPredicate(format: "label IN %@", labels)).count == 0
+            guard self.geometryRead("map.exists", observations: &observations, { map.exists }) else { return false }
+            return !self.geometryRead("clear button.exists", observations: &observations) { app.buttons["clearMapRoute"].exists } &&
+                self.geometryRead("remaining marker count", observations: &observations) {
+                    map.descendants(matching: .any).matching(NSPredicate(format: "label IN %@", labels)).count
+                } == 0
         } }
-        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: cleared, object: map)], timeout: 5), .completed,
+        let result = XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: cleared, object: map)], timeout: 5)
+        XCTAssertEqual(result, .completed,
                        "Clear route must remove the boarding, arrival, and transfer markers", file: file, line: line)
+        recordGeometryObservations(observations, context: "Cleared station itinerary")
+        if result != .completed {
+            recordGeometryFailure(in: app, context: "Cleared station itinerary")
+        }
     }
 
     @MainActor
