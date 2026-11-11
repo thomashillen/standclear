@@ -2621,32 +2621,66 @@ final class StandClearUITests: XCTestCase {
     }
 
     @MainActor
-    private func placeToolbarFrames(in app: XCUIApplication, intersecting bounds: CGRect? = nil, below top: CGFloat? = nil) -> [CGRect] {
-        let identifiers = ["searchButton", "nearbyButton", "moreButton"]
-        let visible = identifiers.map { app.buttons[$0] }.filter { $0.exists && $0.isHittable }
-        guard !visible.isEmpty else { return [] }
-        var frames = visible.map(\.frame)
-        // SwiftUI's floating bar can expose an Other container rather than a
-        // Toolbar. Exclude its full backing/gesture region, not just its pills.
-        let containers = app.otherElements.containing(.button, identifier: "searchButton")
-            .containing(.button, identifier: "nearbyButton")
-            .containing(.button, identifier: "moreButton")
-        for container in containers.allElementsBoundByAccessibilityElement {
-            let frame = container.frame
-            // Reject full-window/navigation ancestors before traversing their
-            // collection views. These frames are already excluded by the
-            // reveal helper's geometry rules; querying every ancestor's
-            // descendants on every drag adds hundreds of AX round trips.
-            if let bounds, let top,
-               !frame.intersects(bounds) || frame.minY <= top || frame.height >= bounds.height
-            {
-                continue
-            }
-            if !container.collectionViews.firstMatch.exists {
-                frames.append(frame)
-            }
+    private func placeToolbarFrames(in app: XCUIApplication, intersecting bounds: CGRect? = nil, below top: CGFloat? = nil) -> [CGRect]? {
+        let start = ProcessInfo.processInfo.systemUptime
+        var observations: [String] = []
+        defer {
+            observations.append("start=\(start), end=\(ProcessInfo.processInfo.systemUptime)")
+            recordGeometryObservations(observations, context: "Native place toolbar coverage")
         }
-        return frames
+        let identifiers = ["searchButton", "nearbyButton", "moreButton"]
+        // Preserve live hit testing; snapshot presence alone is insufficient.
+        let visible = identifiers.filter { app.buttons[$0].exists && app.buttons[$0].isHittable }
+        observations.append("Live-visible controls: \(visible)")
+        guard !visible.isEmpty else { return [] }
+        do {
+            let root = try app.snapshot()
+            guard root.elementType == .application else { return nil }
+            let elements = snapshotElements(root)
+            func valid(_ frame: CGRect) -> Bool {
+                !frame.isNull && !frame.isInfinite && frame.width > 0 && frame.height > 0
+            }
+            let windows = elements.filter { $0.elementType == .window && valid($0.frame) }.map(\.frame)
+            var paths: [String: [[any XCUIElementSnapshot]]] = [:]
+            func visit(_ element: any XCUIElementSnapshot, ancestors: [any XCUIElementSnapshot]) {
+                if element.elementType == .button, visible.contains(element.identifier) {
+                    paths[element.identifier, default: []].append(ancestors + [element])
+                }
+                for child in element.children {
+                    visit(child, ancestors: ancestors + [element])
+                }
+            }
+            visit(root, ancestors: [])
+            var frames: [CGRect] = []
+            for identifier in visible {
+                guard let matches = paths[identifier], matches.count == 1,
+                      let control = matches[0].last, valid(control.frame),
+                      let windowHeight = windows.filter({ $0.contains(control.frame) }).map(\.height).min() else { return nil }
+                let backings = matches[0].filter {
+                    ($0.elementType == .other || $0.elementType == .toolbar) && valid($0.frame)
+                        && $0.frame.contains(control.frame) && $0.frame.height < windowHeight
+                        && ($0.frame.width > control.frame.width || $0.frame.height > control.frame.height)
+                        && !self.snapshotElements($0).contains { $0.elementType == .collectionView }
+                }
+                observations.append("\(identifier): control=\(control.frame), backing ancestors=\(backings.map(\.frame))")
+                guard !backings.isEmpty else { return nil }
+                frames.append(control.frame)
+                for backing in backings {
+                    let frame = backing.frame
+                    // Retain the existing content/nav/full-height exclusions.
+                    if let bounds, let top,
+                       !frame.intersects(bounds) || frame.minY <= top || frame.height >= bounds.height
+                    {
+                        continue
+                    }
+                    frames.append(frame)
+                }
+            }
+            return frames
+        } catch {
+            observations.append("Snapshot unavailable: \(error)")
+            return nil
+        }
     }
 
     @MainActor
@@ -2657,7 +2691,7 @@ final class StandClearUITests: XCTestCase {
             let control = app.buttons[identifier]
             frames.append("\(identifier): \(control.exists ? String(describing: control.frame) : "absent")")
         }
-        frames.append("Native toolbar containers: \(placeToolbarFrames(in: app))")
+        frames.append("Native toolbar containers: \(String(describing: placeToolbarFrames(in: app)))")
         let keyboard = app.keyboards.firstMatch
         frames.append("Keyboard: \(keyboard.exists ? String(describing: keyboard.frame) : "absent")")
         let geometry = XCTAttachment(string: frames.joined(separator: "\n"))
@@ -2709,7 +2743,12 @@ final class StandClearUITests: XCTestCase {
             let bounds = list.frame
             let top = nav.exists ? max(bounds.minY, nav.frame.maxY) : bounds.minY
             var bottom = bounds.maxY
-            for frame in placeToolbarFrames(in: app, intersecting: bounds, below: top) where frame.intersects(bounds) && frame.minY > top && frame.height < bounds.height {
+            guard let toolbarFrames = placeToolbarFrames(in: app, intersecting: bounds, below: top) else {
+                XCTFail("Native toolbar coverage is unavailable", file: file, line: line)
+                recordPlaceSelectionFailure(context: "Place row toolbar coverage unavailable", target: element)
+                return
+            }
+            for frame in toolbarFrames where frame.intersects(bounds) && frame.minY > top && frame.height < bounds.height {
                 bottom = min(bottom, frame.minY)
             }
             let keyboard = app.keyboards.firstMatch
