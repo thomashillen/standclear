@@ -596,6 +596,12 @@ final class StandClearUITests: XCTestCase {
         app.launch()
         activatePermissionPrompt(in: app)
         let initial = arrivalFeedUpdate(in: app)
+        // Permission/status interactions can outlast the initial simulated fix.
+        // Seed a fresh measurement and use the normal one-shot request before
+        // starting the unchanged countdown window, then restore the map glance.
+        XCUIDevice.shared.location = XCUILocation(location: CLLocation(latitude: 40.7076, longitude: -74.0113))
+        app.buttons["nearbyButton"].tap()
+        app.buttons["Done"].tap()
         let glance = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "glance-419:")).firstMatch
         observeThreeMinuteArrival(glance, renewLocation: true)
         XCTAssertNotEqual(arrivalFeedUpdate(in: app), initial)
@@ -604,6 +610,10 @@ final class StandClearUITests: XCTestCase {
         waitForLayout(in: app, expanded: true)
         app.buttons["nearbyButton"].tap()
         let beforeNearby = arrivalFeedUpdate(in: app)
+        // Refresh the same input/request precondition after the status alert;
+        // keep Nearby visible throughout the actual observation window.
+        XCUIDevice.shared.location = XCUILocation(location: CLLocation(latitude: 40.7076, longitude: -74.0113))
+        app.buttons["nearbyButton"].tap()
         let row = app.collectionViews["stationList"].buttons["arrivalRow-ui-fixture-4-n:419:N"]
         observeThreeMinuteArrival(row, renewLocation: true)
         XCTAssertNotEqual(arrivalFeedUpdate(in: app), beforeNearby)
