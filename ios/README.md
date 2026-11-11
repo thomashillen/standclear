@@ -113,7 +113,11 @@ npm test
 npm run build
 ```
 
-The [original proof-of-concept validation record](docs/validation.md) describes the first milestone’s checks and screenshots. The [earlier map comparison record](docs/map-comparison.md) is historical; neither record validates subsequent changes. The Native iOS workflow builds, analyzes, and runs simulator tests without credentials alongside the existing web CI.
+The [original proof-of-concept validation record](docs/validation.md) describes the first milestone’s checks and screenshots. The [earlier map comparison record](docs/map-comparison.md) is historical; neither record validates subsequent changes. The Native iOS workflow builds, analyzes, and runs simulator tests without credentials alongside the existing web CI. It uses a build/analyze/unit stage followed by two exhaustive UI partitions on fresh runners. Both UI partitions remain serial (`max-parallel: 1` and `-parallel-testing-enabled NO`), with the existing 100-minute cap per job. Each stage builds and enumerates both compiled targets without execution filters before assigning cases; new cases are included mechanically. This adds fresh-build/startup overhead to avoid a single job expiring during result or runner cleanup.
+
+The final **Build, analyze, and test iOS** check is the acceptance gate. It requires successful upstream jobs and exactly three artifacts from the same workflow run and attempt, matching checkout/PR-head identities, tracked source hashes, Xcode/SDK and simulator model/runtime. It checks each job's own unchanged compiled products and retained archive, reparses complete original xcresults, and requires every declared case passed exactly once. Missing, duplicate, skipped, failed, unfinished, unexpected or unreadable evidence fails closed. Independent builds need not have identical executable hashes. The artifacts contain logs, raw enumeration, original results, product hashes/archive and accounting receipts, retained seven days. Partial reruns cannot combine evidence from different attempts. Tests, outcome assertions, deadlines, fixtures and animation/idling behavior are unchanged.
+
+The accounting utility uses only Python's standard library; its focused negative tests run with `python3 -B -m unittest discover -s ios/ci -p 'test_*.py'`. Local CI-protocol qualification should use an isolated clean checkout without ignored signing/configuration files and explicit local run/attempt/source/head environment values; ordinary Xcode development does not require these CI receipts.
 
 ## Limits and next increments
 
