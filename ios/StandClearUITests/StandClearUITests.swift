@@ -74,7 +74,7 @@ final class StandClearUITests: XCTestCase {
             observations.append("deadline=\(deadline), start=\(start), end=\(end), status=\(scene.status), sequence=\(scene.sequence), phase=\(scene.phase), homeExists=\(exists), homeHittable=\(hittable), homeFrame=\(frame)")
             return freshBackground && hittable && visibleFrame && end <= deadline
         } }
-        let result = XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: backgrounded, object: app)], timeout: 5)
+        let result = XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: backgrounded, object: nil)], timeout: 5)
         XCTAssertEqual(result, .completed, "A fresh real scene-background transition after cleanup and hittable Home must occur within five seconds", file: file, line: line)
         // XCTest's tracked application enum is diagnostic, never an alternative
         // pass condition. It can disagree with visible Home (tracked in #340).
