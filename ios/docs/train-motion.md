@@ -127,3 +127,14 @@ Fresh local `build analyze test` on iPhone 17 Pro / iOS 26.4.1 passed **177 test
 The same preparation passed the failed flow on iPhone 18 Pro / iOS 27.2 (`countdown-precondition27.xcresult`), zero failures/skips. Both compact and expanded phases again retained 26 valid three-minute samples, and screenshots were inspected. SwiftFormat passed all 33 files. This does not pass the failed hosted head or establish a provider/framework root cause.
 
 Fresh web lint, TypeScript, all 1,059 tests in 98 files and production build passed after the preparation change. No application or CI accounting source changed in this revision.
+
+
+## Compact More readiness after Done
+
+At `7c9569d`, UI partition 0 completed all 30 cases with **29 passed and one failed case** (two assertion failures). The corrected Nearby countdown passed on the hosted runner. The different failure was More-menu adaptation after narrowing: Done tapped at t57.64, then More at t60.23 computed a hit point of `{-1,-1}`. Arrival status remained absent throughout its original five-second wait. Late hierarchy and screenshot show the Nearby sheet covering the map toolbar. Sampled video frames also retain that sheet; the exact video/log offset is not established. Failed dismissal versus later re-presentation is unknown. No framework/product cause is asserted.
+
+The test's existing five-second post-Done readiness now requires a fresh snapshot with one valid compact More inside its portrait window, no native Done/Sheet Grabber controls, and live enabled/hittable coverage. A monotonic end guard rejects late queries; snapshot errors/ambiguity remain false. It uses a fresh compact lookup before the original native tap. One Done action, all subsequent five-second menu/alert assertions and the two expanded visits remain. There is no dismissal retry, repair gesture, longer wait, application change or idling override. If the sheet remains, the readiness fails before tapping through it, retaining the actual failure for investigation. In-wait frames/times are kept separately from later captures.
+
+Local Xcode 27.2 `build analyze test` on iPhone 17 Pro / iOS 26.4.1 passed **177 tests, zero failures/skips**: 174 units and the failed More flow, inspector adaptation and largest-text More flow. The new record observed a 402×874-point window and More frame (329,803,40,38), no sheet controls and live exposure within about 1.23 seconds of the original five-second readiness. The same failed flow passed on iPhone 18 Pro / iOS 27.2, zero failures/skips; its new record is retained. The compact menu screenshot was inspected. These are local observation qualifications, not proof of the original dismissal's cause or physical Duo acceptance. Fresh full current-head hosted gates/review remain mandatory.
+
+Fresh web lint, TypeScript, all 1,059 tests in 98 files and production build passed after this readiness revision. SwiftFormat for all 33 files and whitespace checks passed.

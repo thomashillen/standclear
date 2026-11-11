@@ -3556,9 +3556,13 @@ final class StandClearUITests: XCTestCase {
                 XCUIDevice.shared.orientation = .portrait
                 waitForLayout(in: app, expanded: false, readyControl: "Done")
                 app.buttons["Done"].tap()
-                XCTAssertTrue(more.waitForExistence(timeout: 5))
-                XCTAssertTrue(more.isEnabled)
-                more.tap()
+                guard waitForCompactMoreAfterDone(in: app) else {
+                    XCTFail("Done must leave an unobstructed compact More control within five seconds")
+                    return
+                }
+                let compactMore = app.buttons["moreButton"]
+                XCTAssertTrue(compactMore.isEnabled)
+                compactMore.tap()
                 XCTAssertTrue(app.buttons["arrivalStatusButton"].waitForExistence(timeout: 5))
                 let compactMenu = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
                 compactMenu.name = "Compact open More menu after narrowing"
@@ -3571,6 +3575,47 @@ final class StandClearUITests: XCTestCase {
                 waitForLayout(in: app, expanded: true)
             }
         }
+    }
+
+    @MainActor
+    private func waitForCompactMoreAfterDone(in app: XCUIApplication) -> Bool {
+        let start = ProcessInfo.processInfo.systemUptime
+        let deadline = start + 5
+        var observations: [String] = []
+        let ready = NSPredicate { _, _ in MainActor.assumeIsolated {
+            do {
+                let root = try app.snapshot()
+                let elements = self.snapshotElements(root)
+                let controls = elements.filter { $0.elementType == .button && $0.identifier == "moreButton" }
+                let sheetControls = elements.filter {
+                    $0.elementType == .button && ($0.label == "Done" || $0.identifier == "Done" || $0.label == "Sheet Grabber")
+                }
+                guard root.elementType == .application,
+                      let window = root.children.first(where: { $0.elementType == .window }),
+                      controls.count == 1
+                else {
+                    observations.append("Missing/ambiguous window or More: count=\(controls.count)")
+                    return false
+                }
+                let bounds = window.frame
+                let frame = controls[0].frame
+                let finite = [bounds.minX, bounds.minY, bounds.width, bounds.height,
+                              frame.minX, frame.minY, frame.width, frame.height].allSatisfy(\.isFinite)
+                let geometry = finite && bounds.width > 0 && bounds.height > bounds.width
+                    && frame.width > 0 && frame.height > 0 && bounds.contains(frame)
+                let more = app.buttons["moreButton"]
+                let exposed = geometry && sheetControls.isEmpty && more.exists && more.isEnabled && more.isHittable
+                let end = ProcessInfo.processInfo.systemUptime
+                observations.append("start=\(start), end=\(end), window=\(bounds), More=\(frame), sheetControls=\(sheetControls.map(\.label)), exposed=\(exposed)")
+                return exposed && end <= deadline
+            } catch {
+                observations.append("Snapshot unavailable: \(error)")
+                return false
+            }
+        } }
+        let result = XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: ready, object: app)], timeout: 5)
+        recordGeometryObservations(observations, context: "Compact More after Done")
+        return result == .completed
     }
 
     @MainActor
