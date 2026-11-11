@@ -5,6 +5,238 @@ import XCTest
 final class StandClearUITests: XCTestCase {
     private let unifiedSearchPrompt = "Address, place or station"
 
+    @MainActor
+    func testLocationGlanceDeniedRecoveryAtDefaultText() {
+        checkLocationGlanceDeniedRecovery(accessibilityText: false)
+    }
+
+    @MainActor
+    func testLocationGlanceDeniedRecoveryAtLargestText() {
+        checkLocationGlanceDeniedRecovery(accessibilityText: true)
+    }
+
+    @MainActor
+    private func checkLocationGlanceDeniedRecovery(accessibilityText: Bool) {
+        let app = launchForMoreMenu(accessibilityText: accessibilityText)
+        defer {
+            app.terminate()
+            XCUIDevice.shared.orientation = .portrait
+        }
+        let status = accessibilityText ? app.buttons["glanceLocationOptions"] : app.staticTexts["Location access is off"].firstMatch
+        XCTAssertTrue(status.waitForExistence(timeout: 10))
+        XCTAssertEqual(status.label, "Location access is off")
+        let text = accessibilityText ? "accessibilityXXXL" : "default"
+        captureLocationGlance(in: app, context: "Denied \(text) portrait")
+        assertLocationGlanceVisible(in: app, accessibilityText: accessibilityText)
+
+        XCUIDevice.shared.orientation = .landscapeLeft
+        let landscape = NSPredicate { _, _ in MainActor.assumeIsolated {
+            let frame = app.windows.firstMatch.frame
+            return frame.width > frame.height && status.exists
+        } }
+        expectation(for: landscape, evaluatedWith: app)
+        waitForExpectations(timeout: 20)
+        captureLocationGlance(in: app, context: "Denied \(text) short landscape")
+        assertLocationGlanceVisible(in: app, accessibilityText: accessibilityText)
+
+        let recovery = accessibilityText ? app.buttons["glanceLocationOptions"] : app.buttons["nearbyButton"]
+        XCTAssertTrue(recovery.isHittable)
+        recovery.tap()
+        XCTAssertTrue(app.navigationBars["Nearby arrivals"].waitForExistence(timeout: 5))
+        let nearbyList = app.collectionViews["stationList"]
+        XCTAssertTrue(nearbyList.staticTexts["Location access is off"].firstMatch.waitForExistence(timeout: 5))
+        let settings = nearbyList.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "Open Settings")).firstMatch
+        XCTAssertTrue(settings.isHittable)
+        XCTAssertTrue(app.windows.firstMatch.frame.contains(settings.frame), "Settings recovery must be exposed in Nearby")
+        captureLocationGlance(in: app, context: "Denied \(text) Nearby recovery")
+        if accessibilityText {
+            let done = app.buttons["Done"]
+            XCTAssertTrue(done.isHittable)
+            done.tap()
+            XCTAssertTrue(app.navigationBars["StandClear"].waitForExistence(timeout: 5))
+            XCTAssertTrue(app.buttons["glanceLocationOptions"].isHittable)
+        }
+    }
+
+    @MainActor
+    func testLocationGlanceFailureOpensDetailsAndRetryRestoresArrivalsAtLargestText() {
+        let app = XCUIApplication()
+        app.terminate()
+        XCUIDevice.shared.orientation = .portrait
+        app.resetAuthorizationStatus(for: .location)
+        XCUIDevice.shared.location = nil
+        app.launchArguments = ["--ui-test-fixture", "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
+        guard let lifecycle = lifecycleProbe(for: app) else { return }
+        defer {
+            app.terminate()
+            XCUIDevice.shared.location = nil
+            XCUIDevice.shared.orientation = .portrait
+            lifecycle.close()
+        }
+        addUIInterruptionMonitor(withDescription: "Location permission") { alert in
+            let allow = alert.buttons["Allow While Using App"]
+            guard allow.exists else { return false }
+            allow.tap()
+            return true
+        }
+        app.launch()
+        activatePermissionPrompt(in: app)
+        let pending = app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "Finding nearby stations…")).firstMatch
+        if pending.exists {
+            captureLocationGlance(in: app, context: "Finding location accessibilityXXXL portrait")
+            XCTAssertFalse(app.buttons["glanceLocationOptions"].exists, "Locating must remain distinct from a failed location")
+            XCUIDevice.shared.orientation = .landscapeLeft
+            let landscape = NSPredicate { _, _ in MainActor.assumeIsolated {
+                let frame = app.windows.firstMatch.frame
+                return frame.width > frame.height
+            } }
+            expectation(for: landscape, evaluatedWith: app)
+            waitForExpectations(timeout: 20)
+            if pending.exists {
+                let start = ProcessInfo.processInfo.systemUptime
+                let frame = pending.frame
+                let viewport = app.scrollViews.firstMatch.frame
+                let map = nativeMap(in: app).frame
+                let observation = "start=\(start), end=\(ProcessInfo.processInfo.systemUptime), pending=\(frame), viewport=\(viewport), map=\(map)"
+                let record = XCTAttachment(string: observation)
+                record.name = "Actual pending short landscape viewport observation"
+                record.lifetime = .keepAlways
+                add(record)
+                print("Actual pending short landscape: \(observation)")
+                captureLocationGlance(in: app, context: "Finding location accessibilityXXXL short landscape")
+                XCTAssertTrue(viewport.contains(frame), "The complete locating indicator and status must fit inside the visible glance")
+                XCTAssertTrue(map.contains(frame), "Locating status must remain in the exposed map")
+            } else {
+                let gap = XCTAttachment(string: "The real location request ended before short landscape could be measured; no stable loading state was manufactured.")
+                gap.name = "Pending short landscape observation gap"
+                gap.lifetime = .keepAlways
+                add(gap)
+            }
+            XCUIDevice.shared.orientation = .portrait
+            let portrait = NSPredicate { _, _ in MainActor.assumeIsolated {
+                let frame = app.windows.firstMatch.frame
+                return frame.height > frame.width
+            } }
+            expectation(for: portrait, evaluatedWith: app)
+            waitForExpectations(timeout: 20)
+        }
+        let help = app.buttons["glanceLocationOptions"]
+        let failed = NSPredicate(format: "exists == true AND label == %@", "Location unavailable")
+        expectation(for: failed, evaluatedWith: help)
+        waitForExpectations(timeout: 30)
+        captureLocationGlance(in: app, context: "Failed location accessibilityXXXL portrait")
+        assertLocationGlanceVisible(in: app, accessibilityText: true)
+        XCUIDevice.shared.orientation = .landscapeLeft
+        let landscape = NSPredicate { _, _ in MainActor.assumeIsolated {
+            let frame = app.windows.firstMatch.frame
+            return frame.width > frame.height && help.exists && help.label == "Location unavailable"
+        } }
+        expectation(for: landscape, evaluatedWith: app)
+        waitForExpectations(timeout: 20)
+        captureLocationGlance(in: app, context: "Failed location accessibilityXXXL short landscape")
+        assertLocationGlanceVisible(in: app, accessibilityText: true)
+        help.tap()
+        XCTAssertTrue(app.navigationBars["Nearby arrivals"].waitForExistence(timeout: 5))
+        let message = app.staticTexts["Your location is unavailable. Try again or search for a station."].firstMatch
+        XCTAssertTrue(message.waitForExistence(timeout: 5), "Passive help must preserve the complete failure until the rider chooses Retry")
+        XCTAssertFalse(app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "Waiting for your location…")).firstMatch.exists)
+        XCUIDevice.shared.orientation = .portrait
+        let portrait = NSPredicate { _, _ in MainActor.assumeIsolated {
+            let frame = app.windows.firstMatch.frame
+            return frame.height > frame.width && message.exists
+        } }
+        expectation(for: portrait, evaluatedWith: app)
+        waitForExpectations(timeout: 20)
+        let retry = app.buttons["Retry location"]
+        revealPlaceElement(retry, in: app.collectionViews["stationList"])
+        XCTAssertTrue(message.exists, "Opening and rotating help must not restart location or replace the error")
+        XCTAssertTrue(retry.isHittable)
+        captureLocationGlance(in: app, context: "Failed location preserved in Nearby before explicit Retry")
+        XCUIDevice.shared.location = XCUILocation(location: CLLocation(latitude: 40.7553, longitude: -73.987))
+        retry.tap()
+        XCTAssertTrue(app.collectionViews["stationList"].buttons["station-127"].waitForExistence(timeout: 30))
+        XCTAssertFalse(message.exists)
+        app.buttons["Done"].tap()
+        let glance = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "glance-")).firstMatch
+        XCTAssertTrue(glance.waitForExistence(timeout: 10))
+        XCTAssertTrue(app.descendants(matching: .any)["userLocationDot"].exists)
+        XCTAssertFalse(help.exists)
+        captureLocationGlance(in: app, context: "Fresh fix restores accessibilityXXXL arrivals glance")
+        enterBackground(in: app, probe: lifecycle)
+    }
+
+    @MainActor
+    private func assertLocationGlanceVisible(in app: XCUIApplication, accessibilityText: Bool,
+                                             file: StaticString = #filePath, line: UInt = #line)
+    {
+        let viewport = app.scrollViews.firstMatch
+        XCTAssertTrue(viewport.exists, file: file, line: line)
+        let bounds = viewport.frame
+        let mapBounds = nativeMap(in: app).frame
+        let status = accessibilityText ? app.buttons["glanceLocationOptions"] : app.staticTexts["Location access is off"].firstMatch
+        let recovery = accessibilityText ? status : app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "Open Settings")).firstMatch
+        for element in [status, recovery] {
+            XCTAssertTrue(element.exists, file: file, line: line)
+            let frame = element.frame
+            XCTAssertGreaterThan(frame.width, 0, file: file, line: line)
+            XCTAssertGreaterThan(frame.height, 0, file: file, line: line)
+            XCTAssertTrue(bounds.contains(frame), "The complete location status and recovery action must fit in the visible glance: \(frame) within \(bounds)", file: file, line: line)
+            XCTAssertTrue(mapBounds.contains(frame), "Location recovery must stay inside the exposed map", file: file, line: line)
+            XCTAssertTrue(element.isHittable, file: file, line: line)
+        }
+        if accessibilityText {
+            XCTAssertGreaterThanOrEqual(recovery.frame.height, 44, file: file, line: line)
+        }
+    }
+
+    @MainActor
+    private func captureLocationGlance(in app: XCUIApplication, context: String) {
+        var observations: [String] = []
+        func observe(_ name: String, _ element: XCUIElement) {
+            let start = ProcessInfo.processInfo.systemUptime
+            let exists = element.exists
+            let frame = exists ? element.frame : .zero
+            let hittable = exists && element.isHittable
+            observations.append("\(name): start=\(start), end=\(ProcessInfo.processInfo.systemUptime), exists=\(exists), frame=\(frame), hittable=\(hittable), type=\(exists ? Int(element.elementType.rawValue) : -1), label=\(exists ? element.label : "<absent>")")
+        }
+        observe("window", app.windows.firstMatch)
+        observe("map", nativeMap(in: app))
+        observe("map header", app.navigationBars["StandClear"])
+        observe("location status", app.staticTexts["Location access is off"].firstMatch)
+        observe("location help", app.buttons["glanceLocationOptions"])
+        observe("location failure", app.staticTexts["Location unavailable"].firstMatch)
+        observe("location failure message", app.staticTexts["Your location is unavailable. Try again or search for a station."].firstMatch)
+        observe("location Retry", app.buttons["Retry location"])
+        observe("location pending", app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "Finding nearby stations…")).firstMatch)
+        // SwiftUI Link reports different modern/legacy automation types on iOS 26.
+        observe("Open Settings recovery", app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "Open Settings")).firstMatch)
+        observe("Nearby control", app.buttons["nearbyButton"])
+        let nearbyList = app.collectionViews["stationList"]
+        observe("Nearby location status", nearbyList.staticTexts["Location access is off"].firstMatch)
+        observe("Nearby Settings recovery", nearbyList.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "Open Settings")).firstMatch)
+        let map = nativeMap(in: app)
+        for route in ["1", "4"] {
+            observe("Route \(route) train", map.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "Route \(route) train. Estimated position.")).firstMatch)
+        }
+        for (index, scroll) in app.scrollViews.allElementsBoundByIndex.enumerated() {
+            observe("scroll view \(index)", scroll)
+        }
+        let record = observations.joined(separator: "\n")
+        print("Location glance geometry \(context):\n\(record)")
+        let geometry = XCTAttachment(string: record)
+        geometry.name = context + " public AX geometry"
+        geometry.lifetime = .keepAlways
+        add(geometry)
+        let hierarchy = XCTAttachment(string: app.debugDescription)
+        hierarchy.name = context + " public AX hierarchy"
+        hierarchy.lifetime = .keepAlways
+        add(hierarchy)
+        let screenshot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        screenshot.name = context
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+    }
+
     /// A per-launch observation channel; the runner never writes a lifecycle state.
     @MainActor
     private final class LifecycleProbe {
@@ -141,11 +373,12 @@ final class StandClearUITests: XCTestCase {
         let train = app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "Route 1 train. Estimated position.")).firstMatch
         XCTAssertTrue(train.waitForExistence(timeout: 10))
         if largeText {
-            // Keep the actual train visible below the large permission card.
-            // Drag the unobscured map edge, away from the fixture control.
-            let map = nativeMap(in: app)
-            map.coordinate(withNormalizedOffset: CGVector(dx: 0.85, dy: 0.68))
-                .press(forDuration: 0.05, thenDragTo: map.coordinate(withNormalizedOffset: CGVector(dx: 0.85, dy: 0.88)))
+            let glance = app.scrollViews.firstMatch
+            XCTAssertTrue(glance.exists)
+            let trainFrame = train.frame
+            let glanceFrame = glance.frame
+            captureLocationGlance(in: app, context: "Largest text station-motion train without map panning")
+            XCTAssertFalse(trainFrame.intersects(glanceFrame), "The location glance must leave the fixture train visible without moving the map")
         }
         func capture(_ name: String) {
             let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())

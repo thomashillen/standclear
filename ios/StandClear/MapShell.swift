@@ -287,7 +287,11 @@ struct MapShell: View {
     }
 
     private func map(statusWidth: CGFloat, coveredWidth: CGFloat, coveredBottom: CGFloat, maximumGlanceHeight: CGFloat) -> some View {
-        ZStack(alignment: .topLeading) {
+        let availableGlanceWidth = max(0, statusWidth - 32)
+        let glanceWidth = typeSize.isAccessibilitySize && location.availableCoordinate == nil
+            ? availableGlanceWidth
+            : min(typeSize.isAccessibilitySize ? 260 : 220, availableGlanceWidth)
+        return ZStack(alignment: .topLeading) {
             AppleTransitMap(store: store, mapExposed: panel == nil || sheetDetent != .large, focusedCoordinate: focus.coordinate, focusRevision: focus.revision,
                             coveredWidth: coveredWidth, coveredBottom: coveredBottom, currentLocation: location.availableCoordinate,
                             tripOverlays: tripOverlays, tripFocusRevision: tripFocusRevision,
@@ -298,8 +302,9 @@ struct MapShell: View {
                 NearbyGlancePanel(store: store, location: location,
                                   maximumHeight: maximumGlanceHeight,
                                   openStation: { showGlanceStation($0, expanded: isWide) },
-                                  openNearby: { showNearby(expanded: isWide) })
-                    .frame(maxWidth: min(typeSize.isAccessibilitySize ? 260 : 220, max(0, statusWidth - 32)))
+                                  openNearby: { showNearby(expanded: isWide) },
+                                  openLocationHelp: { presentNearby(expanded: isWide) })
+                    .frame(maxWidth: glanceWidth)
                     .padding()
                     .frame(maxWidth: statusWidth, alignment: .leading)
             }
@@ -374,6 +379,13 @@ struct MapShell: View {
     }
 
     private func showNearby(expanded: Bool) {
+        presentNearby(expanded: expanded)
+        focus.requestNearby(location.availableCoordinate)
+        location.start()
+    }
+
+    /// Location help preserves the current failure until the rider chooses Retry.
+    private func presentNearby(expanded: Bool) {
         selectedTrip = nil
         sheetDetent = typeSize.isAccessibilitySize ? .large : .medium
         if expanded {
@@ -383,8 +395,6 @@ struct MapShell: View {
             nearbyPath = []
             panel = .nearby
         }
-        focus.requestNearby(location.availableCoordinate)
-        location.start()
     }
 
     private func showGlanceStation(_ id: String, expanded: Bool) {
