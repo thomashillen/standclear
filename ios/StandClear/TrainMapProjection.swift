@@ -11,6 +11,7 @@ struct TrainMapMarker: Identifiable {
     let color: String
     let textColor: String
     let opacity: Double
+    var reconciling: Bool = false
     var stale: Bool {
         opacity < 1
     }
@@ -20,6 +21,28 @@ struct TrainMapMarker: Identifiable {
             return "\(base) Express"
         }
         return ["GS", "FS", "H"].contains(routeID) ? "S" : displayLetter
+    }
+}
+
+/// Shared marker wording stays truthful when reconciliation freezes at the
+/// vehicle freshness cap or its target comes from an arrival prediction.
+enum TrainMarkerPresentation {
+    static func uncertaintyCaption(_ marker: TrainMapMarker) -> String? {
+        marker.reconciling ? "Estimated position" : nil
+    }
+
+    static func accessibilityValue(_ marker: TrainMapMarker) -> String {
+        var details: [String] = []
+        if marker.bearingDegrees == nil {
+            details.append("Travel direction is unavailable")
+        }
+        if marker.reconciling {
+            details.append("Current position is uncertain")
+        }
+        if marker.stale {
+            details.append("Position report is over 90 seconds old")
+        }
+        return details.joined(separator: ". ")
     }
 }
 

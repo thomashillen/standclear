@@ -1,8 +1,198 @@
 import CoreLocation
+import notify
 import XCTest
 
 final class StandClearUITests: XCTestCase {
     private let unifiedSearchPrompt = "Address, place or station"
+
+    /// A per-launch observation channel; the runner never writes a lifecycle state.
+    @MainActor
+    private final class LifecycleProbe {
+        let session: UUID
+        private let token: Int32
+        private var closed = false
+
+        init?() {
+            let session = UUID()
+            var registered: Int32 = -1
+            let name = "app.standclear.native.ui-test.lifecycle." + session.uuidString
+            let status = notify_register_check(name, &registered)
+            guard status == UInt32(NOTIFY_STATUS_OK) else {
+                XCTFail("Lifecycle observation registration failed: \(status)")
+                return nil
+            }
+            self.session = session
+            token = registered
+        }
+
+        func read() -> (status: UInt32, sequence: UInt64, phase: UInt64) {
+            var state: UInt64 = 0
+            let status = notify_get_state(token, &state)
+            return (status, state >> 8, state & 255)
+        }
+
+        func close() {
+            guard !closed else { return }
+            closed = true
+            XCTAssertEqual(notify_cancel(token), UInt32(NOTIFY_STATUS_OK), "Lifecycle observation must release its token")
+        }
+    }
+
+    @MainActor
+    private func lifecycleProbe(for app: XCUIApplication) -> LifecycleProbe? {
+        guard let probe = LifecycleProbe() else { return nil }
+        app.launchArguments += ["--ui-test-lifecycle"]
+        app.launchEnvironment["STANDCLEAR_UI_LIFECYCLE_SESSION"] = probe.session.uuidString
+        return probe
+    }
+
+    @MainActor
+    private func enterBackground(in app: XCUIApplication, probe: LifecycleProbe,
+                                 file: StaticString = #filePath, line: UInt = #line)
+    {
+        let active = probe.read()
+        XCTAssertEqual(active.status, UInt32(NOTIFY_STATUS_OK), file: file, line: line)
+        XCTAssertEqual(active.phase, 1, "The app must report its actual active scene before Home", file: file, line: line)
+        XCTAssertGreaterThan(active.sequence, 0, file: file, line: line)
+        guard active.status == UInt32(NOTIFY_STATUS_OK), active.phase == 1, active.sequence > 0 else { return }
+        // The first SpringBoard Icon can be a zero-size layout placeholder.
+        // Safari is an installed, visible system Dock icon in these simulators.
+        let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        let home = springboard.icons["Safari"]
+        var observations: [String] = []
+        XCUIDevice.shared.press(.home)
+        let deadline = ProcessInfo.processInfo.systemUptime + 5
+        let backgrounded = NSPredicate { _, _ in MainActor.assumeIsolated {
+            let start = ProcessInfo.processInfo.systemUptime
+            let scene = probe.read()
+            let freshBackground = scene.status == UInt32(NOTIFY_STATUS_OK) && scene.phase == 3 && scene.sequence > active.sequence
+            let exists = freshBackground && home.exists
+            let hittable = exists && home.isHittable
+            let frame = hittable ? home.frame : .zero
+            let visibleFrame = frame.width.isFinite && frame.height.isFinite && frame.width > 0 && frame.height > 0
+            let end = ProcessInfo.processInfo.systemUptime
+            observations.append("deadline=\(deadline), start=\(start), end=\(end), status=\(scene.status), sequence=\(scene.sequence), phase=\(scene.phase), homeExists=\(exists), homeHittable=\(hittable), homeFrame=\(frame)")
+            return freshBackground && hittable && visibleFrame && end <= deadline
+        } }
+        let result = XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: backgrounded, object: app)], timeout: 5)
+        XCTAssertEqual(result, .completed, "A fresh real scene-background transition after cleanup and hittable Home must occur within five seconds", file: file, line: line)
+        // XCTest's tracked application enum is diagnostic, never an alternative
+        // pass condition. It can disagree with visible Home (tracked in #340).
+        observations.append("post-verdict trackedAppState=\(app.state.rawValue), time=\(ProcessInfo.processInfo.systemUptime)")
+        let record = observations.joined(separator: "\n")
+        print("Lifecycle background observation: \(record)")
+        let attachment = XCTAttachment(string: record)
+        attachment.name = "Real scene background and SpringBoard observations"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+        let screen = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        screen.name = "Home immediately after lifecycle verdict"
+        screen.lifetime = .keepAlways
+        add(screen)
+        if result != .completed {
+            let hierarchy = XCTAttachment(string: springboard.debugDescription)
+            hierarchy.name = "SpringBoard after failed lifecycle verdict"
+            hierarchy.lifetime = .keepAlways
+            add(hierarchy)
+        }
+    }
+
+    @MainActor
+    func testStationObservationReconciliationOnNativeMap() {
+        checkStationObservationReconciliation(expanded: false, largeText: false)
+    }
+
+    @MainActor
+    func testStationObservationReconciliationExpanded() {
+        checkStationObservationReconciliation(expanded: true, largeText: false)
+    }
+
+    @MainActor
+    func testStationObservationReconciliationAtLargestText() {
+        checkStationObservationReconciliation(expanded: false, largeText: true)
+    }
+
+    @MainActor
+    private func checkStationObservationReconciliation(expanded: Bool, largeText: Bool) {
+        let app = XCUIApplication()
+        app.terminate()
+        XCUIDevice.shared.orientation = .portrait
+        app.resetAuthorizationStatus(for: .location)
+        app.launchArguments = ["--ui-test-fixture", "--ui-test-station-motion", "--ui-test-motion-clock"]
+        if !expanded, !largeText {
+            app.launchArguments += ["--ui-test-motion-close-zoom", "--ui-test-motion-heading"]
+        }
+        if largeText {
+            app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
+        }
+        addUIInterruptionMonitor(withDescription: "Location permission") { alert in
+            let deny = alert.buttons["Don’t Allow"]
+            guard deny.exists else { return false }
+            deny.tap()
+            return true
+        }
+        app.launch()
+        XCTAssertTrue(app.buttons["moreButton"].waitForExistence(timeout: 15))
+        activatePermissionPrompt(in: app)
+        if expanded {
+            XCUIDevice.shared.orientation = .landscapeLeft
+            waitForLayout(in: app, expanded: true)
+        }
+        let train = app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "Route 1 train. Estimated position.")).firstMatch
+        XCTAssertTrue(train.waitForExistence(timeout: 10))
+        if largeText {
+            // Keep the actual train visible below the large permission card.
+            // Drag the unobscured map edge, away from the fixture control.
+            let map = nativeMap(in: app)
+            map.coordinate(withNormalizedOffset: CGVector(dx: 0.85, dy: 0.68))
+                .press(forDuration: 0.05, thenDragTo: map.coordinate(withNormalizedOffset: CGVector(dx: 0.85, dy: 0.88)))
+        }
+        func capture(_ name: String) {
+            let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            attachment.name = name
+            attachment.lifetime = .keepAlways
+            add(attachment)
+        }
+        capture("Station observation before update")
+        let advance = app.buttons["advanceMotionFixture"]
+        let ready = NSPredicate(format: "value == %@ AND enabled == true", "0")
+        expectation(for: ready, evaluatedWith: advance)
+        waitForExpectations(timeout: 8)
+        func step(to stage: Int) {
+            advance.tap()
+            let held = NSPredicate(format: "value == %@", String(stage))
+            expectation(for: held, evaluatedWith: advance)
+            waitForExpectations(timeout: 8)
+        }
+        step(to: 1) // New generation anchors entry; station remains unchanged.
+        step(to: 2) // Adjacent station report starts the production transition.
+        let uncertain = NSPredicate(format: "value CONTAINS %@", "Current position is uncertain")
+        expectation(for: uncertain, evaluatedWith: train)
+        waitForExpectations(timeout: 25)
+        XCTAssertEqual(train.value as? String, !expanded && !largeText ? "Current position is uncertain"
+            : "Travel direction is unavailable. Current position is uncertain")
+        step(to: 3)
+        let start = train.frame
+        capture("Estimated position caption at reconciliation start")
+        step(to: 4)
+        let moved = NSPredicate { _, _ in
+            MainActor.assumeIsolated {
+                let frame = train.frame
+                return hypot(frame.midX - start.midX, frame.midY - start.midY) > 0.5
+            }
+        }
+        expectation(for: moved, evaluatedWith: train)
+        waitForExpectations(timeout: 8)
+        let middle = train.frame
+        capture("Estimated position caption during route reconciliation")
+        XCTAssertGreaterThan(hypot(middle.midX - start.midX, middle.midY - start.midY), 0.5)
+        step(to: 5)
+        let settled = NSPredicate(format: "NOT (value CONTAINS %@)", "Current position is uncertain")
+        expectation(for: settled, evaluatedWith: train)
+        waitForExpectations(timeout: 8)
+        capture("Observed station reconciliation settled")
+        XCTAssertTrue((train.value as? String ?? "").contains("Travel direction is unavailable"))
+    }
 
     @MainActor
     func testPlaceRouteCanCollapseRestoreAndClear() {
@@ -203,11 +393,23 @@ final class StandClearUITests: XCTestCase {
             }
             expectation(for: NSPredicate(format: "NOT value CONTAINS %@", interchange), evaluatedWith: map)
             waitForExpectations(timeout: 10)
-            assertStationEndpointsCleared(["Board at Wall St", interchange, "Arrive at Broadway"], in: app)
             let stationCapture = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
             stationCapture.name = fromLines ? "New Lines station with native Done control" : "New Search station with native Done control"
             stationCapture.lifetime = .keepAlways; add(stationCapture)
-            app.buttons["Done"].tap()
+            // Done can clear a selected route. Dismiss interactively instead,
+            // exposing the map without invoking that potentially mutating action.
+            let grabber = app.buttons["Sheet Grabber"]
+            XCTAssertTrue(grabber.waitForExistence(timeout: 5))
+            let start = grabber.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+            let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.97))
+            start.press(forDuration: 0.1, thenDragTo: end, withVelocity: .fast, thenHoldForDuration: 0)
+            guard grabber.waitForNonExistence(timeout: 5) else {
+                XCTFail("Native station sheet must dismiss before checking the exposed map")
+                return
+            }
+            expectation(for: NSPredicate(format: "NOT value CONTAINS %@", interchange), evaluatedWith: map)
+            waitForExpectations(timeout: 10)
+            assertStationEndpointsCleared(["Board at Wall St", interchange, "Arrive at Broadway"], in: app)
             let focused = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
             focused.name = fromLines ? "Explicit new Lines station clears trip and focuses Queensboro Plaza" : "Explicit new Search station clears trip and focuses Wall St"
             focused.lifetime = .keepAlways; add(focused)
@@ -394,6 +596,12 @@ final class StandClearUITests: XCTestCase {
         app.launch()
         activatePermissionPrompt(in: app)
         let initial = arrivalFeedUpdate(in: app)
+        // Permission/status interactions can outlast the initial simulated fix.
+        // Seed a fresh measurement and use the normal one-shot request before
+        // starting the unchanged countdown window, then restore the map glance.
+        XCUIDevice.shared.location = XCUILocation(location: CLLocation(latitude: 40.7076, longitude: -74.0113))
+        app.buttons["nearbyButton"].tap()
+        app.buttons["Done"].tap()
         let glance = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "glance-419:")).firstMatch
         observeThreeMinuteArrival(glance, renewLocation: true)
         XCTAssertNotEqual(arrivalFeedUpdate(in: app), initial)
@@ -402,6 +610,10 @@ final class StandClearUITests: XCTestCase {
         waitForLayout(in: app, expanded: true)
         app.buttons["nearbyButton"].tap()
         let beforeNearby = arrivalFeedUpdate(in: app)
+        // Refresh the same input/request precondition after the status alert;
+        // keep Nearby visible throughout the actual observation window.
+        XCUIDevice.shared.location = XCUILocation(location: CLLocation(latitude: 40.7076, longitude: -74.0113))
+        app.buttons["nearbyButton"].tap()
         let row = app.collectionViews["stationList"].buttons["arrivalRow-ui-fixture-4-n:419:N"]
         observeThreeMinuteArrival(row, renewLocation: true)
         XCTAssertNotEqual(arrivalFeedUpdate(in: app), beforeNearby)
@@ -414,6 +626,8 @@ final class StandClearUITests: XCTestCase {
         XCUIDevice.shared.orientation = .portrait
         app.resetAuthorizationStatus(for: .location)
         app.launchArguments = ["--ui-test-fixture", "--ui-test-temporal-motion"]
+        guard let lifecycle = lifecycleProbe(for: app) else { return }
+        defer { lifecycle.close() }
         addUIInterruptionMonitor(withDescription: "Location permission") { alert in
             guard alert.buttons["Don’t Allow"].exists else { return false }
             alert.buttons["Don’t Allow"].tap()
@@ -454,12 +668,7 @@ final class StandClearUITests: XCTestCase {
         }
 
         observeMovement("initial foreground")
-        XCUIDevice.shared.press(.home)
-        let backgrounded = NSPredicate { _, _ in MainActor.assumeIsolated {
-            app.state == .runningBackground || app.state == .runningBackgroundSuspended
-        } }
-        expectation(for: backgrounded, evaluatedWith: app)
-        waitForExpectations(timeout: 5)
+        enterBackground(in: app, probe: lifecycle)
         app.activate()
         XCTAssertTrue(train.waitForExistence(timeout: 10))
         XCTAssertTrue(reference.waitForExistence(timeout: 10))
@@ -1822,6 +2031,8 @@ final class StandClearUITests: XCTestCase {
         if largeType {
             app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
         }
+        guard let lifecycle = lifecycleProbe(for: app) else { return }
+        defer { lifecycle.close() }
         addUIInterruptionMonitor(withDescription: "Location permission") { alert in
             guard alert.buttons["Don’t Allow"].exists else { return false }
             alert.buttons["Don’t Allow"].tap()
@@ -1910,12 +2121,7 @@ final class StandClearUITests: XCTestCase {
         // Choosing the existing destination is also a no-op for route selection.
         guard chooseDestination("Madison", id: "fixture-550-madison") else { return }
         XCTAssertEqual(map.value as? String, updatedRoute)
-        XCUIDevice.shared.press(.home)
-        let backgrounded = NSPredicate { _, _ in MainActor.assumeIsolated {
-            app.state == .runningBackground || app.state == .runningBackgroundSuspended
-        } }
-        expectation(for: backgrounded, evaluatedWith: app)
-        waitForExpectations(timeout: 5)
+        enterBackground(in: app, probe: lifecycle)
         app.activate()
         XCTAssertTrue(destination.waitForExistence(timeout: 10))
         XCTAssertTrue(origin.label.contains("55 Wall Street"))
@@ -2106,9 +2312,7 @@ final class StandClearUITests: XCTestCase {
         mapAction.lifetime = .keepAlways
         add(mapAction)
         showMap.tap()
-        let map = nativeMap(in: app)
-        expectation(for: NSPredicate(format: "value CONTAINS %@", instruction), evaluatedWith: map)
-        waitForExpectations(timeout: 10)
+        assertStationMapSummary(instruction, in: app)
         let endpoints = ["Board at Wall St", "Arrive at Astoria Blvd"]
         assertStationEndpoints(endpoints, in: app, expanded: expanded)
         app.buttons["clearMapRoute"].tap()
@@ -2161,26 +2365,41 @@ final class StandClearUITests: XCTestCase {
         XCTAssertGreaterThan(sheetHeader.frame.height, 0)
         let labels = ["The Noguchi Museum", "Wall St", "Change to N/W at Lexington Av/59 St"]
         var framingObservations: [String] = []
+        let framingDeadline = ProcessInfo.processInfo.systemUptime + 8
         let fitted = NSPredicate { _, _ in MainActor.assumeIsolated {
-            // Read shared bounds once per evaluation, not four times for each
-            // pin. Repeated AX round trips can consume the entire fit deadline
-            // before the third pin is observed on the hosted simulator.
-            let headerFrame = self.geometryRead("header.frame", observations: &framingObservations) { header.frame }
-            let sheetFrame = self.geometryRead("sheet.frame", observations: &framingObservations) { sheetHeader.frame }
-            let mapFrame = self.geometryRead("map.frame", observations: &framingObservations) { map.frame }
-            return labels.allSatisfy { label in
-                let pin = map.descendants(matching: .any).matching(NSPredicate(format: "label == %@", label)).firstMatch
-                guard self.geometryRead("\(label).exists", observations: &framingObservations, { pin.exists }) else { return false }
-                let frame = self.geometryRead("\(label).frame", observations: &framingObservations) { pin.frame }
-                return frame.width > 0 && frame.height > 0 &&
-                    frame.minY > headerFrame.maxY && frame.maxY < sheetFrame.minY &&
-                    frame.minX >= mapFrame.minX && frame.maxX <= mapFrame.maxX
+            guard let snapshot = self.geometrySnapshot(in: app, observations: &framingObservations) else { return false }
+            let headers = snapshot.elements.filter { $0.elementType == .navigationBar && ($0.identifier == "StandClear" || $0.label == "StandClear") }
+            let sheets = snapshot.elements.filter { $0.elementType == .navigationBar && ($0.identifier == "Route preview" || $0.label == "Route preview") }
+            framingObservations.append("headers=\(headers.map(\.frame)), sheets=\(sheets.map(\.frame))")
+            guard headers.count == 1, sheets.count == 1, let headerFrame = headers.first?.frame, let sheetFrame = sheets.first?.frame,
+                  headerFrame.height > 0, sheetFrame.height > 0 else { return false }
+            let mapFrame = snapshot.map.frame
+            var fits = true
+            for label in labels {
+                let pins = snapshot.descendants.filter { $0.label == label }
+                framingObservations.append("\(label): frames=\(pins.map(\.frame))")
+                if pins.isEmpty {
+                    fits = false
+                }
+                for pin in pins {
+                    let frame = pin.frame
+                    if !(frame.width > 0 && frame.height > 0 &&
+                        frame.minY > headerFrame.maxY && frame.maxY < sheetFrame.minY &&
+                        frame.minX >= mapFrame.minX && frame.maxX <= mapFrame.maxX)
+                    {
+                        fits = false
+                    }
+                }
             }
+            let end = ProcessInfo.processInfo.systemUptime
+            framingObservations.append("fit verdict=\(fits), end=\(end), deadline=\(framingDeadline)")
+            return fits && end <= framingDeadline
         } }
         // Allow native sheet dismissal and camera framing to settle. The old
         // top-safe-area override leaves these pins behind the header indefinitely.
         let fit = XCTNSPredicateExpectation(predicate: fitted, object: map)
         let result = XCTWaiter.wait(for: [fit], timeout: 8)
+        XCTAssertEqual(result, .completed, "Boarding, transfer, and destination pins must fit between the header and route sheet")
         let capture = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         capture.name = "Manual Wall St origin initial compact itinerary framing"
         capture.lifetime = .keepAlways
@@ -2193,7 +2412,6 @@ final class StandClearUITests: XCTestCase {
         observations.name = "Compact itinerary in-wait framing observations"
         observations.lifetime = .keepAlways
         add(observations)
-        XCTAssertEqual(result, .completed, "Boarding, transfer, and destination pins must fit between the header and route sheet")
         XCTAssertFalse(map.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "Board at Wall St")).firstMatch.exists,
                        "Place journeys must retain their existing platform marker rather than duplicate station-only endpoints")
     }
@@ -2411,32 +2629,66 @@ final class StandClearUITests: XCTestCase {
     }
 
     @MainActor
-    private func placeToolbarFrames(in app: XCUIApplication, intersecting bounds: CGRect? = nil, below top: CGFloat? = nil) -> [CGRect] {
-        let identifiers = ["searchButton", "nearbyButton", "moreButton"]
-        let visible = identifiers.map { app.buttons[$0] }.filter { $0.exists && $0.isHittable }
-        guard !visible.isEmpty else { return [] }
-        var frames = visible.map(\.frame)
-        // SwiftUI's floating bar can expose an Other container rather than a
-        // Toolbar. Exclude its full backing/gesture region, not just its pills.
-        let containers = app.otherElements.containing(.button, identifier: "searchButton")
-            .containing(.button, identifier: "nearbyButton")
-            .containing(.button, identifier: "moreButton")
-        for container in containers.allElementsBoundByAccessibilityElement {
-            let frame = container.frame
-            // Reject full-window/navigation ancestors before traversing their
-            // collection views. These frames are already excluded by the
-            // reveal helper's geometry rules; querying every ancestor's
-            // descendants on every drag adds hundreds of AX round trips.
-            if let bounds, let top,
-               !frame.intersects(bounds) || frame.minY <= top || frame.height >= bounds.height
-            {
-                continue
-            }
-            if !container.collectionViews.firstMatch.exists {
-                frames.append(frame)
-            }
+    private func placeToolbarFrames(in app: XCUIApplication, intersecting bounds: CGRect? = nil, below top: CGFloat? = nil) -> [CGRect]? {
+        let start = ProcessInfo.processInfo.systemUptime
+        var observations: [String] = []
+        defer {
+            observations.append("start=\(start), end=\(ProcessInfo.processInfo.systemUptime)")
+            recordGeometryObservations(observations, context: "Native place toolbar coverage")
         }
-        return frames
+        let identifiers = ["searchButton", "nearbyButton", "moreButton"]
+        // Preserve live hit testing; snapshot presence alone is insufficient.
+        let visible = identifiers.filter { app.buttons[$0].exists && app.buttons[$0].isHittable }
+        observations.append("Live-visible controls: \(visible)")
+        guard !visible.isEmpty else { return [] }
+        do {
+            let root = try app.snapshot()
+            guard root.elementType == .application else { return nil }
+            let elements = snapshotElements(root)
+            func valid(_ frame: CGRect) -> Bool {
+                !frame.isNull && !frame.isInfinite && frame.width > 0 && frame.height > 0
+            }
+            let windows = elements.filter { $0.elementType == .window && valid($0.frame) }.map(\.frame)
+            var paths: [String: [[any XCUIElementSnapshot]]] = [:]
+            func visit(_ element: any XCUIElementSnapshot, ancestors: [any XCUIElementSnapshot]) {
+                if element.elementType == .button, visible.contains(element.identifier) {
+                    paths[element.identifier, default: []].append(ancestors + [element])
+                }
+                for child in element.children {
+                    visit(child, ancestors: ancestors + [element])
+                }
+            }
+            visit(root, ancestors: [])
+            var frames: [CGRect] = []
+            for identifier in visible {
+                guard let matches = paths[identifier], matches.count == 1,
+                      let control = matches[0].last, valid(control.frame),
+                      let windowHeight = windows.filter({ $0.contains(control.frame) }).map(\.height).min() else { return nil }
+                let backings = matches[0].filter {
+                    ($0.elementType == .other || $0.elementType == .toolbar) && valid($0.frame)
+                        && $0.frame.contains(control.frame) && $0.frame.height < windowHeight
+                        && ($0.frame.width > control.frame.width || $0.frame.height > control.frame.height)
+                        && !self.snapshotElements($0).contains { $0.elementType == .collectionView }
+                }
+                observations.append("\(identifier): control=\(control.frame), backing ancestors=\(backings.map(\.frame))")
+                guard !backings.isEmpty else { return nil }
+                frames.append(control.frame)
+                for backing in backings {
+                    let frame = backing.frame
+                    // Retain the existing content/nav/full-height exclusions.
+                    if let bounds, let top,
+                       !frame.intersects(bounds) || frame.minY <= top || frame.height >= bounds.height
+                    {
+                        continue
+                    }
+                    frames.append(frame)
+                }
+            }
+            return frames
+        } catch {
+            observations.append("Snapshot unavailable: \(error)")
+            return nil
+        }
     }
 
     @MainActor
@@ -2447,7 +2699,7 @@ final class StandClearUITests: XCTestCase {
             let control = app.buttons[identifier]
             frames.append("\(identifier): \(control.exists ? String(describing: control.frame) : "absent")")
         }
-        frames.append("Native toolbar containers: \(placeToolbarFrames(in: app))")
+        frames.append("Native toolbar containers: \(String(describing: placeToolbarFrames(in: app)))")
         let keyboard = app.keyboards.firstMatch
         frames.append("Keyboard: \(keyboard.exists ? String(describing: keyboard.frame) : "absent")")
         let geometry = XCTAttachment(string: frames.joined(separator: "\n"))
@@ -2499,7 +2751,12 @@ final class StandClearUITests: XCTestCase {
             let bounds = list.frame
             let top = nav.exists ? max(bounds.minY, nav.frame.maxY) : bounds.minY
             var bottom = bounds.maxY
-            for frame in placeToolbarFrames(in: app, intersecting: bounds, below: top) where frame.intersects(bounds) && frame.minY > top && frame.height < bounds.height {
+            guard let toolbarFrames = placeToolbarFrames(in: app, intersecting: bounds, below: top) else {
+                XCTFail("Native toolbar coverage is unavailable", file: file, line: line)
+                recordPlaceSelectionFailure(context: "Place row toolbar coverage unavailable", target: element)
+                return
+            }
+            for frame in toolbarFrames where frame.intersects(bounds) && frame.minY > top && frame.height < bounds.height {
                 bottom = min(bottom, frame.minY)
             }
             let keyboard = app.keyboards.firstMatch
@@ -2841,6 +3098,11 @@ final class StandClearUITests: XCTestCase {
         }
         defer { XCUIDevice.shared.location = nil }
         app.launchArguments = ["--ui-test-fixture"]
+        let lifecycle = locationGranted ? lifecycleProbe(for: app) : nil
+        if locationGranted, lifecycle == nil {
+            return
+        }
+        defer { lifecycle?.close() }
         addUIInterruptionMonitor(withDescription: "Location permission") { alert in
             let deny = alert.buttons[locationGranted ? "Allow While Using App" : "Don’t Allow"]
             if deny.exists {
@@ -2897,13 +3159,8 @@ final class StandClearUITests: XCTestCase {
         if locationGranted {
             // Search may outlast the real 30-second fix lifetime on a hosted
             // simulator. Deliver a fresh measurement on foreground entry.
-            XCUIDevice.shared.press(.home)
-            let backgrounded = NSPredicate { _, _ in MainActor.assumeIsolated {
-                let state = app.state
-                return state == .runningBackground || state == .runningBackgroundSuspended
-            } }
-            expectation(for: backgrounded, evaluatedWith: app)
-            waitForExpectations(timeout: 5)
+            guard let lifecycle else { XCTFail("Lifecycle observation is required"); return }
+            enterBackground(in: app, probe: lifecycle)
             XCUIDevice.shared.location = XCUILocation(location: CLLocation(latitude: 40.7553, longitude: -73.987))
             app.activate()
             XCTAssertTrue(app.wait(for: .runningForeground, timeout: 5))
@@ -2948,12 +3205,105 @@ final class StandClearUITests: XCTestCase {
         XCTAssertTrue(app.buttons["originPicker"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.buttons["originPicker"].label.contains("59 St"))
         let plan = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "tripPlan-4:S:629>419")).firstMatch
-        // A short expanded region keeps endpoint controls above route results.
-        for _ in 0 ..< 3 where !plan.exists {
-            app.collectionViews.firstMatch.swipeUp()
+        let routeList = app.collectionViews["directionsList"]
+        var exposureObservations: [String] = []
+        func exposedPlanRegion() -> CGRect {
+            let bounds = routeList.frame.intersection(app.windows.firstMatch.frame)
+            let header = app.navigationBars["Directions"].frame
+            guard !bounds.isNull, !bounds.isInfinite, bounds.width > 0, bounds.height > 0,
+                  !header.isNull, !header.isInfinite, header.width > 0, header.height > 0 else { return .zero }
+            let top = max(bounds.minY, header.maxY)
+            var bottom = bounds.maxY
+            // iOS can expose separate glass backing containers for each
+            // control. Inspect each button's ancestry, not only a shared parent.
+            let identifiers: Set = ["searchButton", "nearbyButton", "moreButton"]
+            var toolbarPaths: [String: [[any XCUIElementSnapshot]]] = [:]
+            func visit(_ element: any XCUIElementSnapshot, ancestors: [any XCUIElementSnapshot]) {
+                if element.elementType == .button, identifiers.contains(element.identifier) {
+                    toolbarPaths[element.identifier, default: []].append(ancestors + [element])
+                }
+                for child in element.children {
+                    visit(child, ancestors: ancestors + [element])
+                }
+            }
+            do {
+                let snapshot = try app.snapshot()
+                guard snapshot.elementType == .application else { return .zero }
+                visit(snapshot, ancestors: [])
+            } catch {
+                return .zero
+            }
+            for identifier in identifiers {
+                guard let paths = toolbarPaths[identifier] else {
+                    // Narrow sheets can hide the map controls; an expanded
+                    // inspector must expose every expected toolbar control.
+                    if expanded {
+                        return .zero
+                    }
+                    continue
+                }
+                guard paths.count == 1, let control = paths[0].last else { return .zero }
+                let backings = paths[0].filter {
+                    ($0.elementType == .other || $0.elementType == .toolbar)
+                        && !$0.frame.isNull && !$0.frame.isInfinite
+                        && $0.frame.width > 0 && $0.frame.height > 0
+                        && $0.frame.intersects(bounds) && $0.frame.minY > top && $0.frame.height < bounds.height
+                        && $0.frame.contains(control.frame)
+                        && ($0.frame.width > control.frame.width || $0.frame.height > control.frame.height)
+                }
+                guard let backingTop = backings.map(\.frame.minY).min() else { return .zero }
+                exposureObservations.append("\(identifier): control=\(control.frame), backing ancestors=\(backings.map(\.frame))")
+                bottom = min(bottom, backingTop)
+            }
+            let keyboard = app.keyboards.firstMatch
+            if keyboard.exists {
+                let frame = keyboard.frame
+                if frame.intersects(bounds) {
+                    bottom = min(bottom, frame.minY)
+                }
+            }
+            let region = CGRect(x: bounds.minX, y: top, width: bounds.width, height: max(0, bottom - top))
+            exposureObservations.append("Exposed region: \(region), UTC: \(Date().ISO8601Format())")
+            return region
+        }
+        func planHasExposedCenter(in region: CGRect) -> Bool {
+            guard plan.exists, plan.isHittable else { return false }
+            let frame = plan.frame
+            return !frame.isNull && !frame.isInfinite && frame.width > 0 && frame.height > 0
+                && region.contains(CGPoint(x: frame.midX, y: frame.midY))
+                && frame.midY > region.minY && frame.midY < region.maxY
+        }
+        // Existence alone includes rows clipped by the short native inspector.
+        // Expose the actual activation point with the original three-drag limit.
+        for _ in 0 ..< 3 {
+            let region = exposedPlanRegion()
+            if planHasExposedCenter(in: region) {
+                break
+            }
+            guard region.width > 0, region.height > 0 else {
+                XCTFail("No Directions content is exposed between native controls")
+                return
+            }
+            let start = routeList.coordinate(withNormalizedOffset: .zero)
+                .withOffset(CGVector(dx: region.midX - routeList.frame.minX,
+                                     dy: region.minY + region.height * 0.78 - routeList.frame.minY))
+            start.press(forDuration: 0.08,
+                        thenDragTo: start.withOffset(CGVector(dx: 0, dy: -min(region.height * 0.3, 150))),
+                        withVelocity: .slow, thenHoldForDuration: 0.3)
         }
         XCTAssertTrue(plan.waitForExistence(timeout: 10))
-        plan.tap()
+        let finalRegion = exposedPlanRegion()
+        let exposure = XCTAttachment(string: exposureObservations.joined(separator: "\n"))
+        exposure.name = "Station-entry route native backing observations"
+        exposure.lifetime = .keepAlways
+        add(exposure)
+        guard planHasExposedCenter(in: finalRegion) else {
+            XCTFail("The route's activation point must be clear of native controls")
+            recordPlaceSelectionFailure(context: "Station-entry route was not exposed", target: plan)
+            return
+        }
+        recordPlaceTap(plan, in: routeList, context: "Station-entry route")
+        plan.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
         XCTAssertTrue(app.navigationBars["Trip details"].waitForExistence(timeout: 5))
         let capture = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         capture.name = "Station search to directions with preserved origin"
@@ -3068,13 +3418,22 @@ final class StandClearUITests: XCTestCase {
         guard staysCleared("Feed refreshes must not restore a cleared route") else { return }
         XCUIDevice.shared.orientation = .portrait
         waitForLayout(in: app, expanded: false, readyControl: "originPicker")
-        let stayedClear = staysCleared("Narrowing must not restore the cleared itinerary")
+        XCTAssertTrue(app.buttons["originPicker"].label.contains("Wall St"))
+        XCTAssertTrue(app.buttons["destinationPicker"].label.contains("Broadway"))
         let compact = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         compact.name = "Cleared station route after narrowing"
         compact.lifetime = .keepAlways
         add(compact)
-        guard stayedClear else { return }
+        // Without a selected route, Directions intentionally uses a modal large
+        // sheet. Expose the real map before asserting its accessible contents.
+        app.buttons["Done"].tap()
         assertStationEndpointsCleared(labels, in: app)
+        guard staysCleared("Narrowing must not restore the cleared itinerary") else { return }
+        app.buttons["moreButton"].tap()
+        app.buttons["directionsButton"].tap()
+        XCTAssertTrue(app.buttons["originPicker"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.buttons["originPicker"].label.contains("Wall St"))
+        XCTAssertTrue(app.buttons["destinationPicker"].label.contains("Broadway"))
         XCUIDevice.shared.orientation = .landscapeLeft
         waitForLayout(in: app, expanded: true, readyControl: "originPicker")
         guard staysCleared("Expanding must not restore the cleared itinerary") else { return }
@@ -3195,9 +3554,13 @@ final class StandClearUITests: XCTestCase {
                 XCUIDevice.shared.orientation = .portrait
                 waitForLayout(in: app, expanded: false, readyControl: "Done")
                 app.buttons["Done"].tap()
-                XCTAssertTrue(more.waitForExistence(timeout: 5))
-                XCTAssertTrue(more.isEnabled)
-                more.tap()
+                guard waitForCompactMoreAfterDone(in: app) else {
+                    XCTFail("Done must leave an unobstructed compact More control within five seconds")
+                    return
+                }
+                let compactMore = app.buttons["moreButton"]
+                XCTAssertTrue(compactMore.isEnabled)
+                compactMore.tap()
                 XCTAssertTrue(app.buttons["arrivalStatusButton"].waitForExistence(timeout: 5))
                 let compactMenu = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
                 compactMenu.name = "Compact open More menu after narrowing"
@@ -3210,6 +3573,47 @@ final class StandClearUITests: XCTestCase {
                 waitForLayout(in: app, expanded: true)
             }
         }
+    }
+
+    @MainActor
+    private func waitForCompactMoreAfterDone(in app: XCUIApplication) -> Bool {
+        let start = ProcessInfo.processInfo.systemUptime
+        let deadline = start + 5
+        var observations: [String] = []
+        let ready = NSPredicate { _, _ in MainActor.assumeIsolated {
+            do {
+                let root = try app.snapshot()
+                let elements = self.snapshotElements(root)
+                let controls = elements.filter { $0.elementType == .button && $0.identifier == "moreButton" }
+                let sheetControls = elements.filter {
+                    $0.elementType == .button && ($0.label == "Done" || $0.identifier == "Done" || $0.label == "Sheet Grabber")
+                }
+                guard root.elementType == .application,
+                      let window = root.children.first(where: { $0.elementType == .window }),
+                      controls.count == 1
+                else {
+                    observations.append("Missing/ambiguous window or More: count=\(controls.count)")
+                    return false
+                }
+                let bounds = window.frame
+                let frame = controls[0].frame
+                let finite = [bounds.minX, bounds.minY, bounds.width, bounds.height,
+                              frame.minX, frame.minY, frame.width, frame.height].allSatisfy(\.isFinite)
+                let geometry = finite && bounds.width > 0 && bounds.height > bounds.width
+                    && frame.width > 0 && frame.height > 0 && bounds.contains(frame)
+                let more = app.buttons["moreButton"]
+                let exposed = geometry && sheetControls.isEmpty && more.exists && more.isEnabled && more.isHittable
+                let end = ProcessInfo.processInfo.systemUptime
+                observations.append("start=\(start), end=\(end), window=\(bounds), More=\(frame), sheetControls=\(sheetControls.map(\.label)), exposed=\(exposed)")
+                return exposed && end <= deadline
+            } catch {
+                observations.append("Snapshot unavailable: \(error)")
+                return false
+            }
+        } }
+        let result = XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: ready, object: app)], timeout: 5)
+        recordGeometryObservations(observations, context: "Compact More after Done")
+        return result == .completed
     }
 
     @MainActor
@@ -3416,37 +3820,129 @@ final class StandClearUITests: XCTestCase {
     }
 
     @MainActor
+    private func snapshotElements(_ root: any XCUIElementSnapshot) -> [any XCUIElementSnapshot] {
+        var elements: [any XCUIElementSnapshot] = []
+        var pending = [root]
+        while let element = pending.popLast() {
+            elements.append(element)
+            pending.append(contentsOf: element.children.reversed())
+        }
+        return elements
+    }
+
+    @MainActor
+    private func geometrySnapshot(in app: XCUIApplication, observations: inout [String])
+        -> (elements: [any XCUIElementSnapshot], map: any XCUIElementSnapshot, descendants: [any XCUIElementSnapshot])?
+    {
+        let start = ProcessInfo.processInfo.systemUptime
+        observations.append("app.snapshot: start=\(start)")
+        do {
+            // One fresh public XCTest snapshot per poll. Reading the returned
+            // attributes makes no additional remote accessibility queries.
+            let root = try app.snapshot()
+            let elements = snapshotElements(root)
+            let maps = elements.filter { $0.elementType == .other && $0.identifier == "appleTransitMap" }
+            guard root.elementType == .application, maps.count == 1, let map = maps.first else {
+                observations.append("app.snapshot: invalid root or ambiguous/missing map; maps=\(maps.count)")
+                return nil
+            }
+            let frame = map.frame
+            let descendants = map.children.flatMap(snapshotElements)
+            // Missing native map coverage must not become a zero-marker pass.
+            guard frame.minX.isFinite, frame.minY.isFinite, frame.width.isFinite, frame.height.isFinite,
+                  frame.width > 0, frame.height > 0, descendants.contains(where: { $0.elementType == .map })
+            else {
+                observations.append("app.snapshot: invalid map bounds or missing native Map subtree")
+                return nil
+            }
+            observations.append("app.snapshot: start=\(start), end=\(ProcessInfo.processInfo.systemUptime), elements=\(elements.count), map.frame=\(frame), map.descendants=\(descendants.count)")
+            return (elements, map, descendants)
+        } catch {
+            observations.append("app.snapshot: error=\(error), end=\(ProcessInfo.processInfo.systemUptime)")
+            return nil
+        }
+    }
+
+    @MainActor
+    private func waitForMapObservation(_ predicate: NSPredicate, in app: XCUIApplication, deadline: TimeInterval) -> Bool {
+        // Observe immediately rather than spending the predicate waiter's first
+        // polling interval before an expensive accessibility snapshot. Every
+        // predicate rejects late completion, including this initial read.
+        if predicate.evaluate(with: app) {
+            return true
+        }
+        let remaining = deadline - ProcessInfo.processInfo.systemUptime
+        guard remaining > 0 else { return false }
+        let ready = XCTNSPredicateExpectation(predicate: predicate, object: app)
+        return XCTWaiter.wait(for: [ready], timeout: remaining) == .completed
+    }
+
+    @MainActor
+    private func assertStationMapSummary(_ instruction: String, in app: XCUIApplication,
+                                         file: StaticString = #filePath, line: UInt = #line)
+    {
+        var observations: [String] = []
+        let start = ProcessInfo.processInfo.systemUptime
+        let deadline = start + 10
+        observations.append("summary start=\(start), deadline=\(deadline), expected=\(instruction)")
+        let matches = NSPredicate { _, _ in MainActor.assumeIsolated {
+            guard let snapshot = self.geometrySnapshot(in: app, observations: &observations) else { return false }
+            let value = snapshot.map.value as? String
+            let matches = value?.contains(instruction) == true
+            let end = ProcessInfo.processInfo.systemUptime
+            observations.append("summary identity=\(snapshot.map.elementType.rawValue):\(snapshot.map.identifier), value=\(String(describing: value)), matches=\(matches), end=\(end), deadline=\(deadline)")
+            return matches && end <= deadline
+        } }
+        let ready = waitForMapObservation(matches, in: app, deadline: deadline)
+        XCTAssertTrue(ready, "The map summary must name the selected interchange", file: file, line: line)
+        recordGeometryObservations(observations, context: "Station itinerary map summary")
+        if !ready {
+            recordGeometryFailure(in: app, context: "Station itinerary map summary")
+        }
+    }
+
+    @MainActor
     private func assertStationEndpoints(_ labels: [String], in app: XCUIApplication, expanded: Bool = false,
                                         file: StaticString = #filePath, line: UInt = #line)
     {
-        let map = nativeMap(in: app)
         var observations: [String] = []
+        let start = ProcessInfo.processInfo.systemUptime
+        let deadline = start + 10
+        observations.append("fit start=\(start), deadline=\(deadline)")
         let fitted = NSPredicate { _, _ in MainActor.assumeIsolated {
-            guard self.geometryRead("map.exists", observations: &observations, { map.exists }) else { return false }
-            let mapFrame = self.geometryRead("map.frame", observations: &observations) { map.frame }
-            let header = app.navigationBars["StandClear"]
-            let panel = app.navigationBars["Trip details"]
-            let hasHeader = self.geometryRead("header.exists", observations: &observations) { header.exists }
-            let top = hasHeader ? max(mapFrame.minY, self.geometryRead("header.frame", observations: &observations) { header.frame }.maxY) : mapFrame.minY
-            let hasPanel = expanded && self.geometryRead("panel.exists", observations: &observations) { panel.exists }
-            let right = hasPanel ? min(mapFrame.maxX, self.geometryRead("panel.frame", observations: &observations) { panel.frame }.minX) : mapFrame.maxX
-            return labels.allSatisfy { label in
-                let marker = map.descendants(matching: .any).matching(NSPredicate(format: "label == %@", label)).firstMatch
-                guard self.geometryRead("\(label).exists", observations: &observations, { marker.exists }) else { return false }
-                let frame = self.geometryRead("\(label).frame", observations: &observations) { marker.frame }
-                return frame.width > 0 && frame.height > 0 && frame.minY > top && frame.maxY < mapFrame.maxY &&
-                    frame.minX >= mapFrame.minX && frame.maxX <= right
+            guard let snapshot = self.geometrySnapshot(in: app, observations: &observations) else { return false }
+            let mapFrame = snapshot.map.frame
+            let headers = snapshot.elements.filter { $0.elementType == .navigationBar && ($0.identifier == "StandClear" || $0.label == "StandClear") }
+            let panels = expanded ? snapshot.elements.filter { $0.elementType == .navigationBar && ($0.identifier == "Trip details" || $0.label == "Trip details") } : []
+            guard headers.count <= 1, panels.count <= 1 else { return false }
+            let top = headers.first.map { max(mapFrame.minY, $0.frame.maxY) } ?? mapFrame.minY
+            let right = panels.first.map { min(mapFrame.maxX, $0.frame.minX) } ?? mapFrame.maxX
+            let fits = labels.allSatisfy { label in
+                let markers = snapshot.descendants.filter { $0.label == label }
+                observations.append("\(label): frames=\(markers.map(\.frame)), top=\(top), right=\(right)")
+                observations.append("\(label): identities=\(markers.map { "\($0.elementType.rawValue):\($0.identifier)" })")
+                guard !markers.isEmpty else { return false }
+                // At large text sizes MapKit's point-feature hit target may
+                // share the annotation label with a different valid frame.
+                // Every matching pose must satisfy the original fit bounds.
+                return markers.allSatisfy { marker in
+                    let frame = marker.frame
+                    return frame.width > 0 && frame.height > 0 && frame.minY > top && frame.maxY < mapFrame.maxY &&
+                        frame.minX >= mapFrame.minX && frame.maxX <= right
+                }
             }
+            let end = ProcessInfo.processInfo.systemUptime
+            observations.append("fit verdict=\(fits), end=\(end), deadline=\(deadline)")
+            return fits && end <= deadline
         } }
-        let ready = XCTNSPredicateExpectation(predicate: fitted, object: map)
-        let result = XCTWaiter.wait(for: [ready], timeout: 10)
-        XCTAssertEqual(result, .completed, "Named boarding and arrival markers must fit in the exposed map", file: file, line: line)
+        let ready = waitForMapObservation(fitted, in: app, deadline: deadline)
+        XCTAssertTrue(ready, "Named boarding and arrival markers must fit in the exposed map", file: file, line: line)
         recordGeometryObservations(observations, context: "Station itinerary endpoints — expanded \(expanded)")
         let capture = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         capture.name = "Station itinerary endpoints — expanded \(expanded)"
         capture.lifetime = .keepAlways
         add(capture)
-        if result != .completed {
+        if !ready {
             recordGeometryFailure(in: app, context: "Station itinerary endpoints — expanded \(expanded)")
         }
     }
@@ -3457,12 +3953,15 @@ final class StandClearUITests: XCTestCase {
     {
         let map = nativeMap(in: app)
         var observations: [String] = []
+        let deadline = ProcessInfo.processInfo.systemUptime + 5
         let cleared = NSPredicate { _, _ in MainActor.assumeIsolated {
-            guard self.geometryRead("map.exists", observations: &observations, { map.exists }) else { return false }
-            return !self.geometryRead("clear button.exists", observations: &observations) { app.buttons["clearMapRoute"].exists } &&
-                self.geometryRead("remaining marker count", observations: &observations) {
-                    map.descendants(matching: .any).matching(NSPredicate(format: "label IN %@", labels)).count
-                } == 0
+            guard let snapshot = self.geometrySnapshot(in: app, observations: &observations) else { return false }
+            let buttons = snapshot.elements.filter { $0.elementType == .button && $0.identifier == "clearMapRoute" }.count
+            // Retain all accessibility roles, including native annotation aliases.
+            let markers = snapshot.descendants.filter { labels.contains($0.label) }.count
+            let end = ProcessInfo.processInfo.systemUptime
+            observations.append("clear buttons=\(buttons), remaining markers=\(markers), end=\(end), deadline=\(deadline)")
+            return buttons == 0 && markers == 0 && end <= deadline
         } }
         let result = XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: cleared, object: map)], timeout: 5)
         XCTAssertEqual(result, .completed,
@@ -3476,16 +3975,43 @@ final class StandClearUITests: XCTestCase {
     @MainActor
     private func selectStationResult(_ stationID: String, query: String, in app: XCUIApplication) {
         // Text injection can return before SwiftUI exposes the filtered list.
-        // Wait for the exact result; do not retry input or substitute a station.
-        let result = app.buttons["stationChoice-\(stationID)"]
+        // Observe exact identities in one fresh snapshot, without retrying input.
+        let identifier = "stationChoice-\(stationID)"
+        let result = app.buttons[identifier]
+        let prompt = "Search subway stations"
+        var observations: [String] = []
+        let deadline = ProcessInfo.processInfo.systemUptime + 10
         let ready = NSPredicate { _, _ in
             MainActor.assumeIsolated {
-                let search = app.searchFields.firstMatch
-                return search.exists && (search.value as? String) == query && result.exists
+                let start = ProcessInfo.processInfo.systemUptime
+                do {
+                    let root = try app.snapshot()
+                    guard root.elementType == .application else { return false }
+                    let elements = self.snapshotElements(root)
+                    let fields = elements.filter { $0.elementType == .searchField && ($0.identifier == prompt || $0.label == prompt || $0.placeholderValue == prompt) }
+                    let rows = elements.filter { $0.elementType == .button && $0.identifier == identifier }
+                    let value = fields.first?.value as? String
+                    let eligible = fields.count == 1 && value == query && rows.count == 1
+                    let end = ProcessInfo.processInfo.systemUptime
+                    observations.append("start=\(start), end=\(end), deadline=\(deadline), fields=\(fields.count), values=\(fields.map { String(describing: $0.value) }), fieldFrames=\(fields.map(\.frame)), rows=\(rows.count), frames=\(rows.map(\.frame)), eligible=\(eligible)")
+                    return eligible && end <= deadline
+                } catch {
+                    observations.append("snapshot error=\(error), start=\(start), end=\(ProcessInfo.processInfo.systemUptime)")
+                    return false
+                }
             }
         }
         expectation(for: ready, evaluatedWith: result)
+        let failuresBefore = testRun?.failureCount ?? 0
         waitForExpectations(timeout: 10)
+        recordGeometryObservations(observations, context: "Station picker \(stationID) query \(query)")
+        if (testRun?.failureCount ?? 0) > failuresBefore {
+            recordGeometryFailure(in: app, context: "Station picker readiness")
+            let capture = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            capture.name = "Station picker after failed readiness verdict"
+            capture.lifetime = .keepAlways
+            add(capture)
+        }
         if query == "Wall" {
             XCTAssertFalse(app.buttons["placeResult-fixture-55-wall-street"].exists,
                            "The transit endpoint picker should offer stations only")
@@ -3495,15 +4021,45 @@ final class StandClearUITests: XCTestCase {
 
     @MainActor
     private func selectSearchResult(_ stationID: String, query: String, in app: XCUIApplication) {
-        let result = app.buttons["station-\(stationID)"]
+        let identifier = "station-\(stationID)"
+        let result = app.buttons[identifier]
+        let prompt = unifiedSearchPrompt
+        var observations: [String] = []
+        let deadline = ProcessInfo.processInfo.systemUptime + 10
         let ready = NSPredicate { _, _ in
             MainActor.assumeIsolated {
-                let search = app.searchFields.firstMatch
-                return search.exists && (search.value as? String) == query && result.exists && result.isHittable
+                let start = ProcessInfo.processInfo.systemUptime
+                do {
+                    let root = try app.snapshot()
+                    guard root.elementType == .application else { return false }
+                    let elements = self.snapshotElements(root)
+                    let fields = elements.filter { $0.elementType == .searchField && ($0.identifier == prompt || $0.label == prompt || $0.placeholderValue == prompt) }
+                    let rows = elements.filter { $0.elementType == .button && $0.identifier == identifier }
+                    let value = fields.first?.value as? String
+                    let eligible = fields.count == 1 && value == query && rows.count == 1
+                    // Snapshot attributes do not establish hit testing. Preserve
+                    // the real native check before the original center-row tap.
+                    let hittable = eligible && result.isHittable
+                    let end = ProcessInfo.processInfo.systemUptime
+                    observations.append("start=\(start), end=\(end), deadline=\(deadline), fields=\(fields.count), value=\(String(describing: value)), rows=\(rows.count), frames=\(rows.map(\.frame)), queriedHittability=\(eligible), hittable=\(hittable)")
+                    return eligible && hittable && end <= deadline
+                } catch {
+                    observations.append("snapshot error=\(error), start=\(start), end=\(ProcessInfo.processInfo.systemUptime)")
+                    return false
+                }
             }
         }
         expectation(for: ready, evaluatedWith: result)
+        let failuresBefore = testRun?.failureCount ?? 0
         waitForExpectations(timeout: 10)
+        recordGeometryObservations(observations, context: "Station result \(stationID) query \(query)")
+        if (testRun?.failureCount ?? 0) > failuresBefore {
+            recordGeometryFailure(in: app, context: "Station search readiness")
+            let capture = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+            capture.name = "Station search after failed readiness verdict"
+            capture.lifetime = .keepAlways
+            add(capture)
+        }
         // Regression: the blank center between station text and route badges
         // must navigate just like either visible part of the native row label.
         result.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()

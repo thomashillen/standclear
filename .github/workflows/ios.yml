@@ -14,23 +14,23 @@ concurrency:
   group: ios-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  PR_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+
 jobs:
-  simulator:
-    name: Build, analyze, and test iOS
+  unit:
+    name: Build, analyze, and unit tests
     runs-on: macos-26
-    # Run 42682161501 exhausted 75 minutes after 160 unit tests and 46
-    # completed UI cases; the 47th was interrupted and ten never started.
-    # Its measured prefix plus retained matching tail durations projects about
-    # 89 minutes with startup/artifacts. Keep all tests, serial execution, and
-    # assertion deadlines; allow the complete suite and evidence to finish.
     timeout-minutes: 100
     steps:
       - uses: actions/checkout@v7
+      - name: Test fail-closed native accounting
+        run: python3 -B -m unittest discover -s ios/ci -p 'test_*.py'
       - name: Select an installed iPhone simulator
         run: |
           xcodebuild -version
           xcrun simctl list devices available -j > "$RUNNER_TEMP/devices.json"
-          python3 - <<'PY'
+          python3 -B - <<'PY'
           import json, os
           from pathlib import Path
           devices = json.loads(Path(os.environ['RUNNER_TEMP'], 'devices.json').read_text())['devices']
@@ -42,18 +42,86 @@ jobs:
           PY
       - name: Boot the selected simulator and wait for system startup
         run: xcrun simctl bootstatus "$IOS_SIMULATOR_ID" -b
-      - name: Build, analyze, and test without signing or credentials
+      - name: Build, analyze, enumerate both targets, and run all unit cases
         run: |
-          xcodebuild -project ios/StandClear.xcodeproj -scheme StandClear \
-            -destination "platform=iOS Simulator,id=$IOS_SIMULATOR_ID" \
-            -derivedDataPath "$RUNNER_TEMP/StandClearDerived" \
-            -resultBundlePath "$RUNNER_TEMP/StandClear.xcresult" \
-            -parallel-testing-enabled NO \
-            build analyze test CODE_SIGNING_ALLOWED=NO
+          python3 -B ios/ci/native_gate.py run --stage unit \
+            --simulator "$IOS_SIMULATOR_ID" --head-sha "$PR_HEAD_SHA" \
+            --output "$RUNNER_TEMP/native-unit"
       - uses: actions/upload-artifact@v6
         if: always()
         with:
-          name: native-ios-results
-          path: ${{ runner.temp }}/StandClear.xcresult
-          if-no-files-found: ignore
+          name: native-ios-${{ github.run_id }}-${{ github.run_attempt }}-unit
+          path: ${{ runner.temp }}/native-unit
+          if-no-files-found: error
+          retention-days: 7
+
+  ui:
+    name: UI shard ${{ matrix.shard }}
+    needs: unit
+    runs-on: macos-26
+    timeout-minutes: 100
+    strategy:
+      # Preserve global serial native execution, including across machines.
+      max-parallel: 1
+      fail-fast: false
+      matrix:
+        shard: [0, 1]
+    steps:
+      - uses: actions/checkout@v7
+      - name: Select an installed iPhone simulator
+        run: |
+          xcodebuild -version
+          xcrun simctl list devices available -j > "$RUNNER_TEMP/devices.json"
+          python3 -B - <<'PY'
+          import json, os
+          from pathlib import Path
+          devices = json.loads(Path(os.environ['RUNNER_TEMP'], 'devices.json').read_text())['devices']
+          phones = [d for runtime, group in devices.items() if 'iOS' in runtime for d in group if d['name'].startswith('iPhone') and d['isAvailable']]
+          if not phones:
+              raise SystemExit('No installed iPhone simulator')
+          with open(os.environ['GITHUB_ENV'], 'a') as env:
+              env.write('IOS_SIMULATOR_ID=' + phones[0]['udid'] + '\n')
+          PY
+      - name: Boot the selected simulator and wait for system startup
+        run: xcrun simctl bootstatus "$IOS_SIMULATOR_ID" -b
+      - name: Build both targets and run the exhaustive assigned UI partition
+        run: |
+          python3 -B ios/ci/native_gate.py run --stage "ui-${{ matrix.shard }}" \
+            --simulator "$IOS_SIMULATOR_ID" --head-sha "$PR_HEAD_SHA" \
+            --output "$RUNNER_TEMP/native-ui-${{ matrix.shard }}"
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: native-ios-${{ github.run_id }}-${{ github.run_attempt }}-ui-${{ matrix.shard }}
+          path: ${{ runner.temp }}/native-ui-${{ matrix.shard }}
+          if-no-files-found: error
+          retention-days: 7
+
+  simulator:
+    # Keep the original gate context; individual shard passes are insufficient.
+    name: Build, analyze, and test iOS
+    needs: [unit, ui]
+    if: always()
+    runs-on: macos-26
+    timeout-minutes: 100
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v7
+        with:
+          pattern: native-ios-${{ github.run_id }}-${{ github.run_attempt }}-*
+          path: ${{ runner.temp }}/native-artifacts
+      - name: Require every declared case exactly once with complete original results
+        env:
+          UPSTREAM_RESULTS: ${{ toJSON(needs) }}
+        run: |
+          python3 -B ios/ci/native_gate.py aggregate \
+            --artifacts "$RUNNER_TEMP/native-artifacts" \
+            --output "$RUNNER_TEMP/native-aggregate" --head-sha "$PR_HEAD_SHA" \
+            --upstream-results "$UPSTREAM_RESULTS"
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: native-ios-accounting-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/native-aggregate
+          if-no-files-found: error
           retention-days: 7
