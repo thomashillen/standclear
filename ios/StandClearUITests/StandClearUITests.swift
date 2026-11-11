@@ -2312,9 +2312,7 @@ final class StandClearUITests: XCTestCase {
         mapAction.lifetime = .keepAlways
         add(mapAction)
         showMap.tap()
-        let map = nativeMap(in: app)
-        expectation(for: NSPredicate(format: "value CONTAINS %@", instruction), evaluatedWith: map)
-        waitForExpectations(timeout: 10)
+        assertStationMapSummary(instruction, in: app)
         let endpoints = ["Board at Wall St", "Arrive at Astoria Blvd"]
         assertStationEndpoints(endpoints, in: app, expanded: expanded)
         app.buttons["clearMapRoute"].tap()
@@ -3866,12 +3864,51 @@ final class StandClearUITests: XCTestCase {
     }
 
     @MainActor
+    private func waitForMapObservation(_ predicate: NSPredicate, in app: XCUIApplication, deadline: TimeInterval) -> Bool {
+        // Observe immediately rather than spending the predicate waiter's first
+        // polling interval before an expensive accessibility snapshot. Every
+        // predicate rejects late completion, including this initial read.
+        if predicate.evaluate(with: app) {
+            return true
+        }
+        let remaining = deadline - ProcessInfo.processInfo.systemUptime
+        guard remaining > 0 else { return false }
+        let ready = XCTNSPredicateExpectation(predicate: predicate, object: app)
+        return XCTWaiter.wait(for: [ready], timeout: remaining) == .completed
+    }
+
+    @MainActor
+    private func assertStationMapSummary(_ instruction: String, in app: XCUIApplication,
+                                         file: StaticString = #filePath, line: UInt = #line)
+    {
+        var observations: [String] = []
+        let start = ProcessInfo.processInfo.systemUptime
+        let deadline = start + 10
+        observations.append("summary start=\(start), deadline=\(deadline), expected=\(instruction)")
+        let matches = NSPredicate { _, _ in MainActor.assumeIsolated {
+            guard let snapshot = self.geometrySnapshot(in: app, observations: &observations) else { return false }
+            let value = snapshot.map.value as? String
+            let matches = value?.contains(instruction) == true
+            let end = ProcessInfo.processInfo.systemUptime
+            observations.append("summary identity=\(snapshot.map.elementType.rawValue):\(snapshot.map.identifier), value=\(String(describing: value)), matches=\(matches), end=\(end), deadline=\(deadline)")
+            return matches && end <= deadline
+        } }
+        let ready = waitForMapObservation(matches, in: app, deadline: deadline)
+        XCTAssertTrue(ready, "The map summary must name the selected interchange", file: file, line: line)
+        recordGeometryObservations(observations, context: "Station itinerary map summary")
+        if !ready {
+            recordGeometryFailure(in: app, context: "Station itinerary map summary")
+        }
+    }
+
+    @MainActor
     private func assertStationEndpoints(_ labels: [String], in app: XCUIApplication, expanded: Bool = false,
                                         file: StaticString = #filePath, line: UInt = #line)
     {
-        let map = nativeMap(in: app)
         var observations: [String] = []
-        let deadline = ProcessInfo.processInfo.systemUptime + 10
+        let start = ProcessInfo.processInfo.systemUptime
+        let deadline = start + 10
+        observations.append("fit start=\(start), deadline=\(deadline)")
         let fitted = NSPredicate { _, _ in MainActor.assumeIsolated {
             guard let snapshot = self.geometrySnapshot(in: app, observations: &observations) else { return false }
             let mapFrame = snapshot.map.frame
@@ -3898,15 +3935,14 @@ final class StandClearUITests: XCTestCase {
             observations.append("fit verdict=\(fits), end=\(end), deadline=\(deadline)")
             return fits && end <= deadline
         } }
-        let ready = XCTNSPredicateExpectation(predicate: fitted, object: map)
-        let result = XCTWaiter.wait(for: [ready], timeout: 10)
-        XCTAssertEqual(result, .completed, "Named boarding and arrival markers must fit in the exposed map", file: file, line: line)
+        let ready = waitForMapObservation(fitted, in: app, deadline: deadline)
+        XCTAssertTrue(ready, "Named boarding and arrival markers must fit in the exposed map", file: file, line: line)
         recordGeometryObservations(observations, context: "Station itinerary endpoints — expanded \(expanded)")
         let capture = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         capture.name = "Station itinerary endpoints — expanded \(expanded)"
         capture.lifetime = .keepAlways
         add(capture)
-        if result != .completed {
+        if !ready {
             recordGeometryFailure(in: app, context: "Station itinerary endpoints — expanded \(expanded)")
         }
     }
