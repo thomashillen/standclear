@@ -30,10 +30,24 @@ struct AppleTransitMap: View {
     @State private var markers: [TrainMapMarker] = []
     @State private var entryGeneration: Double?
     @State private var needsEntryAnchor = true
-    @State private var position = MapCameraPosition.region(MKCoordinateRegion(
-        center: CLLocationCoordinate2D(latitude: 40.754, longitude: -73.984),
-        span: MKCoordinateSpan(latitudeDelta: 0.14, longitudeDelta: 0.11)
-    ))
+    @State private var position = initialPosition
+
+    private static var initialPosition: MapCameraPosition {
+        #if DEBUG && targetEnvironment(simulator)
+            let arguments = ProcessInfo.processInfo.arguments
+            if ["--ui-test-fixture", "--ui-test-station-motion", "--ui-test-motion-clock", "--ui-test-motion-close-zoom"].allSatisfy(arguments.contains) {
+                return .region(MKCoordinateRegion(
+                    center: CLLocationCoordinate2D(latitude: 40.7528, longitude: -73.9893),
+                    span: MKCoordinateSpan(latitudeDelta: 0.012, longitudeDelta: 0.009)
+                ))
+            }
+        #endif
+        return .region(MKCoordinateRegion(
+            center: CLLocationCoordinate2D(latitude: 40.754, longitude: -73.984),
+            span: MKCoordinateSpan(latitudeDelta: 0.14, longitudeDelta: 0.11)
+        ))
+    }
+
     @State private var cameraState = AppleTransitCameraState()
 
     private var showsJourney: Bool {
@@ -148,6 +162,22 @@ struct AppleTransitMap: View {
             .accessibilityValue([transferMarker?.text, placeRoute?.accessibilitySummary ?? destination?.name].compactMap(\.self).joined(separator: ", "))
             .accessibilityHint("Use Search or Nearby for accessible station arrivals.")
         }
+        #if DEBUG && targetEnvironment(simulator)
+        .overlay(alignment: .trailing) {
+            if let clock = StationMotionFixtureClock.enabled {
+                Button("Advance motion fixture", systemImage: "forward.frame") {
+                    clock.advance()
+                    Task { await store.refresh() }
+                }
+                .buttonStyle(.borderedProminent)
+                .labelStyle(.iconOnly)
+                .padding()
+                .accessibilityIdentifier("advanceMotionFixture")
+                .accessibilityValue(String(clock.sampledStage))
+                .disabled(clock.finished || clock.sampledStage != clock.stage)
+            }
+        }
+        #endif
         .onChange(of: TripGeometryInput(linesRevision: inputs.linesRevision, focus: tripFocusRevision, placeRevision: placeGeometryRevision, ids: tripOverlays.map(\.id)), initial: true) { _, _ in
             tripGeometry = tripOverlays.compactMap { AppleRoutePolyline(id: $0.id, color: $0.color, coordinates: $0.coordinates, walking: $0.walking) }
         }
@@ -156,6 +186,11 @@ struct AppleTransitMap: View {
             if phase != .active {
                 stopMotion()
             }
+        }
+        .onChange(of: inputs.reduceMotion) { _, _ in
+            // Showing a discrete pose while hidden or with Reduce Motion must
+            // not replay an earlier transition when animation becomes eligible.
+            stopMotion()
         }
         .onDisappear { stopMotion() }
     }
@@ -172,11 +207,16 @@ struct AppleTransitMap: View {
         let feedRevision: UUID?
         let active: Bool
         let reduceMotion: Bool
+        let fixtureTime: Date?
     }
 
     private var motionInputs: MotionInputs {
-        MotionInputs(linesRevision: store.linesRevision, feedRevision: store.feedError ? nil : store.motionSnapshotRevision,
-                     active: scenePhase == .active && !showsJourney, reduceMotion: reduceMotion || !mapExposed)
+        var fixtureTime: Date?
+        #if DEBUG && targetEnvironment(simulator)
+            fixtureTime = StationMotionFixtureClock.enabled?.now
+        #endif
+        return MotionInputs(linesRevision: store.linesRevision, feedRevision: store.feedError ? nil : store.motionSnapshotRevision,
+                            active: scenePhase == .active && !showsJourney, reduceMotion: reduceMotion || !mapExposed, fixtureTime: fixtureTime)
     }
 
     private func stopMotion() {
@@ -216,14 +256,17 @@ struct AppleTransitMap: View {
             self.entryGeneration = nil
         }
         if appliedFeedRevision != revision {
-            motion.update(snapshot: snapshot, now: .now, feedUnavailable: false)
+            motion.update(snapshot: snapshot, now: store.motionDate, feedUnavailable: false)
             appliedFeedRevision = revision
         }
         let discrete = inputs.reduceMotion || entryGeneration != nil
         while !Task.isCancelled, inputs == motionInputs {
-            let now = Date()
+            let now = store.motionDate
             markers = motion.markers(at: now, reduceMotion: discrete)
-            guard snapshot.isFresh(at: now) else { return }
+            #if DEBUG && targetEnvironment(simulator)
+                StationMotionFixtureClock.enabled?.didSample(at: now, generatedAt: snapshot.generatedAt)
+            #endif
+            guard snapshot.isFresh(at: now), inputs.fixtureTime == nil else { return }
             // Wake exactly at feed expiry even when coarse sampling. Other
             // input/lifecycle changes cancel this sleep and resample immediately.
             let interval = !discrete && motion.hasActiveMotion(at: now) ? 0.25 : 5.0
@@ -274,6 +317,7 @@ private struct AppleTrainAnnotation: View {
         let baseScale = TrainMarkerSizing.scale(zoom: cameraState.zoom)
         let scale = differentiateWithoutColor ? max(0.85, baseScale) : baseScale
         let labelOpacity = differentiateWithoutColor ? 1 : TrainMarkerSizing.labelOpacity(zoom: cameraState.zoom)
+        let captionTopOffset = (12.0 + hypot(23.0, 10.0)) * scale + 6.0
         ZStack {
             if let bearing = marker.bearingDegrees {
                 TrainCarArtwork(color: marker.color)
@@ -286,6 +330,10 @@ private struct AppleTrainAnnotation: View {
                     .overlay { Circle().strokeBorder(.white, lineWidth: 1.5) }
                     .frame(width: 24, height: 24)
             }
+            if marker.reconciling {
+                Capsule().stroke(.white, style: StrokeStyle(lineWidth: 1.5, dash: [3, 2]))
+                    .frame(width: 48, height: 27)
+            }
             Text(marker.displayLetter)
                 .font(.system(size: 12, weight: .bold))
                 .foregroundStyle(marker.textColor == "black" ? Color.black : Color.white)
@@ -296,19 +344,24 @@ private struct AppleTrainAnnotation: View {
         .scaleEffect(scale)
         .frame(width: 46 * scale, height: 24 * scale)
         .opacity(marker.opacity)
+        // Overlay content does not contribute to the fixed marker layout or
+        // move the glyph's map anchor when the uncertainty caption changes.
+        .overlay(alignment: .top) {
+            if let caption = TrainMarkerPresentation.uncertaintyCaption(marker) {
+                Text(caption)
+                    .font(.caption2)
+                    .fixedSize()
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 2)
+                    .background(.regularMaterial, in: Capsule())
+                    // The 46x20 artwork rotates beyond its 46x24 layout frame.
+                    // Clear its full canvas radius without moving the map anchor.
+                    .offset(y: captionTopOffset)
+                    .accessibilityHidden(true)
+            }
+        }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Route \(marker.spokenRouteName) train. Estimated position.")
-        .accessibilityValue(accessibilityValue(marker))
-    }
-
-    private func accessibilityValue(_ marker: TrainMapMarker) -> String {
-        var details: [String] = []
-        if marker.bearingDegrees == nil {
-            details.append("Travel direction is unavailable")
-        }
-        if marker.stale {
-            details.append("Position report is over 90 seconds old")
-        }
-        return details.joined(separator: ". ")
+        .accessibilityValue(TrainMarkerPresentation.accessibilityValue(marker))
     }
 }

@@ -1,6 +1,9 @@
 import CoreLocation
 import Foundation
 import Observation
+#if DEBUG && targetEnvironment(simulator)
+    import notify
+#endif
 
 @MainActor @Observable
 final class TransitStore {
@@ -37,10 +40,21 @@ final class TransitStore {
         self.pollingSleep = pollingSleep
     }
 
+    /// The opt-in simulator fixture shares its held time with feed validation and
+    /// the real map sampler. All other builds and sessions use the system clock.
+    var motionDate: Date {
+        #if DEBUG && targetEnvironment(simulator)
+            if let clock = StationMotionFixtureClock.enabled {
+                return clock.now
+            }
+        #endif
+        return .now
+    }
+
     private func fetch<T: Decodable>(_ path: String) async throws -> T {
         #if DEBUG && targetEnvironment(simulator)
             if ProcessInfo.processInfo.arguments.contains("--ui-test-fixture") {
-                let data = try NativeUITestFixture.data(for: path, now: .now)
+                let data = try NativeUITestFixture.data(for: path, now: motionDate)
                 return try JSONDecoder().decode(T.self, from: data)
             }
         #endif
@@ -113,7 +127,7 @@ final class TransitStore {
         do {
             let data = try await task.value
             guard active, current == generation else { return }
-            let now = Date.now
+            let now = motionDate
             guard data.hasValidTimestamp(at: now) else { throw URLError(.badServerResponse) }
             // A clock change or an invalid cached timestamp must not block recovery.
             if data.generatedAt >= (snapshot?.generatedAt ?? 0) || snapshot?.hasValidTimestamp(at: now) == false {
@@ -161,6 +175,105 @@ final class TransitStore {
 }
 
 #if DEBUG && targetEnvironment(simulator)
+    /// Public Darwin notification state is a test-only cross-process observation,
+    /// never a command to change lifecycle. Only the real scene handler publishes.
+    @MainActor
+    enum NativeUITestLifecycle {
+        private static var token: Int32?
+        private static var owner: UUID?
+        private static var competingOwner = false
+        private static var sequence: UInt64 = 0
+
+        private static var name: String? {
+            let process = ProcessInfo.processInfo
+            guard process.arguments.contains("--ui-test-fixture"),
+                  process.arguments.contains("--ui-test-lifecycle"),
+                  let value = process.environment["STANDCLEAR_UI_LIFECYCLE_SESSION"],
+                  let session = UUID(uuidString: value) else { return nil }
+            return "app.standclear.native.ui-test.lifecycle." + session.uuidString
+        }
+
+        /// 1 active; 2 inactive; 3 background after cleanup; 254 cleanup missing;
+        /// 255 multiple reporting owners. Upper bits identify a fresh transition.
+        static func record(owner candidate: UUID, phase: UInt64, cleanupComplete: Bool) {
+            guard let name else { return }
+            if let owner, owner != candidate {
+                competingOwner = true
+            }
+            if owner == nil {
+                owner = candidate
+            }
+            if token == nil {
+                var registered: Int32 = -1
+                let status = notify_register_check(name, &registered)
+                guard status == UInt32(NOTIFY_STATUS_OK) else {
+                    print("UI lifecycle registration failed: \(status)")
+                    return
+                }
+                token = registered
+            }
+            guard let token, sequence < UInt64.max >> 8 else { return }
+            sequence += 1
+            let code: UInt64 = competingOwner ? 255 : phase == 3 && !cleanupComplete ? 254 : phase
+            let status = notify_set_state(token, sequence << 8 | code)
+            guard status == UInt32(NOTIFY_STATUS_OK) else {
+                print("UI lifecycle state publication failed: \(status)")
+                return
+            }
+        }
+
+        static func release(owner candidate: UUID) {
+            guard owner == candidate, let token else { return }
+            let status = notify_cancel(token)
+            self.token = nil
+            if status != UInt32(NOTIFY_STATUS_OK) {
+                print("UI lifecycle cancellation failed: \(status)")
+            }
+        }
+    }
+
+    /// No production/physical/Release clock override. Held stages let XCTest
+    /// inspect actual native annotations without racing a four-second window.
+    @MainActor @Observable
+    final class StationMotionFixtureClock {
+        static let shared = StationMotionFixtureClock()
+        static var enabled: StationMotionFixtureClock? {
+            let arguments = ProcessInfo.processInfo.arguments
+            return ["--ui-test-fixture", "--ui-test-station-motion", "--ui-test-motion-clock"].allSatisfy(arguments.contains) ? shared : nil
+        }
+
+        private let epoch = Date.now
+        private(set) var stage = 0
+        private(set) var sampledStage = -1
+        private let offsets: [TimeInterval] = [0, 8, 16, 17, 18.5, 20]
+        var offset: TimeInterval {
+            offsets[stage]
+        }
+
+        var now: Date {
+            epoch.addingTimeInterval(offset)
+        }
+
+        /// Sampling advances while the last accepted vehicle report stays fixed.
+        var reportDate: Date {
+            epoch.addingTimeInterval(min(offset, 16))
+        }
+
+        var finished: Bool {
+            stage == offsets.count - 1
+        }
+
+        func advance() {
+            guard sampledStage == stage else { return }
+            stage = min(stage + 1, offsets.count - 1)
+        }
+
+        func didSample(at date: Date, generatedAt: Double) {
+            guard date == now, generatedAt == reportDate.timeIntervalSince1970 * 1000 else { return }
+            sampledStage = stage
+        }
+    }
+
     /// Fixed journey anchors for opt-in motion QA; excluded from physical builds.
     struct TemporalMotionFixture {
         private var start: Double?
@@ -194,6 +307,7 @@ final class TransitStore {
     private enum NativeUITestFixture {
         @MainActor private static var temporalMotion = TemporalMotionFixture()
         @MainActor private static var alertRequests = 0
+        @MainActor private static var stationMotionRequests = 0
 
         @MainActor static func data(for path: String, now: Date) throws -> Data {
             let includeExpress = ProcessInfo.processInfo.arguments.contains("--ui-test-express-arrivals")
@@ -309,7 +423,21 @@ final class TransitStore {
                                 "routeIds": ["6X"], "stopIds": ["601"], "selectors": [["routeId": "6X", "stopId": "601"]]],
                            ]]
             case "api/trains":
-                let timestamp = now.timeIntervalSince1970
+                let timestamp = StationMotionFixtureClock.enabled?.reportDate.timeIntervalSince1970 ?? now.timeIntervalSince1970
+                if ProcessInfo.processInfo.arguments.contains("--ui-test-station-motion") {
+                    stationMotionRequests += 1
+                    let oldStation = StationMotionFixtureClock.enabled.map { $0.offset < 16 } ?? (stationMotionRequests < 3)
+                    let stop = oldStation ? "128" : "127"
+                    // Explicit close-up QA can establish heading from the
+                    // preceding moving report at the same initial coordinate.
+                    // The stopped target has no new direction evidence or ETA.
+                    let directedApproach = oldStation && StationMotionFixtureClock.enabled != nil
+                        && ProcessInfo.processInfo.arguments.contains("--ui-test-motion-heading")
+                    let vehicle = train(id: "ui-fixture-station-motion", route: "1", direction: "N",
+                                        previous: directedApproach ? "128" : stop, next: directedApproach ? "127" : stop, timestamp: timestamp)
+                        .merging(["progress": directedApproach ? 0 : 1, "status": directedApproach ? "IN_TRANSIT_TO" : "STOPPED_AT"]) { _, updated in updated }
+                    return try JSONSerialization.data(withJSONObject: ["generatedAt": timestamp * 1000, "trains": [vehicle], "arrivals": []], options: [.sortedKeys])
+                }
                 if ProcessInfo.processInfo.arguments.contains("--ui-test-temporal-motion") {
                     guard let sample = temporalMotion.sample(at: timestamp, stale: ProcessInfo.processInfo.arguments.contains("--ui-test-temporal-motion-stale")) else {
                         throw URLError(.badServerResponse)
