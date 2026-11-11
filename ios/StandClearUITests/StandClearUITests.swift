@@ -287,27 +287,75 @@ final class StandClearUITests: XCTestCase {
         XCTAssertEqual(active.phase, 1, "The app must report its actual active scene before Home", file: file, line: line)
         XCTAssertGreaterThan(active.sequence, 0, file: file, line: line)
         guard active.status == UInt32(NOTIFY_STATUS_OK), active.phase == 1, active.sequence > 0 else { return }
-        // The first SpringBoard Icon can be a zero-size layout placeholder.
-        // Safari is an installed, visible system Dock icon in these simulators.
+        // The retained SpringBoard trees identify this visible Home region and
+        // the app icon separately from the test runner and zero-size placeholders.
         let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
-        let home = springboard.icons["Safari"]
-        var observations: [String] = []
+        let home = springboard.otherElements.matching(identifier: "Home screen icons").element
+            .icons.matching(identifier: "StandClear").element
+        var observations = ["target=Home screen icons/StandClear; exists is not separately queried; positive native isHittable is required"]
+        func describe(_ value: Any?) -> String {
+            value.map { String(describing: $0) } ?? "<not queried>"
+        }
         XCUIDevice.shared.press(.home)
         let deadline = ProcessInfo.processInfo.systemUptime + 5
-        let backgrounded = NSPredicate { _, _ in MainActor.assumeIsolated {
+        var backgrounded = false
+        while !backgrounded {
             let start = ProcessInfo.processInfo.systemUptime
+            guard start < deadline else { break }
             let scene = probe.read()
+            let sceneEnd = ProcessInfo.processInfo.systemUptime
             let freshBackground = scene.status == UInt32(NOTIFY_STATUS_OK) && scene.phase == 3 && scene.sequence > active.sequence
-            let exists = freshBackground && home.exists
-            let hittable = exists && home.isHittable
-            let frame = hittable ? home.frame : .zero
-            let visibleFrame = frame.width.isFinite && frame.height.isFinite && frame.width > 0 && frame.height > 0
+            var hitStart: TimeInterval?
+            var hitEnd: TimeInterval?
+            var hittable: Bool?
+            var frameStart: TimeInterval?
+            var frameEnd: TimeInterval?
+            var frame: CGRect?
+            var finalSceneStart: TimeInterval?
+            var finalSceneEnd: TimeInterval?
+            var finalScene: (status: UInt32, sequence: UInt64, phase: UInt64)?
+            if freshBackground, sceneEnd < deadline {
+                hitStart = ProcessInfo.processInfo.systemUptime
+                hittable = home.isHittable
+                hitEnd = ProcessInfo.processInfo.systemUptime
+                if hittable == true, ProcessInfo.processInfo.systemUptime < deadline {
+                    frameStart = ProcessInfo.processInfo.systemUptime
+                    frame = home.frame
+                    frameEnd = ProcessInfo.processInfo.systemUptime
+                    if ProcessInfo.processInfo.systemUptime < deadline {
+                        finalSceneStart = ProcessInfo.processInfo.systemUptime
+                        finalScene = probe.read()
+                        finalSceneEnd = ProcessInfo.processInfo.systemUptime
+                    }
+                }
+            }
+            let visibleFrame = frame.map {
+                !$0.isNull && !$0.isInfinite &&
+                    $0.origin.x.isFinite && $0.origin.y.isFinite &&
+                    $0.width.isFinite && $0.height.isFinite &&
+                    $0.minX.isFinite && $0.minY.isFinite && $0.maxX.isFinite && $0.maxY.isFinite &&
+                    $0.width > 0 && $0.height > 0
+            } ?? false
+            let stillBackgrounded = finalScene.map {
+                $0.status == UInt32(NOTIFY_STATUS_OK) && $0.phase == 3 && $0.sequence > active.sequence
+            } ?? false
             let end = ProcessInfo.processInfo.systemUptime
-            observations.append("deadline=\(deadline), start=\(start), end=\(end), status=\(scene.status), sequence=\(scene.sequence), phase=\(scene.phase), homeExists=\(exists), homeHittable=\(hittable), homeFrame=\(frame)")
-            return freshBackground && hittable && visibleFrame && end <= deadline
-        } }
-        let result = XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: backgrounded, object: nil)], timeout: 5)
-        XCTAssertEqual(result, .completed, "A fresh real scene-background transition after cleanup and hittable Home must occur within five seconds", file: file, line: line)
+            backgrounded = freshBackground && hittable == true && visibleFrame && stillBackgrounded && end <= deadline
+            observations.append("deadline=\(deadline), start=\(start), sceneEnd=\(sceneEnd), hitStart=\(describe(hitStart)), hitEnd=\(describe(hitEnd)), frameStart=\(describe(frameStart)), frameEnd=\(describe(frameEnd)), finalSceneStart=\(describe(finalSceneStart)), finalSceneEnd=\(describe(finalSceneEnd)), end=\(end), status=\(scene.status), sequence=\(scene.sequence), phase=\(scene.phase), homeHittable=\(describe(hittable)), homeFrame=\(describe(frame)), finalStatus=\(describe(finalScene?.status)), finalSequence=\(describe(finalScene?.sequence)), finalPhase=\(describe(finalScene?.phase)), completed=\(backgrounded)")
+            guard !backgrounded, end < deadline else { break }
+            // Pump public run-loop work between cheap real scene reads. A run
+            // mode can return early, so sleep only its remaining bounded slice.
+            let nextSample = min(deadline, ProcessInfo.processInfo.systemUptime + 0.025)
+            let runLoopInterval = nextSample - ProcessInfo.processInfo.systemUptime
+            if runLoopInterval > 0 {
+                RunLoop.current.run(mode: .default, before: Date(timeIntervalSinceNow: runLoopInterval))
+                let remaining = nextSample - ProcessInfo.processInfo.systemUptime
+                if remaining > 0 {
+                    Thread.sleep(forTimeInterval: remaining)
+                }
+            }
+        }
+        XCTAssertTrue(backgrounded, "A fresh real scene-background transition after cleanup and hittable Home must occur within five seconds", file: file, line: line)
         // XCTest's tracked application enum is diagnostic, never an alternative
         // pass condition. It can disagree with visible Home (tracked in #340).
         observations.append("post-verdict trackedAppState=\(app.state.rawValue), time=\(ProcessInfo.processInfo.systemUptime)")
@@ -321,7 +369,7 @@ final class StandClearUITests: XCTestCase {
         screen.name = "Home immediately after lifecycle verdict"
         screen.lifetime = .keepAlways
         add(screen)
-        if result != .completed {
+        if !backgrounded {
             let hierarchy = XCTAttachment(string: springboard.debugDescription)
             hierarchy.name = "SpringBoard after failed lifecycle verdict"
             hierarchy.lifetime = .keepAlways
