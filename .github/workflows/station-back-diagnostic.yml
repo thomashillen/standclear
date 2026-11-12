@@ -1,0 +1,57 @@
+name: Station Back diagnostic
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+    paths: ['diagnostics/station-back/**', '.github/workflows/station-back-diagnostic.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: station-back-diagnostic-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  diagnostic:
+    name: Wrapped and original Back bindings (diagnostic only)
+    runs-on: macos-26
+    timeout-minutes: 15
+    env:
+      SOURCE_COMMIT: '13752724401a670216dc7498671a6bc62237a505'
+      PATCH_SHA256: '8adf3c4331519ee6992313a4a673ae46f91d567e9bc7e3a57328ebab71c5cecd'
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Fetch the fixed public source object
+        timeout-minutes: 1
+        run: git fetch --no-tags --depth=1 origin "$SOURCE_COMMIT"
+      - name: Prepare and guard exact tools, source, patch and one Simulator
+        timeout-minutes: 3
+        run: |
+          python3 diagnostics/station-back/driver.py prepare \
+            --output "$RUNNER_TEMP/station-back-diagnostic" \
+            --patch diagnostics/station-back/apply-diagnostic.patch \
+            --patch-sha256 "$PATCH_SHA256"
+      - name: Run both focused tests once and preserve their result
+        timeout-minutes: 11
+        run: python3 diagnostics/station-back/driver.py run --output "$RUNNER_TEMP/station-back-diagnostic"
+      - name: Export both RAM logs and clean up only the owned Simulator
+        if: always()
+        timeout-minutes: 1
+        run: python3 diagnostics/station-back/driver.py collect --output "$RUNNER_TEMP/station-back-diagnostic"
+      - name: Upload evidence even on failure
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: station-back-diagnostic-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/station-back-diagnostic/*.json
+            ${{ runner.temp }}/station-back-diagnostic/*.log
+            ${{ runner.temp }}/station-back-diagnostic/exports/*.json
+            ${{ runner.temp }}/station-back-diagnostic/StationBack.xcresult
+          if-no-files-found: error
+          retention-days: 7
