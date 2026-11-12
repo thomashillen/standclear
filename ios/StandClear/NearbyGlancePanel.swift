@@ -7,6 +7,7 @@ struct NearbyGlancePanel: View {
     let maximumHeight: CGFloat
     let openStation: (String) -> Void
     let openNearby: () -> Void
+    let openLocationHelp: () -> Void
     @Environment(\.dynamicTypeSize) private var typeSize
     @State private var contentHeight: CGFloat = 1
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
@@ -83,15 +84,41 @@ struct NearbyGlancePanel: View {
 
     @ViewBuilder private var locationState: some View {
         if location.status == .denied || location.status == .restricted {
-            Label("Location access is off", systemImage: "location.slash")
-                .font(.subheadline)
-            Link("Open Settings", destination: URL(string: UIApplication.openSettingsURLString)!)
+            if typeSize.isAccessibilitySize {
+                locationHelp("Location access is off", hint: "Show location help and Open Settings in Nearby arrivals")
+            } else {
+                Label("Location access is off", systemImage: "location.slash")
+                    .font(.subheadline)
+                Link("Open Settings", destination: URL(string: UIApplication.openSettingsURLString)!)
+            }
         } else if let message = location.message {
-            Text(message).font(.caption)
-            Button("Retry location") { location.start() }
+            if typeSize.isAccessibilitySize {
+                locationHelp("Location unavailable", hint: "Show location details and Retry location in Nearby arrivals")
+            } else {
+                Text(message).font(.caption)
+                Button("Retry location") { location.start() }
+            }
         } else {
             ProgressView("Finding nearby stations…")
         }
+    }
+
+    private func locationHelp(_ title: String, hint: String) -> some View {
+        Button(action: openLocationHelp) {
+            HStack(spacing: 8) {
+                Text(title)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.forward")
+                    .accessibilityHidden(true)
+            }
+            .font(.subheadline)
+            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+            .contentShape(Rectangle())
+        }
+        .accessibilityLabel(title)
+        .accessibilityHint(hint)
+        .accessibilityIdentifier("glanceLocationOptions")
     }
 
     private func prediction(_ arrival: Arrival?, routes: [String], color: String, direction: String, symbol: String, now: Date) -> some View {
