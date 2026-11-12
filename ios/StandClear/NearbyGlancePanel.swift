@@ -98,6 +98,16 @@ struct NearbyGlancePanel: View {
                 Text(message).font(.caption)
                 Button("Retry location") { location.start() }
             }
+        } else if typeSize.isAccessibilitySize {
+            VStack(spacing: 8) {
+                // Size only the native indicator; the complete status keeps Dynamic Type.
+                ProgressView()
+                    .controlSize(.small)
+                Text("Finding nearby stations…")
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("Finding nearby stations…")
         } else {
             ProgressView("Finding nearby stations…")
         }
