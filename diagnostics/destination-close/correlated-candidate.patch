@@ -1,0 +1,71 @@
+--- a/ios/StandClear/PlacePreview.swift
++++ b/ios/StandClear/PlacePreview.swift
+@@ -888,6 +888,13 @@
+         choose(origin)
+     }
+
++    private func traceSearchState(_ event: String) {
++        let session = ProcessInfo.processInfo.environment["SC_SEARCH_TRACE_SESSION"] ?? "unassigned"
++        NSLog("[SCSearchTraceV2] session=%@ %@; destination=%@ presented=%@ focused=%@ query=%@ uptime=%.6f wall=%.6f",
++              session, event, String(destination), String(searchPresented), String(searchFocused), query,
++              ProcessInfo.processInfo.systemUptime, Date().timeIntervalSince1970)
++    }
++
+     var body: some View {
+         let key = request
+         List {
+@@ -934,6 +941,14 @@
+         .modifier(OriginPickerBackground())
+         .searchable(text: $query, isPresented: $searchPresented, placement: .navigationBarDrawer(displayMode: .always), prompt: destination ? "Address or place" : "Address, place or station")
+         .searchFocused($searchFocused)
++        .onChange(of: searchPresented, initial: true) { (old: Bool, new: Bool) in
++            traceSearchState("presented \(old) -> \(new)")
++        }
++        .onChange(of: searchFocused, initial: true) { (old: Bool, new: Bool) in
++            traceSearchState("focused \(old) -> \(new)")
++        }
++        .onAppear { traceSearchState("appear") }
++        .onDisappear { traceSearchState("disappear") }
+         .navigationTitle(destination ? "To" : "From").navigationBarTitleDisplayMode(.inline)
+         .task(id: key) { [key] in
+             guard key.active, key.query.count >= 2 else { return }
+--- a/ios/StandClearUITests/StandClearUITests.swift
++++ b/ios/StandClearUITests/StandClearUITests.swift
+@@ -1813,12 +1813,20 @@
+
+     @MainActor
+     private func checkPlaceDestinationEditing(expanded: Bool, largeType: Bool) {
++        // Correlation token only; this is not a SwiftUI view identity.
++        let traceSession = UUID().uuidString
++        func traceCloseCommand(_ event: String) {
++            let uptime = ProcessInfo.processInfo.systemUptime
++            let wall = Date().timeIntervalSince1970
++            print("[SCSearchCommand] session=\(traceSession) event=\(event) uptime=\(uptime) wall=\(wall)")
++        }
+         let app = XCUIApplication()
+         app.terminate()
+         XCUIDevice.shared.orientation = .portrait
+         defer { XCUIDevice.shared.orientation = .portrait }
+         app.resetAuthorizationStatus(for: .location)
+         app.launchArguments = ["--ui-test-fixture", "--ui-test-noguchi"]
++        app.launchEnvironment["SC_SEARCH_TRACE_SESSION"] = traceSession
+         if largeType {
+             app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
+         }
+@@ -1887,10 +1895,16 @@
+         // Active native search exposes its own Close button before navigation
+         // Back. End search, then explicitly leave the endpoint picker.
+         let closeSearch = app.navigationBars["To"].buttons["Close"]
++        traceCloseCommand("close.exists.begin")
+         if closeSearch.exists {
++            traceCloseCommand("close.tap.begin")
+             closeSearch.tap()
++            traceCloseCommand("close.tap.return")
++        } else {
++            traceCloseCommand("close.absent")
+         }
+         let back = app.navigationBars["To"].buttons["BackButton"]
++        traceCloseCommand("back.assertion.begin")
+         XCTAssertTrue(back.waitForExistence(timeout: 5))
+         back.tap()
+         XCTAssertTrue(destination.waitForExistence(timeout: 10))

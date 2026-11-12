@@ -1,0 +1,98 @@
+[
+  {
+    "timestamp": "2026-11-09 08:31:57.010261+0000",
+    "eventMessage": "[SCSearchTrace] presented false -> false; destination=true presented=false focused=false query= uptime=717.499622",
+    "processID": 10211,
+    "bootUUID": "F096596E-182E-4474-B9A3-4757BB66296E"
+  },
+  {
+    "timestamp": "2026-11-09 08:31:57.010413+0000",
+    "eventMessage": "[SCSearchTrace] focused false -> false; destination=true presented=false focused=false query= uptime=717.499800",
+    "processID": 10211,
+    "bootUUID": "F096596E-182E-4474-B9A3-4757BB66296E"
+  },
+  {
+    "timestamp": "2026-11-09 08:31:57.010614+0000",
+    "eventMessage": "[SCSearchTrace] appear; destination=true presented=false focused=false query= uptime=717.499999",
+    "processID": 10211,
+    "bootUUID": "F096596E-182E-4474-B9A3-4757BB66296E"
+  },
+  {
+    "timestamp": "2026-11-09 08:32:07.303772+0000",
+    "eventMessage": "[SCSearchTrace] presented false -> true; destination=true presented=true focused=true query= uptime=727.793115",
+    "processID": 10211,
+    "bootUUID": "F096596E-182E-4474-B9A3-4757BB66296E"
+  },
+  {
+    "timestamp": "2026-11-09 08:32:08.499561+0000",
+    "eventMessage": "[SCSearchTrace] focused false -> true; destination=true presented=true focused=true query= uptime=728.988857",
+    "processID": 10211,
+    "bootUUID": "F096596E-182E-4474-B9A3-4757BB66296E"
+  },
+  {
+    "timestamp": "2026-11-09 08:32:10.681025+0000",
+    "eventMessage": "[SCSearchTrace] focused true -> false; destination=true presented=true focused=false query=Madison uptime=731.170382",
+    "processID": 10211,
+    "bootUUID": "F096596E-182E-4474-B9A3-4757BB66296E"
+  },
+  {
+    "timestamp": "2026-11-09 08:32:21.696723+0000",
+    "eventMessage": "[SCSearchTrace] presented true -> false; destination=true presented=false focused=false query= uptime=742.185990",
+    "processID": 10211,
+    "bootUUID": "F096596E-182E-4474-B9A3-4757BB66296E"
+  },
+  {
+    "timestamp": "2026-11-09 08:32:26.297474+0000",
+    "eventMessage": "[SCSearchTrace] disappear; destination=true presented=false focused=false query= uptime=746.786782",
+    "processID": 10211,
+    "bootUUID": "F096596E-182E-4474-B9A3-4757BB66296E"
+  },
+  {
+    "timestamp": "2026-11-09 08:32:29.436771+0000",
+    "eventMessage": "[SCSearchTrace] presented false -> false; destination=true presented=false focused=false query= uptime=749.926134",
+    "processID": 10211,
+    "bootUUID": "F096596E-182E-4474-B9A3-4757BB66296E"
+  },
+  {
+    "timestamp": "2026-11-09 08:32:29.436956+0000",
+    "eventMessage": "[SCSearchTrace] focused false -> false; destination=true presented=false focused=false query= uptime=749.926345",
+    "processID": 10211,
+    "bootUUID": "F096596E-182E-4474-B9A3-4757BB66296E"
+  },
+  {
+    "timestamp": "2026-11-09 08:32:29.437029+0000",
+    "eventMessage": "[SCSearchTrace] appear; destination=true presented=false focused=false query= uptime=749.926421",
+    "processID": 10211,
+    "bootUUID": "F096596E-182E-4474-B9A3-4757BB66296E"
+  },
+  {
+    "timestamp": "2026-11-09 08:32:33.220033+0000",
+    "eventMessage": "[SCSearchTrace] presented false -> true; destination=true presented=true focused=true query= uptime=753.709387",
+    "processID": 10211,
+    "bootUUID": "F096596E-182E-4474-B9A3-4757BB66296E"
+  },
+  {
+    "timestamp": "2026-11-09 08:32:33.537823+0000",
+    "eventMessage": "[SCSearchTrace] focused false -> true; destination=true presented=true focused=true query= uptime=754.027180",
+    "processID": 10211,
+    "bootUUID": "F096596E-182E-4474-B9A3-4757BB66296E"
+  },
+  {
+    "timestamp": "2026-11-09 08:32:36.060865+0000",
+    "eventMessage": "[SCSearchTrace] focused true -> false; destination=true presented=true focused=false query=Madison uptime=756.550230",
+    "processID": 10211,
+    "bootUUID": "F096596E-182E-4474-B9A3-4757BB66296E"
+  },
+  {
+    "timestamp": "2026-11-09 08:32:38.956506+0000",
+    "eventMessage": "[SCSearchTrace] presented true -> false; destination=true presented=false focused=false query=Madison uptime=759.445874",
+    "processID": 10211,
+    "bootUUID": "F096596E-182E-4474-B9A3-4757BB66296E"
+  },
+  {
+    "timestamp": "2026-11-09 08:32:39.001890+0000",
+    "eventMessage": "[SCSearchTrace] disappear; destination=true presented=false focused=false query=Madison uptime=759.491259",
+    "processID": 10211,
+    "bootUUID": "F096596E-182E-4474-B9A3-4757BB66296E"
+  }
+]
