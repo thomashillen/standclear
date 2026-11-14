@@ -236,7 +236,7 @@ final class TransitStore {
     /// inspect actual native annotations without racing a four-second window.
     @MainActor @Observable
     final class StationMotionFixtureClock {
-        static let shared = StationMotionFixtureClock()
+        static let shared = StationMotionFixtureClock(freezeVehicleReport: ProcessInfo.processInfo.arguments.contains("--ui-test-motion-vehicle-stale"))
         static var enabled: StationMotionFixtureClock? {
             let arguments = ProcessInfo.processInfo.arguments
             return ["--ui-test-fixture", "--ui-test-station-motion", "--ui-test-motion-clock"].allSatisfy(arguments.contains) ? shared : nil
@@ -245,7 +245,14 @@ final class TransitStore {
         private let epoch = Date.now
         private(set) var stage = 0
         private(set) var sampledStage = -1
-        private let offsets: [TimeInterval] = [0, 8, 16, 17, 18.5, 20]
+        private let offsets: [TimeInterval]
+        private let freezeVehicleReport: Bool
+
+        init(freezeVehicleReport: Bool = false) {
+            self.freezeVehicleReport = freezeVehicleReport
+            offsets = freezeVehicleReport ? [0, 8, 16, 17, 18.5, 20, 80] : [0, 8, 16, 17, 18.5, 20]
+        }
+
         var offset: TimeInterval {
             offsets[stage]
         }
@@ -257,6 +264,12 @@ final class TransitStore {
         /// Sampling advances while the last accepted vehicle report stays fixed.
         var reportDate: Date {
             epoch.addingTimeInterval(min(offset, 16))
+        }
+
+        /// Explicit stale QA keeps the snapshot fresh while the normal vehicle
+        /// movement cap freezes a correction halfway, then lets the feed expire.
+        var vehicleReportDate: Date {
+            freezeVehicleReport ? epoch.addingTimeInterval(-72) : reportDate
         }
 
         var finished: Bool {
@@ -433,8 +446,9 @@ final class TransitStore {
                     // The stopped target has no new direction evidence or ETA.
                     let directedApproach = oldStation && StationMotionFixtureClock.enabled != nil
                         && ProcessInfo.processInfo.arguments.contains("--ui-test-motion-heading")
+                    let vehicleTimestamp = StationMotionFixtureClock.enabled?.vehicleReportDate.timeIntervalSince1970 ?? timestamp
                     let vehicle = train(id: "ui-fixture-station-motion", route: "1", direction: "N",
-                                        previous: directedApproach ? "128" : stop, next: directedApproach ? "127" : stop, timestamp: timestamp)
+                                        previous: directedApproach ? "128" : stop, next: directedApproach ? "127" : stop, timestamp: vehicleTimestamp)
                         .merging(["progress": directedApproach ? 0 : 1, "status": directedApproach ? "IN_TRANSIT_TO" : "STOPPED_AT"]) { _, updated in updated }
                     return try JSONSerialization.data(withJSONObject: ["generatedAt": timestamp * 1000, "trains": [vehicle], "arrivals": []], options: [.sortedKeys])
                 }

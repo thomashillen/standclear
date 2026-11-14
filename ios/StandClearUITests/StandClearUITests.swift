@@ -380,26 +380,29 @@ final class StandClearUITests: XCTestCase {
     @MainActor
     func testStationObservationReconciliationOnNativeMap() {
         checkStationObservationReconciliation(expanded: false, largeText: false)
+        checkStationObservationReconciliation(expanded: false, largeText: false, closeZoom: false, captureContext: "Ordinary portrait")
     }
 
     @MainActor
     func testStationObservationReconciliationExpanded() {
         checkStationObservationReconciliation(expanded: true, largeText: false)
+        checkStationObservationReconciliation(expanded: true, largeText: true, captureContext: "Largest text landscape")
     }
 
     @MainActor
     func testStationObservationReconciliationAtLargestText() {
         checkStationObservationReconciliation(expanded: false, largeText: true)
+        checkFrozenStationObservationReconciliation()
     }
 
     @MainActor
-    private func checkStationObservationReconciliation(expanded: Bool, largeText: Bool) {
+    private func checkStationObservationReconciliation(expanded: Bool, largeText: Bool, closeZoom: Bool = true, captureContext: String = "") {
         let app = XCUIApplication()
         app.terminate()
         XCUIDevice.shared.orientation = .portrait
         app.resetAuthorizationStatus(for: .location)
         app.launchArguments = ["--ui-test-fixture", "--ui-test-station-motion", "--ui-test-motion-clock"]
-        if !expanded, !largeText {
+        if !expanded, !largeText, closeZoom {
             app.launchArguments += ["--ui-test-motion-close-zoom", "--ui-test-motion-heading"]
         }
         if largeText {
@@ -416,7 +419,11 @@ final class StandClearUITests: XCTestCase {
         activatePermissionPrompt(in: app)
         if expanded {
             XCUIDevice.shared.orientation = .landscapeLeft
-            waitForLayout(in: app, expanded: true)
+            if largeText {
+                waitForAccessibilityLandscapeMotionLayout(in: app)
+            } else {
+                waitForLayout(in: app, expanded: true)
+            }
         }
         let train = app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "Route 1 train. Estimated position.")).firstMatch
         XCTAssertTrue(train.waitForExistence(timeout: 10))
@@ -425,12 +432,16 @@ final class StandClearUITests: XCTestCase {
             XCTAssertTrue(glance.exists)
             let trainFrame = train.frame
             let glanceFrame = glance.frame
-            captureLocationGlance(in: app, context: "Largest text station-motion train without map panning")
+            captureLocationGlance(in: app, context: captureContext.isEmpty ? "Largest text station-motion train without map panning" : "\(captureContext) station-motion train without map panning")
             XCTAssertFalse(trainFrame.intersects(glanceFrame), "The location glance must leave the fixture train visible without moving the map")
+        }
+        if !closeZoom {
+            captureLocationGlance(in: app, context: "Ordinary portrait station-motion train without map panning")
+            XCTAssertFalse(train.frame.intersects(app.scrollViews.firstMatch.frame))
         }
         func capture(_ name: String) {
             let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
-            attachment.name = name
+            attachment.name = captureContext.isEmpty ? name : "\(captureContext): \(name)"
             attachment.lifetime = .keepAlways
             add(attachment)
         }
@@ -450,7 +461,7 @@ final class StandClearUITests: XCTestCase {
         let uncertain = NSPredicate(format: "value CONTAINS %@", "Current position is uncertain")
         expectation(for: uncertain, evaluatedWith: train)
         waitForExpectations(timeout: 25)
-        XCTAssertEqual(train.value as? String, !expanded && !largeText ? "Current position is uncertain"
+        XCTAssertEqual(train.value as? String, !expanded && !largeText && closeZoom ? "Current position is uncertain"
             : "Travel direction is unavailable. Current position is uncertain")
         step(to: 3)
         let start = train.frame
@@ -473,6 +484,89 @@ final class StandClearUITests: XCTestCase {
         waitForExpectations(timeout: 8)
         capture("Observed station reconciliation settled")
         XCTAssertTrue((train.value as? String ?? "").contains("Travel direction is unavailable"))
+    }
+
+    @MainActor
+    private func waitForAccessibilityLandscapeMotionLayout(in app: XCUIApplication) {
+        // Accessibility sizes retain the compact toolbar in a landscape window.
+        let ready = NSPredicate { _, _ in
+            MainActor.assumeIsolated {
+                let window = app.windows.firstMatch
+                let matches = ["searchButton", "nearbyButton", "moreButton"].map { app.buttons.matching(identifier: $0) }
+                guard window.exists, matches.allSatisfy({ $0.count == 1 }) else { return false }
+                let controls = matches.map { $0.element(boundBy: 0) }
+                guard controls.allSatisfy(\.exists) else { return false }
+                let bounds = window.frame
+                let frames = controls.map(\.frame)
+                guard !bounds.isNull, !bounds.isInfinite, bounds.width > bounds.height, bounds.height > 0,
+                      frames.allSatisfy({ !$0.isNull && !$0.isInfinite && $0.width > 0 && $0.height > 0 && bounds.contains($0) }),
+                      frames[0].midX < bounds.midX,
+                      frames[1].midX > bounds.midX,
+                      frames[2].midX > frames[1].midX
+                else { return false }
+                return controls.allSatisfy(\.isHittable)
+            }
+        }
+        expectation(for: ready, evaluatedWith: app)
+        waitForExpectations(timeout: 20)
+    }
+
+    @MainActor
+    private func checkFrozenStationObservationReconciliation() {
+        let app = XCUIApplication()
+        app.terminate()
+        XCUIDevice.shared.orientation = .portrait
+        app.resetAuthorizationStatus(for: .location)
+        app.launchArguments = ["--ui-test-fixture", "--ui-test-station-motion", "--ui-test-motion-clock", "--ui-test-motion-vehicle-stale"]
+        defer {
+            app.terminate()
+            XCUIDevice.shared.orientation = .portrait
+        }
+        addUIInterruptionMonitor(withDescription: "Location permission") { alert in
+            let deny = alert.buttons["Don’t Allow"]
+            guard deny.exists else { return false }
+            deny.tap()
+            return true
+        }
+        app.launch()
+        XCTAssertTrue(app.buttons["moreButton"].waitForExistence(timeout: 15))
+        activatePermissionPrompt(in: app)
+        let train = app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "Route 1 train. Estimated position.")).firstMatch
+        XCTAssertTrue(train.waitForExistence(timeout: 10))
+        let advance = app.buttons["advanceMotionFixture"]
+        expectation(for: NSPredicate(format: "value == %@ AND enabled == true", "0"), evaluatedWith: advance)
+        waitForExpectations(timeout: 8)
+        func step(to stage: Int) {
+            advance.tap()
+            expectation(for: NSPredicate(format: "value == %@", String(stage)), evaluatedWith: advance)
+            waitForExpectations(timeout: 8)
+        }
+        captureLocationGlance(in: app, context: "Vehicle-freeze fixture before correction")
+        step(to: 1)
+        step(to: 2)
+        expectation(for: NSPredicate(format: "value CONTAINS %@", "Current position is uncertain"), evaluatedWith: train)
+        waitForExpectations(timeout: 25)
+        step(to: 3) // Vehicle age89, one second into the correction.
+        let start = train.frame
+        captureLocationGlance(in: app, context: "Vehicle-freeze fixture before the90-second cap")
+        step(to: 4) // Vehicle age90.5, normal movement cap selects logical18.
+        let frozenValue = "Travel direction is unavailable. Current position is uncertain. Position report is over 90 seconds old"
+        expectation(for: NSPredicate(format: "value == %@", frozenValue), evaluatedWith: train)
+        waitForExpectations(timeout: 8)
+        let frozen = train.frame
+        XCTAssertGreaterThan(hypot(frozen.midX - start.midX, frozen.midY - start.midY), 0.5)
+        captureLocationGlance(in: app, context: "Vehicle-freeze fixture at the90-second cap")
+        step(to: 5) // Vehicle age92, still the same capped coordinate.
+        expectation(for: NSPredicate(format: "value == %@", frozenValue), evaluatedWith: train)
+        waitForExpectations(timeout: 8)
+        let later = train.frame
+        XCTAssertLessThanOrEqual(hypot(later.midX - frozen.midX, later.midY - frozen.midY), 0.5)
+        captureLocationGlance(in: app, context: "Vehicle-freeze fixture stays frozen and uncertain")
+        step(to: 6) // Snapshot age64: the existing60-second deadline removes it.
+        expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: train)
+        waitForExpectations(timeout: 8)
+        XCTAssertTrue(nativeMap(in: app).exists, "An absent map must not supply an expired-marker pass")
+        captureLocationGlance(in: app, context: "Vehicle-freeze fixture expires normally")
     }
 
     @MainActor
