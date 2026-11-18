@@ -347,15 +347,25 @@ struct StationArrivals: View {
     @State private var visible = false
     @State private var alerts = StationAlertsLoad()
     @State private var alertsRetry = 0
+    #if DEBUG && targetEnvironment(simulator)
+        @State private var alertRetryID: UUID?
+    #endif
 
     private struct AlertsRequest: Equatable {
         let stationID: String
         let active: Bool
         let revision: Int
+        #if DEBUG && targetEnvironment(simulator)
+            let alertRetryID: UUID?
+        #endif
     }
 
     private var alertsRequest: AlertsRequest {
-        AlertsRequest(stationID: station.id, active: visible && scenePhase == .active && !showingDirections, revision: alertsRetry)
+        #if DEBUG && targetEnvironment(simulator)
+            AlertsRequest(stationID: station.id, active: visible && scenePhase == .active && !showingDirections, revision: alertsRetry, alertRetryID: alertRetryID)
+        #else
+            AlertsRequest(stationID: station.id, active: visible && scenePhase == .active && !showingDirections, revision: alertsRetry)
+        #endif
     }
 
     var body: some View {
@@ -365,7 +375,12 @@ struct StationArrivals: View {
             let groups = fresh ? StationArrivalGroup.groups(Transit.arrivals(for: station, snapshot: store.snapshot, now: now)) : []
             let caveat = "MTA predictions may change. Missing predictions do not mean no service. Partial upstream outages may omit routes."
             List {
-                StationAlertSection(station: station, load: alerts.scoped(to: station.id), now: now) { alertsRetry += 1 }
+                StationAlertSection(station: station, load: alerts.scoped(to: station.id), now: now) {
+                    #if DEBUG && targetEnvironment(simulator)
+                        alertRetryID = UUID()
+                    #endif
+                    alertsRetry += 1
+                }
                 if !fresh || groups.isEmpty {
                     Section {
                         if !fresh {
@@ -407,7 +422,11 @@ struct StationArrivals: View {
             while !Task.isCancelled {
                 alerts.beginRequest()
                 do {
-                    let snapshot = try await store.stationAlerts()
+                    #if DEBUG && targetEnvironment(simulator)
+                        let snapshot = try await store.stationAlerts(uiTestRetryID: alertsRequest.alertRetryID)
+                    #else
+                        let snapshot = try await store.stationAlerts()
+                    #endif
                     guard !Task.isCancelled, self.alertsRequest == alertsRequest else { return }
                     alerts.receive(snapshot)
                 } catch {
@@ -693,21 +712,36 @@ private struct LineStations: View {
     @State private var visible = false
     @State private var alerts = StationAlertsLoad()
     @State private var alertsRetry = 0
+    #if DEBUG && targetEnvironment(simulator)
+        @State private var alertRetryID: UUID?
+    #endif
 
     private struct Request: Equatable {
         let routeID: String
         let active: Bool
         let revision: Int
+        #if DEBUG && targetEnvironment(simulator)
+            let alertRetryID: UUID?
+        #endif
     }
 
     private var request: Request {
-        Request(routeID: line.routeId, active: visible && scenePhase == .active, revision: alertsRetry)
+        #if DEBUG && targetEnvironment(simulator)
+            Request(routeID: line.routeId, active: visible && scenePhase == .active, revision: alertsRetry, alertRetryID: alertRetryID)
+        #else
+            Request(routeID: line.routeId, active: visible && scenePhase == .active, revision: alertsRetry)
+        #endif
     }
 
     var body: some View {
         TimelineView(.periodic(from: .now, by: 5)) { context in
             List {
-                LineAlertSection(line: line, load: alerts.scoped(to: line.routeId), now: context.date) { alertsRetry += 1 }
+                LineAlertSection(line: line, load: alerts.scoped(to: line.routeId), now: context.date) {
+                    #if DEBUG && targetEnvironment(simulator)
+                        alertRetryID = UUID()
+                    #endif
+                    alertsRetry += 1
+                }
                 Section {
                     ForEach(line.stops) { stop in
                         if let station = store.stations.first(where: { $0.stopIDs.contains(stop.id) }) {
@@ -742,7 +776,11 @@ private struct LineStations: View {
             while !Task.isCancelled {
                 alerts.beginRequest()
                 do {
-                    let snapshot = try await store.stationAlerts()
+                    #if DEBUG && targetEnvironment(simulator)
+                        let snapshot = try await store.stationAlerts(uiTestRetryID: request.alertRetryID)
+                    #else
+                        let snapshot = try await store.stationAlerts()
+                    #endif
                     guard !Task.isCancelled, self.request == request else { return }
                     alerts.receive(snapshot)
                 } catch {
