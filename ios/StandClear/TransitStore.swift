@@ -335,6 +335,13 @@ final class TransitStore {
             case stale, failure, current
         }
 
+        /// XCTest retains the app log alongside the UI runner's tap and assertion times.
+        static func log(_ event: String, retryID: UUID?) {
+            let arguments = ProcessInfo.processInfo.arguments
+            guard arguments.contains("--ui-test-fixture"), arguments.contains("--ui-test-alert-recovery") else { return }
+            NSLog("StandClear alert recovery: %@, retry=%@", event, retryID?.uuidString ?? "none")
+        }
+
         private var retries: Set<UUID> = []
 
         mutating func response(afterRetry id: UUID?) -> Response {
@@ -453,6 +460,7 @@ final class TransitStore {
             case "api/alerts":
                 let recovery = ProcessInfo.processInfo.arguments.contains("--ui-test-alert-recovery")
                 let response = recovery ? alertRecovery.response(afterRetry: alertRetryID) : .current
+                NativeAlertRetryFixture.log("fixture \(response)", retryID: alertRetryID)
                 if response == .failure {
                     throw URLError(.notConnectedToInternet)
                 }
