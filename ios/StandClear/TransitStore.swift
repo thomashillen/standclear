@@ -72,6 +72,19 @@ final class TransitStore {
         try await fetch("api/alerts")
     }
 
+    #if DEBUG && targetEnvironment(simulator)
+        /// Only the opt-in recovery fixture follows explicit Retry actions.
+        /// Automatic refreshes keep their real cadence and do not consume a stage.
+        func stationAlerts(uiTestRetryID: UUID?) async throws -> StationAlertSnapshot {
+            let arguments = ProcessInfo.processInfo.arguments
+            guard arguments.contains("--ui-test-fixture"), arguments.contains("--ui-test-alert-recovery") else {
+                return try await stationAlerts()
+            }
+            let data = try NativeUITestFixture.data(for: "api/alerts", now: motionDate, alertRetryID: uiTestRetryID)
+            return try JSONDecoder().decode(StationAlertSnapshot.self, from: data)
+        }
+    #endif
+
     func loadLines() async {
         guard active else { return }
         let current = generation
@@ -236,7 +249,7 @@ final class TransitStore {
     /// inspect actual native annotations without racing a four-second window.
     @MainActor @Observable
     final class StationMotionFixtureClock {
-        static let shared = StationMotionFixtureClock()
+        static let shared = StationMotionFixtureClock(freezeVehicleReport: ProcessInfo.processInfo.arguments.contains("--ui-test-motion-vehicle-stale"))
         static var enabled: StationMotionFixtureClock? {
             let arguments = ProcessInfo.processInfo.arguments
             return ["--ui-test-fixture", "--ui-test-station-motion", "--ui-test-motion-clock"].allSatisfy(arguments.contains) ? shared : nil
@@ -245,7 +258,14 @@ final class TransitStore {
         private let epoch = Date.now
         private(set) var stage = 0
         private(set) var sampledStage = -1
-        private let offsets: [TimeInterval] = [0, 8, 16, 17, 18.5, 20]
+        private let offsets: [TimeInterval]
+        private let freezeVehicleReport: Bool
+
+        init(freezeVehicleReport: Bool = false) {
+            self.freezeVehicleReport = freezeVehicleReport
+            offsets = freezeVehicleReport ? [0, 8, 16, 17, 18.5, 20, 80] : [0, 8, 16, 17, 18.5, 20]
+        }
+
         var offset: TimeInterval {
             offsets[stage]
         }
@@ -257,6 +277,12 @@ final class TransitStore {
         /// Sampling advances while the last accepted vehicle report stays fixed.
         var reportDate: Date {
             epoch.addingTimeInterval(min(offset, 16))
+        }
+
+        /// Explicit stale QA keeps the snapshot fresh while the normal vehicle
+        /// movement cap freezes a correction halfway, then lets the feed expire.
+        var vehicleReportDate: Date {
+            freezeVehicleReport ? epoch.addingTimeInterval(-72) : reportDate
         }
 
         var finished: Bool {
@@ -302,14 +328,42 @@ final class TransitStore {
         }
     }
 
+    /// Recovery stages follow distinct rider actions, independent of poll count
+    /// or view recreation. Remember at most two actions for this app session.
+    struct NativeAlertRetryFixture {
+        enum Response: Equatable {
+            case stale, failure, current
+        }
+
+        /// XCTest retains the app log alongside the UI runner's tap and assertion times.
+        static func log(_ event: String, retryID: UUID?) {
+            let arguments = ProcessInfo.processInfo.arguments
+            guard arguments.contains("--ui-test-fixture"), arguments.contains("--ui-test-alert-recovery") else { return }
+            NSLog("StandClear alert recovery: %@, retry=%@", event, retryID?.uuidString ?? "none")
+        }
+
+        private var retries: Set<UUID> = []
+
+        mutating func response(afterRetry id: UUID?) -> Response {
+            if let id, retries.count < 2 {
+                retries.insert(id)
+            }
+            switch retries.count {
+            case 0: return .stale
+            case 1: return .failure
+            default: return .current
+            }
+        }
+    }
+
     /// Explicit simulator-only UI data. Refresh still uses the normal decoding,
     /// polling, cancellation and freshness gates. Default trips remain stable.
     private enum NativeUITestFixture {
         @MainActor private static var temporalMotion = TemporalMotionFixture()
-        @MainActor private static var alertRequests = 0
+        @MainActor private static var alertRecovery = NativeAlertRetryFixture()
         @MainActor private static var stationMotionRequests = 0
 
-        @MainActor static func data(for path: String, now: Date) throws -> Data {
+        @MainActor static func data(for path: String, now: Date, alertRetryID: UUID? = nil) throws -> Data {
             let includeExpress = ProcessInfo.processInfo.arguments.contains("--ui-test-express-arrivals")
             let includeOperational = ProcessInfo.processInfo.arguments.contains("--ui-test-operational-direction")
             let includeMuseum = ProcessInfo.processInfo.arguments.contains("--ui-test-noguchi")
@@ -404,12 +458,13 @@ final class TransitStore {
                 }
                 payload = ["lines": lines]
             case "api/alerts":
-                alertRequests += 1
                 let recovery = ProcessInfo.processInfo.arguments.contains("--ui-test-alert-recovery")
-                if recovery, alertRequests == 2 {
+                let response = recovery ? alertRecovery.response(afterRetry: alertRetryID) : .current
+                NativeAlertRetryFixture.log("fixture \(response)", retryID: alertRetryID)
+                if response == .failure {
                     throw URLError(.notConnectedToInternet)
                 }
-                let stale = ProcessInfo.processInfo.arguments.contains("--ui-test-stale-alerts") || (recovery && alertRequests == 1)
+                let stale = ProcessInfo.processInfo.arguments.contains("--ui-test-stale-alerts") || response == .stale
                 let windowEnd = now.timeIntervalSince1970 + (ProcessInfo.processInfo.arguments.contains("--ui-test-alert-window-absolute") ? 2 * 86400 : 2700)
                 let bullets = ProcessInfo.processInfo.arguments.contains("--ui-test-route-bullets")
                 payload = ["available": true, "generatedAt": now.timeIntervalSince1970 * 1000,
@@ -433,8 +488,9 @@ final class TransitStore {
                     // The stopped target has no new direction evidence or ETA.
                     let directedApproach = oldStation && StationMotionFixtureClock.enabled != nil
                         && ProcessInfo.processInfo.arguments.contains("--ui-test-motion-heading")
+                    let vehicleTimestamp = StationMotionFixtureClock.enabled?.vehicleReportDate.timeIntervalSince1970 ?? timestamp
                     let vehicle = train(id: "ui-fixture-station-motion", route: "1", direction: "N",
-                                        previous: directedApproach ? "128" : stop, next: directedApproach ? "127" : stop, timestamp: timestamp)
+                                        previous: directedApproach ? "128" : stop, next: directedApproach ? "127" : stop, timestamp: vehicleTimestamp)
                         .merging(["progress": directedApproach ? 0 : 1, "status": directedApproach ? "IN_TRANSIT_TO" : "STOPPED_AT"]) { _, updated in updated }
                     return try JSONSerialization.data(withJSONObject: ["generatedAt": timestamp * 1000, "trains": [vehicle], "arrivals": []], options: [.sortedKeys])
                 }

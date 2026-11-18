@@ -440,21 +440,37 @@ struct SystemAlertsView: View {
     @Environment(\.scenePhase) private var scenePhase
     @State private var visible = false
     @State private var revision = 0
+    #if DEBUG && targetEnvironment(simulator)
+        @State private var alertRetryID: UUID?
+    #endif
 
     private struct Request: Equatable {
         let active: Bool
         let revision: Int
+        #if DEBUG && targetEnvironment(simulator)
+            let alertRetryID: UUID?
+        #endif
     }
 
     private var request: Request {
-        Request(active: visible && scenePhase == .active, revision: revision)
+        #if DEBUG && targetEnvironment(simulator)
+            Request(active: visible && scenePhase == .active, revision: revision, alertRetryID: alertRetryID)
+        #else
+            Request(active: visible && scenePhase == .active, revision: revision)
+        #endif
     }
 
     var body: some View {
         TimelineView(.periodic(from: .now, by: 5)) { context in
             List {
-                ServiceAlertSection(load: load, now: context.date, retry: { revision += 1 }, includes: { _ in true },
-                                    emptyMessage: "No service alerts reported.", summaryIdentifier: "systemAlertsSummary", systemwide: true)
+                ServiceAlertSection(load: load, now: context.date, retry: {
+                    #if DEBUG && targetEnvironment(simulator)
+                        alertRetryID = UUID()
+                        NativeAlertRetryFixture.log("inline Retry", retryID: alertRetryID)
+                    #endif
+                    revision += 1
+                }, includes: { _ in true },
+                emptyMessage: "No service alerts reported.", summaryIdentifier: "systemAlertsSummary", systemwide: true)
             }
             .listStyle(.plain)
             .scrollContentBackground(.hidden)
@@ -464,9 +480,15 @@ struct SystemAlertsView: View {
         }
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
-                Button("Refresh service alerts", systemImage: "arrow.clockwise") { revision += 1 }
-                    .disabled(load.isRequestInFlight)
-                    .accessibilityIdentifier("systemAlertsRefresh")
+                Button("Refresh service alerts", systemImage: "arrow.clockwise") {
+                    #if DEBUG && targetEnvironment(simulator)
+                        alertRetryID = UUID()
+                        NativeAlertRetryFixture.log("toolbar refresh", retryID: alertRetryID)
+                    #endif
+                    revision += 1
+                }
+                .disabled(load.isRequestInFlight)
+                .accessibilityIdentifier("systemAlertsRefresh")
             }
         }
         .onAppear { visible = true }
@@ -476,12 +498,23 @@ struct SystemAlertsView: View {
             while !Task.isCancelled {
                 load.beginRequest()
                 do {
-                    let snapshot = try await store.stationAlerts()
+                    #if DEBUG && targetEnvironment(simulator)
+                        NativeAlertRetryFixture.log("request", retryID: request.alertRetryID)
+                        let snapshot = try await store.stationAlerts(uiTestRetryID: request.alertRetryID)
+                    #else
+                        let snapshot = try await store.stationAlerts()
+                    #endif
                     guard !Task.isCancelled, self.request == request else { return }
                     load.receive(snapshot)
+                    #if DEBUG && targetEnvironment(simulator)
+                        NativeAlertRetryFixture.log("applied snapshot", retryID: request.alertRetryID)
+                    #endif
                 } catch {
                     guard !Task.isCancelled, self.request == request else { return }
                     load.fail()
+                    #if DEBUG && targetEnvironment(simulator)
+                        NativeAlertRetryFixture.log("applied failure", retryID: request.alertRetryID)
+                    #endif
                 }
                 do { try await Task.sleep(for: .seconds(60)) } catch { return }
             }

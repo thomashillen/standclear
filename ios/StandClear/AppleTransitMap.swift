@@ -317,7 +317,6 @@ private struct AppleTrainAnnotation: View {
         let baseScale = TrainMarkerSizing.scale(zoom: cameraState.zoom)
         let scale = differentiateWithoutColor ? max(0.85, baseScale) : baseScale
         let labelOpacity = differentiateWithoutColor ? 1 : TrainMarkerSizing.labelOpacity(zoom: cameraState.zoom)
-        let captionTopOffset = (12.0 + hypot(23.0, 10.0)) * scale + 6.0
         ZStack {
             if let bearing = marker.bearingDegrees {
                 TrainCarArtwork(color: marker.color)
@@ -330,10 +329,6 @@ private struct AppleTrainAnnotation: View {
                     .overlay { Circle().strokeBorder(.white, lineWidth: 1.5) }
                     .frame(width: 24, height: 24)
             }
-            if marker.reconciling {
-                Capsule().stroke(.white, style: StrokeStyle(lineWidth: 1.5, dash: [3, 2]))
-                    .frame(width: 48, height: 27)
-            }
             Text(marker.displayLetter)
                 .font(.system(size: 12, weight: .bold))
                 .foregroundStyle(marker.textColor == "black" ? Color.black : Color.white)
@@ -344,22 +339,6 @@ private struct AppleTrainAnnotation: View {
         .scaleEffect(scale)
         .frame(width: 46 * scale, height: 24 * scale)
         .opacity(marker.opacity)
-        // Overlay content does not contribute to the fixed marker layout or
-        // move the glyph's map anchor when the uncertainty caption changes.
-        .overlay(alignment: .top) {
-            if let caption = TrainMarkerPresentation.uncertaintyCaption(marker) {
-                Text(caption)
-                    .font(.caption2)
-                    .fixedSize()
-                    .padding(.horizontal, 5)
-                    .padding(.vertical, 2)
-                    .background(.regularMaterial, in: Capsule())
-                    // The 46x20 artwork rotates beyond its 46x24 layout frame.
-                    // Clear its full canvas radius without moving the map anchor.
-                    .offset(y: captionTopOffset)
-                    .accessibilityHidden(true)
-            }
-        }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Route \(marker.spokenRouteName) train. Estimated position.")
         .accessibilityValue(TrainMarkerPresentation.accessibilityValue(marker))
