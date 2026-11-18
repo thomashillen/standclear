@@ -17,7 +17,7 @@ final class StationAlertsTests: XCTestCase {
         XCTAssertEqual(evidence(generatedAge: 300, sourceAge: 0), .unknown)
     }
 
-    func testFailedPollKeepsReportUnconfirmedThroughRetryUntilSuccessfulReplacement() {
+    func testFailedPollKeepsReportUnconfirmedThroughRetryUntilSuccessfulReplacement() throws {
         let severe = StationAlert(id: "service-change", header: "Suspended", description: "", effect: "", severity: "severe",
                                   routeIds: ["4"], stopIds: [], selectors: nil)
         let source = now.addingTimeInterval(-10)
@@ -49,6 +49,35 @@ final class StationAlertsTests: XCTestCase {
             XCTAssertEqual(load.snapshot?.alerts.count, 0)
             XCTAssertNil(load.lastReportAfterFailure(at: now))
         }
+
+        #if DEBUG && targetEnvironment(simulator)
+            let firstRetry = try XCTUnwrap(UUID(uuidString: "00000000-0000-0000-0000-000000000001"))
+            let secondRetry = try XCTUnwrap(UUID(uuidString: "00000000-0000-0000-0000-000000000002"))
+            let staleSource = now.addingTimeInterval(-780)
+            let staleReport = StationAlertSnapshot(generatedAt: now.timeIntervalSince1970 * 1000, available: true,
+                                                   feedTimestamp: staleSource.timeIntervalSince1970, alerts: [severe])
+            var fixture = NativeAlertRetryFixture()
+            var recovery = StationAlertsLoad()
+            // Extra automatic polls before and after Retry cannot consume the
+            // failure. A recreated view supplies nil, without resetting recovery.
+            let phases: [(UUID?, StationAlertSnapshot.Evidence)] = [
+                (nil, .lastReported(staleSource)), (nil, .lastReported(staleSource)), (nil, .lastReported(staleSource)),
+                (firstRetry, .unavailable), (firstRetry, .unavailable), (nil, .unavailable),
+                (secondRetry, .current), (secondRetry, .current), (nil, .current), (firstRetry, .current),
+            ]
+            for (retryID, expectedEvidence) in phases {
+                recovery.beginRequest()
+                switch fixture.response(afterRetry: retryID) {
+                case .stale: recovery.receive(staleReport)
+                case .failure: recovery.fail()
+                case .current: recovery.receive(severeReport)
+                }
+                XCTAssertFalse(recovery.isRequestInFlight)
+                XCTAssertEqual(recovery.evidence(at: now), expectedEvidence)
+                XCTAssertEqual(recovery.snapshot?.alerts.map(\.id), ["service-change"])
+                XCTAssertEqual(recovery.lastReportAfterFailure(at: now), expectedEvidence == .unavailable ? staleSource : nil)
+            }
+        #endif
     }
 
     func testFirstFailureAndChangedScopeHaveNoPriorReport() {

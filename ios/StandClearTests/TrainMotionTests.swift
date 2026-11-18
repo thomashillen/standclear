@@ -48,6 +48,30 @@ final class TrainMotionTests: XCTestCase {
             }
             XCTAssertTrue(clock.finished)
             XCTAssertEqual(clock.stage, 5)
+
+            let frozen = StationMotionFixtureClock(freezeVehicleReport: true)
+            let frozenStart = frozen.now
+            frozen.advance()
+            XCTAssertEqual(frozen.stage, 0)
+            frozen.didSample(at: frozen.now, generatedAt: 0)
+            XCTAssertEqual(frozen.sampledStage, -1)
+            for (stage, offset) in [0.0, 8, 16, 17, 18.5, 20, 80].enumerated() {
+                XCTAssertEqual(frozen.stage, stage)
+                XCTAssertEqual(frozen.now.timeIntervalSince(frozenStart), offset)
+                XCTAssertEqual(frozen.reportDate.timeIntervalSince(frozenStart), min(offset, 16))
+                XCTAssertEqual(frozen.vehicleReportDate.timeIntervalSince(frozenStart), -72)
+                XCTAssertEqual(frozen.now.timeIntervalSince(frozen.vehicleReportDate), offset + 72)
+                frozen.didSample(at: frozen.now, generatedAt: frozen.reportDate.timeIntervalSince1970 * 1000 + 1)
+                XCTAssertLessThan(frozen.sampledStage, stage)
+                frozen.advance()
+                XCTAssertEqual(frozen.stage, stage, "A mismatched feed cannot advance the held clock")
+                frozen.didSample(at: frozen.now, generatedAt: frozen.reportDate.timeIntervalSince1970 * 1000)
+                XCTAssertEqual(frozen.sampledStage, stage)
+                frozen.advance()
+            }
+            XCTAssertTrue(frozen.finished)
+            XCTAssertEqual(frozen.stage, 6)
+            XCTAssertEqual(frozen.now.timeIntervalSince(frozen.reportDate), 64)
         }
 
         func testTemporalFixtureMaintainsJourneyAcrossRefreshesAndStops() throws {
