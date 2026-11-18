@@ -1240,6 +1240,36 @@ final class StandClearUITests: XCTestCase {
         let retry = list.buttons["systemAlertsRetry"]
         XCTAssertTrue(list.waitForExistence(timeout: 10))
         XCTAssertTrue(retry.waitForExistence(timeout: 10))
+
+        let delayedReport = list.descendants(matching: .any).matching(NSPredicate(
+            format: "label BEGINSWITH %@ AND label CONTAINS %@",
+            "Last reported ", "Current alert status is unconfirmed."
+        )).firstMatch
+        XCTAssertTrue(delayedReport.waitForExistence(timeout: 10))
+        let initialDelayedReport = delayedReport.exists ? delayedReport.label : "<missing>"
+        let delayedInitialCapture = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        delayedInitialCapture.name = "Unconfirmed advisory report before automatic refresh"
+        delayedInitialCapture.lifetime = .keepAlways
+        add(delayedInitialCapture)
+
+        // Keep the real 60-second app refresh interval. This wait queries only
+        // the test process clock, leaving the target active without AX polling.
+        let delayedClockStart = ProcessInfo.processInfo.systemUptime
+        let delayedWallStart = Date()
+        let delayedHold = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            ProcessInfo.processInfo.systemUptime - delayedClockStart >= 65
+        }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [delayedHold], timeout: 75), .completed)
+        XCTAssertTrue(delayedReport.exists, "Automatic refresh must retain an unconfirmed report until explicit Retry")
+        let polledDelayedReport = delayedReport.exists ? delayedReport.label : "<missing>"
+        XCTAssertNotEqual(initialDelayedReport, polledDelayedReport, "A new automatic report must advance the displayed last-report date")
+        XCTAssertTrue(retry.exists, "Automatic refresh must not consume the fixture's explicit Retry failure")
+        XCTAssertFalse(list.staticTexts["Service alerts unavailable"].exists)
+        print("SC_ALERT_DELAYED wallStart=\(delayedWallStart.timeIntervalSince1970), wallEnd=\(Date().timeIntervalSince1970), uptimeElapsed=\(ProcessInfo.processInfo.systemUptime - delayedClockStart), initial=\(initialDelayedReport), polled=\(polledDelayedReport)")
+        let delayedPolledCapture = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        delayedPolledCapture.name = "Unconfirmed advisory report after real automatic refresh"
+        delayedPolledCapture.lifetime = .keepAlways
+        add(delayedPolledCapture)
         revealPlaceElement(wall, in: list)
         XCTAssertTrue(wall.label.contains("Wall St"))
         revealPlaceElement(express, in: list)
@@ -1252,6 +1282,10 @@ final class StandClearUITests: XCTestCase {
         retry.tap()
         let unavailable = list.staticTexts["Service alerts unavailable"]
         XCTAssertTrue(unavailable.waitForExistence(timeout: 10))
+        let delayedFailedCapture = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        delayedFailedCapture.name = "Failed first Retry after automatic refresh"
+        delayedFailedCapture.lifetime = .keepAlways
+        add(delayedFailedCapture)
         revealPlaceElement(wall, in: list)
         XCTAssertTrue(wall.label.contains("Wall St"))
         revealPlaceElement(express, in: list)
@@ -1261,6 +1295,10 @@ final class StandClearUITests: XCTestCase {
         XCTAssertTrue(unavailable.waitForNonExistence(timeout: 10))
         XCTAssertFalse(retry.exists)
         XCTAssertFalse(list.descendants(matching: .any)["systemAlertsEmpty"].exists)
+        let delayedRecoveredCapture = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        delayedRecoveredCapture.name = "Recovered second Retry after automatic refresh"
+        delayedRecoveredCapture.lifetime = .keepAlways
+        add(delayedRecoveredCapture)
 
         XCUIDevice.shared.orientation = .landscapeLeft
         waitForLayout(in: app, expanded: true)
@@ -3260,7 +3298,7 @@ final class StandClearUITests: XCTestCase {
         XCTAssertFalse(app.buttons["Done"].exists, "Wide controls should occupy the right region, not a sheet")
         XCTAssertGreaterThan(app.buttons["searchButton"].frame.midX, app.frame.midX)
         XCTAssertGreaterThan(app.buttons["nearbyButton"].frame.midX, app.frame.midX)
-        let expanded = XCTAttachment(screenshot: app.screenshot())
+        let expanded = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         expanded.name = "Expanded native control region"
         expanded.lifetime = .keepAlways
         add(expanded)

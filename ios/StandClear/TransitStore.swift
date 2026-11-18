@@ -72,6 +72,19 @@ final class TransitStore {
         try await fetch("api/alerts")
     }
 
+    #if DEBUG && targetEnvironment(simulator)
+        /// Only the opt-in recovery fixture follows explicit Retry actions.
+        /// Automatic refreshes keep their real cadence and do not consume a stage.
+        func stationAlerts(uiTestRetryID: UUID?) async throws -> StationAlertSnapshot {
+            let arguments = ProcessInfo.processInfo.arguments
+            guard arguments.contains("--ui-test-fixture"), arguments.contains("--ui-test-alert-recovery") else {
+                return try await stationAlerts()
+            }
+            let data = try NativeUITestFixture.data(for: "api/alerts", now: motionDate, alertRetryID: uiTestRetryID)
+            return try JSONDecoder().decode(StationAlertSnapshot.self, from: data)
+        }
+    #endif
+
     func loadLines() async {
         guard active else { return }
         let current = generation
@@ -315,14 +328,35 @@ final class TransitStore {
         }
     }
 
+    /// Recovery stages follow distinct rider actions, independent of poll count
+    /// or view recreation. Remember at most two actions for this app session.
+    struct NativeAlertRetryFixture {
+        enum Response: Equatable {
+            case stale, failure, current
+        }
+
+        private var retries: Set<UUID> = []
+
+        mutating func response(afterRetry id: UUID?) -> Response {
+            if let id, retries.count < 2 {
+                retries.insert(id)
+            }
+            switch retries.count {
+            case 0: return .stale
+            case 1: return .failure
+            default: return .current
+            }
+        }
+    }
+
     /// Explicit simulator-only UI data. Refresh still uses the normal decoding,
     /// polling, cancellation and freshness gates. Default trips remain stable.
     private enum NativeUITestFixture {
         @MainActor private static var temporalMotion = TemporalMotionFixture()
-        @MainActor private static var alertRequests = 0
+        @MainActor private static var alertRecovery = NativeAlertRetryFixture()
         @MainActor private static var stationMotionRequests = 0
 
-        @MainActor static func data(for path: String, now: Date) throws -> Data {
+        @MainActor static func data(for path: String, now: Date, alertRetryID: UUID? = nil) throws -> Data {
             let includeExpress = ProcessInfo.processInfo.arguments.contains("--ui-test-express-arrivals")
             let includeOperational = ProcessInfo.processInfo.arguments.contains("--ui-test-operational-direction")
             let includeMuseum = ProcessInfo.processInfo.arguments.contains("--ui-test-noguchi")
@@ -417,12 +451,12 @@ final class TransitStore {
                 }
                 payload = ["lines": lines]
             case "api/alerts":
-                alertRequests += 1
                 let recovery = ProcessInfo.processInfo.arguments.contains("--ui-test-alert-recovery")
-                if recovery, alertRequests == 2 {
+                let response = recovery ? alertRecovery.response(afterRetry: alertRetryID) : .current
+                if response == .failure {
                     throw URLError(.notConnectedToInternet)
                 }
-                let stale = ProcessInfo.processInfo.arguments.contains("--ui-test-stale-alerts") || (recovery && alertRequests == 1)
+                let stale = ProcessInfo.processInfo.arguments.contains("--ui-test-stale-alerts") || response == .stale
                 let windowEnd = now.timeIntervalSince1970 + (ProcessInfo.processInfo.arguments.contains("--ui-test-alert-window-absolute") ? 2 * 86400 : 2700)
                 let bullets = ProcessInfo.processInfo.arguments.contains("--ui-test-route-bullets")
                 payload = ["available": true, "generatedAt": now.timeIntervalSince1970 * 1000,
