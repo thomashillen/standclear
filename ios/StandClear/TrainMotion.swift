@@ -9,7 +9,7 @@ struct TrainMotion {
     private let geometryIDs: [String: String]
     private var snapshot: Snapshot?
     private var rows: [Row] = []
-    private var latestMotionEnd = 0.0
+    private(set) var latestMotionEnd = 0.0
 
     init(lines: [SubwayLine]) {
         self.lines = lines

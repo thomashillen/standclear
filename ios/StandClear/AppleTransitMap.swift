@@ -28,6 +28,7 @@ struct AppleTransitMap: View {
     @State private var indexedLinesRevision: UInt64?
     @State private var appliedFeedRevision: UUID?
     @State private var markers: [TrainMapMarker] = []
+    @State private var animatingRevision: UUID?
     @State private var entryGeneration: Double?
     @State private var needsEntryAnchor = true
     @State private var position = initialPosition
@@ -50,117 +51,165 @@ struct AppleTransitMap: View {
 
     @State private var cameraState = AppleTransitCameraState()
 
+    private struct ProjectedTrain: Identifiable {
+        let marker: TrainMapMarker
+        let point: CGPoint
+        var id: TrainMapMarker.ID {
+            marker.id
+        }
+    }
+
+    private func projectedTrains(in frame: CGRect, proxy: MapProxy) -> [ProjectedTrain] {
+        let corners = [CGPoint(x: frame.minX, y: frame.minY), CGPoint(x: frame.maxX, y: frame.minY),
+                       CGPoint(x: frame.minX, y: frame.maxY), CGPoint(x: frame.maxX, y: frame.maxY)]
+        // During a camera animation the live projection can change between camera callbacks.
+        let bounds = trainProjectionBounds(corners.compactMap { proxy.convert($0, from: .global) })
+        return motion.markers(at: store.motionDate).compactMap { marker in
+            if let bounds, !bounds.contains(MKMapPoint(marker.coordinate)) {
+                return nil
+            }
+            guard let point = proxy.convert(marker.coordinate, to: .global), frame.contains(point) else { return nil }
+            return ProjectedTrain(marker: marker, point: point)
+        }
+    }
+
     private var showsJourney: Bool {
         destination != nil || !tripOverlays.isEmpty || stationEndpoints?.boarding != nil || stationEndpoints?.alighting != nil
     }
 
     var body: some View {
         let inputs = motionInputs
-        GeometryReader { geometry in
-            MapKit.Map(position: $position, interactionModes: [.pan, .zoom, .rotate]) {
-                ForEach(showsJourney ? [] : routeGeometry) { line in
-                    MapPolyline(line.polyline)
-                        .stroke(line.color,
-                                style: StrokeStyle(lineWidth: 3, lineCap: .round, lineJoin: .round))
-                }
-                ForEach(tripGeometry) { overlay in
-                    if overlay.walking {
-                        MapPolyline(overlay.polyline)
-                            .stroke(.blue, style: StrokeStyle(lineWidth: 4, lineCap: .round, dash: [6, 5]))
-                    } else {
-                        MapPolyline(overlay.polyline)
-                            .stroke(.white, style: StrokeStyle(lineWidth: 10, lineCap: .round, lineJoin: .round))
-                        MapPolyline(overlay.polyline)
-                            .stroke(overlay.color, style: StrokeStyle(lineWidth: 6, lineCap: .round, lineJoin: .round))
+        let animate = inputs.active && !inputs.reduceMotion && inputs.feedRevision != nil && inputs.feedRevision == animatingRevision
+        MapReader { proxy in
+            GeometryReader { geometry in
+                MapKit.Map(position: $position, interactionModes: [.pan, .zoom, .rotate]) {
+                    ForEach(showsJourney ? [] : routeGeometry) { line in
+                        MapPolyline(line.polyline)
+                            .stroke(line.color,
+                                    style: StrokeStyle(lineWidth: 3, lineCap: .round, lineJoin: .round))
+                    }
+                    ForEach(tripGeometry) { overlay in
+                        if overlay.walking {
+                            MapPolyline(overlay.polyline)
+                                .stroke(.blue, style: StrokeStyle(lineWidth: 4, lineCap: .round, dash: [6, 5]))
+                        } else {
+                            MapPolyline(overlay.polyline)
+                                .stroke(.white, style: StrokeStyle(lineWidth: 10, lineCap: .round, lineJoin: .round))
+                            MapPolyline(overlay.polyline)
+                                .stroke(overlay.color, style: StrokeStyle(lineWidth: 6, lineCap: .round, lineJoin: .round))
+                        }
+                    }
+                    ForEach(animate || inputs.feedRevision == nil || inputs.feedRevision != appliedFeedRevision || !inputs.active ? [] : markers) { marker in
+                        Annotation("Route \(marker.spokenRouteName) train", coordinate: marker.coordinate) {
+                            AppleTrainAnnotation(marker: marker, cameraState: cameraState)
+                        }
+                        .annotationTitles(.hidden)
+                    }
+                    if let destination {
+                        Marker(destination.name, systemImage: "mappin", coordinate: destination.coordinate)
+                        if let start = placeRoute?.startMarker(currentLocation: currentLocation) {
+                            Marker("Start", systemImage: "figure.walk", coordinate: start)
+                        }
+                        if let boarding = placeRoute?.boarding {
+                            Marker(boarding.name, systemImage: "tram", coordinate: boarding.coordinate)
+                        }
+                        if let alighting = placeRoute?.alighting, alighting.id != placeRoute?.boarding?.id {
+                            Marker(alighting.name, systemImage: "tram", coordinate: alighting.coordinate)
+                        }
+                    } else if let stationEndpoints {
+                        if let boarding = stationEndpoints.boarding {
+                            Marker("Board at \(boarding.name)", systemImage: "tram", coordinate: boarding.coordinate)
+                                .annotationTitles(dynamicTypeSize.isAccessibilitySize ? .hidden : .automatic)
+                        }
+                        if let alighting = stationEndpoints.alighting {
+                            Marker("Arrive at \(alighting.name)", systemImage: "mappin", coordinate: alighting.coordinate)
+                                .annotationTitles(dynamicTypeSize.isAccessibilitySize ? .hidden : .automatic)
+                        }
+                    }
+                    if let transfer = transferMarker {
+                        Marker(transfer.text, systemImage: "arrow.left.arrow.right", coordinate: transfer.coordinate)
+                            .annotationTitles(.visible)
+                    }
+                    if let currentLocation {
+                        // Use the same expiring foreground fix as nearby arrivals.
+                        // UserAnnotation would introduce an independent location source.
+                        Annotation("Your approximate location", coordinate: currentLocation) {
+                            Circle()
+                                .fill(.white)
+                                .frame(width: 18, height: 18)
+                                .overlay {
+                                    Circle().fill(Color(uiColor: .systemBlue)).frame(width: 12, height: 12)
+                                }
+                                .accessibilityElement(children: .ignore)
+                                .accessibilityLabel("Your approximate location")
+                                .accessibilityIdentifier("userLocationDot")
+                        }
+                        .annotationTitles(.hidden)
                     }
                 }
-                ForEach(inputs.feedRevision == nil || !inputs.active ? [] : markers) { marker in
-                    Annotation("Route \(marker.spokenRouteName) train", coordinate: marker.coordinate) {
-                        AppleTrainAnnotation(marker: marker, cameraState: cameraState)
-                    }
-                    .annotationTitles(.hidden)
+                .mapStyle(.standard(elevation: .flat, emphasis: .muted,
+                                    pointsOfInterest: .excludingAll, showsTraffic: false))
+                .mapControls {
+                    MapCompass()
+                    MapScaleView()
                 }
-                if let destination {
-                    Marker(destination.name, systemImage: "mappin", coordinate: destination.coordinate)
-                    if let start = placeRoute?.startMarker(currentLocation: currentLocation) {
-                        Marker("Start", systemImage: "figure.walk", coordinate: start)
-                    }
-                    if let boarding = placeRoute?.boarding {
-                        Marker(boarding.name, systemImage: "tram", coordinate: boarding.coordinate)
-                    }
-                    if let alighting = placeRoute?.alighting, alighting.id != placeRoute?.boarding?.id {
-                        Marker(alighting.name, systemImage: "tram", coordinate: alighting.coordinate)
-                    }
-                } else if let stationEndpoints {
-                    if let boarding = stationEndpoints.boarding {
-                        Marker("Board at \(boarding.name)", systemImage: "tram", coordinate: boarding.coordinate)
-                            .annotationTitles(dynamicTypeSize.isAccessibilitySize ? .hidden : .automatic)
-                    }
-                    if let alighting = stationEndpoints.alighting {
-                        Marker("Arrive at \(alighting.name)", systemImage: "mappin", coordinate: alighting.coordinate)
-                            .annotationTitles(dynamicTypeSize.isAccessibilitySize ? .hidden : .automatic)
+                .onMapCameraChange(frequency: .continuous) { context in
+                    cameraState.camera = context.camera
+                    cameraState.update(heading: context.camera.heading,
+                                       zoom: TrainMarkerSizing.zoom(longitudeSpan: context.region.span.longitudeDelta,
+                                                                    viewportWidth: max(1, geometry.size.width - max(0, coveredWidth))))
+                }
+                .onChange(of: focusRevision, initial: true) { _, _ in
+                    guard let focusedCoordinate else { return }
+                    position = .region(MKCoordinateRegion(
+                        center: focusedCoordinate,
+                        span: MKCoordinateSpan(latitudeDelta: 0.018, longitudeDelta: 0.014)
+                    ))
+                }
+                .onChange(of: tripFocusRevision, initial: true) { _, _ in
+                    let endpoints = placeRoute?.endpoints ?? [destination?.coordinate, stationEndpoints?.boarding?.coordinate,
+                                                              stationEndpoints?.alighting?.coordinate].compactMap(\.self)
+                    if let region = TripMapOverlay.region(for: tripOverlays, including: endpoints) {
+                        position = .region(region)
                     }
                 }
-                if let transfer = transferMarker {
-                    Marker(transfer.text, systemImage: "arrow.left.arrow.right", coordinate: transfer.coordinate)
-                        .annotationTitles(.visible)
+                // Apple uses the safe region for its controls and camera framing; the map
+                // itself can continue under the native trailing control presentation.
+                // Keep the inherited top safe area: overriding it makes MapKit fit
+                // itinerary pins behind the compact navigation bar.
+                .safeAreaInset(edge: .trailing, spacing: 0) {
+                    Color.clear.frame(width: max(0, coveredWidth)).allowsHitTesting(false)
                 }
-                if let currentLocation {
-                    // Use the same expiring foreground fix as nearby arrivals.
-                    // UserAnnotation would introduce an independent location source.
-                    Annotation("Your approximate location", coordinate: currentLocation) {
-                        Circle()
-                            .fill(.white)
-                            .frame(width: 18, height: 18)
-                            .overlay {
-                                Circle().fill(Color(uiColor: .systemBlue)).frame(width: 12, height: 12)
+                .safeAreaInset(edge: .bottom, spacing: 0) {
+                    Color.clear.frame(height: max(0, coveredBottom)).allowsHitTesting(false)
+                }
+                .overlay {
+                    if animate {
+                        GeometryReader { overlay in
+                            let frame = overlay.frame(in: .global)
+                            TimelineView(.animation(minimumInterval: 1.0 / 60)) { _ in
+                                if cameraState.camera != nil {
+                                    ZStack(alignment: .topLeading) {
+                                        let paddedFrame = frame.insetBy(dx: -32, dy: -32)
+                                        let rows = projectedTrains(in: paddedFrame, proxy: proxy)
+                                        ForEach(rows) { row in
+                                            AppleTrainAnnotation(marker: row.marker, cameraState: cameraState)
+                                                .position(x: row.point.x - frame.minX, y: row.point.y - frame.minY)
+                                        }
+                                    }
+                                    .frame(width: frame.width, height: frame.height, alignment: .topLeading)
+                                }
                             }
-                            .accessibilityElement(children: .ignore)
-                            .accessibilityLabel("Your approximate location")
-                            .accessibilityIdentifier("userLocationDot")
+                        }
+                        .allowsHitTesting(false)
                     }
-                    .annotationTitles(.hidden)
                 }
+                .accessibilityElement(children: .contain)
+                .accessibilityIdentifier("appleTransitMap")
+                .accessibilityLabel("Subway map, Apple Maps")
+                .accessibilityValue([transferMarker?.text, placeRoute?.accessibilitySummary ?? destination?.name].compactMap(\.self).joined(separator: ", "))
+                .accessibilityHint("Use Search or Nearby for accessible station arrivals.")
             }
-            .mapStyle(.standard(elevation: .flat, emphasis: .muted,
-                                pointsOfInterest: .excludingAll, showsTraffic: false))
-            .mapControls {
-                MapCompass()
-                MapScaleView()
-            }
-            .onMapCameraChange(frequency: .continuous) { context in
-                cameraState.update(heading: context.camera.heading,
-                                   zoom: TrainMarkerSizing.zoom(longitudeSpan: context.region.span.longitudeDelta,
-                                                                viewportWidth: max(1, geometry.size.width - max(0, coveredWidth))))
-            }
-            .onChange(of: focusRevision, initial: true) { _, _ in
-                guard let focusedCoordinate else { return }
-                position = .region(MKCoordinateRegion(
-                    center: focusedCoordinate,
-                    span: MKCoordinateSpan(latitudeDelta: 0.018, longitudeDelta: 0.014)
-                ))
-            }
-            .onChange(of: tripFocusRevision, initial: true) { _, _ in
-                let endpoints = placeRoute?.endpoints ?? [destination?.coordinate, stationEndpoints?.boarding?.coordinate,
-                                                          stationEndpoints?.alighting?.coordinate].compactMap(\.self)
-                if let region = TripMapOverlay.region(for: tripOverlays, including: endpoints) {
-                    position = .region(region)
-                }
-            }
-            // Apple uses the safe region for its controls and camera framing; the map
-            // itself can continue under the native trailing control presentation.
-            // Keep the inherited top safe area: overriding it makes MapKit fit
-            // itinerary pins behind the compact navigation bar.
-            .safeAreaInset(edge: .trailing, spacing: 0) {
-                Color.clear.frame(width: max(0, coveredWidth)).allowsHitTesting(false)
-            }
-            .safeAreaInset(edge: .bottom, spacing: 0) {
-                Color.clear.frame(height: max(0, coveredBottom)).allowsHitTesting(false)
-            }
-            .accessibilityIdentifier("appleTransitMap")
-            .accessibilityLabel("Subway map, Apple Maps")
-            .accessibilityValue([transferMarker?.text, placeRoute?.accessibilitySummary ?? destination?.name].compactMap(\.self).joined(separator: ", "))
-            .accessibilityHint("Use Search or Nearby for accessible station arrivals.")
         }
         #if DEBUG && targetEnvironment(simulator)
         .overlay(alignment: .trailing) {
@@ -220,6 +269,7 @@ struct AppleTransitMap: View {
     }
 
     private func stopMotion() {
+        animatingRevision = nil
         motion.reset()
         markers = []
         appliedFeedRevision = nil
@@ -262,14 +312,16 @@ struct AppleTransitMap: View {
         let discrete = inputs.reduceMotion || entryGeneration != nil
         while !Task.isCancelled, inputs == motionInputs {
             let now = store.motionDate
-            markers = motion.markers(at: now, reduceMotion: discrete)
+            let animated = !discrete && inputs.fixtureTime == nil && motion.hasActiveMotion(at: now)
+            animatingRevision = animated ? revision : nil
+            markers = animated ? [] : motion.markers(at: now, reduceMotion: discrete)
             #if DEBUG && targetEnvironment(simulator)
                 StationMotionFixtureClock.enabled?.didSample(at: now, generatedAt: snapshot.generatedAt)
             #endif
             guard snapshot.isFresh(at: now), inputs.fixtureTime == nil else { return }
             // Wake exactly at feed expiry even when coarse sampling. Other
             // input/lifecycle changes cancel this sleep and resample immediately.
-            let interval = !discrete && motion.hasActiveMotion(at: now) ? 0.25 : 5.0
+            let interval = animated ? motion.latestMotionEnd - now.timeIntervalSince1970 : 5.0
             let remaining = snapshot.generatedAt / 1000 + 60 - now.timeIntervalSince1970
             do { try await Task.sleep(for: .seconds(min(interval, max(0.001, remaining)))) } catch { return }
         }
@@ -291,10 +343,21 @@ private struct AppleRoutePolyline: Identifiable {
     }
 }
 
+/// A missing corner or a world-wrap ambiguity leaves the screen projection authoritative.
+func trainProjectionBounds(_ corners: [CLLocationCoordinate2D]) -> MKMapRect? {
+    guard corners.count == 4, corners.allSatisfy(CLLocationCoordinate2DIsValid) else { return nil }
+    let points = corners.map { MKMapPoint($0) }
+    let xs = points.map(\.x), ys = points.map(\.y)
+    guard let left = xs.min(), let right = xs.max(), let top = ys.min(), let bottom = ys.max(),
+          left < right, top < bottom, right - left < MKMapRect.world.size.width / 2 else { return nil }
+    return MKMapRect(x: left, y: top, width: right - left, height: bottom - top).insetBy(dx: -1, dy: -1)
+}
+
 /// The map view does not read these properties. Only individual marker views
 /// observe them, keeping camera callbacks from rebuilding all GTFS polylines.
 @MainActor @Observable
 private final class AppleTransitCameraState {
+    var camera: MapCamera?
     var heading = 0.0
     var zoom = 11.0
 
