@@ -493,6 +493,35 @@ private final class FixtureURLProtocol: URLProtocol, @unchecked Sendable {
     }
 }
 
+private final class ContractMetrics: NSObject, URLSessionTaskDelegate {
+    let endpoint: String
+
+    init(endpoint: String) {
+        self.endpoint = endpoint
+    }
+
+    func urlSession(_: URLSession, task: URLSessionTask, didFinishCollecting metrics: URLSessionTaskMetrics) {
+        let origin = metrics.taskInterval.start
+        // Millisecond offsets from task start. A dash means Foundation supplied no timestamp.
+        func ms(_ date: Date?) -> String {
+            guard let date else { return "-" }
+            return String(Int((date.timeIntervalSince(origin) * 1000).rounded()))
+        }
+        print("ContractMetrics endpoint=\(endpoint) task=\(task.taskIdentifier) totalMs=\(ms(metrics.taskInterval.end)) transactions=\(metrics.transactionMetrics.count)")
+        for (index, item) in metrics.transactionMetrics.enumerated() {
+            print(
+                "ContractPhase endpoint=\(endpoint) task=\(task.taskIdentifier) index=\(index)",
+                "reused=\(item.isReusedConnection)",
+                "dns=\(ms(item.domainLookupStartDate))/\(ms(item.domainLookupEndDate))",
+                "connect=\(ms(item.connectStartDate))/\(ms(item.connectEndDate))",
+                "tls=\(ms(item.secureConnectionStartDate))/\(ms(item.secureConnectionEndDate))",
+                "request=\(ms(item.requestStartDate))/\(ms(item.requestEndDate))",
+                "response=\(ms(item.responseStartDate))/\(ms(item.responseEndDate))"
+            )
+        }
+    }
+}
+
 /// Live integration coverage stays separate from deterministic interaction tests.
 /// Empty/stale realtime feeds are valid payloads; freshness behavior is covered by
 /// TransitModelsTests rather than requiring a particular live train to survive a tap.
@@ -505,7 +534,7 @@ final class LiveBackendContractTests: XCTestCase {
             var request = try URLRequest(url: XCTUnwrap(URL(string: "https://standclear.vercel.app/\(path)")))
             request.timeoutInterval = 20
             request.cachePolicy = .reloadIgnoringLocalCacheData
-            let (data, response) = try await session.data(for: request)
+            let (data, response) = try await session.data(for: request, delegate: ContractMetrics(endpoint: path))
             XCTAssertEqual((response as? HTTPURLResponse)?.statusCode, 200)
             return data
         }
