@@ -1,9 +1,15 @@
 import { act, cleanup, fireEvent, render, renderHook, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const source = vi.hoisted(() => ({ linesReady: true, dataReady: true, error: false, failures: 0, online: true, empty: false, generatedAt: 100_000 }));
+const source = vi.hoisted(() => ({ linesReady: true, dataReady: true, demoActive: false, error: false, failures: 0, online: true, empty: false, generatedAt: 100_000 }));
+const startLiveDemo = vi.hoisted(() => vi.fn());
 vi.mock("@/lib/subwayData", () => ({ useLines: () => source.linesReady ? {} : null, useSubwayDataStatus: () => ({ error: source.error }) }));
-vi.mock("@/lib/useTrains", () => ({ useTrains: () => source.dataReady ? { generatedAt: source.generatedAt, trains: [], arrivals: [] } : null, useFeedHealth: () => ({ consecutiveFailures: source.failures }) }));
+vi.mock("@/lib/useTrains", () => ({
+  useTrains: () => source.dataReady ? { generatedAt: source.generatedAt, trains: [], arrivals: [] } : null,
+  useFeedHealth: () => ({ consecutiveFailures: source.failures }),
+  useLiveDemo: () => ({ active: source.demoActive, endsAt: null }),
+  startLiveDemo,
+}));
 vi.mock("@/lib/useOnline", () => ({ useOnline: () => source.online }));
 vi.mock("@/lib/useNow", () => ({ useNow: () => 100_000 }));
 // The projection is covered in lib/nearbyGlance.test.ts. This fixture isolates
@@ -30,7 +36,8 @@ const region = () => screen.queryByRole("region", { name: "Nearby train arrivals
 
 beforeEach(() => {
   vi.resetModules();
-  Object.assign(source, { linesReady: true, dataReady: true, error: false, failures: 0, online: true, empty: false, generatedAt: 100_000 });
+  Object.assign(source, { linesReady: true, dataReady: true, demoActive: false, error: false, failures: 0, online: true, empty: false, generatedAt: 100_000 });
+  startLiveDemo.mockClear();
   vi.spyOn(Date, "now").mockReturnValue(100_000);
   width = 350; height = 200; visibility = "visible"; success = [];
   permission = Object.assign(new EventTarget(), { state: "granted" as PermissionState });
@@ -414,5 +421,14 @@ describe("permission refresh without browser change events", () => {
     expect(geo.watchPosition).toHaveBeenCalledTimes(1);
     expect(region()).toBeNull();
     expect(screen.getByRole("status").textContent).toBe("Finding nearby arrivals");
+  });
+
+  it("shows an explicit bounded-demo action instead of loading forever without train data", async () => {
+    source.dataReady = false;
+    await mount();
+    act(() => success[0](position));
+    expect(screen.getByText("Live arrivals are off to save data.")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Start 5-minute demo" }));
+    expect(startLiveDemo).toHaveBeenCalledTimes(1);
   });
 });

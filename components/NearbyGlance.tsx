@@ -6,8 +6,9 @@ import { buildStationIndex } from "@/lib/stopsIndex";
 import { useLines, useSubwayDataStatus } from "@/lib/subwayData";
 import { useGeolocation } from "@/lib/useGeolocation";
 import { useNow } from "@/lib/useNow";
-import { useTrains, useFeedHealth } from "@/lib/useTrains";
+import { useTrains, useFeedHealth, useLiveDemo } from "@/lib/useTrains";
 import { useOnline } from "@/lib/useOnline";
+import { LiveArrivalsGate } from "./LiveArrivalsGate";
 
 function GlanceStatus({ message, loading = false }: { message: string; loading?: boolean }) {
   return (
@@ -145,6 +146,7 @@ export default function NearbyGlance({
   const lineStatus = useSubwayDataStatus();
   const data = useTrains();
   const health = useFeedHealth();
+  const liveDemo = useLiveDemo();
   const online = useOnline();
   const clock = useNow(eligible);
   const now = Math.max(clock, geo.updatedAt ?? 0);
@@ -167,9 +169,11 @@ export default function NearbyGlance({
   else if (!online) message = "Offline · arrivals unavailable";
   else if (geo.status === "error" || geo.status === "unavailable") message = "Location unavailable";
   else if (lineStatus.error) message = "Stations unavailable";
+  else if (geo.status !== "granted" || !lines) waiting = true;
   else if (health.consecutiveFailures > 0) message = "Arrival update delayed";
+  else if (!data && !liveDemo.active) message = "demo-off";
   else if (data && now - data.generatedAt >= 60_000) message = "Waiting for fresh arrivals";
-  else if (geo.status !== "granted" || !lines || !data) waiting = true;
+  else if (!data) waiting = true;
   else if (!rows.length) message = "No nearby arrivals";
 
   const showRows = eligible && !waiting && !message;
@@ -182,7 +186,13 @@ export default function NearbyGlance({
         aria-label={showRows && rows.length ? "Nearby train arrivals" : undefined}
         className="nearby-glance flex flex-col items-start gap-1.5"
       >
-        {eligible && (waiting ? <LoadingGlance /> : message ? <GlanceStatus message={message} /> : null)}
+        {eligible && (waiting
+          ? <LoadingGlance />
+          : message === "demo-off"
+            ? <LiveArrivalsGate compact />
+            : message
+              ? <GlanceStatus message={message} />
+              : null)}
         {(showRows ? rows : []).map((row) => {
           // Badges name the actual next trains, not every service that
           // happens to share this color at the station.

@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { ArrowUp, ArrowDown, Compass, Star, X } from "lucide-react";
 import { useLines } from "@/lib/subwayData";
 import { directionalTermini } from "@/lib/operationalDirection";
-import { useTrains, type Arrival, type Train } from "@/lib/useTrains";
+import { useLiveDemo, useTrains, type Arrival, type Train } from "@/lib/useTrains";
 import { useAlerts, alertsForStation } from "@/lib/useAlerts";
 import { useFavorites } from "@/lib/useFavorites";
 import { useNow } from "@/lib/useNow";
@@ -14,6 +14,7 @@ import { trainStaleness, type TrainStaleness } from "@/lib/trainStaleness";
 import { formatEtaCountdown } from "@/lib/etaFormat";
 import { AlertsSection } from "./AlertsSection";
 import { DragHandle } from "./DragHandle";
+import { LiveArrivalsGate } from "./LiveArrivalsGate";
 
 interface Props {
   stopId: string;
@@ -210,6 +211,7 @@ export function ArrivalRow({
 export default function StationPanel({ stopId, onClose, onSelectLine, onStartDirections }: Props) {
   const lines = useLines();
   const data = useTrains();
+  const liveDemo = useLiveDemo();
   const alertsData = useAlerts();
   const { has, toggle } = useFavorites();
   // Live wall-clock so countdowns tick every second AND so the
@@ -597,7 +599,8 @@ export default function StationPanel({ stopId, onClose, onSelectLine, onStartDir
         onTouchEnd={contentHandlers.onTouchEnd}
         onTouchCancel={contentHandlers.onTouchCancel}
       >
-        {!data && (
+        {!data && !liveDemo.active && <LiveArrivalsGate />}
+        {!data && liveDemo.active && (
           <div className="text-center text-xs text-gray-500 py-8 motion-safe:animate-pulse">
             Loading live arrivals…
           </div>

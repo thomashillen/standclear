@@ -323,12 +323,18 @@ function subscribe(cb: () => void): () => void {
   // First subscriber on a given runtime warms the in-memory cache from
   // localStorage and arms lifecycle listeners. Network access is opt-in:
   // passive subscribers never request /api/trains.
-  if (subscribers.size === 0) {
+  const firstSubscriber = subscribers.size === 0;
+  if (firstSubscriber) {
     hydrateFromStorage();
     bindVisibility();
     bindOnline();
   }
   subscribers.add(cb);
+  // Navigating away can remove the last subscriber and cancel the next
+  // scheduled poll while the bounded session itself remains active. Resume
+  // that same session when the first subscriber returns; inactive sessions
+  // still make zero requests.
+  if (firstSubscriber && liveDemo.active) startPolling();
   return () => {
     subscribers.delete(cb);
     stopPolling();

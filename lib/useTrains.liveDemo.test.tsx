@@ -70,6 +70,26 @@ describe("bounded web live demo request lifecycle", () => {
     expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 
+  it("resumes the same active session when subscribers return", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify(payload())));
+    vi.stubGlobal("fetch", fetchMock);
+    const { startLiveDemo, useTrains } = await import("./useTrains");
+    const first = renderHook(() => useTrains());
+
+    await act(async () => { startLiveDemo(60_000); });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    first.unmount();
+    await act(async () => { await vi.advanceTimersByTimeAsync(8_000); });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    const second = renderHook(() => useTrains());
+    await act(async () => {});
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    await act(async () => { await vi.advanceTimersByTimeAsync(8_000); });
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    second.unmount();
+  });
+
   it("manual refresh makes exactly one compatible request without enabling polling", async () => {
     const expected = payload();
     const fetchMock = vi.fn(async () => new Response(JSON.stringify(expected)));
