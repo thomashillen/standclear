@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { MapPin, MoreHorizontal, Search, TrainFront } from "lucide-react";
 import { useLines } from "@/lib/subwayData";
-import { useFeedHealth, useTrains } from "@/lib/useTrains";
+import { useFeedHealth, useLiveDemo, useTrains } from "@/lib/useTrains";
 import { useOnline } from "@/lib/useOnline";
 import { legGeometry, type TripPlan } from "@/lib/commuteRouting";
 import { pickDismissTarget } from "@/lib/escDismiss";
@@ -504,6 +504,7 @@ export default function SubwayMap() {
   // distinct from "stale" (last success > 60s ago) and "offline"
   // (the device dropped its own connection).
   const feedHealth = useFeedHealth();
+  const liveDemo = useLiveDemo();
   const feedDegraded = online && feedHealth.degraded;
   // Single source of truth for the live-pill's state — feeds both the
   // visual chrome chain below and the parallel `role="status"` live
@@ -928,6 +929,10 @@ export default function SubwayMap() {
             aria-label={
               !online
                 ? "Offline — tap for details"
+                : !liveDemo.active
+                  ? data
+                    ? "Saved train snapshot — not live; tap for demo controls"
+                    : "Live demo off — tap for demo controls"
                 : liveFeedState === "connecting"
                   ? "Connecting to live feed"
                   : feedDegraded
@@ -940,6 +945,10 @@ export default function SubwayMap() {
             title={
               !online
                 ? "Offline — showing last-known data"
+                : !liveDemo.active
+                  ? data
+                    ? "Saved train snapshot — not live"
+                    : "Live demo off — zero passive train requests"
                 : liveFeedState === "connecting"
                   ? "Connecting…"
                   : feedDegraded
@@ -955,6 +964,8 @@ export default function SubwayMap() {
                 className={`absolute inset-0 rounded-full ${
                   !online
                     ? "bg-rose-400"
+                    : !liveDemo.active
+                      ? "bg-sky-400"
                     : liveFeedState === "connecting"
                       ? "bg-gray-500"
                       : feedDegraded
@@ -966,6 +977,8 @@ export default function SubwayMap() {
                 style={{
                   color: !online
                     ? "rgba(251,113,133,0.65)"
+                    : !liveDemo.active
+                      ? "rgba(56,189,248,0.6)"
                     : liveFeedState === "connecting"
                       ? "rgba(107,114,128,0.5)"
                       : feedDegraded
@@ -975,7 +988,7 @@ export default function SubwayMap() {
                           : "rgba(52,211,153,0.7)",
                 }}
               />
-              {online && data && !stale && !feedDegraded && (
+              {online && liveDemo.active && data && !stale && !feedDegraded && (
                 // motion-safe gate: the ring pulse is purely decorative
                 // emphasis on "live" — the colored dot + glow underneath
                 // already carries the state signal. A rider with
@@ -986,9 +999,19 @@ export default function SubwayMap() {
             <span className={`text-[12px] font-semibold leading-none ${
               !online || feedDegraded ? "text-rose-200" : stale ? "text-amber-200" : "text-gray-100"
             }`}>
-              {!online ? "Offline" : liveFeedState === "connecting" ? "Connecting…" : feedDegraded ? "Feed issue" : stale ? "Stale" : "Live"}
+              {!online
+                ? "Offline"
+                : !liveDemo.active
+                  ? data ? "Saved" : "Demo"
+                  : liveFeedState === "connecting"
+                    ? "Connecting…"
+                    : feedDegraded
+                      ? "Feed issue"
+                      : stale
+                        ? "Stale"
+                        : "Live"}
             </span>
-            {online && data && !stale && !feedDegraded && (
+            {online && liveDemo.active && data && !stale && !feedDegraded && (
               <span className="hidden sm:flex items-center gap-1 text-[12px] tabular-nums text-gray-300">
                 <TrainFront className="w-3 h-3" aria-hidden="true" />
                 {totalTrains}
@@ -1007,7 +1030,11 @@ export default function SubwayMap() {
               `lib/liveFeedState.ts::liveFeedAnnouncement` — so the
               region doesn't fire on every 8 s poll tick. */}
           <span role="status" className="sr-only">
-            {liveFeedAnnouncement(liveFeedState)}
+            {liveDemo.active
+              ? liveFeedAnnouncement(liveFeedState)
+              : data
+                ? "Saved train snapshot. Not live."
+                : "Live train demo is off."}
           </span>
 
           {!panelOpen && (

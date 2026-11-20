@@ -4,12 +4,14 @@ import type { ComponentType } from "react";
 import SubwayMap from "./SubwayMap";
 
 const feed = vi.hoisted(() => ({ online: true, degraded: false, generatedAt: 100_000 as number | null }));
+const demo = vi.hoisted(() => ({ active: true, endsAt: 400_000 as number | null }));
 vi.mock("@/lib/subwayData", () => ({ useLines: () => null, useSubwayDataStatus: () => ({ error: false, attempt: 0 }) }));
 vi.mock("@/lib/useOnline", () => ({ useOnline: () => feed.online }));
 vi.mock("@/lib/useNow", () => ({ useNow: () => 100_000 }));
 vi.mock("@/lib/useTrains", () => ({
   useTrains: () => feed.generatedAt === null ? null : ({ trains: [], arrivals: [], generatedAt: feed.generatedAt }),
   useFeedHealth: () => ({ degraded: feed.degraded, consecutiveFailures: 2 }),
+  useLiveDemo: () => demo,
 }));
 vi.mock("./LinePicker", () => ({ default: () => <button>Lines</button> }));
 // Exercise shell ownership independently of Mapbox and each panel's data fetching.
@@ -24,7 +26,12 @@ vi.mock("next/dynamic", () => ({ default: (loader: () => Promise<unknown>) => {
   return Panel;
 } }));
 
-beforeEach(() => { feed.online = true; feed.degraded = false; feed.generatedAt = 100_000; });
+beforeEach(() => {
+  feed.online = true;
+  feed.degraded = false;
+  feed.generatedAt = 100_000;
+  Object.assign(demo, { active: true, endsAt: 400_000 });
+});
 
 describe("mobile home shell", () => {
   it("shows and announces feed failure after repeated cold-boot failures", () => {
