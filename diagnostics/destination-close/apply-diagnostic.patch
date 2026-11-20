@@ -1,0 +1,29 @@
+--- a/ios/StandClear/PlacePreview.swift
++++ b/ios/StandClear/PlacePreview.swift
+@@ -888,6 +888,11 @@
+         choose(origin)
+     }
+
++    private func traceSearchState(_ event: String) {
++        NSLog("[SCSearchTrace] %@; destination=%@ presented=%@ focused=%@ query=%@ uptime=%.6f",
++              event, String(destination), String(searchPresented), String(searchFocused), query, ProcessInfo.processInfo.systemUptime)
++    }
++
+     var body: some View {
+         let key = request
+         List {
+@@ -934,6 +939,14 @@
+         .modifier(OriginPickerBackground())
+         .searchable(text: $query, isPresented: $searchPresented, placement: .navigationBarDrawer(displayMode: .always), prompt: destination ? "Address or place" : "Address, place or station")
+         .searchFocused($searchFocused)
++        .onChange(of: searchPresented, initial: true) { (old: Bool, new: Bool) in
++            traceSearchState("presented \(old) -> \(new)")
++        }
++        .onChange(of: searchFocused, initial: true) { (old: Bool, new: Bool) in
++            traceSearchState("focused \(old) -> \(new)")
++        }
++        .onAppear { traceSearchState("appear") }
++        .onDisappear { traceSearchState("disappear") }
+         .navigationTitle(destination ? "To" : "From").navigationBarTitleDisplayMode(.inline)
+         .task(id: key) { [key] in
+             guard key.active, key.query.count >= 2 else { return }

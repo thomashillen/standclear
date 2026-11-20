@@ -1,0 +1,22 @@
+{
+  "sourceCommit": "e874c7f9cd1c5bc1bb2e6e6e185e806408a0493f",
+  "patchSHA256": "1fd076b38335fae9125536736a1c11ec8a8f40bbb7386b3cee129ea732315d1b",
+  "originalSHA256": {
+    "ios/StandClear/PlacePreview.swift": "239157a0c88bb3c2fc8932218f095947e59e46d1477923fa0aade9f1db1b9039",
+    "ios/StandClearUITests/StandClearUITests.swift": "5d11a8e7fe84640e7f3670a112aabaa61b0cad6b9558550f493500ac745456bf"
+  },
+  "candidateSHA256": {
+    "ios/StandClear/PlacePreview.swift": "104161080e9f3492bd192238dc61f16e1cdb10a56facc53a5a63d034bb9c2183",
+    "ios/StandClearUITests/StandClearUITests.swift": "ddb0ad3f793a73340ed17813924915f468a52e41868c8d34a0b9679a0d452e11"
+  },
+  "changedPaths": [
+    "ios/StandClear/PlacePreview.swift",
+    "ios/StandClearUITests/StandClearUITests.swift"
+  ],
+  "candidateOnly": true,
+  "nativeValidation": "pending_one_changed_head_hosted_qualification",
+  "nativeCloseActionEntry": "unavailable",
+  "viewIdentity": "unavailable",
+  "productionMergeGate": false,
+  "workflowIntegration": true
+}
