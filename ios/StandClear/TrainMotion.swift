@@ -102,8 +102,12 @@ struct TrainMotion {
         }
     }
 
+    func hasFreshSnapshot(at date: Date) -> Bool {
+        snapshot?.isFresh(at: date) == true
+    }
+
     func hasActiveMotion(at date: Date) -> Bool {
-        snapshot?.isFresh(at: date) == true && date.timeIntervalSince1970 < latestMotionEnd
+        hasFreshSnapshot(at: date) && date.timeIntervalSince1970 < latestMotionEnd
     }
 
     func markers(at date: Date, reduceMotion: Bool = false) -> [TrainMapMarker] {

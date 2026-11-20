@@ -28,7 +28,7 @@ struct AppleTransitMap: View {
     @State private var indexedLinesRevision: UInt64?
     @State private var appliedFeedRevision: UUID?
     @State private var markers: [TrainMapMarker] = []
-    @State private var animatingRevision: UUID?
+    @State private var animatesMarkers = false
     @State private var entryGeneration: Double?
     @State private var needsEntryAnchor = true
     @State private var position = initialPosition
@@ -79,7 +79,12 @@ struct AppleTransitMap: View {
 
     var body: some View {
         let inputs = motionInputs
-        let animate = inputs.active && !inputs.reduceMotion && inputs.feedRevision != nil && inputs.feedRevision == animatingRevision
+        let now = store.motionDate
+        // render(_:) replaces the model and its presentation together. Keep the
+        // applied presentation through a refresh while both snapshots are fresh.
+        let showMarkers = inputs.active && inputs.feedRevision != nil && indexedLinesRevision == inputs.linesRevision
+            && store.snapshot?.isFresh(at: now) == true && motion.hasFreshSnapshot(at: now)
+        let animate = showMarkers && !inputs.reduceMotion && animatesMarkers
         MapReader { proxy in
             GeometryReader { geometry in
                 MapKit.Map(position: $position, interactionModes: [.pan, .zoom, .rotate]) {
@@ -99,7 +104,7 @@ struct AppleTransitMap: View {
                                 .stroke(overlay.color, style: StrokeStyle(lineWidth: 6, lineCap: .round, lineJoin: .round))
                         }
                     }
-                    ForEach(animate || inputs.feedRevision == nil || inputs.feedRevision != appliedFeedRevision || !inputs.active ? [] : markers) { marker in
+                    ForEach(showMarkers && !animate ? markers : []) { marker in
                         Annotation("Route \(marker.spokenRouteName) train", coordinate: marker.coordinate) {
                             AppleTrainAnnotation(marker: marker, cameraState: cameraState)
                         }
@@ -269,7 +274,7 @@ struct AppleTransitMap: View {
     }
 
     private func stopMotion() {
-        animatingRevision = nil
+        animatesMarkers = false
         motion.reset()
         markers = []
         appliedFeedRevision = nil
@@ -296,6 +301,7 @@ struct AppleTransitMap: View {
             // After a failed refresh or lifecycle interruption, the previous
             // generation can resume only as a discrete, fresh observation.
             entryGeneration = store.snapshot?.generatedAt
+            animatesMarkers = false
             motion.reset()
             markers = []
             appliedFeedRevision = nil
@@ -313,7 +319,7 @@ struct AppleTransitMap: View {
         while !Task.isCancelled, inputs == motionInputs {
             let now = store.motionDate
             let animated = !discrete && inputs.fixtureTime == nil && motion.hasActiveMotion(at: now)
-            animatingRevision = animated ? revision : nil
+            animatesMarkers = animated
             markers = animated ? [] : motion.markers(at: now, reduceMotion: discrete)
             #if DEBUG && targetEnvironment(simulator)
                 StationMotionFixtureClock.enabled?.didSample(at: now, generatedAt: snapshot.generatedAt)
