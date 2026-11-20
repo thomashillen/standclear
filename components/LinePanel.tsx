@@ -3,13 +3,14 @@
 import { memo, useEffect, useMemo, useRef } from "react";
 import { X } from "lucide-react";
 import { useLines, CORRIDOR } from "@/lib/subwayData";
-import { useTrains, type Arrival } from "@/lib/useTrains";
+import { useLiveDemo, useTrains, type Arrival } from "@/lib/useTrains";
 import { useAlerts, alertsForRoutes } from "@/lib/useAlerts";
 import { useNow } from "@/lib/useNow";
 import { useSheetDrag } from "@/lib/useSheetDrag";
 import { snapshotStaleLabel, trainStaleness, type TrainStaleness } from "@/lib/trainStaleness";
 import { AlertsSection } from "./AlertsSection";
 import { DragHandle } from "./DragHandle";
+import { LiveArrivalsGate } from "./LiveArrivalsGate";
 
 interface LinePanelProps {
   lineId: string; // routeId (e.g. "1", "A", "GS")
@@ -245,6 +246,7 @@ export default function LinePanel({ lineId, focusStopId, onClose, onStationOpen 
   const lines = useLines();
   const line = lines?.[lineId];
   const data = useTrains();
+  const liveDemo = useLiveDemo();
   const alertsData = useAlerts();
   // Tick once per second so ETAs and the staleness banner update on
   // their own without waiting for the next /api/trains poll. Reading
@@ -456,7 +458,8 @@ export default function LinePanel({ lineId, focusStopId, onClose, onStationOpen 
         onTouchEnd={contentHandlers.onTouchEnd}
         onTouchCancel={contentHandlers.onTouchCancel}
       >
-        {!data && (
+        {!data && !liveDemo.active && <LiveArrivalsGate />}
+        {!data && liveDemo.active && (
           <div className="text-center text-xs text-gray-500 py-8 motion-safe:animate-pulse">
             Loading live arrivals…
           </div>

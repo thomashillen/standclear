@@ -15,10 +15,18 @@ const linesRef = vi.hoisted(() => ({
   current: null as Lines | null,
 }));
 const healthRef = vi.hoisted(() => ({ online: true, degraded: false }));
+const demoRef = vi.hoisted(() => ({ active: false, endsAt: null as number | null }));
+const startLiveDemo = vi.hoisted(() => vi.fn());
+const stopLiveDemo = vi.hoisted(() => vi.fn());
+const refreshTrains = vi.hoisted(() => vi.fn(async () => {}));
 
 vi.mock("@/lib/useTrains", () => ({
   useTrains: () => trainsRef.current,
   useFeedHealth: () => healthRef,
+  useLiveDemo: () => demoRef,
+  startLiveDemo,
+  stopLiveDemo,
+  refreshTrains,
 }));
 
 vi.mock("@/lib/subwayData", () => ({
@@ -79,6 +87,10 @@ describe("LiveTrainsPopup", () => {
     trainsRef.current = null;
     linesRef.current = null;
     Object.assign(healthRef, { online: true, degraded: false });
+    Object.assign(demoRef, { active: false, endsAt: null });
+    startLiveDemo.mockClear();
+    stopLiveDemo.mockClear();
+    refreshTrains.mockClear();
   });
   // Manual cleanup between cases so Radix's portal-managed dialog tears
   // down between mounts — without this the previous dialog stays attached
@@ -233,7 +245,7 @@ describe("LiveTrainsPopup", () => {
     expect(screen.queryAllByRole("link")).toHaveLength(0);
   });
 
-  it("null data (pre-first-poll) keeps the dialog mounted with the connecting copy", () => {
+  it("null data keeps the dialog mounted with honest demo-off copy", () => {
     // The hero count and lines-running list both depend on the stats
     // memo, which is null while data is null. The dialog should still
     // render its chrome — riders opening the System Pulse during a
@@ -245,30 +257,46 @@ describe("LiveTrainsPopup", () => {
 
     expect(screen.getByText("System Pulse")).toBeTruthy();
     expect(
-      screen.getByText(/Connecting to MTA realtime feed/),
+      screen.getByText(/Live demo is off/),
     ).toBeTruthy();
   });
 
   it("shows cold-boot feed failure and recovers without closing the dialog", () => {
+    Object.assign(demoRef, { active: true, endsAt: Date.now() + 300_000 });
     healthRef.degraded = true;
     const { rerender } = render(<LiveTrainsPopup open onClose={vi.fn()} />);
-    expect(screen.getByText("Live train feed unavailable. Retrying automatically.")).toBeTruthy();
-    expect(screen.queryByText(/Connecting to MTA realtime feed/)).toBeNull();
+    expect(screen.getByText("Live train feed unavailable. Retrying until the demo ends.")).toBeTruthy();
+    expect(screen.queryByText(/Connecting for a bounded live demo/)).toBeNull();
 
     healthRef.degraded = false;
     trainsRef.current = makeResponse([]);
     rerender(<LiveTrainsPopup open onClose={vi.fn()} />);
-    expect(screen.getByText(/Live · refreshed 0s ago/)).toBeTruthy();
+    expect(screen.getByText(/Live demo · refreshed 0s ago/)).toBeTruthy();
     expect(screen.queryByText(/Live train feed unavailable/)).toBeNull();
   });
 
   it("labels retained fresh-looking data as last-known during a confirmed outage", () => {
+    Object.assign(demoRef, { active: true, endsAt: Date.now() + 300_000 });
     healthRef.degraded = true;
     trainsRef.current = makeResponse([makeTrain("t1", "1")]);
     render(<LiveTrainsPopup open onClose={vi.fn()} />);
     expect(screen.getByText(/Feed issue — showing last-known data/)).toBeTruthy();
-    expect(screen.getByText("trains in the last-known snapshot")).toBeTruthy();
+    expect(screen.getByText("trains in a saved snapshot — not live")).toBeTruthy();
     expect(screen.queryByText(/Live · refreshed/)).toBeNull();
+  });
+
+  it("offers explicit bounded start, stop and one-time refresh controls", () => {
+    const { rerender } = render(<LiveTrainsPopup open onClose={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Start 5-minute live demo" }));
+    expect(startLiveDemo).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole("button", { name: "Refresh once" }));
+    expect(refreshTrains).toHaveBeenCalledTimes(1);
+
+    Object.assign(demoRef, { active: true, endsAt: Date.now() + 300_000 });
+    rerender(<LiveTrainsPopup open onClose={vi.fn()} />);
+    expect(screen.getByRole("button", { name: "Refresh once" }).hasAttribute("disabled")).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "Stop live demo" }));
+    expect(stopLiveDemo).toHaveBeenCalledTimes(1);
   });
 });
 

@@ -20,6 +20,7 @@ const MAX_POLL_MS = 60_000;
 // Bound the browser-to-app request as well as the server's upstream feeds.
 // Leave margin beyond the server's 10s feed deadline for transit/cold starts.
 const REQUEST_TIMEOUT_MS = 20_000;
+export const LIVE_DEMO_DURATION_MS = 5 * 60_000;
 
 // Persist the last successful response to localStorage so a cold boot
 // surfaces the last-known state immediately instead of a "Connecting…"
@@ -47,6 +48,11 @@ export interface FeedHealth {
   degraded: boolean;
 }
 
+export interface LiveDemoState {
+  active: boolean;
+  endsAt: number | null;
+}
+
 const DEGRADED_THRESHOLD = 2;
 
 let cache: { data: TrainsResponse | null; ts: number; promise: Promise<void> | null } = {
@@ -62,8 +68,10 @@ let health: FeedHealth = {
   lastError: null,
   degraded: false,
 };
+let liveDemo: LiveDemoState = { active: false, endsAt: null };
 const subscribers = new Set<() => void>();
 let timeoutId: ReturnType<typeof setTimeout> | null = null;
+let expiryTimeoutId: ReturnType<typeof setTimeout> | null = null;
 
 function hydrateFromStorage() {
   if (cache.data) return;
@@ -108,6 +116,11 @@ export function dedupeResponse(data: TrainsResponse): TrainsResponse {
 
 function notify() {
   subscribers.forEach((cb) => cb());
+}
+
+function setLiveDemo(next: LiveDemoState) {
+  liveDemo = next;
+  notify();
 }
 
 function setHealth(next: Partial<FeedHealth>) {
@@ -202,23 +215,43 @@ function scheduleNext() {
   clearScheduled();
   timeoutId = setTimeout(async () => {
     timeoutId = null;
-    if (subscribers.size === 0) return;
+    if (!liveDemo.active || subscribers.size === 0) return;
     if (typeof document !== "undefined" && document.hidden) return;
     if (!isOnline()) {
       setHealth({ online: false });
       return;
     }
     await refresh();
-    if (subscribers.size > 0) scheduleNext();
+    if (liveDemo.active && subscribers.size > 0) scheduleNext();
   }, nextDelayMs());
 }
 
 function startPolling() {
-  if (timeoutId) return;
+  if (!liveDemo.active || timeoutId) return;
   if (typeof document !== "undefined" && document.hidden) return;
   refresh().then(() => {
-    if (subscribers.size > 0) scheduleNext();
+    if (liveDemo.active && subscribers.size > 0) scheduleNext();
   });
+}
+
+function clearExpiry() {
+  if (expiryTimeoutId) {
+    clearTimeout(expiryTimeoutId);
+    expiryTimeoutId = null;
+  }
+}
+
+function stopLiveDemoInternal() {
+  clearScheduled();
+  clearExpiry();
+  if (liveDemo.active || liveDemo.endsAt !== null) {
+    setLiveDemo({ active: false, endsAt: null });
+  }
+}
+
+function scheduleExpiry(durationMs: number) {
+  clearExpiry();
+  expiryTimeoutId = setTimeout(stopLiveDemoInternal, durationMs);
 }
 
 // Resume / pause polling when connectivity flips. Goes through the
@@ -232,7 +265,7 @@ function bindOnline() {
   onlineUnsub = subscribeOnline(() => {
     if (isOnline()) {
       setHealth({ online: true });
-      if (subscribers.size > 0 && !timeoutId) {
+      if (liveDemo.active && subscribers.size > 0 && !timeoutId) {
         if (typeof document !== "undefined" && document.hidden) return;
         startPolling();
       }
@@ -258,7 +291,7 @@ function bindVisibility() {
   document.addEventListener("visibilitychange", () => {
     if (document.hidden) {
       clearScheduled();
-    } else if (subscribers.size > 0 && !timeoutId) {
+    } else if (liveDemo.active && subscribers.size > 0 && !timeoutId) {
       startPolling();
     }
   });
@@ -272,17 +305,36 @@ export function refreshTrains(): Promise<void> {
   return refresh();
 }
 
+/** Begin one explicitly requested, automatically expiring live session. */
+export function startLiveDemo(durationMs = LIVE_DEMO_DURATION_MS): void {
+  if (!Number.isFinite(durationMs) || durationMs <= 0) return;
+  const endsAt = Date.now() + durationMs;
+  setLiveDemo({ active: true, endsAt });
+  scheduleExpiry(durationMs);
+  startPolling();
+}
+
+/** Stop the live session immediately. Retained data stays visible as saved data. */
+export function stopLiveDemo(): void {
+  stopLiveDemoInternal();
+}
+
 function subscribe(cb: () => void): () => void {
   // First subscriber on a given runtime warms the in-memory cache from
-  // localStorage and arms the visibility/poll lifecycle. Subsequent
-  // subscribers just attach to the existing stream.
-  if (subscribers.size === 0) {
+  // localStorage and arms lifecycle listeners. Network access is opt-in:
+  // passive subscribers never request /api/trains.
+  const firstSubscriber = subscribers.size === 0;
+  if (firstSubscriber) {
     hydrateFromStorage();
     bindVisibility();
     bindOnline();
-    startPolling();
   }
   subscribers.add(cb);
+  // Navigating away can remove the last subscriber and cancel the next
+  // scheduled poll while the bounded session itself remains active. Resume
+  // that same session when the first subscriber returns; inactive sessions
+  // still make zero requests.
+  if (firstSubscriber && liveDemo.active) startPolling();
   return () => {
     subscribers.delete(cb);
     stopPolling();
@@ -325,6 +377,19 @@ export function useFeedHealth(): FeedHealth {
     subscribe,
     () => health,
     () => SERVER_HEALTH,
+  );
+}
+
+const SERVER_LIVE_DEMO: LiveDemoState = Object.freeze({
+  active: false,
+  endsAt: null,
+});
+
+export function useLiveDemo(): LiveDemoState {
+  return useSyncExternalStore(
+    subscribe,
+    () => liveDemo,
+    () => SERVER_LIVE_DEMO,
   );
 }
 

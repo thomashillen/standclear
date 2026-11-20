@@ -37,9 +37,9 @@ describe("train feed outage lifecycle", () => {
   it("retains the last good snapshot, storage and freshness during outage, then recovers", async () => {
     const fetchMock = vi.fn().mockImplementation(async () => response(snapshot()));
     vi.stubGlobal("fetch", fetchMock);
-    const { useTrains, useFeedHealth, refreshTrains } = await import("./useTrains");
+    const { useTrains, useFeedHealth, refreshTrains, startLiveDemo } = await import("./useTrains");
     const { result } = renderHook(() => ({ data: useTrains(), health: useFeedHealth() }));
-    await act(async () => {});
+    await act(async () => { startLiveDemo(); });
     const good = result.current.data;
     const persisted = localStorage.getItem(STORAGE_KEY);
     const lastSuccessAt = result.current.health.lastSuccessAt;
@@ -74,9 +74,9 @@ describe("train feed outage lifecycle", () => {
   it("surfaces repeated cold-boot failures without fabricating data and recovers", async () => {
     const fetchMock = vi.fn().mockImplementation(async () => new Response("unavailable", { status: 503 }));
     vi.stubGlobal("fetch", fetchMock);
-    const { useTrains, useFeedHealth, refreshTrains } = await import("./useTrains");
+    const { useTrains, useFeedHealth, refreshTrains, startLiveDemo } = await import("./useTrains");
     const { result } = renderHook(() => ({ data: useTrains(), health: useFeedHealth() }));
-    await act(async () => {});
+    await act(async () => { startLiveDemo(); });
     await act(async () => { await vi.advanceTimersByTimeAsync(16_000); });
     expect(result.current.data).toBeNull();
     expect(result.current.health).toMatchObject({ lastSuccessAt: null, consecutiveFailures: 2, degraded: true });
@@ -95,10 +95,12 @@ describe("train feed outage lifecycle", () => {
     const saved = { data: snapshot(NOW - 120_000), ts: NOW - 120_000 };
     localStorage.setItem(STORAGE_KEY, JSON.stringify(saved));
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("network unavailable")));
-    const { useTrains, useFeedHealth } = await import("./useTrains");
+    const { useTrains, useFeedHealth, startLiveDemo } = await import("./useTrains");
     const { result } = renderHook(() => ({ data: useTrains(), health: useFeedHealth() }));
     await act(async () => {});
     expect(result.current.data).toEqual(saved.data);
+    expect(result.current.health).toMatchObject({ consecutiveFailures: 0, lastSuccessAt: null });
+    await act(async () => { startLiveDemo(); });
     expect(result.current.health).toMatchObject({ consecutiveFailures: 1, lastSuccessAt: null });
     expect(JSON.parse(localStorage.getItem(STORAGE_KEY)!)).toEqual(saved);
   });
@@ -112,8 +114,9 @@ describe("train feed outage lifecycle", () => {
       });
     });
     vi.stubGlobal("fetch", fetchMock);
-    const { useTrains, useFeedHealth, refreshTrains } = await import("./useTrains");
+    const { useTrains, useFeedHealth, refreshTrains, startLiveDemo } = await import("./useTrains");
     const { result, unmount } = renderHook(() => ({ data: useTrains(), health: useFeedHealth() }));
+    act(() => { startLiveDemo(); });
     const refreshes = Promise.all([refreshTrains(), refreshTrains()]);
     await act(async () => { await vi.advanceTimersByTimeAsync(19_999); });
     expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -134,17 +137,17 @@ describe("train feed outage lifecycle", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(result.current.data!.generatedAt).toBe(NOW + 36_000);
     expect(result.current.health).toMatchObject({ consecutiveFailures: 0, degraded: false, lastSuccessAt: NOW + 36_000 });
-    expect(vi.getTimerCount()).toBe(1); // Next poll only; deadline is gone.
+    expect(vi.getTimerCount()).toBe(2); // Next poll + bounded-session expiry; deadline is gone.
     unmount();
-    expect(vi.getTimerCount()).toBe(0);
+    expect(vi.getTimerCount()).toBe(1); // Session expiry remains independent of subscribers.
   });
 
   it("bounds stalled body consumption while retaining last-good data, storage and freshness", async () => {
     const fetchMock = vi.fn().mockImplementation(async () => response(snapshot()));
     vi.stubGlobal("fetch", fetchMock);
-    const { useTrains, useFeedHealth, refreshTrains } = await import("./useTrains");
+    const { useTrains, useFeedHealth, refreshTrains, startLiveDemo } = await import("./useTrains");
     const { result } = renderHook(() => ({ data: useTrains(), health: useFeedHealth() }));
-    await act(async () => {});
+    await act(async () => { startLiveDemo(); });
     const good = result.current.data;
     const persisted = localStorage.getItem(STORAGE_KEY);
     let signal!: AbortSignal;
@@ -174,8 +177,9 @@ describe("train feed outage lifecycle", () => {
     vi.stubGlobal("fetch", vi.fn((_url: string, init?: RequestInit) => new Promise<Response>((_resolve, reject) => {
       init!.signal!.addEventListener("abort", () => reject(init!.signal!.reason), { once: true });
     })));
-    const { useTrains, useFeedHealth } = await import("./useTrains");
+    const { useTrains, useFeedHealth, startLiveDemo } = await import("./useTrains");
     const { result } = renderHook(() => ({ data: useTrains(), health: useFeedHealth() }));
+    act(() => { startLiveDemo(); });
     // 20s deadline, 16s backoff, second 20s deadline.
     await act(async () => { await vi.advanceTimersByTimeAsync(56_000); });
     expect(result.current.health).toMatchObject({ consecutiveFailures: 2, degraded: true, lastSuccessAt: null });
@@ -192,12 +196,12 @@ describe("train feed outage lifecycle", () => {
         : outcome === "HTTP failure" ? new Response("outage", { status: 503 })
         : new Response("not json");
     }));
-    const { useTrains } = await import("./useTrains");
+    const { useTrains, startLiveDemo } = await import("./useTrains");
     const { unmount } = renderHook(() => useTrains());
-    await act(async () => {});
-    expect(vi.getTimerCount()).toBe(1);
+    await act(async () => { startLiveDemo(); });
+    expect(vi.getTimerCount()).toBe(2);
     unmount();
-    expect(vi.getTimerCount()).toBe(0);
+    expect(vi.getTimerCount()).toBe(1);
     await vi.advanceTimersByTimeAsync(30_000);
     expect(signal.aborted).toBe(false);
   });

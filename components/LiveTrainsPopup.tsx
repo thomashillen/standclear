@@ -2,7 +2,7 @@
 
 import { useMemo, useRef } from "react";
 import Link from "next/link";
-import { Activity, ArrowDown, ArrowUp, ChevronRight, Radio, Train } from "lucide-react";
+import { Activity, ArrowDown, ArrowUp, ChevronRight, Radio, RefreshCw, Square, Train } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -10,7 +10,14 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { useFeedHealth, useTrains } from "@/lib/useTrains";
+import {
+  refreshTrains,
+  startLiveDemo,
+  stopLiveDemo,
+  useFeedHealth,
+  useLiveDemo,
+  useTrains,
+} from "@/lib/useTrains";
 import { useLines } from "@/lib/subwayData";
 import { useNow } from "@/lib/useNow";
 import { lineSlug } from "@/lib/lineSlug";
@@ -30,6 +37,7 @@ export default function LiveTrainsPopup({ open, onClose }: Props) {
   const returnFocus = useRef<HTMLElement | null>(null);
   const data = useTrains();
   const health = useFeedHealth();
+  const demo = useLiveDemo();
   const feedDegraded = health.online && health.degraded;
   const lines = useLines();
   // Tick once per second so the "updated Xs ago" footer stays honest
@@ -87,6 +95,9 @@ export default function LiveTrainsPopup({ open, onClose }: Props) {
   const ageSec = data ? Math.max(0, Math.round((now - data.generatedAt) / 1000)) : null;
   const fresh = !feedDegraded && ageSec !== null && ageSec < 30;
   const stale = ageSec !== null && ageSec >= 60;
+  const remainingSec = demo.active && demo.endsAt
+    ? Math.max(0, Math.ceil((demo.endsAt - now) / 1000))
+    : 0;
 
   // Per-vehicle staleness rolled up across the fleet, separate from
   // the snapshot-age signal above. The snapshot can be fresh while
@@ -159,19 +170,58 @@ export default function LiveTrainsPopup({ open, onClose }: Props) {
             System Pulse
           </DialogTitle>
           <DialogDescription className="text-gray-400 text-left">
-            {feedDegraded
+            {demo.active && feedDegraded
               ? data
-                ? `Feed issue — showing last-known data from ${ageSec}s ago. Retrying automatically.`
-                : "Live train feed unavailable. Retrying automatically."
-              : !data
-              ? "Connecting to MTA realtime feed…"
-              : stale
-                ? `Stale — last refresh ${ageSec}s ago`
-                : `Live · refreshed ${ageSec}s ago`}
+                ? `Feed issue — showing last-known data from ${ageSec}s ago. Retrying until the demo ends.`
+                : "Live train feed unavailable. Retrying until the demo ends."
+              : demo.active
+                ? !data
+                  ? "Connecting for a bounded live demo…"
+                  : stale
+                    ? `Live demo · stale snapshot from ${ageSec}s ago`
+                    : `Live demo · refreshed ${ageSec}s ago · ${remainingSec}s left`
+                : data
+                  ? `Saved snapshot from ${ageSec}s ago — not live`
+                  : "Live demo is off — no realtime requests are running"}
           </DialogDescription>
         </DialogHeader>
 
         <div className="flex-1 overflow-y-auto ios-scroll px-5 pb-5 space-y-4">
+          <section className="rounded-2xl bg-white/[0.04] border border-white/[0.08] p-3 space-y-2">
+            <div className="flex gap-2">
+              {demo.active ? (
+                <button
+                  type="button"
+                  onClick={stopLiveDemo}
+                  className="press min-h-11 flex-1 rounded-xl bg-rose-400/15 text-rose-100 border border-rose-300/20 font-semibold text-sm flex items-center justify-center gap-2"
+                >
+                  <Square className="size-4" aria-hidden />
+                  Stop live demo
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => startLiveDemo()}
+                  className="press min-h-11 flex-1 rounded-xl bg-emerald-400/15 text-emerald-100 border border-emerald-300/20 font-semibold text-sm"
+                >
+                  Start 5-minute live demo
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => void refreshTrains()}
+                disabled={demo.active}
+                className="press min-h-11 rounded-xl px-3 bg-white/[0.06] text-gray-100 border border-white/[0.08] font-semibold text-sm flex items-center justify-center gap-2 disabled:opacity-40"
+              >
+                <RefreshCw className="size-4" aria-hidden />
+                Refresh once
+              </button>
+            </div>
+            <p className="text-[11px] leading-relaxed text-gray-400">
+              The page makes no passive train requests. A live demo polls every 8 seconds and stops automatically after 5 minutes; Refresh once makes one request.
+            </p>
+          </section>
+
           {/* Hero — total fleet in service. The single number that
               answers "how busy is the subway right now". */}
           <div className="rounded-2xl bg-gradient-to-br from-emerald-500/10 via-sky-500/5 to-transparent border border-white/[0.08] p-4 flex items-center gap-4">
@@ -183,7 +233,11 @@ export default function LiveTrainsPopup({ open, onClose }: Props) {
                 {stats?.total ?? "—"}
               </div>
               <div className="text-[12px] text-gray-400 mt-1">
-                {!data ? "Waiting for live train data" : feedDegraded ? "trains in the last-known snapshot" : "trains in service across NYC right now"}
+                {!data
+                  ? "No saved train snapshot"
+                  : demo.active && !feedDegraded
+                    ? "trains in service in the current live demo"
+                    : "trains in a saved snapshot — not live"}
               </div>
             </div>
           </div>
@@ -346,9 +400,9 @@ export default function LiveTrainsPopup({ open, onClose }: Props) {
           </section>
 
           <p className="text-[11px] text-gray-500 leading-relaxed px-1">
-            Data streams from the MTA GTFS-Realtime feed, polled every 8
-            seconds. Each train above corresponds to a live vehicle
-            broadcasting its position to the public feed.
+            Live-demo data comes from the MTA GTFS-Realtime feed. Outside an
+            explicitly started demo, any train data shown is a retained or
+            one-time snapshot and is not presented as live.
           </p>
         </div>
       </DialogContent>
