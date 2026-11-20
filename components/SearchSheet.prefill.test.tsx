@@ -280,9 +280,11 @@ describe("SearchSheet directions prefill", () => {
     fireEvent.click(screen.getByRole("button", { name: "To: Work station" }));
     fireEvent.change(screen.getByRole("textbox", { name: "To station search" }), { target: { value: "New address" } });
     fireEvent.click(screen.getByRole("button", { name: /New address Manhattan/ }));
-    await waitFor(() => expect(screen.getByRole("button", { name: "To: New address" })).toBeTruthy());
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "To: New address" })).toBeTruthy();
+      expect(changed.mock.calls[0]?.[0]).toBeNull();
+    });
     expect(screen.getByRole("button", { name: "From: Home station" })).toBeTruthy();
-    expect(changed.mock.calls[0]?.[0]).toBeNull();
     await waitFor(() => expect(changed.mock.lastCall?.[0]?.plan).toEqual(originalPlan));
     expect(changed.mock.lastCall?.[0]?.walkTo).toEqual({ name: "New address", lng: -74.0002, lat: 40.8002 });
   });

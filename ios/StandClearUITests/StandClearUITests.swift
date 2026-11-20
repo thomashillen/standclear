@@ -194,10 +194,12 @@ final class StandClearUITests: XCTestCase {
         var observations: [String] = []
         func observe(_ name: String, _ element: XCUIElement) {
             let start = ProcessInfo.processInfo.systemUptime
-            let exists = element.exists
-            let frame = exists ? element.frame : .zero
-            let hittable = exists && element.isHittable
-            observations.append("\(name): start=\(start), end=\(ProcessInfo.processInfo.systemUptime), exists=\(exists), frame=\(frame), hittable=\(hittable), type=\(exists ? Int(element.elementType.rawValue) : -1), label=\(exists ? element.label : "<absent>")")
+            guard element.exists, let snapshot = try? element.snapshot() else {
+                observations.append("\(name): start=\(start), end=\(ProcessInfo.processInfo.systemUptime), no matching snapshot")
+                return
+            }
+            let hittable = element.isHittable
+            observations.append("\(name): start=\(start), end=\(ProcessInfo.processInfo.systemUptime), exists=true, frame=\(snapshot.frame), hittable=\(hittable), type=\(snapshot.elementType.rawValue), label=\(snapshot.label)")
         }
         observe("window", app.windows.firstMatch)
         observe("map", nativeMap(in: app))
@@ -205,7 +207,10 @@ final class StandClearUITests: XCTestCase {
         observe("location status", app.staticTexts["Location access is off"].firstMatch)
         observe("location help", app.buttons["glanceLocationOptions"])
         observe("location failure", app.staticTexts["Location unavailable"].firstMatch)
-        observe("location failure message", app.staticTexts["Your location is unavailable. Try again or search for a station."].firstMatch)
+        // Location can age out while the diagnostic attachment is being collected.
+        let failureMessages = ["Your location is unavailable. Try again or search for a station.",
+                               "Your location is out of date. Try again or search for a station."]
+        observe("location failure message", app.staticTexts.matching(NSPredicate(format: "label IN %@", failureMessages)).firstMatch)
         observe("location Retry", app.buttons["Retry location"])
         observe("location pending", app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "Finding nearby stations…")).firstMatch)
         // SwiftUI Link reports different modern/legacy automation types on iOS 26.
