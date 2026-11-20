@@ -172,6 +172,7 @@ export default function NearbyGlance({
   else if (geo.status !== "granted" || !lines) waiting = true;
   else if (health.consecutiveFailures > 0) message = "Arrival update delayed";
   else if (!data && !liveDemo.active) message = "demo-off";
+  else if (data && now - data.generatedAt >= 60_000 && !liveDemo.active) message = "stale-off";
   else if (data && now - data.generatedAt >= 60_000) message = "Waiting for fresh arrivals";
   else if (!data) waiting = true;
   else if (!rows.length) message = "No nearby arrivals";
@@ -190,6 +191,8 @@ export default function NearbyGlance({
           ? <LoadingGlance />
           : message === "demo-off"
             ? <LiveArrivalsGate compact />
+            : message === "stale-off"
+              ? <LiveArrivalsGate compact stale />
             : message
               ? <GlanceStatus message={message} />
               : null)}

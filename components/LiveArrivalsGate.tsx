@@ -2,7 +2,7 @@
 
 import { startLiveDemo } from "@/lib/useTrains";
 
-export function LiveArrivalsGate({ compact = false }: { compact?: boolean }) {
+export function LiveArrivalsGate({ compact = false, stale = false }: { compact?: boolean; stale?: boolean }) {
   return (
     <div
       className={compact
@@ -10,7 +10,7 @@ export function LiveArrivalsGate({ compact = false }: { compact?: boolean }) {
         : "py-6 text-center text-xs text-gray-400"}
     >
       <span className={compact ? "leading-tight" : "block mb-2"}>
-        Live arrivals are off to save data.
+        {stale ? "Saved arrivals are stale — not live." : "Live arrivals are off to save data."}
       </span>
       <button
         type="button"
