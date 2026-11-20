@@ -9,7 +9,7 @@ struct TrainMotion {
     private let geometryIDs: [String: String]
     private var snapshot: Snapshot?
     private var rows: [Row] = []
-    private var latestMotionEnd = 0.0
+    private(set) var latestMotionEnd = 0.0
 
     init(lines: [SubwayLine]) {
         self.lines = lines
@@ -102,8 +102,12 @@ struct TrainMotion {
         }
     }
 
+    func hasFreshSnapshot(at date: Date) -> Bool {
+        snapshot?.isFresh(at: date) == true
+    }
+
     func hasActiveMotion(at date: Date) -> Bool {
-        snapshot?.isFresh(at: date) == true && date.timeIntervalSince1970 < latestMotionEnd
+        hasFreshSnapshot(at: date) && date.timeIntervalSince1970 < latestMotionEnd
     }
 
     func markers(at date: Date, reduceMotion: Bool = false) -> [TrainMapMarker] {

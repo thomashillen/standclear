@@ -1,8 +1,28 @@
 import CoreLocation
+import MapKit
 @testable import StandClear
 import XCTest
 
 final class TrainMapProjectionTests: XCTestCase {
+    func testProjectionBoundsIncludeEveryCornerAndFallBackForAmbiguousFootprints() throws {
+        let corners = [(40.73, -73.99), (40.74, -73.95), (40.71, -74.00), (40.72, -73.96)].map {
+            CLLocationCoordinate2D(latitude: $0.0, longitude: $0.1)
+        }
+        let bounds = try XCTUnwrap(trainProjectionBounds(corners))
+        for corner in corners {
+            XCTAssertTrue(bounds.contains(MKMapPoint(corner)))
+        }
+        XCTAssertNil(trainProjectionBounds(Array(corners.dropLast())))
+        XCTAssertNil(trainProjectionBounds(Array(repeating: corners[0], count: 4)))
+        var invalid = corners
+        invalid[0].latitude = .nan
+        XCTAssertNil(trainProjectionBounds(invalid))
+        var wrapped = corners
+        wrapped[0].longitude = 179.9
+        wrapped[1].longitude = -179.9
+        XCTAssertNil(trainProjectionBounds(wrapped))
+    }
+
     private let now = Date(timeIntervalSince1970: 1_800_000_000)
 
     func testCompassBearingsFollowForwardAndReverseTravel() throws {
