@@ -14,4 +14,12 @@ describe("LiveArrivalsGate", () => {
     fireEvent.click(screen.getByRole("button", { name: "Start 5-minute demo" }));
     expect(startLiveDemo).toHaveBeenCalledTimes(1);
   });
+
+  it("labels retained stale data and offers the same bounded start action", () => {
+    startLiveDemo.mockClear();
+    render(<LiveArrivalsGate compact stale />);
+    expect(screen.getByText("Saved arrivals are stale — not live.")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Start 5-minute demo" }));
+    expect(startLiveDemo).toHaveBeenCalledTimes(1);
+  });
 });

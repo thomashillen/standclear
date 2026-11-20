@@ -298,7 +298,7 @@ describe("initial nearby arrival discovery", () => {
   it.each([
     ["feed failure", { failures: 1, dataReady: false }, "Arrival update delayed"],
     ["retained failed feed", { failures: 1 }, "Arrival update delayed"],
-    ["stale feed", { generatedAt: -20_000 }, "Waiting for fresh arrivals"],
+    ["stale feed during a live session", { generatedAt: -20_000, demoActive: true }, "Waiting for fresh arrivals"],
     ["offline", { online: false }, "Offline · arrivals unavailable"],
     ["static failure", { error: true }, "Stations unavailable"],
     ["empty arrivals", { empty: true }, "No nearby arrivals"],
@@ -428,6 +428,21 @@ describe("permission refresh without browser change events", () => {
     await mount();
     act(() => success[0](position));
     expect(screen.getByText("Live arrivals are off to save data.")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Start 5-minute demo" }));
+    expect(startLiveDemo).toHaveBeenCalledTimes(1);
+  });
+
+  it("offers a bounded restart when retained arrivals become stale after stop or expiry", async () => {
+    source.generatedAt = -20_000;
+    source.demoActive = true;
+    const view = await mount();
+    act(() => success[0](position));
+    expect(screen.getByRole("status").textContent).toBe("Waiting for fresh arrivals");
+
+    source.demoActive = false;
+    view.refresh();
+    expect(screen.queryByRole("status")).toBeNull();
+    expect(screen.getByText("Saved arrivals are stale — not live.")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Start 5-minute demo" }));
     expect(startLiveDemo).toHaveBeenCalledTimes(1);
   });
